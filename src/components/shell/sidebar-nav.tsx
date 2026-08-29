@@ -13,7 +13,6 @@ export function SidebarNav({ items }: { items: NavItem[] }) {
     <nav className="flex flex-col gap-0.5 px-3">
       {items.map((item) => {
         const active = pathname === item.href || pathname.startsWith(item.href + "/");
-        const Icon = item.icon;
         return (
           <Link
             key={item.href}
@@ -32,7 +31,7 @@ export function SidebarNav({ items }: { items: NavItem[] }) {
                 transition={{ type: "spring", stiffness: 500, damping: 40 }}
               />
             )}
-            <Icon className="relative z-10 h-4 w-4 shrink-0" />
+            {item.icon}
             <span className="relative z-10">{item.label}</span>
           </Link>
         );
