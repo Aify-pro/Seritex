@@ -42,11 +42,17 @@ type MediaFileRow = {
 export async function MediaLibrary({ companyId }: { companyId: string }) {
   const supabase = await createClient();
 
-  const { data: files } = await supabase
+  // Note : `media_files` porte DEUX relations vers `media_file_versions`
+  // (`current_version_id` en plus de la relation inverse portée par
+  // `media_file_versions.media_file_id`). PostgREST ne peut pas deviner
+  // laquelle utiliser pour l'imbrication ci-dessous — sans le nom explicite
+  // de la contrainte, la requête échoue avec une erreur d'ambiguïté
+  // (PGRST201), silencieusement ignorée si on ne vérifie pas `error`.
+  const { data: files, error } = await supabase
     .from("media_files")
     .select(
       `id, file_name, category, mime_type, size_bytes, created_at,
-       media_file_versions ( id, version_number, created_at,
+       media_file_versions!media_file_versions_media_file_id_fkey ( id, version_number, created_at,
          media_file_copies ( id, sync_status, error_message, storage_targets ( name, type ) )
        ),
        media_file_events ( id, event_type, reason, occurred_at, app_users ( full_name ) )`
@@ -54,11 +60,22 @@ export async function MediaLibrary({ companyId }: { companyId: string }) {
     .eq("company_id", companyId)
     .order("created_at", { ascending: false });
 
+  if (error) {
+    console.error("MediaLibrary: échec du chargement des fichiers", error);
+  }
+
   const mediaFiles = (files ?? []) as unknown as MediaFileRow[];
 
   return (
     <div className="space-y-6">
       <UploadMediaForm companyId={companyId} />
+
+      {error && (
+        <p className="rounded-md border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger">
+          Impossible de charger la liste des fichiers pour le moment. Réessayez dans un instant ou contactez le
+          support si le problème persiste.
+        </p>
+      )}
 
       <Card>
         <CardBody className="p-0">
