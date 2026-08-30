@@ -2,9 +2,11 @@ import { createClient } from "@/lib/supabase/server";
 import { Card, CardBody } from "@/components/ui/card";
 import { UploadMediaForm } from "@/components/media/upload-media-form";
 import { AddVersionForm } from "@/components/media/add-version-form";
+import { DeleteMediaFileForm } from "@/components/media/delete-media-file-form";
 import { MediaFileHistory, type HistoryEvent } from "@/components/media/media-file-history";
 import { MEDIA_CATEGORY_LABELS } from "@/lib/types/domain";
 import { formatDate, formatFileSize } from "@/lib/utils";
+import { can } from "@/lib/auth/permissions";
 import { FileText } from "lucide-react";
 
 type MediaFileRow = {
@@ -58,6 +60,7 @@ export async function MediaLibrary({ companyId }: { companyId: string }) {
        media_file_events ( id, event_type, reason, occurred_at, app_users ( full_name ) )`
     )
     .eq("company_id", companyId)
+    .is("deleted_at", null)
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -65,6 +68,7 @@ export async function MediaLibrary({ companyId }: { companyId: string }) {
   }
 
   const mediaFiles = (files ?? []) as unknown as MediaFileRow[];
+  const canDelete = await can("mediatheque", "delete");
 
   return (
     <div className="space-y-6">
@@ -113,7 +117,10 @@ export async function MediaLibrary({ companyId }: { companyId: string }) {
                     </p>
                   </div>
                   <MediaFileHistory events={events} copies={copies} />
-                  <AddVersionForm mediaFileId={f.id} />
+                  <div className="flex flex-wrap items-center gap-4">
+                    <AddVersionForm mediaFileId={f.id} />
+                    {canDelete && <DeleteMediaFileForm mediaFileId={f.id} companyId={companyId} />}
+                  </div>
                 </li>
               );
             })}

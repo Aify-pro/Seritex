@@ -261,7 +261,7 @@ export async function createStorageTarget(formData: FormData) {
   });
 
   if (error) return { error: error.message };
-  revalidatePath("/admin/stockage");
+  revalidatePath("/parametres/stockage");
   return {};
 }
 
@@ -271,6 +271,41 @@ export async function toggleStorageTargetActive(targetId: string, active: boolea
   const supabase = await createClient();
   const { error } = await supabase.from("storage_targets").update({ active }).eq("id", targetId);
   if (error) return { error: error.message };
-  revalidatePath("/admin/stockage");
+  revalidatePath("/parametres/stockage");
+  return {};
+}
+
+const deleteMediaFileSchema = z.object({
+  media_file_id: z.string().uuid(),
+  reason: z.string().trim().min(3, "La raison doit contenir au moins 3 caractères"),
+  company_id: z.string().uuid(),
+});
+
+/**
+ * Supprime (logiquement) un fichier de la médiathèque — raison obligatoire,
+ * même logique de traçabilité que le dépôt/la mise à jour (section 3.7).
+ * L'autorisation réelle vient de `delete_media_file()` côté Postgres
+ * (module `mediatheque`, action `delete`, matrice éditable depuis
+ * Paramètres > Rôles & permissions) — `requireUser()` ne garantit ici
+ * qu'une session valide, pas le droit d'agir.
+ */
+export async function deleteMediaFile(formData: FormData) {
+  await requireUser();
+  const parsed = deleteMediaFileSchema.safeParse({
+    media_file_id: formData.get("media_file_id"),
+    reason: formData.get("reason"),
+    company_id: formData.get("company_id"),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message };
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("delete_media_file", {
+    p_media_file_id: parsed.data.media_file_id,
+    p_reason: parsed.data.reason,
+  });
+  if (error) return { error: error.message };
+
+  revalidatePath(`/mediatheque/${parsed.data.company_id}`);
+  revalidatePath("/client/mediatheque");
   return {};
 }

@@ -2,11 +2,13 @@ import { requireRole } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
-import { StatusBadge } from "@/components/ui/badge";
+import { Badge, StatusBadge } from "@/components/ui/badge";
 import { PRODUCTION_ORDER_STATUS_LABELS, WORK_ORDER_STATUS_LABELS } from "@/lib/types/domain";
 import { formatDate, formatDateTime } from "@/lib/utils";
+import { can } from "@/lib/auth/permissions";
 import { notFound } from "next/navigation";
 import { LaunchButton } from "./launch-button";
+import { ArchiveButton } from "./archive-button";
 
 export default async function ProductionOrderDetailPage({ params }: { params: Promise<{ id: string }> }) {
   await requireRole(["responsable_production", "administrateur"]);
@@ -29,13 +31,20 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
 
   const company = order.companies as unknown as { name: string } | null;
   const quote = order.quotes as unknown as { reference: string } | null;
+  const canArchive = await can("ordres_fabrication", "archive");
 
   return (
     <div className="space-y-6">
       <PageHeader
         title={order.reference}
         description={`${company?.name ?? ""} · ${order.total_quantity} pièces · devis ${quote?.reference ?? "—"}`}
-        action={<StatusBadge status={order.status} labels={PRODUCTION_ORDER_STATUS_LABELS} kind="production" />}
+        action={
+          <div className="flex items-center gap-2">
+            {order.archived_at && <Badge tone="neutral">Archivé le {formatDate(order.archived_at)}</Badge>}
+            <StatusBadge status={order.status} labels={PRODUCTION_ORDER_STATUS_LABELS} kind="production" />
+            {canArchive && <ArchiveButton productionOrderId={order.id} archived={!!order.archived_at} />}
+          </div>
+        }
       />
 
       {order.status === "a_lancer" && (

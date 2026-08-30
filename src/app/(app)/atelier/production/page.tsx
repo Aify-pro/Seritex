@@ -2,26 +2,42 @@ import { requireRole } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardBody } from "@/components/ui/card";
-import { StatusBadge } from "@/components/ui/badge";
+import { Badge, StatusBadge } from "@/components/ui/badge";
 import { PRODUCTION_ORDER_STATUS_LABELS } from "@/lib/types/domain";
 import { formatDate } from "@/lib/utils";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 
-export default async function ProductionOrdersPage() {
+export default async function ProductionOrdersPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ archives?: string }>;
+}) {
   await requireRole(["responsable_production", "administrateur"]);
+  const { archives } = await searchParams;
+  const showArchived = archives === "1";
   const supabase = await createClient();
 
-  const { data: orders } = await supabase
+  let query = supabase
     .from("production_orders")
-    .select("id,reference,status,total_quantity,planned_start_date,planned_end_date,companies(name)")
+    .select("id,reference,status,total_quantity,planned_start_date,planned_end_date,archived_at,companies(name)")
     .order("created_at", { ascending: false });
+  query = showArchived ? query.not("archived_at", "is", null) : query.is("archived_at", null);
+  const { data: orders } = await query;
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Ordres de fabrication"
         description="Un devis accepté génère un ordre de fabrication à lancer, puis ses ordres de travail par section."
+        action={
+          <Link
+            href={showArchived ? "/atelier/production" : "/atelier/production?archives=1"}
+            className="text-xs font-medium text-brand hover:underline"
+          >
+            {showArchived ? "← Voir les ODF actifs" : "Voir les ODF archivés"}
+          </Link>
+        }
       />
 
       <Card>
@@ -40,7 +56,14 @@ export default async function ProductionOrdersPage() {
             <tbody className="divide-y divide-border">
               {orders?.map((o) => (
                 <tr key={o.id} className="hover:bg-surface-muted/60">
-                  <td className="px-5 py-3 font-medium text-foreground">{o.reference}</td>
+                  <td className="px-5 py-3 font-medium text-foreground">
+                    {o.reference}
+                    {o.archived_at && (
+                      <Badge tone="neutral" className="ml-2">
+                        Archivé
+                      </Badge>
+                    )}
+                  </td>
                   <td className="px-5 py-3 text-foreground-muted">
                     {(o.companies as unknown as { name: string } | null)?.name}
                   </td>
@@ -62,7 +85,7 @@ export default async function ProductionOrdersPage() {
               {(!orders || orders.length === 0) && (
                 <tr>
                   <td colSpan={6} className="px-5 py-8 text-center text-sm text-foreground-muted">
-                    Aucun ordre de fabrication pour le moment.
+                    {showArchived ? "Aucun ordre de fabrication archivé." : "Aucun ordre de fabrication pour le moment."}
                   </td>
                 </tr>
               )}

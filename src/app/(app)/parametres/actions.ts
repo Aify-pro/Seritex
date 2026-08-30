@@ -19,6 +19,7 @@ const newUserSchema = z.object({
   ]),
   company_id: z.string().uuid().optional().or(z.literal("")),
   section_id: z.string().uuid().optional().or(z.literal("")),
+  contact_id: z.string().uuid().optional().or(z.literal("")),
 });
 
 /**
@@ -35,11 +36,17 @@ export async function createUserAccount(formData: FormData) {
     role: formData.get("role"),
     company_id: formData.get("company_id"),
     section_id: formData.get("section_id"),
+    contact_id: formData.get("contact_id"),
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message };
 
   if (parsed.data.role === "client" && !parsed.data.company_id) {
     return { error: "Une entreprise est requise pour un compte client" };
+  }
+  // (v4) Un compte client représente désormais une vraie fiche contact CRM,
+  // pas seulement l'entreprise — cf. addendum v4 de l'analyse fonctionnelle.
+  if (parsed.data.role === "client" && !parsed.data.contact_id) {
+    return { error: "Un contact (fiche CRM) est requis pour un compte client — créez-le d'abord depuis Clients." };
   }
   if (parsed.data.role === "chef_section" && !parsed.data.section_id) {
     return { error: "Une section est requise pour un chef de section" };
@@ -56,20 +63,28 @@ export async function createUserAccount(formData: FormData) {
   });
   if (createError) return { error: createError.message };
 
+  // `app_users.role` reste écrit ici directement (compatibilité avec le
+  // flux de création existant) ; le trigger `trg_sync_app_user_role`
+  // n'intervient que lorsqu'on écrit `role_id` — voir la page Rôles &
+  // permissions pour réattribuer un rôle personnalisé après création.
+  const { data: roleRow } = await admin.from("roles").select("id").eq("key", parsed.data.role).single();
+
   const { error: profileError } = await admin.from("app_users").insert({
     id: created.user.id,
     email: parsed.data.email,
     full_name: parsed.data.full_name,
     role: parsed.data.role,
+    role_id: roleRow?.id,
     company_id: parsed.data.company_id || null,
     section_id: parsed.data.section_id || null,
+    contact_id: parsed.data.contact_id || null,
   });
   if (profileError) {
     await admin.auth.admin.deleteUser(created.user.id);
     return { error: profileError.message };
   }
 
-  revalidatePath("/admin/utilisateurs");
+  revalidatePath("/parametres/utilisateurs");
   return { tempPassword, email: parsed.data.email };
 }
 
@@ -78,7 +93,7 @@ export async function toggleUserActive(userId: string, active: boolean) {
   const supabase = await createClient();
   const { error } = await supabase.from("app_users").update({ active }).eq("id", userId);
   if (error) return { error: error.message };
-  revalidatePath("/admin/utilisateurs");
+  revalidatePath("/parametres/utilisateurs");
   return {};
 }
 
@@ -109,7 +124,7 @@ export async function createSection(formData: FormData) {
     display_order: (max?.display_order ?? 0) + 1,
   });
   if (error) return { error: error.message };
-  revalidatePath("/admin/sections");
+  revalidatePath("/parametres/sections");
   return {};
 }
 
@@ -118,7 +133,7 @@ export async function toggleSectionActive(sectionId: string, active: boolean) {
   const supabase = await createClient();
   const { error } = await supabase.from("sections").update({ active }).eq("id", sectionId);
   if (error) return { error: error.message };
-  revalidatePath("/admin/sections");
+  revalidatePath("/parametres/sections");
   return {};
 }
 
@@ -136,7 +151,7 @@ export async function createRoutingTemplate(formData: FormData) {
     .select()
     .single();
   if (error) return { error: error.message };
-  revalidatePath("/admin/gammes");
+  revalidatePath("/parametres/gammes");
   return { id: data.id as string };
 }
 
@@ -176,7 +191,7 @@ export async function addRoutingStep(formData: FormData) {
     instructions: parsed.data.instructions || null,
   });
   if (error) return { error: error.message };
-  revalidatePath("/admin/gammes");
+  revalidatePath("/parametres/gammes");
   return {};
 }
 
@@ -207,6 +222,6 @@ export async function simulateStockSync() {
       })
       .eq("sage_reference", item.sage_reference);
   }
-  revalidatePath("/admin/stock");
+  revalidatePath("/parametres/stock");
   return {};
 }

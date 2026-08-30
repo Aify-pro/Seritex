@@ -8,15 +8,21 @@ const PUBLIC_PATHS = ["/login", "/auth", "/api/health"];
  * charger une page qui ne le concerne pas. */
 const ROUTE_ACCESS: { prefix: string; roles: string[] }[] = [
   { prefix: "/client", roles: ["client"] },
+  // Fiche client CRM (v4) : aussi utile au responsable production, qui suit
+  // l'avancement de production par client sans repasser par le commercial.
+  { prefix: "/commercial/clients", roles: ["commercial", "responsable_production", "administrateur"] },
   { prefix: "/commercial", roles: ["commercial", "administrateur"] },
   { prefix: "/infographie", roles: ["infographiste", "administrateur"] },
   { prefix: "/atelier/production", roles: ["responsable_production", "administrateur"] },
   { prefix: "/atelier/section", roles: ["chef_section", "responsable_production", "administrateur"] },
-  // Règles spécifiques évaluées avant la règle générale /admin ci-dessous :
-  // ces deux écrans sont aussi utiles au responsable production.
-  { prefix: "/admin/gammes", roles: ["responsable_production", "administrateur"] },
-  { prefix: "/admin/stock", roles: ["responsable_production", "chef_section", "administrateur"] },
-  { prefix: "/admin", roles: ["administrateur"] },
+  // Règles spécifiques évaluées avant la règle générale /parametres ci-dessous :
+  // ces écrans sont aussi utiles au responsable production et au commercial
+  // (v4 : intégration Sage — stock, clients, articles).
+  { prefix: "/parametres/gammes", roles: ["responsable_production", "administrateur"] },
+  { prefix: "/parametres/stock", roles: ["responsable_production", "chef_section", "administrateur"] },
+  { prefix: "/parametres/clients-sage", roles: ["commercial", "responsable_production", "administrateur"] },
+  { prefix: "/parametres/articles-sage", roles: ["commercial", "responsable_production", "administrateur"] },
+  { prefix: "/parametres", roles: ["administrateur"] },
 ];
 
 export async function updateSession(request: NextRequest) {

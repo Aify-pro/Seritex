@@ -57,8 +57,10 @@ export interface AppUser {
   email: string;
   full_name: string;
   role: UserRole;
+  role_id: string;
   company_id: string | null;
   section_id: string | null;
+  contact_id: string | null;
   active: boolean;
   created_at: string;
 }
@@ -74,6 +76,9 @@ export interface Company {
   created_at: string;
 }
 
+export type ContactStatus = "actif" | "inactif";
+export type ContactPreferredChannel = "email" | "telephone" | "whatsapp";
+
 export interface Contact {
   id: string;
   company_id: string;
@@ -81,7 +86,16 @@ export interface Contact {
   last_name: string;
   email: string | null;
   phone: string | null;
+  mobile_phone: string | null;
   role_title: string | null;
+  department: string | null;
+  preferred_channel: ContactPreferredChannel;
+  status: ContactStatus;
+  is_primary_contact: boolean;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+  companies?: Pick<Company, "id" | "name">;
 }
 
 export interface Section {
@@ -164,6 +178,8 @@ export interface ProductionOrder {
   planned_start_date: string | null;
   planned_end_date: string | null;
   actual_end_date: string | null;
+  archived_at: string | null;
+  archived_by: string | null;
   created_at: string;
   companies?: Pick<Company, "id" | "name">;
 }
@@ -242,6 +258,8 @@ export interface MediaFile {
   size_bytes: number | null;
   current_version_id: string | null;
   created_by: string | null;
+  deleted_at: string | null;
+  deleted_by: string | null;
   created_at: string;
   updated_at: string;
   companies?: Pick<Company, "id" | "name">;
@@ -388,6 +406,99 @@ export const MEDIA_SYNC_STATUS_LABELS: Record<MediaSyncStatus, string> = {
   synchronise: "Synchronisé",
   erreur: "Erreur",
 };
+
+// ----------------------------------------------------------------------------
+// RBAC dynamique (v4) — supabase/migrations/0005_rbac_crm_parametres_sage.sql
+// ----------------------------------------------------------------------------
+
+export type PermissionAction = "view" | "create" | "modify" | "archive" | "delete";
+
+export const PERMISSION_ACTION_LABELS: Record<PermissionAction, string> = {
+  view: "Voir",
+  create: "Créer",
+  modify: "Modifier",
+  archive: "Archiver",
+  delete: "Supprimer",
+};
+
+export interface ModuleRecord {
+  id: string;
+  key: string;
+  label: string;
+  description: string | null;
+  display_order: number;
+}
+
+export interface RoleRecord {
+  id: string;
+  key: string;
+  label: string;
+  description: string | null;
+  base_role: UserRole;
+  is_system: boolean;
+  active: boolean;
+  created_at: string;
+}
+
+export interface RolePermissionRecord {
+  id: string;
+  role_id: string;
+  module_id: string;
+  can_view: boolean;
+  can_create: boolean;
+  can_modify: boolean;
+  can_archive: boolean;
+  can_delete: boolean;
+  updated_at: string;
+  modules?: Pick<ModuleRecord, "id" | "key" | "label">;
+}
+
+// ----------------------------------------------------------------------------
+// Paramètres — Intégration Sage (v4)
+// ----------------------------------------------------------------------------
+
+export type SageSyncMode = "simulation" | "agent_local";
+
+export interface SageConnectionConfig {
+  id: string;
+  label: string;
+  sync_mode: SageSyncMode;
+  host: string | null;
+  port: number | null;
+  database_name: string | null;
+  schema_stock: string | null;
+  schema_clients: string | null;
+  schema_articles: string | null;
+  sync_frequency_minutes: number;
+  active: boolean;
+  last_test_status: string | null;
+  last_test_at: string | null;
+  updated_at: string;
+}
+
+export interface SageCustomer {
+  sage_code: string;
+  name: string;
+  siret: string | null;
+  address: string | null;
+  phone: string | null;
+  email: string | null;
+  linked_company_id: string | null;
+  last_sync_at: string;
+  companies?: Pick<Company, "id" | "name">;
+}
+
+export interface SageArticle {
+  sage_reference: string;
+  designation: string;
+  category: string | null;
+  unit: string | null;
+  sale_price: number | null;
+  active: boolean;
+  linked_product_model_id: string | null;
+  last_sync_at: string;
+  product_models?: Pick<ProductModel, "id" | "name">;
+}
 
 export const SAMPLE_STATUS_LABELS: Record<SampleRequestStatus, string> = {
   demande: "Demandée",
