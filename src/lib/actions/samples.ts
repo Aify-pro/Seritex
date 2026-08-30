@@ -66,18 +66,31 @@ export async function createSampleRequest(formData: FormData) {
   return {};
 }
 
-const detailsSchema = z.object({
+const editSchema = z.object({
+  need_description: z.string().min(1, "Merci de décrire le besoin"),
+  quantity_requested: z.coerce.number().int().positive().default(1),
   priority: z.enum(["basse", "normale", "haute", "urgente"]),
+  request_date: z.string().min(1).optional(),
   due_date: z.string().optional(),
   extra_info: z.string().optional(),
 });
 
-/** Mise à jour de la fiche (priorité, délai, infos complémentaires) — réservée au staff commercial/production. */
-export async function updateSampleDetails(sampleId: string, formData: FormData) {
+/**
+ * Modification complète de la fiche (besoin, quantité, priorité, dates,
+ * infos complémentaires) — réservée au staff qui gère l'échantillonnage
+ * (commercial, responsable production, administrateur), quel que soit le
+ * lien ou non à un ordre de fabrication : modifier une fiche ne remet rien
+ * en cause pour un ordre de fabrication déjà référencé, contrairement à sa
+ * suppression (cf. `deleteSampleRequest`).
+ */
+export async function updateSampleRequest(sampleId: string, formData: FormData) {
   await requireRole(["commercial", "administrateur", "responsable_production"]);
 
-  const parsed = detailsSchema.safeParse({
+  const parsed = editSchema.safeParse({
+    need_description: formData.get("need_description"),
+    quantity_requested: formData.get("quantity_requested"),
     priority: formData.get("priority"),
+    request_date: formData.get("request_date") || undefined,
     due_date: formData.get("due_date") || undefined,
     extra_info: formData.get("extra_info") || undefined,
   });
@@ -87,12 +100,34 @@ export async function updateSampleDetails(sampleId: string, formData: FormData) 
   const { error } = await supabase
     .from("sample_requests")
     .update({
+      need_description: parsed.data.need_description,
+      quantity_requested: parsed.data.quantity_requested,
       priority: parsed.data.priority,
+      request_date: parsed.data.request_date || undefined,
       due_date: parsed.data.due_date || null,
       extra_info: parsed.data.extra_info || null,
     })
     .eq("id", sampleId);
 
+  if (error) return { error: error.message };
+  revalidateSamplePaths();
+  return {};
+}
+
+/**
+ * Suppression d'une fiche échantillon — réservée au staff qui gère
+ * l'échantillonnage, et uniquement si la fiche n'est pas attribuée à un
+ * ordre de fabrication (sinon on romprait la traçabilité essai ↔ commande
+ * décrite en section 3.6 de l'analyse ; il faut d'abord délier via
+ * `linkSampleToProductionOrder`). Passe par la fonction Postgres
+ * `delete_sample_request` (SECURITY DEFINER, journalisée dans `audit_log`)
+ * plutôt que par un DELETE direct, cohérent avec les autres mutations
+ * sensibles du schéma.
+ */
+export async function deleteSampleRequest(sampleId: string) {
+  await requireRole(["commercial", "administrateur", "responsable_production"]);
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("delete_sample_request", { p_sample_request_id: sampleId });
   if (error) return { error: error.message };
   revalidateSamplePaths();
   return {};

@@ -8,7 +8,7 @@ import { AlertCircle, Lock, Mail } from "lucide-react";
 
 const initialState: LoginState = {};
 
-export function LoginForm() {
+export function LoginForm({ next }: { next?: string }) {
   const [state, formAction, pending] = useActionState(signInAction, initialState);
 
   return (
@@ -23,6 +23,7 @@ export function LoginForm() {
       </p>
 
       <form action={formAction} className="mt-6 space-y-4">
+        {next && <input type="hidden" name="next" value={next} />}
         <div>
           <label htmlFor="email" className="mb-1.5 block text-xs font-medium text-foreground">
             Adresse e-mail

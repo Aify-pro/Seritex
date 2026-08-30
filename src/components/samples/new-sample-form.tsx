@@ -13,11 +13,14 @@ export function NewSampleForm({
   companies,
   fixedCompanyId,
   canSetPriority = false,
+  onCreated,
 }: {
   companies?: { id: string; name: string }[];
   fixedCompanyId?: string;
   /** Priorité et délai réservés au staff (section 2.1) — masqués pour le client. */
   canSetPriority?: boolean;
+  /** Appelé après une création réussie — utilisé par `CreateSampleDialog` pour refermer la fenêtre. */
+  onCreated?: () => void;
 }) {
   const [pending, startTransition] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
@@ -32,12 +35,12 @@ export function NewSampleForm({
           else {
             toast.success("Demande d'échantillon créée");
             formRef.current?.reset();
+            onCreated?.();
           }
         })
       }
-      className="space-y-3 rounded-md border border-dashed border-border p-4"
+      className="space-y-3"
     >
-      <p className="text-sm font-medium text-foreground">Nouvelle demande d&apos;échantillon</p>
       {fixedCompanyId ? (
         <input type="hidden" name="company_id" value={fixedCompanyId} />
       ) : (

@@ -57,6 +57,7 @@ export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
   ],
   responsable_production: [
     { href: "/dashboard", label: "Tableau de bord", icon: navIcon(LayoutDashboard) },
+    { href: "/commercial/echantillons", label: "Échantillons", icon: navIcon(FlaskConical) },
     { href: "/atelier/production", label: "Ordres de fabrication", icon: navIcon(Factory) },
     { href: "/atelier/transverse", label: "Vue transverse sections", icon: navIcon(Boxes) },
     { href: "/mediatheque", label: "Médiathèque", icon: navIcon(FolderOpen) },

@@ -8,6 +8,10 @@ const PUBLIC_PATHS = ["/login", "/auth", "/api/health"];
  * charger une page qui ne le concerne pas. */
 const ROUTE_ACCESS: { prefix: string; roles: string[] }[] = [
   { prefix: "/client", roles: ["client"] },
+  // Règle spécifique évaluée avant la règle générale /commercial ci-dessous :
+  // l'échantillonnage est aussi géré par le responsable production (section
+  // 2.1/2.7 de l'analyse), contrairement au reste de l'espace commercial.
+  { prefix: "/commercial/echantillons", roles: ["commercial", "responsable_production", "administrateur"] },
   { prefix: "/commercial", roles: ["commercial", "administrateur"] },
   { prefix: "/infographie", roles: ["infographiste", "administrateur"] },
   { prefix: "/atelier/production", roles: ["responsable_production", "administrateur"] },
