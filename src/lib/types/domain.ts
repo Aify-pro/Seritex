@@ -42,6 +42,16 @@ export type SampleRequestStatus =
 
 export type SampleDecision = "valide" | "a_ajuster" | "refuse";
 
+export type SamplePriority = "basse" | "normale" | "haute" | "urgente";
+
+export type StorageBackendType = "supabase_storage" | "google_drive" | "nas" | "local_server";
+
+export type MediaSyncStatus = "en_attente" | "synchronise" | "erreur";
+
+export type MediaEventType = "ajout" | "mise_a_jour" | "suppression";
+
+export type MediaFileCategory = "visuel" | "image_de_marque" | "fiche_technique" | "nuancier" | "autre";
+
 export interface AppUser {
   id: string;
   email: string;
@@ -195,16 +205,91 @@ export interface WorkOrderEvent {
 export interface SampleRequestRecord {
   id: string;
   reference: string;
+  sample_number: string;
   company_id: string;
   contact_id: string | null;
   request_id: string | null;
+  production_order_id: string | null;
   created_by_user_id: string | null;
   need_description: string;
   quantity_requested: number;
+  priority: SamplePriority;
+  request_date: string;
   status: SampleRequestStatus;
   due_date: string | null;
+  extra_info: string | null;
   created_at: string;
   companies?: Pick<Company, "id" | "name">;
+  production_orders?: Pick<ProductionOrder, "id" | "reference" | "status"> | null;
+}
+
+export interface StorageTarget {
+  id: string;
+  type: StorageBackendType;
+  name: string;
+  active: boolean;
+  is_default: boolean;
+  config: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface MediaFile {
+  id: string;
+  company_id: string;
+  file_name: string;
+  category: MediaFileCategory;
+  mime_type: string | null;
+  size_bytes: number | null;
+  current_version_id: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  companies?: Pick<Company, "id" | "name">;
+  media_file_versions?: MediaFileVersion[];
+}
+
+export interface MediaFileVersion {
+  id: string;
+  media_file_id: string;
+  version_number: number;
+  file_name: string;
+  mime_type: string | null;
+  size_bytes: number | null;
+  checksum: string | null;
+  uploaded_by: string | null;
+  created_at: string;
+  media_file_copies?: MediaFileCopy[];
+}
+
+export interface MediaFileCopy {
+  id: string;
+  media_file_version_id: string;
+  storage_target_id: string;
+  remote_path: string | null;
+  sync_status: MediaSyncStatus;
+  error_message: string | null;
+  synced_at: string | null;
+  storage_targets?: Pick<StorageTarget, "id" | "name" | "type">;
+}
+
+export interface MediaFileEvent {
+  id: string;
+  media_file_id: string;
+  media_file_version_id: string | null;
+  event_type: MediaEventType;
+  reason: string;
+  user_id: string | null;
+  occurred_at: string;
+  app_users?: Pick<AppUser, "id" | "full_name">;
+}
+
+export interface SampleRequestMediaFile {
+  id: string;
+  sample_request_id: string;
+  media_file_id: string;
+  added_by: string | null;
+  added_at: string;
+  media_files?: MediaFile;
 }
 
 export interface StockItem {
@@ -274,6 +359,34 @@ export const WORK_ORDER_STATUS_LABELS: Record<WorkOrderStatus, string> = {
   bloque: "Bloqué",
   termine: "Terminé",
   annule: "Annulé",
+};
+
+export const SAMPLE_PRIORITY_LABELS: Record<SamplePriority, string> = {
+  basse: "Basse",
+  normale: "Normale",
+  haute: "Haute",
+  urgente: "Urgente",
+};
+
+export const MEDIA_CATEGORY_LABELS: Record<MediaFileCategory, string> = {
+  visuel: "Visuel",
+  image_de_marque: "Image de marque",
+  fiche_technique: "Fiche technique",
+  nuancier: "Nuancier",
+  autre: "Autre",
+};
+
+export const STORAGE_BACKEND_LABELS: Record<StorageBackendType, string> = {
+  supabase_storage: "Supabase Storage",
+  google_drive: "Google Drive",
+  nas: "NAS",
+  local_server: "Serveur local",
+};
+
+export const MEDIA_SYNC_STATUS_LABELS: Record<MediaSyncStatus, string> = {
+  en_attente: "En attente",
+  synchronise: "Synchronisé",
+  erreur: "Erreur",
 };
 
 export const SAMPLE_STATUS_LABELS: Record<SampleRequestStatus, string> = {

@@ -87,6 +87,21 @@ const SAMPLE_TONE: Record<string, Tone> = {
   sans_suite: "neutral",
 };
 
+const PRIORITY_TONE: Record<string, Tone> = {
+  basse: "neutral",
+  normale: "info",
+  haute: "warning",
+  urgente: "danger",
+};
+
+export function PriorityBadge({ priority, label }: { priority: string; label: string }) {
+  return (
+    <Badge tone={PRIORITY_TONE[priority] ?? "neutral"} dot>
+      {label}
+    </Badge>
+  );
+}
+
 export function StatusBadge({
   status,
   labels,
