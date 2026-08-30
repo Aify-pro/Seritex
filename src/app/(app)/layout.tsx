@@ -1,6 +1,7 @@
 import { requireUser } from "@/lib/auth/current-user";
 import { NAV_BY_ROLE } from "@/lib/auth/nav";
 import { SidebarNav } from "@/components/shell/sidebar-nav";
+import { MobileSidebar } from "@/components/shell/mobile-sidebar";
 import { UserMenu } from "@/components/shell/user-menu";
 import { Shirt } from "lucide-react";
 
@@ -20,9 +21,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
       <div className="flex min-h-screen flex-1 flex-col">
         <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-surface px-4 md:px-6">
-          <div className="flex items-center gap-2 font-semibold text-foreground md:hidden">
-            <Shirt className="h-5 w-5 text-brand" />
-            Seritex
+          <div className="flex items-center gap-2 md:hidden">
+            <MobileSidebar items={items} />
+            <div className="flex items-center gap-2 font-semibold text-foreground">
+              <Shirt className="h-5 w-5 text-brand" />
+              Seritex
+            </div>
           </div>
           <div className="hidden md:block" />
           <UserMenu fullName={profile.full_name} role={profile.role} email={profile.email} />

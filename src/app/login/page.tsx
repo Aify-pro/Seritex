@@ -1,7 +1,12 @@
 import { LoginForm } from "./login-form";
 import { Shirt, ShieldCheck, Workflow, Users } from "lucide-react";
 
-export default function LoginPage() {
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ next?: string }>;
+}) {
+  const { next } = await searchParams;
   return (
     <div className="grid min-h-screen flex-1 lg:grid-cols-2">
       <div className="relative hidden flex-col justify-between overflow-hidden bg-brand p-10 text-brand-foreground lg:flex">
@@ -52,7 +57,7 @@ export default function LoginPage() {
             <Shirt className="h-6 w-6 text-brand" />
             Seritex
           </div>
-          <LoginForm />
+          <LoginForm next={next} />
         </div>
       </div>
     </div>
