@@ -20,6 +20,7 @@ import {
   Package,
   Plug,
   Contact,
+  Ruler,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { createElement, type ReactNode } from "react";
@@ -82,6 +83,7 @@ export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
     { href: "/commercial/clients", label: "Clients", icon: navIcon(Contact) },
     { href: "/commercial/echantillons", label: "Échantillons", icon: navIcon(FlaskConical) },
     { href: "/atelier/production", label: "Ordres de fabrication", icon: navIcon(Factory) },
+    { href: "/atelier/patronnage", label: "Patronnage", icon: navIcon(Ruler) },
     { href: "/atelier/transverse", label: "Vue transverse sections", icon: navIcon(Boxes) },
     { href: "/mediatheque", label: "Médiathèque", icon: navIcon(FolderOpen) },
     { href: "/parametres/gammes", label: "Gammes opératoires", icon: navIcon(Route), section: PARAMETRES },
@@ -107,6 +109,7 @@ export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
     { href: "/commercial/echantillons", label: "Échantillons", icon: navIcon(FlaskConical) },
     { href: "/mediatheque", label: "Médiathèque", icon: navIcon(FolderOpen) },
     { href: "/atelier/production", label: "Ordres de fabrication", icon: navIcon(Factory) },
+    { href: "/atelier/patronnage", label: "Patronnage", icon: navIcon(Ruler) },
     { href: "/atelier/transverse", label: "Vue transverse sections", icon: navIcon(Boxes) },
     { href: "/parametres/utilisateurs", label: "Utilisateurs", icon: navIcon(Users), section: PARAMETRES },
     { href: "/parametres/roles", label: "Rôles & permissions", icon: navIcon(ShieldCheck), section: PARAMETRES },
