@@ -22,6 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { cn, formatDate, formatDateTime } from "@/lib/utils";
+import { QrScannerButton } from "@/components/atelier/patronnage/qr-scanner-button";
 import type { FichePlacement, RepartitionTailles, StatutFiche, TracePlacement } from "@/lib/patronnage/types";
 import { REPARTITION_TAILLES_KEYS } from "@/lib/patronnage/types";
 import {
@@ -336,12 +337,22 @@ function CreateFicheForm({ onCreated }: { onCreated: () => void }) {
           <input type="hidden" name="client_libelle" value="" />
         </Field>
         <Field label="Lier à un ODF (optionnel)">
-          <SearchPicker
-            placeholder="Rechercher une référence ODF…"
-            search={searchOdf}
-            renderOption={(o: { id: string; reference: string }) => o.reference}
-            onSelect={(o) => setOdfId(o.id ?? null)}
-          />
+          <div className="flex gap-2">
+            <div className="flex-1">
+              <SearchPicker
+                placeholder="Rechercher une référence ODF…"
+                search={searchOdf}
+                renderOption={(o: { id: string; reference: string }) => o.reference}
+                onSelect={(o) => setOdfId(o.id ?? null)}
+              />
+            </div>
+            <QrScannerButton
+              onScanned={async (reference) => {
+                const results = await searchOdf(reference);
+                if (results[0]) setOdfId(results[0].id ?? null);
+              }}
+            />
+          </div>
         </Field>
       </div>
 
@@ -501,13 +512,23 @@ function FicheDetailContent({
         <CardHeader title="Ordre de fabrication lié" description={fiche.premiereLiaisonOdfLe ? `Première liaison le ${formatDate(fiche.premiereLiaisonOdfLe)}` : "Optionnel"} />
         <CardBody>
           {!locked && permissions.canModify ? (
-            <SearchPicker
-              placeholder="Rechercher une référence ODF…"
-              search={searchOdf}
-              renderOption={(o: { id: string; reference: string }) => o.reference}
-              onSelect={(o) => runAction(() => linkOdf(fiche.id, o.id))}
-              displayValue={fiche.odfReference ?? ""}
-            />
+            <div className="flex gap-2">
+              <div className="flex-1">
+                <SearchPicker
+                  placeholder="Rechercher une référence ODF…"
+                  search={searchOdf}
+                  renderOption={(o: { id: string; reference: string }) => o.reference}
+                  onSelect={(o) => runAction(() => linkOdf(fiche.id, o.id ?? null))}
+                  displayValue={fiche.odfReference ?? ""}
+                />
+              </div>
+              <QrScannerButton
+                onScanned={async (reference) => {
+                  const results = await searchOdf(reference);
+                  if (results[0]) runAction(() => linkOdf(fiche.id, results[0].id ?? null));
+                }}
+              />
+            </div>
           ) : (
             <p className="text-sm text-foreground">{fiche.odfReference ?? "Aucun ODF lié"}</p>
           )}
