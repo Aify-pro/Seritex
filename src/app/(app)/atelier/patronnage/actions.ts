@@ -227,53 +227,75 @@ function sanitizeFileName(name: string) {
   return name.replace(/[^a-zA-Z0-9.\-_]/g, "_");
 }
 
-export interface CompareRowResult {
+export interface RecognizedGroup {
+  patternPieceId: string;
+  articleCode: string;
+  size: string;
+  pieceName: string;
+  count: number;
+  averageConfidence: number;
+  referencePoints: Point[];
+  exampleCandidatePoints: Point[];
+}
+
+export interface UnrecognizedPiece {
   index: number;
   points: Point[];
   area: number;
   perimeter: number;
-  best: {
-    piecePatternId: string;
-    pieceName: string;
+  bestGuess: {
     articleCode: string;
     size: string;
+    pieceName: string;
     referencePoints: Point[];
     confidence: number;
     areaDiffPct: number;
     perimDiffPct: number;
     shapeDiffPct: number;
   } | null;
-  matchesDeclared: boolean;
-  accepted: boolean;
 }
 
-export interface CompareResult {
-  rows: CompareRowResult[];
+export interface TraceAnalysis {
   totalDetected: number;
-  totalExpected: number;
-  countMismatch: boolean;
-  globalAccepted: boolean;
+  recognized: RecognizedGroup[];
+  unrecognized: UnrecognizedPiece[];
+  allRecognized: boolean;
 }
+
+const DEFAULT_RECOGNITION_THRESHOLD = 98;
 
 /**
- * Compare un tracé DXF importé à la bibliothèque de patrons. Chaque pièce
- * détectée est comparée à TOUTE la bibliothèque (pas seulement à l'article
- * déclaré) : si une pièce ressemble davantage à un autre modèle ou une autre
- * taille que ceux déclarés, c'est précisément le type d'erreur coûteuse que
- * ce module doit intercepter — jamais la laisser passer silencieusement.
- * Tolérance zéro : le tracé n'est accepté que si chaque pièce correspond au
- * patron déclaré au-dessus du seuil ET que le compte de pièces correspond.
+ * Analyse un tracé de placement Diamino : un seul fichier DXF contenant en
+ * général de nombreuses pièces, potentiellement de plusieurs patrons, posées
+ * à des rotations quelconques pour optimiser le matelas. Ce n'est PAS une
+ * vérification par rapport à un article déclaré à l'avance — le module scanne
+ * le tracé tel qu'il est et rapporte ce qu'il y trouve réellement.
+ *
+ * Pour chaque pièce détectée, la meilleure correspondance est cherchée dans
+ * TOUTE la bibliothèque, sans restriction, avec une comparaison invariante en
+ * rotation (cf. compareShapes). Les pièces reconnues sont regroupées et
+ * comptées par patron de référence ; les pièces non reconnues sont
+ * remontées individuellement avec leur meilleure piste, jamais masquées.
+ *
+ * Seuil de reconnaissance élevé par défaut (98%, pas 92%) : un tracé Diamino
+ * est une copie numérique directe du patron de référence, pas un nouveau
+ * relevé manuel — une pièce correcte doit donc correspondre presque
+ * exactement (aux imprécisions de flottants près), pas "à peu près". Un
+ * score proche de 92% signale une vraie divergence (mauvaise taille, mauvais
+ * modèle), pas une simple tolérance de mesure à absorber.
+ *
+ * Résultat exploité tel quel par l'écran : le tracé n'est considéré bon que
+ * si `allRecognized` est vrai, c'est-à-dire que 100% des pièces posées ont
+ * été reconnues — jamais un score de confiance individuel utilisé comme
+ * seuil de validation globale.
  */
-export async function compareTraceDxf(formData: FormData): Promise<CompareResult | { error: string }> {
+export async function analyzeTraceDxf(formData: FormData): Promise<TraceAnalysis | { error: string }> {
   await requireRole(ALLOWED_ROLES);
 
   const read = readDxfFile(formData);
   if ("error" in read) return { error: read.error };
 
-  const declaredArticleId = String(formData.get("article_id") ?? "").trim();
-  const declaredSize = String(formData.get("size") ?? "").trim();
-  const threshold = Number(formData.get("threshold") ?? 92);
-  if (!declaredArticleId || !declaredSize) return { error: "Article ou taille déclaré manquant" };
+  const threshold = Number(formData.get("threshold") ?? DEFAULT_RECOGNITION_THRESHOLD);
 
   let text: string;
   try {
@@ -289,10 +311,12 @@ export async function compareTraceDxf(formData: FormData): Promise<CompareResult
   const supabase = await createClient();
   const { data: allPieces, error: fetchError } = await supabase
     .from("pattern_pieces")
-    .select("id,name,area,perimeter,radial_signature,points,pattern_id,patterns(id,size,article_id,pattern_articles(article_code))");
+    .select(
+      "id,name,area,perimeter,radial_signature,points,pattern_id,patterns(id,size,article_id,pattern_articles(article_code))"
+    );
   if (fetchError) return { error: `Lecture de la bibliothèque impossible : ${fetchError.message}` };
   if (!allPieces || allPieces.length === 0) {
-    return { error: "La bibliothèque de patrons est vide — ajoutez au moins un patron avant de comparer." };
+    return { error: "La bibliothèque de patrons est vide — ajoutez au moins un patron avant d'analyser un tracé." };
   }
 
   type RefRow = {
@@ -305,15 +329,18 @@ export async function compareTraceDxf(formData: FormData): Promise<CompareResult
     pattern_id: string;
     patterns: { id: string; size: string; article_id: string; pattern_articles: { article_code: string } | null } | null;
   };
-
   const references = (allPieces as unknown as RefRow[]).filter((r) => r.patterns);
 
-  const declaredPieces = references.filter(
-    (r) => r.patterns!.article_id === declaredArticleId && r.patterns!.size === declaredSize
-  );
+  const recognizedMap = new Map<
+    string,
+    { ref: RefRow; count: number; confidenceSum: number; exampleCandidatePoints: Point[] }
+  >();
+  const unrecognized: UnrecognizedPiece[] = [];
 
-  const rows: CompareRowResult[] = contours.map((contour, index) => {
+  for (let index = 0; index < contours.length; index++) {
+    const contour = contours[index];
     const candGeom = normalizeShape(contour.points);
+
     let best: (ReturnType<typeof compareShapes> & { ref: RefRow }) | null = null;
     for (const ref of references) {
       const cmp = compareShapes(candGeom, {
@@ -325,48 +352,57 @@ export async function compareTraceDxf(formData: FormData): Promise<CompareResult
       if (!best || cmp.confidence > best.confidence) best = { ...cmp, ref };
     }
 
-    const matchesDeclared = Boolean(
-      best && best.ref.patterns!.article_id === declaredArticleId && best.ref.patterns!.size === declaredSize
-    );
-    const accepted = matchesDeclared && !!best && best.confidence >= threshold;
-
-    return {
-      index,
-      points: candGeom.points,
-      area: Math.round(candGeom.area),
-      perimeter: Math.round(candGeom.perimeter),
-      best: best
-        ? {
-            piecePatternId: best.ref.pattern_id,
-            pieceName: best.ref.name,
-            articleCode: best.ref.patterns!.pattern_articles?.article_code ?? "?",
-            size: best.ref.patterns!.size,
-            referencePoints: best.ref.points,
-            confidence: best.confidence,
-            areaDiffPct: best.areaDiffPct,
-            perimDiffPct: best.perimDiffPct,
-            shapeDiffPct: best.shapeDiffPct,
-          }
-        : null,
-      matchesDeclared,
-      accepted,
-    };
-  });
-
-  let totalExpected = 0;
-  if (declaredPieces.length > 0) {
-    const { data: expectedRows } = await supabase
-      .from("pattern_pieces")
-      .select("expected_count")
-      .in(
-        "id",
-        declaredPieces.map((p) => p.id)
-      );
-    totalExpected = (expectedRows ?? []).reduce((s, p) => s + (p.expected_count as number), 0);
+    if (best && best.confidence >= threshold) {
+      const key = best.ref.id;
+      const existing = recognizedMap.get(key);
+      if (existing) {
+        existing.count += 1;
+        existing.confidenceSum += best.confidence;
+      } else {
+        recognizedMap.set(key, {
+          ref: best.ref,
+          count: 1,
+          confidenceSum: best.confidence,
+          exampleCandidatePoints: candGeom.points,
+        });
+      }
+    } else {
+      unrecognized.push({
+        index,
+        points: candGeom.points,
+        area: Math.round(candGeom.area),
+        perimeter: Math.round(candGeom.perimeter),
+        bestGuess: best
+          ? {
+              articleCode: best.ref.patterns!.pattern_articles?.article_code ?? "?",
+              size: best.ref.patterns!.size,
+              pieceName: best.ref.name,
+              referencePoints: best.ref.points,
+              confidence: best.confidence,
+              areaDiffPct: best.areaDiffPct,
+              perimDiffPct: best.perimDiffPct,
+              shapeDiffPct: best.shapeDiffPct,
+            }
+          : null,
+      });
+    }
   }
 
-  const countMismatch = totalExpected > 0 && totalExpected !== contours.length;
-  const globalAccepted = rows.every((r) => r.accepted) && !countMismatch;
+  const recognized: RecognizedGroup[] = Array.from(recognizedMap.values()).map((g) => ({
+    patternPieceId: g.ref.id,
+    articleCode: g.ref.patterns!.pattern_articles?.article_code ?? "?",
+    size: g.ref.patterns!.size,
+    pieceName: g.ref.name,
+    count: g.count,
+    averageConfidence: Math.round((g.confidenceSum / g.count) * 10) / 10,
+    referencePoints: g.ref.points,
+    exampleCandidatePoints: g.exampleCandidatePoints,
+  }));
 
-  return { rows, totalDetected: contours.length, totalExpected, countMismatch, globalAccepted };
+  return {
+    totalDetected: contours.length,
+    recognized,
+    unrecognized,
+    allRecognized: unrecognized.length === 0,
+  };
 }

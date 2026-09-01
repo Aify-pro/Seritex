@@ -135,6 +135,16 @@ export function normalizeShape(points: Point[]): ShapeGeometry {
 
 /**
  * Compare une forme candidate à une forme de référence déjà normalisée.
+ *
+ * Invariance en rotation : `normalizeShape` aligne chaque forme sur son
+ * propre axe principal (ACP), mais cet axe est une droite, pas une
+ * direction — il laisse une ambiguïté de 180° non résolue (une pièce et
+ * cette même pièce tournée de 180° s'alignent sur le même axe mais avec
+ * une signature radiale décalée d'un demi-tour). Sans correction, une
+ * pièce correctement posée mais tournée sur le tracé pouvait être jugée
+ * "non reconnue" à tort. On teste donc les deux décalages possibles de la
+ * signature radiale (0 et un demi-tour) et on retient le meilleur.
+ *
  * Score de confiance = 100 - moyenne pondérée des écarts (aire/périmètre/
  * signature radiale). Poids et seuils à recalibrer sur des cas réels (cf.
  * rapport du module).
@@ -143,12 +153,18 @@ export function compareShapes(candidate: ShapeGeometry, reference: ShapeGeometry
   const areaDiffPct = (Math.abs(candidate.area - reference.area) / reference.area) * 100;
   const perimDiffPct = (Math.abs(candidate.perimeter - reference.perimeter) / reference.perimeter) * 100;
   const meanR = reference.radial.reduce((s, v) => s + v, 0) / reference.radial.length;
-  let sq = 0;
-  for (let i = 0; i < reference.radial.length; i++) {
-    const d = candidate.radial[i] - reference.radial[i];
-    sq += d * d;
-  }
-  const rmse = Math.sqrt(sq / reference.radial.length);
+
+  const bins = reference.radial.length;
+  const halfTurnShift = Math.round(bins / 2);
+  const rmseAtShift = (shift: number) => {
+    let sq = 0;
+    for (let i = 0; i < bins; i++) {
+      const d = candidate.radial[(i + shift) % bins] - reference.radial[i];
+      sq += d * d;
+    }
+    return Math.sqrt(sq / bins);
+  };
+  const rmse = Math.min(rmseAtShift(0), rmseAtShift(halfTurnShift));
   const shapeDiffPct = meanR > 0 ? (rmse / meanR) * 100 : 100;
 
   const confidence = Math.max(0, 100 - (0.5 * areaDiffPct + 0.2 * perimDiffPct + 0.3 * shapeDiffPct));
