@@ -1,18 +1,9 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-  CheckCircle2,
-  XCircle,
-  AlertTriangle,
-  FileWarning,
-  RotateCcw,
-  Wand2,
-  ClipboardCheck,
-} from "lucide-react";
+import { AlertTriangle, Wand2 } from "lucide-react";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Point } from "@/lib/patronnage/geometry";
@@ -20,12 +11,8 @@ import type { LibraryArticle } from "@/lib/patronnage/types";
 import {
   previewDxfPieces,
   saveReferencePattern,
-  analyzeTraceDxf,
   type PreviewedPiece,
-  type TraceAnalysis,
 } from "@/app/(app)/atelier/patronnage/actions";
-
-const THRESHOLD_DEFAULT = 98;
 
 /* ============================================================
    Rendu SVG d'une pièce (candidat vs référence superposés)
@@ -110,39 +97,16 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
    Composant principal
 ============================================================ */
 
-export function PatronnageWorkspace({ initialLibrary }: { initialLibrary: LibraryArticle[] }) {
+/**
+ * Bibliothèque des patrons de référence — brique support du module
+ * Patronnage. L'écran principal du module (liste des fiches de placement +
+ * fiche détail avec tracés) vit dans page.tsx et fiche-detail-content.tsx ;
+ * cette bibliothèque reste une page séparée (/atelier/patronnage/bibliotheque)
+ * puisqu'elle sert de référence à toutes les fiches, pas à une seule.
+ */
+export function PatronBibliothequeManager({ initialLibrary }: { initialLibrary: LibraryArticle[] }) {
   const router = useRouter();
-  const [tab, setTab] = useState<"bibliotheque" | "comparaison">("bibliotheque");
-  const library = initialLibrary;
-
-  return (
-    <div className="space-y-5">
-      <div className="flex gap-1 border-b border-border">
-        {(
-          [
-            { id: "bibliotheque" as const, label: "Bibliothèque de patrons" },
-            { id: "comparaison" as const, label: "Comparaison de tracé" },
-          ]
-        ).map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            className={cn(
-              "-mb-px border-b-2 px-4 py-2.5 text-sm transition-colors",
-              tab === t.id
-                ? "border-brand font-medium text-brand"
-                : "border-transparent text-foreground-muted hover:text-foreground"
-            )}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {tab === "bibliotheque" && <BibliothequeTab library={library} onChanged={() => router.refresh()} />}
-      {tab === "comparaison" && <ComparaisonTab library={library} />}
-    </div>
-  );
+  return <BibliothequeTab library={initialLibrary} onChanged={() => router.refresh()} />;
 }
 
 /* ============================================================
@@ -424,305 +388,3 @@ function BibliothequeTab({ library, onChanged }: { library: LibraryArticle[]; on
   );
 }
 
-/* ============================================================
-   Onglet Comparaison — import réel du tracé à contrôler
-============================================================ */
-
-function ComparaisonTab({ library }: { library: LibraryArticle[] }) {
-  const [threshold, setThreshold] = useState(THRESHOLD_DEFAULT);
-  const [file, setFile] = useState<File | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<TraceAnalysis | null>(null);
-  const [overrides, setOverrides] = useState<Record<number, { label: string; reason: string }>>({});
-  const [correctingIndex, setCorrectingIndex] = useState<number | null>(null);
-
-  const allReferencePieces = useMemo(
-    () =>
-      library.flatMap((a) =>
-        a.patterns.flatMap((p) => p.pieces.map((piece) => ({ articleCode: a.articleCode, size: p.size, piece })))
-      ),
-    [library]
-  );
-
-  async function handleAnalyze() {
-    if (!file) {
-      setError("Sélectionnez le fichier DXF du tracé à analyser");
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    setOverrides({});
-    const fd = new FormData();
-    fd.set("file", file);
-    fd.set("threshold", String(threshold));
-    const res = await analyzeTraceDxf(fd);
-    setBusy(false);
-    if ("error" in res) {
-      setError(res.error);
-      setResult(null);
-      return;
-    }
-    setResult(res);
-  }
-
-  if (library.length === 0) {
-    return (
-      <Card>
-        <CardBody className="text-sm text-foreground-muted">
-          Ajoutez au moins un patron de référence dans l&apos;onglet Bibliothèque avant de pouvoir analyser un tracé.
-        </CardBody>
-      </Card>
-    );
-  }
-
-  const recognizedCount = result ? result.totalDetected - result.unrecognized.length : 0;
-
-  return (
-    <div className="space-y-5">
-      <Card>
-        <CardHeader
-          title="Tracé de placement à analyser"
-          description="Un tracé Diamino contient en général de nombreuses pièces posées à des rotations variées — le module scanne tout le fichier, sans déclaration préalable d'article."
-        />
-        <CardBody className="space-y-4">
-          {error && (
-            <div className="flex items-center gap-2 rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger">
-              <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> {error}
-            </div>
-          )}
-
-          <div className="grid grid-cols-3 gap-4">
-            <Field label="Fichier DXF du tracé">
-              <input
-                type="file"
-                accept=".dxf"
-                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-                className="w-full rounded-md border border-dashed border-border bg-surface-muted px-2.5 py-2 text-sm text-foreground-muted"
-              />
-            </Field>
-            <Field label="Seuil de reconnaissance (%)">
-              <input
-                type="number"
-                min={80}
-                max={100}
-                value={threshold}
-                onChange={(e) => setThreshold(Number(e.target.value))}
-                className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground"
-              />
-            </Field>
-            <div className="flex items-end">
-              <Button size="sm" loading={busy} onClick={handleAnalyze} className="w-full">
-                <Wand2 className="h-3.5 w-3.5" /> Analyser le tracé
-              </Button>
-            </div>
-          </div>
-          <p className="text-xs text-foreground-muted">
-            Un tracé est une copie numérique directe des patrons de référence : une pièce correcte doit y
-            correspondre presque exactement. Un seuil de 98% n&apos;est donc pas restrictif pour une pièce bien
-            posée — un score plus bas signale une vraie divergence (mauvaise taille, mauvais modèle), pas une
-            simple tolérance de mesure.
-          </p>
-        </CardBody>
-      </Card>
-
-      {result && (
-        <div className="space-y-4">
-          <div
-            className={cn(
-              "flex items-center gap-3 rounded-lg border px-5 py-4",
-              result.allRecognized ? "border-success/30 bg-success-soft" : "border-danger/30 bg-danger-soft"
-            )}
-          >
-            {result.allRecognized ? (
-              <CheckCircle2 className="h-5 w-5 text-success" />
-            ) : (
-              <XCircle className="h-5 w-5 text-danger" />
-            )}
-            <div>
-              <p className="text-sm font-medium text-foreground">
-                {result.allRecognized
-                  ? `Tracé accepté — ${result.totalDetected} pièce(s), 100% reconnues`
-                  : `Tracé refusé — ${recognizedCount} sur ${result.totalDetected} pièce(s) reconnues`}
-              </p>
-              <p className="text-xs text-foreground-muted">
-                {result.allRecognized
-                  ? "Chaque pièce posée sur ce tracé correspond à un patron de référence connu."
-                  : "Au moins une pièce posée sur ce tracé ne correspond à aucun patron de référence avec une confiance suffisante. Aucune correction n'est appliquée automatiquement."}
-              </p>
-            </div>
-          </div>
-
-          {result.recognized.length > 0 && (
-            <Card>
-              <CardHeader title="Pièces reconnues, par patron de référence" />
-              <div className="divide-y divide-border">
-                {result.recognized.map((g) => (
-                  <div key={g.patternPieceId} className="flex items-center gap-4 px-5 py-3">
-                    <PieceOverlay candidatePoints={g.exampleCandidatePoints} referencePoints={g.referencePoints} ok />
-                    <div className="flex-1">
-                      <p className="text-sm text-foreground">
-                        <span className="font-medium">
-                          {g.articleCode} · {g.size} · {g.pieceName}
-                        </span>
-                      </p>
-                      <p className="text-xs text-foreground-muted">confiance moyenne {g.averageConfidence}%</p>
-                    </div>
-                    <Badge tone="success">×{g.count}</Badge>
-                  </div>
-                ))}
-              </div>
-            </Card>
-          )}
-
-          {result.unrecognized.length > 0 && (
-            <Card>
-              <CardHeader
-                title="Pièces non reconnues"
-                description="Aucune correspondance fiable trouvée dans la bibliothèque — à vérifier avant toute coupe."
-              />
-              <div className="divide-y divide-border">
-                {result.unrecognized.map((row) => {
-                  const override = overrides[row.index];
-                  const isCorrecting = correctingIndex === row.index;
-                  return (
-                    <div key={row.index} className="px-5 py-3.5">
-                      <div className="flex items-start gap-3">
-                        <PieceOverlay
-                          candidatePoints={row.points}
-                          referencePoints={row.bestGuess?.referencePoints ?? null}
-                          ok={Boolean(override)}
-                        />
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Badge tone={override ? "success" : "danger"} dot>
-                              {override ? "Corrigé manuellement" : "Non reconnue"}
-                            </Badge>
-                            {override ? (
-                              <span className="text-sm text-foreground">
-                                Réassignée à : <span className="font-medium">{override.label}</span>
-                              </span>
-                            ) : row.bestGuess ? (
-                              <span className="text-sm text-foreground">
-                                Piste la plus proche :{" "}
-                                <span className="font-medium">
-                                  {row.bestGuess.articleCode} · {row.bestGuess.size} · {row.bestGuess.pieceName}
-                                </span>
-                              </span>
-                            ) : (
-                              <span className="text-sm text-foreground-muted">Aucune piste dans la bibliothèque</span>
-                            )}
-                            {row.bestGuess && (
-                              <span className="text-xs text-foreground-muted">confiance {row.bestGuess.confidence}%</span>
-                            )}
-                          </div>
-
-                          {row.bestGuess && (
-                            <div className="mt-1.5 flex gap-4 text-xs text-foreground-muted">
-                              <span>Δ aire {row.bestGuess.areaDiffPct}%</span>
-                              <span>Δ périmètre {row.bestGuess.perimDiffPct}%</span>
-                              <span>Δ forme {row.bestGuess.shapeDiffPct}%</span>
-                              <span>seuil requis {threshold}%</span>
-                            </div>
-                          )}
-
-                          {!override && !isCorrecting && (
-                            <button
-                              onClick={() => setCorrectingIndex(row.index)}
-                              className="mt-2 flex items-center gap-1 text-xs text-foreground-muted hover:text-foreground"
-                            >
-                              <RotateCcw className="h-3 w-3" /> Corriger manuellement
-                            </button>
-                          )}
-
-                          {isCorrecting && (
-                            <ManualCorrectionForm
-                              options={allReferencePieces}
-                              onCancel={() => setCorrectingIndex(null)}
-                              onValidate={(_pieceId, label, reason) => {
-                                setOverrides((prev) => ({ ...prev, [row.index]: { label, reason } }));
-                                setCorrectingIndex(null);
-                              }}
-                            />
-                          )}
-
-                          {override && (
-                            <p className="mt-1.5 flex items-center gap-1 text-xs text-foreground-muted">
-                              <ClipboardCheck className="h-3 w-3" /> Motif : {override.reason}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </Card>
-          )}
-
-          <div className="flex items-center gap-2 rounded-lg border border-warning/30 bg-warning-soft px-4 py-2.5 text-xs text-foreground">
-            <FileWarning className="h-3.5 w-3.5 shrink-0" />
-            <span>
-              Les corrections manuelles ci-dessus sont un aide-mémoire visuel pour cette session : elles ne sont pas
-              encore enregistrées en base ni reliées à un circuit de validation formel.
-            </span>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ManualCorrectionForm({
-  options,
-  onCancel,
-  onValidate,
-}: {
-  options: { articleCode: string; size: string; piece: { id: string; name: string } }[];
-  onCancel: () => void;
-  onValidate: (pieceId: string, label: string, reason: string) => void;
-}) {
-  const [selected, setSelected] = useState("");
-  const [reason, setReason] = useState("");
-  return (
-    <div className="mt-2.5 space-y-2 rounded-md border border-border bg-surface-muted p-3">
-      <p className="text-xs text-foreground-muted">
-        Réassigner cette pièce à la correspondance réelle constatée visuellement, puis motiver la correction
-        (obligatoire — reste soumis à validation du responsable production avant tout lancement de coupe).
-      </p>
-      <select
-        value={selected}
-        onChange={(e) => setSelected(e.target.value)}
-        className="w-full rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm text-foreground"
-      >
-        <option value="">— Choisir la pièce réelle —</option>
-        {options.map((r) => (
-          <option key={r.piece.id} value={r.piece.id}>
-            {r.articleCode} · {r.size} · {r.piece.name}
-          </option>
-        ))}
-      </select>
-      <input
-        value={reason}
-        onChange={(e) => setReason(e.target.value)}
-        placeholder="Motif de la correction (obligatoire)"
-        className="w-full rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm text-foreground"
-      />
-      <div className="flex justify-end gap-2">
-        <Button variant="ghost" size="sm" onClick={onCancel}>
-          Annuler
-        </Button>
-        <Button
-          size="sm"
-          disabled={!selected || !reason.trim()}
-          onClick={() => {
-            const opt = options.find((o) => o.piece.id === selected);
-            if (opt && reason.trim()) onValidate(selected, `${opt.articleCode} · ${opt.size} · ${opt.piece.name}`, reason);
-          }}
-        >
-          Valider la correction
-        </Button>
-      </div>
-    </div>
-  );
-}

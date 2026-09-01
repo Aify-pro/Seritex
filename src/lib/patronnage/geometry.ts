@@ -149,6 +149,145 @@ export function normalizeShape(points: Point[]): ShapeGeometry {
  * signature radiale). Poids et seuils à recalibrer sur des cas réels (cf.
  * rapport du module).
  */
+/* ============================================================
+   Extensions — pré-passe d'échelle fichier + passe réflexion (miroir)
+   ============================================================
+   Voir module-patronnage-specification.md §7. Fonctions pures, écrites
+   pour recevoir le format de points déjà utilisé ici ([number, number]),
+   et la fonction de comparaison existante (compareShapes) déjà adaptée
+   avec la correction d'ambiguïté à 180°.
+============================================================ */
+
+export const FACTEURS_ECHELLE = [0.01, 0.1, 1, 10, 100, 1000] as const;
+export type FacteurEchelle = (typeof FACTEURS_ECHELLE)[number];
+
+export interface ReferenceGeom {
+  id: string;
+  geom: ShapeGeometry;
+}
+
+function scaleContour(contour: Point[], f: number): Point[] {
+  if (f === 1) return contour;
+  return contour.map(([x, y]) => [x * f, y * f]);
+}
+
+/**
+ * Réflexion d'un contour (miroir sur l'axe vertical) avec inversion du sens
+ * de parcours, pour préserver l'orientation attendue par normalizeShape.
+ */
+export function mirrorContour(contour: Point[]): Point[] {
+  return contour.map(([x, y]) => [-x, y] as Point).reverse();
+}
+
+export interface ResultatEchelle {
+  facteur: FacteurEchelle;
+  scoreGlobal: number;
+  detailParFacteur: Record<string, number>;
+}
+
+/**
+ * Détecte le facteur d'échelle du FICHIER ENTIER, avant toute comparaison
+ * pièce-à-pièce. Étanche avec la détection de taille : les facteurs sont
+ * espacés d'un ordre de grandeur (×10), largement hors de portée d'un écart
+ * de gradation (~5-6 % par taille), qui reste détecté par compareShapes au
+ * seuil normal. Stratégie en deux temps pour rester rapide :
+ *  a) filtre grossier par aire (fenêtre ±15%, sert à départager des ordres
+ *     de grandeur, pas des tailles) ;
+ *  b) confirmation fine (compareShapes) sur un échantillon des plus grandes
+ *     pièces candidates.
+ * À égalité de score, le facteur 1 (aucune correction) l'emporte toujours.
+ */
+export function detecterEchelleFichier(
+  pieces: Point[][],
+  bibliotheque: ReferenceGeom[],
+  seuil = 98,
+  taillePreEchantillon = 8
+): ResultatEchelle {
+  const airesRef = bibliotheque.map((r) => ({ ref: r, aire: r.geom.area }));
+  const geomsBrutes = pieces.map((p) => ({ points: p, aire: polygonArea(p) }));
+  const detail: Record<string, number> = {};
+  let meilleur: { facteur: FacteurEchelle; score: number } = { facteur: 1, score: -1 };
+
+  for (const f of FACTEURS_ECHELLE) {
+    const f2 = f * f;
+    const candidatsParPiece = geomsBrutes.map(({ aire }) => {
+      const aScaled = aire * f2;
+      return airesRef.filter(({ aire: ar }) => aScaled >= ar * 0.85 && aScaled <= ar * 1.15);
+    });
+    const tauxCandidats = candidatsParPiece.filter((c) => c.length > 0).length / pieces.length;
+
+    if (tauxCandidats < 0.3) {
+      detail[String(f)] = 0;
+      continue; // ordre de grandeur manifestement faux
+    }
+
+    const indices = geomsBrutes
+      .map(({ aire }, i) => ({ aire, i }))
+      .filter(({ i }) => candidatsParPiece[i].length > 0)
+      .sort((x, y) => y.aire - x.aire)
+      .slice(0, taillePreEchantillon)
+      .map(({ i }) => i);
+
+    let matches = 0;
+    for (const i of indices) {
+      const scaled = normalizeShape(scaleContour(pieces[i], f));
+      const ok = candidatsParPiece[i].some(({ ref }) => compareShapes(scaled, ref.geom).confidence >= seuil);
+      if (ok) matches++;
+    }
+    const score = indices.length > 0 ? matches / indices.length : 0;
+    detail[String(f)] = score;
+
+    if (score > meilleur.score || (score === meilleur.score && f === 1)) {
+      meilleur = { facteur: f, score };
+    }
+  }
+
+  return { facteur: meilleur.facteur, scoreGlobal: Math.max(meilleur.score, 0), detailParFacteur: detail };
+}
+
+/** Application unique du facteur retenu à l'ensemble des pièces du fichier. */
+export function appliquerEchelleFichier(pieces: Point[][], facteur: FacteurEchelle): Point[][] {
+  return facteur === 1 ? pieces : pieces.map((c) => scaleContour(c, facteur));
+}
+
+export interface ResultatMiroir {
+  reconnu: boolean;
+  reference?: ReferenceGeom;
+  score?: number;
+}
+
+/**
+ * À appeler pour toute pièce NON reconnue par la comparaison directe :
+ * reteste son contour miroité contre la même bibliothèque. Si reconnue
+ * ainsi, la pièce compte comme reconnue mais reste marquée « en miroir »
+ * par l'appelant (alerte non bloquante, jamais masquée).
+ */
+export function testerEnMiroir(piece: Point[], bibliotheque: ReferenceGeom[], seuil = 98): ResultatMiroir {
+  const miroir = normalizeShape(mirrorContour(piece));
+  let best: { ref: ReferenceGeom; score: number } | null = null;
+  for (const ref of bibliotheque) {
+    const s = compareShapes(miroir, ref.geom).confidence;
+    if (s >= seuil && (!best || s > best.score)) best = { ref, score: s };
+  }
+  return best ? { reconnu: true, reference: best.ref, score: best.score } : { reconnu: false };
+}
+
+/**
+ * Compare une forme candidate à une forme de référence déjà normalisée.
+ *
+ * Invariance en rotation : `normalizeShape` aligne chaque forme sur son
+ * propre axe principal (ACP), mais cet axe est une droite, pas une
+ * direction — il laisse une ambiguïté de 180° non résolue (une pièce et
+ * cette même pièce tournée de 180° s'alignent sur le même axe mais avec
+ * une signature radiale décalée d'un demi-tour). Sans correction, une
+ * pièce correctement posée mais tournée sur le tracé pouvait être jugée
+ * "non reconnue" à tort. On teste donc les deux décalages possibles de la
+ * signature radiale (0 et un demi-tour) et on retient le meilleur.
+ *
+ * Score de confiance = 100 - moyenne pondérée des écarts (aire/périmètre/
+ * signature radiale). Poids et seuils à recalibrer sur des cas réels (cf.
+ * rapport du module).
+ */
 export function compareShapes(candidate: ShapeGeometry, reference: ShapeGeometry): ShapeComparison {
   const areaDiffPct = (Math.abs(candidate.area - reference.area) / reference.area) * 100;
   const perimDiffPct = (Math.abs(candidate.perimeter - reference.perimeter) / reference.perimeter) * 100;

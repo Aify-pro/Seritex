@@ -5,22 +5,11 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { requireRole } from "@/lib/auth/current-user";
 import { parseDxfContours } from "@/lib/patronnage/dxf";
 import { normalizeShape, compareShapes, type Point } from "@/lib/patronnage/geometry";
+import { readDxfFile } from "@/lib/patronnage/upload";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-const MAX_SIZE_BYTES = 10 * 1024 * 1024; // 10 Mo — un DXF de patron est un fichier texte, largement suffisant
 const ALLOWED_ROLES: ("responsable_production" | "administrateur")[] = ["responsable_production", "administrateur"];
-
-function readDxfFile(formData: FormData): { text: string; file: File } | { error: string } {
-  const file = formData.get("file");
-  if (!(file instanceof File) || file.size === 0) {
-    return { error: "Merci de sélectionner un fichier DXF" };
-  }
-  if (file.size > MAX_SIZE_BYTES) {
-    return { error: "Fichier trop volumineux (10 Mo maximum)" };
-  }
-  return { file, text: "" };
-}
 
 export interface PreviewedPiece {
   index: number;
