@@ -103,6 +103,8 @@ const COLUMN_BY_ACTION: Record<PermissionAction, string> = {
   modify: "can_modify",
   archive: "can_archive",
   delete: "can_delete",
+  validate: "can_validate",
+  unlock: "can_unlock",
 };
 
 /**

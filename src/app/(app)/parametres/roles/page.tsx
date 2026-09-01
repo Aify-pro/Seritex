@@ -24,7 +24,7 @@ export default async function RolesPage() {
     <div className="space-y-6">
       <PageHeader
         title="Rôles & permissions"
-        description="Un rôle peut être créé ou supprimé librement (sauf les 6 rôles système). Pour chaque rôle et chaque module : Voir, Créer, Modifier, Archiver, Supprimer — modifiable ici, appliqué immédiatement dans toute l'application."
+        description="Un rôle peut être créé ou supprimé librement (sauf les 6 rôles système). Pour chaque rôle et chaque module : Voir, Créer, Modifier, Archiver, Supprimer, et pour les modules à cycle de vie verrouillable, Valider et Déverrouiller — modifiable ici, appliqué immédiatement dans toute l'application."
       />
       <RoleManager
         roles={(roles ?? []) as RoleRecord[]}

@@ -411,7 +411,7 @@ export const MEDIA_SYNC_STATUS_LABELS: Record<MediaSyncStatus, string> = {
 // RBAC dynamique (v4) — supabase/migrations/0005_rbac_crm_parametres_sage.sql
 // ----------------------------------------------------------------------------
 
-export type PermissionAction = "view" | "create" | "modify" | "archive" | "delete";
+export type PermissionAction = "view" | "create" | "modify" | "archive" | "delete" | "validate" | "unlock";
 
 export const PERMISSION_ACTION_LABELS: Record<PermissionAction, string> = {
   view: "Voir",
@@ -419,6 +419,8 @@ export const PERMISSION_ACTION_LABELS: Record<PermissionAction, string> = {
   modify: "Modifier",
   archive: "Archiver",
   delete: "Supprimer",
+  validate: "Valider",
+  unlock: "Déverrouiller",
 };
 
 export interface ModuleRecord {
@@ -449,6 +451,8 @@ export interface RolePermissionRecord {
   can_modify: boolean;
   can_archive: boolean;
   can_delete: boolean;
+  can_validate: boolean;
+  can_unlock: boolean;
   updated_at: string;
   modules?: Pick<ModuleRecord, "id" | "key" | "label">;
 }
