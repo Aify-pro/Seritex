@@ -17,7 +17,7 @@ import {
 } from "@/lib/types/domain";
 import { Plus, Trash2, Lock } from "lucide-react";
 
-const ACTIONS: PermissionAction[] = ["view", "create", "modify", "archive", "delete"];
+const ACTIONS: PermissionAction[] = ["view", "create", "modify", "archive", "delete", "validate", "unlock"];
 const BASE_ROLES = Object.keys(ROLE_LABELS) as UserRole[];
 
 export function RoleManager({
@@ -49,12 +49,14 @@ export function RoleManager({
     const key = `${selectedRoleId}:${moduleId}`;
     const current = localPerms.get(key);
     if (!current) return;
-    const column = { view: "can_view", create: "can_create", modify: "can_modify", archive: "can_archive", delete: "can_delete" }[action] as
+    const column = { view: "can_view", create: "can_create", modify: "can_modify", archive: "can_archive", delete: "can_delete", validate: "can_validate", unlock: "can_unlock" }[action] as
       | "can_view"
       | "can_create"
       | "can_modify"
       | "can_archive"
-      | "can_delete";
+      | "can_delete"
+      | "can_validate"
+      | "can_unlock";
     setLocalPerms(new Map(localPerms).set(key, { ...current, [column]: next }));
     startTransition(async () => {
       const res = await setRolePermission(selectedRoleId, moduleId, action, next);
@@ -231,7 +233,16 @@ export function RoleManager({
                             modify: "can_modify",
                             archive: "can_archive",
                             delete: "can_delete",
-                          }[action] as "can_view" | "can_create" | "can_modify" | "can_archive" | "can_delete";
+                            validate: "can_validate",
+                            unlock: "can_unlock",
+                          }[action] as
+                            | "can_view"
+                            | "can_create"
+                            | "can_modify"
+                            | "can_archive"
+                            | "can_delete"
+                            | "can_validate"
+                            | "can_unlock";
                           const checked = row?.[column] ?? false;
                           return (
                             <td key={action} className="px-2 py-2 text-center">

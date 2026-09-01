@@ -12,6 +12,8 @@ const EMPTY_PERMISSIONS: PermissionRow = {
   modify: false,
   archive: false,
   delete: false,
+  validate: false,
+  unlock: false,
 };
 
 /**
@@ -34,7 +36,7 @@ export const getPermissionMap = cache(async (): Promise<PermissionMap> => {
 
   const { data, error } = await supabase
     .from("role_permissions")
-    .select("can_view,can_create,can_modify,can_archive,can_delete,modules(key)");
+    .select("can_view,can_create,can_modify,can_archive,can_delete,can_validate,can_unlock,modules(key)");
 
   if (error || !data) return {};
 
@@ -45,6 +47,8 @@ export const getPermissionMap = cache(async (): Promise<PermissionMap> => {
     can_modify: boolean;
     can_archive: boolean;
     can_delete: boolean;
+    can_validate: boolean;
+    can_unlock: boolean;
     modules: { key: string } | null;
   }[]) {
     const key = row.modules?.key;
@@ -55,6 +59,8 @@ export const getPermissionMap = cache(async (): Promise<PermissionMap> => {
       modify: row.can_modify,
       archive: row.can_archive,
       delete: row.can_delete,
+      validate: row.can_validate,
+      unlock: row.can_unlock,
     };
   }
   return map;
