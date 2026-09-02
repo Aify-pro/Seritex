@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "seed": "tsx scripts/seed.ts",
+    "test:patronnage": "tsx --require ./scripts/allow-server-only.cjs scripts/test-moteur-patronnage.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

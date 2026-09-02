@@ -133,22 +133,6 @@ export function normalizeShape(points: Point[]): ShapeGeometry {
   return { points: rotated, area, perimeter, radial };
 }
 
-/**
- * Compare une forme candidate à une forme de référence déjà normalisée.
- *
- * Invariance en rotation : `normalizeShape` aligne chaque forme sur son
- * propre axe principal (ACP), mais cet axe est une droite, pas une
- * direction — il laisse une ambiguïté de 180° non résolue (une pièce et
- * cette même pièce tournée de 180° s'alignent sur le même axe mais avec
- * une signature radiale décalée d'un demi-tour). Sans correction, une
- * pièce correctement posée mais tournée sur le tracé pouvait être jugée
- * "non reconnue" à tort. On teste donc les deux décalages possibles de la
- * signature radiale (0 et un demi-tour) et on retient le meilleur.
- *
- * Score de confiance = 100 - moyenne pondérée des écarts (aire/périmètre/
- * signature radiale). Poids et seuils à recalibrer sur des cas réels (cf.
- * rapport du module).
- */
 /* ============================================================
    Extensions — pré-passe d'échelle fichier + passe réflexion (miroir)
    ============================================================
@@ -195,7 +179,15 @@ export interface ResultatEchelle {
  *     de grandeur, pas des tailles) ;
  *  b) confirmation fine (compareShapes) sur un échantillon des plus grandes
  *     pièces candidates.
- * À égalité de score, le facteur 1 (aucune correction) l'emporte toujours.
+ * À égalité de score, le facteur 1 (aucune correction) l'emporte toujours,
+ * et GARDE-FOU : un facteur ≠ 1 n'est jamais retenu sans au moins une
+ * correspondance confirmée par la comparaison fine — appliquer une
+ * « correction » d'échelle que rien ne confirme serait une correction
+ * silencieuse sans preuve, exactement ce que la plateforme s'interdit.
+ * La confirmation fine teste aussi le contour miroité : un tracé dont les
+ * grandes pièces sont majoritairement posées en miroir ne doit pas faire
+ * échouer la détection d'échelle (le marquage « en miroir » proprement dit
+ * reste du ressort de la passe réflexion, jamais masqué ici).
  */
 export function detecterEchelleFichier(
   pieces: Point[][],
@@ -230,9 +222,19 @@ export function detecterEchelleFichier(
 
     let matches = 0;
     for (const i of indices) {
-      const scaled = normalizeShape(scaleContour(pieces[i], f));
-      const ok = candidatsParPiece[i].some(({ ref }) => compareShapes(scaled, ref.geom).confidence >= seuil);
-      if (ok) matches++;
+      const contourScaled = scaleContour(pieces[i], f);
+      const scaled = normalizeShape(contourScaled);
+      const direct = candidatsParPiece[i].some(({ ref }) => compareShapes(scaled, ref.geom).confidence >= seuil);
+      if (direct) {
+        matches++;
+        continue;
+      }
+      // Pièce posée en miroir : ne pénalise pas le score d'échelle
+      const scaledMiroir = normalizeShape(mirrorContour(contourScaled));
+      const enMiroir = candidatsParPiece[i].some(
+        ({ ref }) => compareShapes(scaledMiroir, ref.geom).confidence >= seuil
+      );
+      if (enMiroir) matches++;
     }
     const score = indices.length > 0 ? matches / indices.length : 0;
     detail[String(f)] = score;
@@ -240,6 +242,11 @@ export function detecterEchelleFichier(
     if (score > meilleur.score || (score === meilleur.score && f === 1)) {
       meilleur = { facteur: f, score };
     }
+  }
+
+  // Garde-fou : sans aucune correspondance confirmée, aucune correction.
+  if (meilleur.facteur !== 1 && meilleur.score <= 0) {
+    meilleur = { facteur: 1, score: 0 };
   }
 
   return { facteur: meilleur.facteur, scoreGlobal: Math.max(meilleur.score, 0), detailParFacteur: detail };
