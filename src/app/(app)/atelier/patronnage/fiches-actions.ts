@@ -5,15 +5,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { requireUser } from "@/lib/auth/current-user";
 import { can } from "@/lib/auth/permissions";
 import { parseDxfContours } from "@/lib/patronnage/dxf";
-import {
-  normalizeShape,
-  compareShapes,
-  detecterEchelleFichier,
-  appliquerEchelleFichier,
-  testerEnMiroir,
-  type ReferenceGeom,
-  type FacteurEchelle,
-} from "@/lib/patronnage/geometry";
+import { loadReferenceLibrary } from "@/lib/patronnage/bibliotheque";
+import { reconnaitreTrace } from "@/lib/patronnage/reconnaissance";
 import { readDxfFile } from "@/lib/patronnage/upload";
 import type { StatutFiche, RepartitionTailles } from "@/lib/patronnage/types";
 import { revalidatePath } from "next/cache";
@@ -439,112 +432,14 @@ export async function uploadTraceDxf(traceId: string, ficheId: string, formData:
   }
 
   const supabase = await createClient();
-  const { data: allPieces, error: fetchError } = await supabase
-    .from("pattern_pieces")
-    .select(
-      "id,name,area,perimeter,radial_signature,points,pattern_id,patterns(id,size,article_id,pattern_articles(article_code))"
-    );
-  if (fetchError) return { error: `Lecture de la bibliothèque impossible : ${fetchError.message}` };
-  if (!allPieces || allPieces.length === 0) {
-    return { error: "La bibliothèque de patrons est vide — ajoutez au moins un patron avant d'analyser un tracé." };
-  }
+  const library = await loadReferenceLibrary(supabase);
+  if ("error" in library) return { error: library.error };
 
-  type RefRow = {
-    id: string;
-    name: string;
-    area: number;
-    perimeter: number;
-    radial_signature: number[];
-    points: [number, number][];
-    pattern_id: string;
-    patterns: { id: string; size: string; article_id: string; pattern_articles: { article_code: string } | null } | null;
-  };
-  const references = (allPieces as unknown as RefRow[]).filter((r) => r.patterns);
-  const referenceGeoms: (ReferenceGeom & { row: RefRow })[] = references.map((r) => ({
-    id: r.id,
-    row: r,
-    geom: { points: r.points, area: r.area, perimeter: r.perimeter, radial: r.radial_signature },
-  }));
+  // 1 → 3. Moteur : pré-passe d'échelle fichier, comparaison directe contre
+  // toute la bibliothèque, puis passe miroir (cf. lib/patronnage/reconnaissance).
+  const analyse = reconnaitreTrace(contours, library.references, SEUIL_RECONNAISSANCE);
 
-  // 1. Pré-passe d'échelle fichier (facteur unique, appliqué à tout le tracé)
-  const rawPoints = contours.map((c) => c.points);
-  const echelle = detecterEchelleFichier(rawPoints, referenceGeoms, SEUIL_RECONNAISSANCE);
-  const correctedPoints = appliquerEchelleFichier(rawPoints, echelle.facteur as FacteurEchelle);
-
-  // 2. Comparaison directe contre toute la bibliothèque, puis passe miroir
-  //    pour toute pièce non reconnue directement.
-  const recognizedTally = new Map<
-    string,
-    { row: RefRow; count: number; miroirCount: number }
-  >();
-  const piecesNonReconnues: {
-    index_piece: number;
-    calque: string;
-    meilleur_score: number;
-    meilleur_candidat: { patron_id: string; article: string; taille: string; piece: string } | null;
-  }[] = [];
-
-  for (let i = 0; i < correctedPoints.length; i++) {
-    const candGeom = normalizeShape(correctedPoints[i]);
-    let best: { confidence: number; row: RefRow } | null = null;
-    for (const ref of referenceGeoms) {
-      const cmp = compareShapes(candGeom, ref.geom);
-      if (!best || cmp.confidence > best.confidence) best = { confidence: cmp.confidence, row: ref.row };
-    }
-
-    if (best && best.confidence >= SEUIL_RECONNAISSANCE) {
-      const key = best.row.id;
-      const existing = recognizedTally.get(key);
-      if (existing) existing.count += 1;
-      else recognizedTally.set(key, { row: best.row, count: 1, miroirCount: 0 });
-      continue;
-    }
-
-    const miroir = testerEnMiroir(correctedPoints[i], referenceGeoms, SEUIL_RECONNAISSANCE);
-    if (miroir.reconnu && miroir.reference) {
-      const refRow = (miroir.reference as ReferenceGeom & { row: RefRow }).row;
-      const key = refRow.id;
-      const existing = recognizedTally.get(key);
-      if (existing) {
-        existing.count += 1;
-        existing.miroirCount += 1;
-      } else {
-        recognizedTally.set(key, { row: refRow, count: 1, miroirCount: 1 });
-      }
-      continue;
-    }
-
-    piecesNonReconnues.push({
-      index_piece: i,
-      calque: contours[i].layer,
-      meilleur_score: best?.confidence ?? 0,
-      meilleur_candidat: best
-        ? {
-            patron_id: best.row.id,
-            article: best.row.patterns!.pattern_articles?.article_code ?? "?",
-            taille: best.row.patterns!.size,
-            piece: best.row.name,
-          }
-        : null,
-    });
-  }
-
-  const patronsReconnus = Array.from(recognizedTally.values()).map((g) => ({
-    patron_id: g.row.id,
-    article: g.row.patterns!.pattern_articles?.article_code ?? "?",
-    taille: g.row.patterns!.size,
-    piece: g.row.name,
-    quantite: g.count,
-    dont_en_miroir: g.miroirCount,
-  }));
-
-  const totalReconnu = patronsReconnus.reduce((s, p) => s + p.quantite, 0);
-  const tauxReconnaissance = contours.length > 0 ? totalReconnu / contours.length : 0;
-  const reconnaissanceComplete = piecesNonReconnues.length === 0;
-  const alerteMiroir = patronsReconnus.some((p) => p.dont_en_miroir > 0);
-  const alerteEchelle = echelle.facteur !== 1;
-
-  // 3. Stockage du fichier (remplace l'ancien s'il existe)
+  // 4. Stockage du fichier (remplace l'ancien s'il existe)
   const admin = createAdminClient();
   const { data: existingTrace } = await supabase
     .from("traces_placement")
@@ -577,14 +472,14 @@ export async function uploadTraceDxf(traceId: string, ficheId: string, formData:
   const { error: analyseError } = await supabase.from("analyses_trace").upsert(
     {
       trace_id: traceId,
-      nb_pieces_detectees: contours.length,
-      facteur_echelle: echelle.facteur,
-      patrons_reconnus: patronsReconnus,
-      pieces_non_reconnues: piecesNonReconnues,
-      taux_reconnaissance: tauxReconnaissance,
-      reconnaissance_complete: reconnaissanceComplete,
-      alerte_miroir: alerteMiroir,
-      alerte_echelle: alerteEchelle,
+      nb_pieces_detectees: analyse.nbPiecesDetectees,
+      facteur_echelle: analyse.facteurEchelle,
+      patrons_reconnus: analyse.patronsReconnus,
+      pieces_non_reconnues: analyse.piecesNonReconnues,
+      taux_reconnaissance: analyse.tauxReconnaissance,
+      reconnaissance_complete: analyse.reconnaissanceComplete,
+      alerte_miroir: analyse.alerteMiroir,
+      alerte_echelle: analyse.alerteEchelle,
       moteur_version: MOTEUR_VERSION,
       analysee_le: new Date().toISOString(),
     },
@@ -592,7 +487,7 @@ export async function uploadTraceDxf(traceId: string, ficheId: string, formData:
   );
   if (analyseError) return { error: analyseError.message };
 
-  // 4. Fiche : passage automatique en "Tracés déposés" au premier dépôt
+  // 5. Fiche : passage automatique en "Tracés déposés" au premier dépôt
   if (gate.statut === "demande") {
     await supabase.from("fiches_placement").update({ statut: "traces_deposes" }).eq("id", ficheId);
   }
@@ -602,11 +497,18 @@ export async function uploadTraceDxf(traceId: string, ficheId: string, formData:
     action: "upload_trace_dxf",
     entity_type: "trace_placement",
     entity_id: traceId,
-    metadata: { nb_pieces: contours.length, facteur_echelle: echelle.facteur, reconnaissance_complete: reconnaissanceComplete },
+    metadata: {
+      nb_pieces: analyse.nbPiecesDetectees,
+      facteur_echelle: analyse.facteurEchelle,
+      score_echelle: analyse.scoreEchelle,
+      taux_reconnaissance: analyse.tauxReconnaissance,
+      alerte_miroir: analyse.alerteMiroir,
+      reconnaissance_complete: analyse.reconnaissanceComplete,
+    },
   });
 
   revalidatePath("/atelier/patronnage");
-  return { reconnaissanceComplete };
+  return { reconnaissanceComplete: analyse.reconnaissanceComplete };
 }
 
 function sanitizeFileName(name: string) {
