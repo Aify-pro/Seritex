@@ -39,7 +39,6 @@ export async function recordWorkOrderQuantity(
 
   revalidatePath("/atelier/section");
   revalidatePath("/atelier/production");
-  revalidatePath("/atelier/transverse");
   revalidatePath("/dashboard");
   return {};
 }
