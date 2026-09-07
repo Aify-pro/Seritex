@@ -192,9 +192,6 @@ export default async function DashboardPage() {
           <Link href="/atelier/production" className="text-sm font-medium text-brand hover:underline">
             Voir les ordres de fabrication →
           </Link>
-          <Link href="/atelier/transverse" className="text-sm font-medium text-brand hover:underline">
-            Vue transverse par section →
-          </Link>
         </div>
       </div>
     );

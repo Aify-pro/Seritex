@@ -7,7 +7,6 @@ import { revalidatePath } from "next/cache";
 function revalidateOdf(productionOrderId: string) {
   revalidatePath(`/atelier/production/${productionOrderId}`);
   revalidatePath("/atelier/production");
-  revalidatePath("/atelier/transverse");
   revalidatePath("/dashboard");
 }
 
