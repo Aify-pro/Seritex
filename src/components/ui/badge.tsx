@@ -59,21 +59,13 @@ const QUOTE_TONE: Record<string, Tone> = {
 };
 
 const PRODUCTION_TONE: Record<string, Tone> = {
-  a_lancer: "info",
-  en_cours: "brand",
+  brouillon: "neutral",
+  en_attente_validation: "info",
+  refuse: "danger",
+  en_production: "brand",
+  demande_cloture: "warning",
   terminee: "success",
-  bloquee: "danger",
   annulee: "neutral",
-};
-
-const WORK_ORDER_TONE: Record<string, Tone> = {
-  en_attente: "neutral",
-  planifie: "info",
-  en_cours: "brand",
-  pause: "warning",
-  bloque: "danger",
-  termine: "success",
-  annule: "neutral",
 };
 
 const SAMPLE_TONE: Record<string, Tone> = {
@@ -109,7 +101,7 @@ export function StatusBadge({
 }: {
   status: string;
   labels: Record<string, string>;
-  kind: "request" | "quote" | "production" | "work_order" | "sample";
+  kind: "request" | "quote" | "production" | "sample";
 }) {
   const toneMap =
     kind === "request"
@@ -118,9 +110,7 @@ export function StatusBadge({
         ? QUOTE_TONE
         : kind === "production"
           ? PRODUCTION_TONE
-          : kind === "work_order"
-            ? WORK_ORDER_TONE
-            : SAMPLE_TONE;
+          : SAMPLE_TONE;
 
   return (
     <Badge tone={toneMap[status] ?? "neutral"} dot>

@@ -5,16 +5,14 @@ import { motion, AnimatePresence } from "framer-motion";
 import { createClient } from "@/lib/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { WORK_ORDER_STATUS_LABELS, type WorkOrderStatus } from "@/lib/types/domain";
-import { transitionWorkOrder } from "./actions";
+import { recordWorkOrderQuantity } from "./actions";
 import { toast } from "sonner";
-import { AlertTriangle, CheckCircle2, Pause, Play, RotateCcw, Package } from "lucide-react";
+import { CheckCircle2, Package, Plus } from "lucide-react";
 import { formatDateTime, cn } from "@/lib/utils";
 
 export type WorkOrderRow = {
   id: string;
   reference: string;
-  status: WorkOrderStatus;
   quantity_planned: number;
   quantity_done: number;
   blocking_reason: string | null;
@@ -28,13 +26,6 @@ export type WorkOrderRow = {
     companies?: { name: string } | null;
   } | null;
 };
-
-const COLUMNS: { status: WorkOrderStatus; title: string }[] = [
-  { status: "planifie", title: "À démarrer" },
-  { status: "en_cours", title: "En cours" },
-  { status: "bloque", title: "Bloqué" },
-  { status: "termine", title: "Terminé" },
-];
 
 export function SectionBoard({
   sectionId,
@@ -61,6 +52,10 @@ export function SectionBoard({
             setOrders((prev) =>
               prev.map((o) => (o.id === payload.new.id ? { ...o, ...(payload.new as Partial<WorkOrderRow>) } : o))
             );
+          } else if (payload.eventType === "INSERT") {
+            setOrders((prev) =>
+              prev.some((o) => o.id === payload.new.id) ? prev : [...prev, payload.new as WorkOrderRow]
+            );
           }
         }
       )
@@ -71,43 +66,41 @@ export function SectionBoard({
     };
   }, [sectionId]);
 
-  const enAttente = orders.filter((o) => o.status === "en_attente");
+  const enCours = orders.filter((o) => o.quantity_done < o.quantity_planned);
+  const termines = orders.filter((o) => o.quantity_done >= o.quantity_planned);
 
   return (
-    <div className="space-y-4">
-      {enAttente.length > 0 && (
-        <p className="text-xs text-foreground-muted">
-          {enAttente.length} ordre(s) en attente de l&apos;étape précédente (non affichés ci-dessous).
-        </p>
-      )}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
-        {COLUMNS.map((col) => (
-          <div key={col.status} className="flex flex-col gap-3">
-            <div className="flex items-center justify-between px-1">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground-muted">
-                {col.title}
-              </h3>
-              <span className="rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium text-foreground-muted">
-                {orders.filter((o) => o.status === col.status).length}
-              </span>
+    <div className="space-y-6">
+      <div>
+        <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-foreground-muted">
+          À produire ({enCours.length})
+        </h3>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <AnimatePresence initial={false}>
+            {enCours.map((wo) => (
+              <WorkOrderCard key={wo.id} wo={wo} setOrders={setOrders} />
+            ))}
+          </AnimatePresence>
+          {enCours.length === 0 && (
+            <div className="rounded-md border border-dashed border-border p-4 text-center text-xs text-foreground-muted sm:col-span-2 lg:col-span-3">
+              Aucun ordre en cours
             </div>
-            <div className="flex flex-col gap-3">
-              <AnimatePresence initial={false}>
-                {orders
-                  .filter((o) => o.status === col.status)
-                  .map((wo) => (
-                    <WorkOrderCard key={wo.id} wo={wo} setOrders={setOrders} />
-                  ))}
-              </AnimatePresence>
-              {orders.filter((o) => o.status === col.status).length === 0 && (
-                <div className="rounded-md border border-dashed border-border p-4 text-center text-xs text-foreground-muted">
-                  Aucun ordre
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
+          )}
+        </div>
       </div>
+
+      {termines.length > 0 && (
+        <div>
+          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-foreground-muted">
+            Quantité atteinte ({termines.length})
+          </h3>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {termines.map((wo) => (
+              <WorkOrderCard key={wo.id} wo={wo} setOrders={setOrders} />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -120,32 +113,24 @@ function WorkOrderCard({
   setOrders: React.Dispatch<React.SetStateAction<WorkOrderRow[]>>;
 }) {
   const [pending, startTransition] = useTransition();
-  const [showBlockForm, setShowBlockForm] = useState(false);
-  const [showFinishForm, setShowFinishForm] = useState(false);
-  const [reason, setReason] = useState("");
-  const [qty, setQty] = useState(wo.quantity_planned - wo.quantity_done);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [qty, setQty] = useState(Math.max(wo.quantity_planned - wo.quantity_done, 0));
+  const atteinte = wo.quantity_done >= wo.quantity_planned;
 
-  function applyOptimistic(status: WorkOrderStatus, patch: Partial<WorkOrderRow> = {}) {
-    setOrders((prev) => prev.map((o) => (o.id === wo.id ? { ...o, status, ...patch } : o)));
-  }
-
-  function run(status: WorkOrderStatus, options?: { quantity?: number; comment?: string }) {
-    const previous = wo.status;
-    applyOptimistic(status, {
-      blocking_reason: status === "bloque" ? options?.comment ?? null : null,
-      quantity_done: options?.quantity !== undefined ? wo.quantity_done + options.quantity : wo.quantity_done,
-    });
+  function submitQuantity() {
+    if (!qty) return;
+    const previousDone = wo.quantity_done;
+    setOrders((prev) => prev.map((o) => (o.id === wo.id ? { ...o, quantity_done: o.quantity_done + qty } : o)));
     startTransition(async () => {
-      const res = await transitionWorkOrder(wo.id, status, options);
+      const res = await recordWorkOrderQuantity(wo.id, qty);
       if (res.error) {
-        applyOptimistic(previous);
+        setOrders((prev) => prev.map((o) => (o.id === wo.id ? { ...o, quantity_done: previousDone } : o)));
         toast.error("Action refusée", { description: res.error });
       } else {
-        toast.success(`${wo.reference} → ${WORK_ORDER_STATUS_LABELS[status]}`);
+        toast.success(`${wo.reference} : +${qty} pièce(s)`);
       }
     });
-    setShowBlockForm(false);
-    setShowFinishForm(false);
+    setShowAddForm(false);
   }
 
   return (
@@ -156,13 +141,7 @@ function WorkOrderCard({
       exit={{ opacity: 0, scale: 0.96 }}
       transition={{ duration: 0.2 }}
     >
-      <Card
-        className={cn(
-          "p-4",
-          wo.status === "bloque" && "border-danger/40",
-          wo.status === "en_cours" && "border-brand/40"
-        )}
-      >
+      <Card className={cn("p-4", atteinte && "border-success/40")}>
         <div className="flex items-start justify-between gap-2">
           <div>
             <p className="text-sm font-semibold text-foreground">{wo.reference}</p>
@@ -170,7 +149,11 @@ function WorkOrderCard({
               {wo.production_orders?.companies?.name ?? "—"} · {wo.production_orders?.reference}
             </p>
           </div>
-          <Package className="h-4 w-4 shrink-0 text-foreground-muted" />
+          {atteinte ? (
+            <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
+          ) : (
+            <Package className="h-4 w-4 shrink-0 text-foreground-muted" />
+          )}
         </div>
 
         <div className="mt-3 flex items-center gap-2 text-xs text-foreground-muted">
@@ -180,79 +163,28 @@ function WorkOrderCard({
         </div>
         <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-surface-muted">
           <div
-            className="h-full rounded-full bg-brand transition-all"
+            className={cn("h-full rounded-full transition-all", atteinte ? "bg-success" : "bg-brand")}
             style={{ width: `${Math.min(100, (wo.quantity_done / wo.quantity_planned) * 100)}%` }}
           />
         </div>
 
-        {wo.status === "bloque" && wo.blocking_reason && (
-          <p className="mt-2 flex items-start gap-1.5 rounded-md bg-danger-soft px-2 py-1.5 text-xs text-danger">
-            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            {wo.blocking_reason}
-          </p>
+        {wo.blocking_reason && (
+          <p className="mt-2 rounded-md bg-danger-soft px-2 py-1.5 text-xs text-danger">⚠ {wo.blocking_reason}</p>
         )}
 
         {wo.actual_start && (
           <p className="mt-2 text-[11px] text-foreground-muted">Démarré le {formatDateTime(wo.actual_start)}</p>
         )}
 
-        {!showBlockForm && !showFinishForm && (
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            {wo.status === "planifie" && (
-              <Button size="sm" onClick={() => run("en_cours")} loading={pending}>
-                <Play className="h-3.5 w-3.5" /> Démarrer
-              </Button>
-            )}
-            {wo.status === "en_cours" && (
-              <>
-                <Button size="sm" variant="secondary" onClick={() => run("pause")} loading={pending}>
-                  <Pause className="h-3.5 w-3.5" /> Pause
-                </Button>
-                <Button size="sm" variant="danger" onClick={() => setShowBlockForm(true)} disabled={pending}>
-                  <AlertTriangle className="h-3.5 w-3.5" /> Bloquer
-                </Button>
-                <Button size="sm" variant="success" onClick={() => setShowFinishForm(true)} disabled={pending}>
-                  <CheckCircle2 className="h-3.5 w-3.5" /> Terminer
-                </Button>
-              </>
-            )}
-            {wo.status === "pause" && (
-              <Button size="sm" onClick={() => run("en_cours")} loading={pending}>
-                <RotateCcw className="h-3.5 w-3.5" /> Reprendre
-              </Button>
-            )}
-            {wo.status === "bloque" && (
-              <Button size="sm" onClick={() => run("en_cours")} loading={pending}>
-                <RotateCcw className="h-3.5 w-3.5" /> Débloquer
-              </Button>
-            )}
+        {!showAddForm ? (
+          <div className="mt-3">
+            <Button size="sm" onClick={() => setShowAddForm(true)} loading={pending}>
+              <Plus className="h-3.5 w-3.5" /> Ajouter une quantité
+            </Button>
           </div>
-        )}
-
-        {showBlockForm && (
+        ) : (
           <div className="mt-3 space-y-2">
-            <textarea
-              autoFocus
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder="Motif du blocage (matière manquante, défaut qualité, panne...)"
-              className="w-full rounded-md border border-border bg-surface p-2 text-xs outline-none focus:ring-2 focus:ring-brand/30"
-              rows={2}
-            />
-            <div className="flex gap-1.5">
-              <Button size="sm" variant="danger" onClick={() => run("bloque", { comment: reason })} disabled={!reason}>
-                Confirmer le blocage
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => setShowBlockForm(false)}>
-                Annuler
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {showFinishForm && (
-          <div className="mt-3 space-y-2">
-            <label className="block text-[11px] text-foreground-muted">Quantité réalisée à ajouter</label>
+            <label className="block text-[11px] text-foreground-muted">Quantité produite à ajouter</label>
             <input
               type="number"
               autoFocus
@@ -261,10 +193,10 @@ function WorkOrderCard({
               className="w-full rounded-md border border-border bg-surface p-2 text-xs outline-none focus:ring-2 focus:ring-brand/30"
             />
             <div className="flex gap-1.5">
-              <Button size="sm" variant="success" onClick={() => run("termine", { quantity: qty })}>
-                Confirmer la fin
+              <Button size="sm" onClick={submitQuantity} disabled={!qty} loading={pending}>
+                Valider
               </Button>
-              <Button size="sm" variant="ghost" onClick={() => setShowFinishForm(false)}>
+              <Button size="sm" variant="ghost" onClick={() => setShowAddForm(false)}>
                 Annuler
               </Button>
             </div>

@@ -24,11 +24,33 @@ export type RequestStatus =
 
 export type QuoteStatus = "brouillon" | "en_validation_interne" | "envoye" | "accepte" | "refuse" | "expire";
 
-export type ProductionOrderStatus = "a_lancer" | "en_cours" | "terminee" | "bloquee" | "annulee";
+// Cycle de vie ODF v2 (lot 1 — refonte module Production, 09/2026) :
+// remplace a_lancer|en_cours|terminee|bloquee|annulee. `bloquee` disparaît en
+// tant que statut — un blocage devient une anomalie transverse calculée (lot
+// 5), pas un état du cycle de vie. Voir claude_logique-ordre-fabrication-
+// consolidee.md section 2.
+export type ProductionOrderStatus =
+  | "brouillon"
+  | "en_attente_validation"
+  | "refuse"
+  | "en_production"
+  | "demande_cloture"
+  | "terminee"
+  | "annulee";
 
-export type WorkOrderStatus = "en_attente" | "planifie" | "en_cours" | "pause" | "bloque" | "termine" | "annule";
+// WorkOrderStatus supprimé (lot 1) : un sous-ODF ne porte plus de statut
+// propre, seulement quantity_planned/quantity_done (section 5 du document de
+// logique consolidé). L'avancement se lit sur ces deux quantités, un simple
+// indicateur visuel calculé (cumul atteint) remplace l'ancien statut.
 
-export type WorkOrderEventType = "demarre" | "pause" | "reprise" | "termine" | "bloque" | "debloque";
+export type WorkOrderEventType =
+  | "demarre"
+  | "pause"
+  | "reprise"
+  | "termine"
+  | "bloque"
+  | "debloque"
+  | "quantite_ajoutee";
 
 export type SampleRequestStatus =
   | "demande"
@@ -180,8 +202,38 @@ export interface ProductionOrder {
   actual_end_date: string | null;
   archived_at: string | null;
   archived_by: string | null;
+  // Cycle de vie v2 (lot 1) — même principe que archived_at/archived_by :
+  // le nom de la personne qui valide le lancement et celui qui valide la
+  // clôture définitive doivent apparaître à l'écran et sur le PDF.
+  launched_at: string | null;
+  launched_by: string | null;
+  cloture_demandee_at: string | null;
+  cloture_demandee_par: string | null;
+  closed_at: string | null;
+  closed_by: string | null;
+  cloture_note: string | null;
+  replaced_by_production_order_id: string | null;
   created_at: string;
   companies?: Pick<Company, "id" | "name">;
+}
+
+// Un ODF est rempli en plusieurs fois avant soumission : les sections
+// retenues (remplace la dépendance à routing_templates/routing_steps pour
+// la génération des sous-ODF) et les quantités par taille.
+export interface ProductionOrderSection {
+  id: string;
+  production_order_id: string;
+  section_id: string;
+  ordre: number;
+  created_at: string;
+  sections?: Pick<Section, "id" | "name">;
+}
+
+export interface ProductionOrderSize {
+  id: string;
+  production_order_id: string;
+  taille: string;
+  quantite_demandee: number;
 }
 
 export interface WorkOrder {
@@ -189,9 +241,8 @@ export interface WorkOrder {
   reference: string;
   production_order_id: string;
   section_id: string;
-  routing_step_id: string;
+  routing_step_id: string | null;
   predecessor_work_order_id: string | null;
-  status: WorkOrderStatus;
   quantity_planned: number;
   quantity_done: number;
   quantity_rejected: number;
@@ -362,21 +413,13 @@ export const QUOTE_STATUS_LABELS: Record<QuoteStatus, string> = {
 };
 
 export const PRODUCTION_ORDER_STATUS_LABELS: Record<ProductionOrderStatus, string> = {
-  a_lancer: "À lancer",
-  en_cours: "En cours",
+  brouillon: "Brouillon",
+  en_attente_validation: "En attente de validation",
+  refuse: "Refusé",
+  en_production: "En production",
+  demande_cloture: "Demande de clôture",
   terminee: "Terminée",
-  bloquee: "Bloquée",
   annulee: "Annulée",
-};
-
-export const WORK_ORDER_STATUS_LABELS: Record<WorkOrderStatus, string> = {
-  en_attente: "En attente",
-  planifie: "Planifié",
-  en_cours: "En cours",
-  pause: "En pause",
-  bloque: "Bloqué",
-  termine: "Terminé",
-  annule: "Annulé",
 };
 
 export const SAMPLE_PRIORITY_LABELS: Record<SamplePriority, string> = {
