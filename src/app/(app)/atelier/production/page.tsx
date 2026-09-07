@@ -36,8 +36,16 @@ export default async function ProductionOrdersPage({
     supabase.from("work_orders").select("id,section_id,quantity_planned,quantity_done"),
   ]);
 
-  const enCoursGlobal = workOrders?.filter((w) => w.quantity_done < w.quantity_planned).length ?? 0;
-  const atteintsGlobal = workOrders?.filter((w) => w.quantity_done >= w.quantity_planned).length ?? 0;
+  const today = new Date().toISOString().slice(0, 10);
+  const enCoursOrders = orders?.filter((o) => o.status === "en_production").length ?? 0;
+  const enAttenteValidationOrders = orders?.filter((o) => o.status === "en_attente_validation").length ?? 0;
+  const enRetardOrders =
+    orders?.filter(
+      (o) =>
+        o.planned_end_date !== null &&
+        o.planned_end_date < today &&
+        !["terminee", "annulee", "refuse"].includes(o.status)
+    ).length ?? 0;
 
   return (
     <div className="space-y-6">
@@ -62,9 +70,10 @@ export default async function ProductionOrdersPage({
           Avancement en temps réel
         </h2>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <StatCard label="Sous-ODF en cours (atelier)" value={enCoursGlobal} tone="brand" />
-          <StatCard label="Sous-ODF quantité atteinte" value={atteintsGlobal} tone="info" />
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <StatCard label="Ordres de fabrication en cours" value={enCoursOrders} tone="brand" />
+          <StatCard label="Ordres de fabrication en attente de validation" value={enAttenteValidationOrders} tone="warning" />
+          <StatCard label="Ordres de fabrication en retard" value={enRetardOrders} tone="danger" />
         </div>
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -74,34 +83,30 @@ export default async function ProductionOrdersPage({
             const atteintes = sectionOrders.filter((w) => w.quantity_done >= w.quantity_planned);
 
             return (
-              <Card key={section.id}>
-                <CardHeader
-                  title={section.name}
-                  action={
-                    <Link
-                      href={`/atelier/section?section=${section.id}`}
-                      className="text-xs font-medium text-brand hover:underline"
-                    >
-                      Gérer →
-                    </Link>
-                  }
-                />
-                <CardBody>
-                  <div className="grid grid-cols-2 gap-2 text-center">
-                    <div className="rounded-md bg-surface-muted px-2 py-2">
-                      <p className="text-lg font-semibold text-foreground">{enCours.length}</p>
-                      <p className="text-[10px] text-foreground-muted">En cours</p>
+              <Link
+                key={section.id}
+                href={`/atelier/section?section=${section.id}`}
+                className="block rounded-lg"
+              >
+                <Card className="cursor-pointer transition-colors hover:bg-surface-muted/40">
+                  <CardHeader title={section.name} />
+                  <CardBody>
+                    <div className="grid grid-cols-2 gap-2 text-center">
+                      <div className="rounded-md bg-surface-muted px-2 py-2">
+                        <p className="text-lg font-semibold text-foreground">{enCours.length}</p>
+                        <p className="text-[10px] text-foreground-muted">En cours</p>
+                      </div>
+                      <div className="rounded-md bg-surface-muted px-2 py-2">
+                        <p className="text-lg font-semibold text-foreground">{atteintes.length}</p>
+                        <p className="text-[10px] text-foreground-muted">Quantité atteinte</p>
+                      </div>
                     </div>
-                    <div className="rounded-md bg-surface-muted px-2 py-2">
-                      <p className="text-lg font-semibold text-foreground">{atteintes.length}</p>
-                      <p className="text-[10px] text-foreground-muted">Quantité atteinte</p>
-                    </div>
-                  </div>
-                  {sectionOrders.length === 0 && (
-                    <p className="mt-3 text-center text-xs text-foreground-muted">Aucun ordre de travail.</p>
-                  )}
-                </CardBody>
-              </Card>
+                    {sectionOrders.length === 0 && (
+                      <p className="mt-3 text-center text-xs text-foreground-muted">Aucun ordre de travail.</p>
+                    )}
+                  </CardBody>
+                </Card>
+              </Link>
             );
           })}
         </div>
