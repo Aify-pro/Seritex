@@ -2,11 +2,7 @@ import { requireUser } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server";
 import { StatCard, Card, CardHeader, CardBody } from "@/components/ui/card";
 import { StatusBadge } from "@/components/ui/badge";
-import {
-  REQUEST_STATUS_LABELS,
-  PRODUCTION_ORDER_STATUS_LABELS,
-  WORK_ORDER_STATUS_LABELS,
-} from "@/lib/types/domain";
+import { REQUEST_STATUS_LABELS, PRODUCTION_ORDER_STATUS_LABELS } from "@/lib/types/domain";
 import Link from "next/link";
 import { formatDate } from "@/lib/utils";
 import { PageHeader } from "@/components/shell/page-header";
@@ -87,16 +83,14 @@ export default async function DashboardPage() {
   }
 
   if (profile.role === "commercial" || profile.role === "administrateur") {
-    const [{ data: requests }, { data: quotesEnvoyes }, { data: samples }, { data: blocked }] =
-      await Promise.all([
-        supabase.from("requests").select("id,status,reference,created_at,companies(id,name)").order(
-          "created_at",
-          { ascending: false }
-        ).limit(6),
-        supabase.from("quotes").select("id,status").eq("status", "envoye"),
-        supabase.from("sample_requests").select("id,status").not("status", "in", "(valide,refuse,sans_suite)"),
-        supabase.from("work_orders").select("id,status").eq("status", "bloque"),
-      ]);
+    const [{ data: requests }, { data: quotesEnvoyes }, { data: samples }] = await Promise.all([
+      supabase.from("requests").select("id,status,reference,created_at,companies(id,name)").order(
+        "created_at",
+        { ascending: false }
+      ).limit(6),
+      supabase.from("quotes").select("id,status").eq("status", "envoye"),
+      supabase.from("sample_requests").select("id,status").not("status", "in", "(valide,refuse,sans_suite)"),
+    ]);
 
     const nouvelles = requests?.filter((r) => r.status === "nouvelle").length ?? 0;
 
@@ -106,15 +100,10 @@ export default async function DashboardPage() {
           title="Tableau de bord commercial"
           description="Pipeline des demandes, devis et échantillons en cours."
         />
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <StatCard label="Nouvelles demandes" value={nouvelles} tone="info" />
           <StatCard label="Devis en attente client" value={quotesEnvoyes?.length ?? 0} tone="brand" />
           <StatCard label="Échantillons actifs" value={samples?.length ?? 0} tone="accent" />
-          <StatCard
-            label="OT bloqués (atelier)"
-            value={blocked?.length ?? 0}
-            tone={blocked && blocked.length > 0 ? "danger" : "neutral"}
-          />
         </div>
 
         <Card>
@@ -149,39 +138,48 @@ export default async function DashboardPage() {
   }
 
   if (profile.role === "responsable_production") {
-    const [{ data: orders }, { data: blocked }, { data: sections }] = await Promise.all([
+    const [{ data: orders }, { data: enAttente }, { data: cloturesDemandees }] = await Promise.all([
       supabase.from("production_orders").select("id,status"),
-      supabase.from("work_orders").select("id,reference,status,section_id,sections(name)").eq("status", "bloque"),
-      supabase.from("sections").select("id,name").order("display_order"),
+      supabase.from("production_orders").select("id,status").eq("status", "en_attente_validation"),
+      supabase
+        .from("production_orders")
+        .select("id,reference,cloture_demandee_at,companies(name)")
+        .eq("status", "demande_cloture")
+        .order("cloture_demandee_at", { ascending: true }),
     ]);
 
-    const enCours = orders?.filter((o) => o.status === "en_cours").length ?? 0;
-    const aLancer = orders?.filter((o) => o.status === "a_lancer").length ?? 0;
+    const enProduction = orders?.filter((o) => o.status === "en_production").length ?? 0;
+    const brouillons = orders?.filter((o) => o.status === "brouillon").length ?? 0;
 
     return (
       <div className="space-y-6">
         <PageHeader title="Pilotage atelier" description="Vue d'ensemble des ordres de fabrication." />
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
-          <StatCard label="Ordres en cours" value={enCours} tone="brand" />
-          <StatCard label="À lancer" value={aLancer} tone="info" />
-          <StatCard label="Sections actives" value={sections?.length ?? 0} tone="neutral" />
+          <StatCard label="En production" value={enProduction} tone="brand" />
+          <StatCard label="Brouillons" value={brouillons} tone="neutral" />
+          <StatCard label="En attente de validation" value={enAttente?.length ?? 0} tone="info" />
           <StatCard
-            label="OT bloqués"
-            value={blocked?.length ?? 0}
-            tone={blocked && blocked.length > 0 ? "danger" : "neutral"}
+            label="Demandes de clôture"
+            value={cloturesDemandees?.length ?? 0}
+            tone={cloturesDemandees && cloturesDemandees.length > 0 ? "warning" : "neutral"}
           />
         </div>
 
-        {blocked && blocked.length > 0 && (
+        {cloturesDemandees && cloturesDemandees.length > 0 && (
           <Card>
-            <CardHeader title="Ordres de travail bloqués — action requise" />
+            <CardHeader title="Demandes de clôture — action requise" />
             <CardBody className="p-0">
               <ul className="divide-y divide-border">
-                {blocked.map((b) => (
-                  <li key={b.id} className="flex items-center justify-between px-5 py-3">
-                    <span className="text-sm font-medium text-foreground">{b.reference}</span>
+                {cloturesDemandees.map((o) => (
+                  <li key={o.id} className="flex items-center justify-between px-5 py-3">
+                    <Link
+                      href={`/atelier/production/${o.id}`}
+                      className="text-sm font-medium text-foreground hover:text-brand"
+                    >
+                      {o.reference}
+                    </Link>
                     <span className="text-xs text-foreground-muted">
-                      {(b.sections as unknown as { name: string } | null)?.name}
+                      {(o.companies as unknown as { name: string } | null)?.name}
                     </span>
                   </li>
                 ))}
@@ -205,19 +203,19 @@ export default async function DashboardPage() {
   if (profile.role === "chef_section") {
     const { data: workOrders } = await supabase
       .from("work_orders")
-      .select("id,status")
+      .select("id,quantity_planned,quantity_done")
       .eq("section_id", profile.section_id!);
 
-    const parStatut = (s: string) => workOrders?.filter((w) => w.status === s).length ?? 0;
+    const enCours = workOrders?.filter((w) => w.quantity_done < w.quantity_planned).length ?? 0;
+    const atteints = workOrders?.filter((w) => w.quantity_done >= w.quantity_planned).length ?? 0;
 
     return (
       <div className="space-y-6">
         <PageHeader title="File de ma section" description="Ordres de travail assignés à votre section." />
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
-          <StatCard label={WORK_ORDER_STATUS_LABELS.planifie} value={parStatut("planifie")} tone="info" />
-          <StatCard label={WORK_ORDER_STATUS_LABELS.en_cours} value={parStatut("en_cours")} tone="brand" />
-          <StatCard label={WORK_ORDER_STATUS_LABELS.bloque} value={parStatut("bloque")} tone="danger" />
-          <StatCard label={WORK_ORDER_STATUS_LABELS.termine} value={parStatut("termine")} tone="neutral" />
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <StatCard label="Ordres assignés" value={workOrders?.length ?? 0} tone="neutral" />
+          <StatCard label="En cours" value={enCours} tone="brand" />
+          <StatCard label="Quantité atteinte" value={atteints} tone="info" />
         </div>
         <Link href="/atelier/section" className="text-sm font-medium text-brand hover:underline">
           Ouvrir la file de travail →

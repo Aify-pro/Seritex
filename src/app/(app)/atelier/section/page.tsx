@@ -36,7 +36,7 @@ export default async function SectionQueuePage({
   const { data: workOrders } = await supabase
     .from("work_orders")
     .select(
-      "id,reference,status,quantity_planned,quantity_done,blocking_reason,planned_start,planned_end,actual_start,production_orders(id,reference,company_id,companies(name))"
+      "id,reference,quantity_planned,quantity_done,blocking_reason,planned_start,planned_end,actual_start,production_orders(id,reference,company_id,companies(name))"
     )
     .eq("section_id", sectionId)
     .order("planned_start", { ascending: true });
@@ -45,7 +45,7 @@ export default async function SectionQueuePage({
     <div className="space-y-6">
       <PageHeader
         title={`File de travail — ${section?.name ?? ""}`}
-        description="Démarrez, mettez en pause, signalez un incident ou terminez vos ordres de travail."
+        description="Ajoutez la quantité produite au fur et à mesure sur vos ordres de travail."
         action={
           sections.length > 0 ? <SectionSwitcher sections={sections} value={sectionId} /> : undefined
         }

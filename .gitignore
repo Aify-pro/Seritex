@@ -23,3 +23,10 @@ next-env.d.ts
 
 # logs
 npm-debug.log*
+
+# artefacts temporaires (bundles/patches générés pour transférer de
+# l'historique git entre copies du dépôt) — jamais destinés à être commités
+*.bundle
+*.patch
+/patches/
+/patbun/
