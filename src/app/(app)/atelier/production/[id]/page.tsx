@@ -10,6 +10,8 @@ import { notFound } from "next/navigation";
 import { ArchiveButton } from "./archive-button";
 import { LifecycleActions } from "./lifecycle-actions";
 import { SectionsSizesEditor } from "./sections-sizes-editor";
+import { FichePatronnageLink } from "./fiche-patronnage-link";
+import type { StatutFiche } from "@/lib/patronnage/types";
 import { CheckCircle2, Package } from "lucide-react";
 
 export default async function ProductionOrderDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -25,12 +27,21 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
 
   if (!order) notFound();
 
-  const [{ data: workOrders }, { data: allSections }, { data: chosenSections }, { data: sizes }] = await Promise.all([
-    supabase.from("work_orders").select("*,sections(name)").eq("production_order_id", id).order("planned_start", { ascending: true }),
-    supabase.from("sections").select("id,name").eq("active", true).order("display_order"),
-    supabase.from("production_order_sections").select("section_id").eq("production_order_id", id).order("ordre"),
-    supabase.from("production_order_sizes").select("taille,quantite_demandee").eq("production_order_id", id),
-  ]);
+  const [{ data: workOrders }, { data: allSections }, { data: chosenSections }, { data: sizes }, { data: fiche }] =
+    await Promise.all([
+      supabase.from("work_orders").select("*,sections(name)").eq("production_order_id", id).order("planned_start", { ascending: true }),
+      supabase.from("sections").select("id,name").eq("active", true).order("display_order"),
+      supabase.from("production_order_sections").select("section_id").eq("production_order_id", id).order("ordre"),
+      supabase.from("production_order_sizes").select("taille,quantite_demandee").eq("production_order_id", id),
+      supabase.from("fiches_placement").select("id,numero_ot,statut").eq("odf_id", id).maybeSingle(),
+    ]);
+
+  // Lot 2 : la fiche Patronnage liée n'est pertinente que si la section
+  // Coupe est retenue (obligatoire pour valider, section 10 du document de
+  // logique) — ou si une fiche est déjà liée alors que Coupe a depuis été
+  // décochée, pour ne pas faire disparaître un lien existant sans prévenir.
+  const coupeSectionId = allSections?.find((s) => s.name === "Coupe")?.id;
+  const coupeSelected = !!coupeSectionId && (chosenSections ?? []).some((s) => s.section_id === coupeSectionId);
 
   // Noms des personnes ayant validé le lancement / demandé ou confirmé la
   // clôture — doivent apparaître à l'écran (et sur le PDF, hors périmètre de
@@ -73,12 +84,33 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
         </Card>
       )}
 
+      {order.mention_surplus_traces && (
+        <Card className="border-info/30 bg-info-soft/40">
+          <CardBody>
+            <p className="text-xs font-medium text-foreground-muted">Surplus tracé vs quantité demandée</p>
+            <p className="text-sm text-foreground">
+              {Object.entries(order.mention_surplus_traces as Record<string, number>)
+                .map(([taille, surplus]) => `${taille} : +${surplus}`)
+                .join(" · ")}
+            </p>
+          </CardBody>
+        </Card>
+      )}
+
       {order.status === "brouillon" && (
         <SectionsSizesEditor
           productionOrderId={order.id}
           allSections={allSections ?? []}
           initialSectionIds={(chosenSections ?? []).map((s) => s.section_id)}
           initialSizes={sizes ?? []}
+        />
+      )}
+
+      {(coupeSelected || fiche) && (
+        <FichePatronnageLink
+          productionOrderId={order.id}
+          editable={order.status === "brouillon"}
+          fiche={fiche ? { id: fiche.id, numeroOt: fiche.numero_ot, statut: fiche.statut as StatutFiche } : null}
         />
       )}
 

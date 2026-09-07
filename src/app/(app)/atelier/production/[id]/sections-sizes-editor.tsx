@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
 import { Plus, Trash2, Send } from "lucide-react";
 import { setProductionOrderSections, setProductionOrderSizes, submitProductionOrder } from "../actions";
+import { REPARTITION_TAILLES_KEYS } from "@/lib/patronnage/types";
 
 /**
  * Édition d'un ODF en brouillon : sections retenues (remplace la gamme
@@ -13,6 +14,11 @@ import { setProductionOrderSections, setProductionOrderSizes, submitProductionOr
  * soumission (submit_production_order() les exige, section 1 du cahier des
  * charges lot 1). Écriture directe sur production_order_sections/sizes,
  * autorisée par la RLS pour responsable_production/administrateur.
+ *
+ * Lot 2 : la taille est choisie dans le même ensemble fixe que le Patronnage
+ * (XS/S/M/L/XL/XXL/XXXL/Autre) plutôt que tapée en texte libre — le contrôle
+ * de quantité tracée vs demandée (validate_production_order()) compare les
+ * deux valeurs telles quelles, un texte libre les aurait rendues fragiles.
  */
 export function SectionsSizesEditor({
   productionOrderId,
@@ -95,12 +101,18 @@ export function SectionsSizesEditor({
           <div className="space-y-2">
             {sizes.map((s, i) => (
               <div key={i} className="flex items-center gap-2">
-                <input
-                  placeholder="Taille (ex. M)"
+                <select
                   value={s.taille}
                   onChange={(e) => updateSize(i, { taille: e.target.value })}
                   className="w-28 rounded-md border border-border bg-surface p-2 text-xs outline-none focus:ring-2 focus:ring-brand/30"
-                />
+                >
+                  <option value="">Taille…</option>
+                  {REPARTITION_TAILLES_KEYS.map((k) => (
+                    <option key={k} value={k}>
+                      {k}
+                    </option>
+                  ))}
+                </select>
                 <input
                   type="number"
                   placeholder="Quantité"
