@@ -11,7 +11,7 @@ import { PRODUCTION_ORDER_STATUS_LABELS } from "@/lib/types/domain";
 import { formatDate } from "@/lib/utils";
 import { RealtimeRefresher } from "@/components/shell/realtime-refresher";
 import Link from "next/link";
-import { Eye, Printer } from "lucide-react";
+import { Eye, Printer, TriangleAlert } from "lucide-react";
 
 export default async function ProductionOrdersPage({
   searchParams,
@@ -30,11 +30,15 @@ export default async function ProductionOrdersPage({
     .order("created_at", { ascending: false });
   query = showArchived ? query.not("archived_at", "is", null) : query.is("archived_at", null);
 
-  const [{ data: orders }, { data: sections }, { data: workOrders }] = await Promise.all([
+  const [{ data: orders }, { data: sections }, { data: workOrders }, { data: openAnomalies }] = await Promise.all([
     query,
     supabase.from("sections").select("id,name").eq("active", true).order("display_order"),
     supabase.from("work_orders").select("id,section_id,quantity_planned,quantity_done"),
+    // Lot 5 : flag calculé, pas un statut — un triangle par ODF ayant au
+    // moins une anomalie non résolue (section 14 du document de logique).
+    supabase.from("production_order_anomalies").select("production_order_id").is("resolved_at", null),
   ]);
+  const odfWithOpenAnomaly = new Set((openAnomalies ?? []).map((a) => a.production_order_id));
 
   const today = new Date().toISOString().slice(0, 10);
   const enCoursOrders = orders?.filter((o) => o.status === "en_production").length ?? 0;
@@ -129,7 +133,12 @@ export default async function ProductionOrdersPage({
               {orders?.map((o) => (
                 <ClickableTr key={o.id} href={`/atelier/production/${o.id}`}>
                   <Td>
-                    <p className="font-medium text-foreground">{o.reference}</p>
+                    <p className="flex items-center gap-1.5 font-medium text-foreground">
+                      {o.reference}
+                      {odfWithOpenAnomaly.has(o.id) && (
+                        <TriangleAlert className="h-3.5 w-3.5 text-warning" aria-label="Anomalie signalée" />
+                      )}
+                    </p>
                     {o.archived_at && (
                       <Badge tone="neutral" className="mt-1">
                         Archivé
