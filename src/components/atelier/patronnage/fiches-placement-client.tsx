@@ -15,6 +15,7 @@ import {
   Archive,
   ArchiveRestore,
   Search,
+  Wrench,
 } from "lucide-react";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Table, Thead, Tbody, Tr, Th, Td, EmptyRow } from "@/components/ui/table";
@@ -39,6 +40,9 @@ import {
   deleteTrace,
   uploadTraceDxf,
   removeTraceDxf,
+  requestCorrectiveTrace,
+  approveCorrectiveTrace,
+  rejectCorrectiveTrace,
   searchOdf,
   searchClient,
 } from "@/app/(app)/atelier/patronnage/fiches-actions";
@@ -612,16 +616,21 @@ function FicheDetailContent({
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-medium text-foreground">Tracés ({fiche.traces.length})</h3>
-          {!locked && permissions.canModify && (
-            <Button
-              size="sm"
-              variant="secondary"
-              loading={pending}
-              onClick={() => runAction(() => addTrace(fiche.id, new FormData()))}
-            >
-              <Plus className="h-3.5 w-3.5" /> Ajouter un tracé
-            </Button>
-          )}
+          <div className="flex gap-2">
+            {!locked && permissions.canModify && (
+              <Button
+                size="sm"
+                variant="secondary"
+                loading={pending}
+                onClick={() => runAction(() => addTrace(fiche.id, new FormData()))}
+              >
+                <Plus className="h-3.5 w-3.5" /> Ajouter un tracé
+              </Button>
+            )}
+            {locked && fiche.statut === "bon_pour_coupe" && permissions.canModify && (
+              <RequestCorrectiveTraceButton ficheId={fiche.id} onRequested={refresh} />
+            )}
+          </div>
         </div>
 
         {fiche.traces.length === 0 && (
@@ -637,10 +646,73 @@ function FicheDetailContent({
             trace={trace}
             locked={locked}
             canModify={permissions.canModify}
+            canValidate={permissions.canValidate}
             referenceOptions={referenceOptions}
             onChanged={refresh}
           />
         ))}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   Demande de tracé de rattrapage (lot 3) — chef de section, fiche verrouillée
+============================================================ */
+
+function RequestCorrectiveTraceButton({ ficheId, onRequested }: { ficheId: string; onRequested: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [justification, setJustification] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  function submit() {
+    if (!justification.trim()) {
+      setError("Justification obligatoire.");
+      return;
+    }
+    setError(null);
+    startTransition(async () => {
+      const res = await requestCorrectiveTrace(ficheId, justification.trim());
+      if ("error" in res && res.error) {
+        setError(res.error);
+        return;
+      }
+      setOpen(false);
+      setJustification("");
+      onRequested();
+    });
+  }
+
+  if (!open) {
+    return (
+      <Button size="sm" variant="secondary" onClick={() => setOpen(true)}>
+        <Wrench className="h-3.5 w-3.5" /> Demander un tracé de rattrapage
+      </Button>
+    );
+  }
+
+  return (
+    <div className="w-full space-y-2 rounded-md border border-warning/30 bg-warning-soft/40 p-3">
+      <p className="text-xs font-medium text-foreground">
+        Fiche verrouillée : ce tracé sera ajouté après approbation du chef de production.
+      </p>
+      {error && <p className="text-xs text-danger">{error}</p>}
+      <textarea
+        autoFocus
+        value={justification}
+        onChange={(e) => setJustification(e.target.value)}
+        placeholder="Justification du rattrapage (obligatoire)"
+        rows={2}
+        className="w-full rounded-md border border-border bg-surface p-2 text-xs text-foreground outline-none focus:ring-2 focus:ring-brand/30"
+      />
+      <div className="flex gap-1.5">
+        <Button size="sm" loading={pending} onClick={submit}>
+          Envoyer la demande
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => { setOpen(false); setError(null); }}>
+          Annuler
+        </Button>
       </div>
     </div>
   );
@@ -655,17 +727,21 @@ function TraceCard({
   trace,
   locked,
   canModify,
+  canValidate,
   onChanged,
 }: {
   fiche: FichePlacement;
   trace: TracePlacement;
   locked: boolean;
   canModify: boolean;
+  canValidate: boolean;
   referenceOptions: ReferenceOption[];
   onChanged: () => void;
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [rejectMotif, setRejectMotif] = useState("");
+  const [showReject, setShowReject] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const matelasFormRef = useRef<HTMLFormElement>(null);
 
@@ -676,6 +752,70 @@ function TraceCard({
       if (res && "error" in res && res.error) setError(res.error);
       else onChanged();
     });
+  }
+
+  // Lot 3 : un rattrapage approuvé redéverrouille CE tracé précis, même si le
+  // reste de la fiche reste figé. Une demande encore en attente (pas encore
+  // approuvée) n'affiche pas le formulaire matelas/DXF normal — seulement la
+  // justification + les actions d'approbation.
+  const pendingApproval = trace.estCorrectif && !trace.approuveLe;
+  const effectiveLocked = pendingApproval ? true : locked && !(trace.estCorrectif && trace.approuveLe);
+
+  if (pendingApproval) {
+    return (
+      <Card className="border-warning/30 bg-warning-soft/30">
+        <CardHeader
+          title={trace.reference}
+          action={<Badge tone="warning">Rattrapage — en attente d&apos;approbation</Badge>}
+        />
+        <CardBody className="space-y-3">
+          {error && (
+            <div className="flex items-center gap-2 rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> {error}
+            </div>
+          )}
+          <p className="text-sm text-foreground">{trace.justification}</p>
+          {canValidate && (
+            <div className="space-y-2">
+              {!showReject ? (
+                <div className="flex gap-1.5">
+                  <Button size="sm" loading={pending} onClick={() => run(() => approveCorrectiveTrace(trace.id))}>
+                    <CheckCircle2 className="h-3.5 w-3.5" /> Approuver
+                  </Button>
+                  <Button size="sm" variant="danger" onClick={() => setShowReject(true)} disabled={pending}>
+                    <XCircle className="h-3.5 w-3.5" /> Refuser
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <textarea
+                    autoFocus
+                    value={rejectMotif}
+                    onChange={(e) => setRejectMotif(e.target.value)}
+                    placeholder="Motif du refus"
+                    rows={2}
+                    className="w-full rounded-md border border-border bg-surface p-2 text-xs text-foreground outline-none focus:ring-2 focus:ring-brand/30"
+                  />
+                  <div className="flex gap-1.5">
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      loading={pending}
+                      onClick={() => run(() => rejectCorrectiveTrace(trace.id, rejectMotif))}
+                    >
+                      Confirmer le refus
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setShowReject(false)}>
+                      Annuler
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </CardBody>
+      </Card>
+    );
   }
 
   function handleUpload() {
@@ -701,8 +841,16 @@ function TraceCard({
     <Card>
       <CardHeader
         title={trace.reference}
+        description={
+          trace.estCorrectif ? (
+            <span className="inline-flex items-center gap-1.5">
+              <Badge tone="warning">Rattrapage approuvé le {formatDateTime(trace.approuveLe)}</Badge>
+              {trace.justification}
+            </span>
+          ) : undefined
+        }
         action={
-          !locked &&
+          !effectiveLocked &&
           canModify && (
             <button
               onClick={() => {
@@ -725,24 +873,24 @@ function TraceCard({
         <form ref={matelasFormRef} onSubmit={handleSaveMatelas} className="space-y-3">
           <div className="grid grid-cols-4 gap-3">
             <Field label="Référence patron">
-              <input name="reference_patron" defaultValue={trace.referencePatron ?? ""} disabled={locked || !canModify} className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground disabled:opacity-60" />
+              <input name="reference_patron" defaultValue={trace.referencePatron ?? ""} disabled={effectiveLocked || !canModify} className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground disabled:opacity-60" />
             </Field>
             <Field label="Longueur matelas (m)">
-              <input type="number" name="longueur_matelas_m" defaultValue={trace.longueurMatelasM ?? ""} disabled={locked || !canModify} className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground disabled:opacity-60" />
+              <input type="number" name="longueur_matelas_m" defaultValue={trace.longueurMatelasM ?? ""} disabled={effectiveLocked || !canModify} className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground disabled:opacity-60" />
             </Field>
             <Field label="Largeur matelas (cm)">
-              <input type="number" name="largeur_matelas_cm" defaultValue={trace.largeurMatelasCm ?? ""} disabled={locked || !canModify} className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground disabled:opacity-60" />
+              <input type="number" name="largeur_matelas_cm" defaultValue={trace.largeurMatelasCm ?? ""} disabled={effectiveLocked || !canModify} className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground disabled:opacity-60" />
             </Field>
             <Field label="Nombre de plis">
-              <input type="number" name="nb_plis" defaultValue={trace.nbPlis ?? ""} disabled={locked || !canModify} className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground disabled:opacity-60" />
+              <input type="number" name="nb_plis" defaultValue={trace.nbPlis ?? ""} disabled={effectiveLocked || !canModify} className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground disabled:opacity-60" />
             </Field>
           </div>
           <Field label={`Répartition par couche (total/couche ${totalCouche}${totalTrace !== null ? ` · théorique tracé ${totalTrace}` : ""})`}>
-            <fieldset disabled={locked || !canModify}>
+            <fieldset disabled={effectiveLocked || !canModify}>
               <RepartitionFields prefix="couche" initial={trace.repartitionParCouche} />
             </fieldset>
           </Field>
-          {!locked && canModify && (
+          {!effectiveLocked && canModify && (
             <div className="flex justify-end">
               <Button type="submit" size="sm" variant="secondary" loading={pending}>
                 Enregistrer
@@ -758,7 +906,7 @@ function TraceCard({
                 <p>{trace.fichierNom}</p>
                 <p className="text-xs text-foreground-muted">déposé le {formatDateTime(trace.chargeLe)}</p>
               </div>
-              {!locked && canModify && (
+              {!effectiveLocked && canModify && (
                 <div className="flex gap-2">
                   <input ref={fileInputRef} type="file" accept=".dxf" onChange={handleUpload} className="hidden" id={`replace-${trace.id}`} />
                   <label htmlFor={`replace-${trace.id}`}>
@@ -772,7 +920,7 @@ function TraceCard({
                 </div>
               )}
             </div>
-          ) : !locked && canModify ? (
+          ) : !effectiveLocked && canModify ? (
             <div className="flex items-center gap-3">
               <Upload className="h-4 w-4 text-foreground-muted" />
               <input ref={fileInputRef} type="file" accept=".dxf" onChange={handleUpload} className="text-sm text-foreground-muted" />

@@ -32,7 +32,7 @@ export default async function PatronnagePage() {
        valide_le,created_at,
        production_orders(reference),
        traces_placement(id,ordre,reference,reference_patron,longueur_matelas_m,largeur_matelas_cm,nb_plis,
-         repartition_par_couche,fichier_path,fichier_nom,charge_le,
+         repartition_par_couche,fichier_path,fichier_nom,charge_le,est_correctif,justification,approuve_le,
          analyses_trace(id,nb_pieces_detectees,facteur_echelle,patrons_reconnus,pieces_non_reconnues,
            taux_reconnaissance,reconnaissance_complete,alerte_miroir,alerte_echelle,analysee_le))`
     )
@@ -106,6 +106,9 @@ export default async function PatronnagePage() {
           fichierPath: t.fichier_path,
           fichierNom: t.fichier_nom,
           chargeLe: t.charge_le,
+          estCorrectif: t.est_correctif,
+          justification: t.justification,
+          approuveLe: t.approuve_le,
           analyse: analyse
             ? {
                 id: analyse.id,
