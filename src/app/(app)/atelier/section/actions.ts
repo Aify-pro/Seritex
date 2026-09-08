@@ -79,3 +79,38 @@ export async function closeMatelas(
   revalidatePath("/dashboard");
   return {};
 }
+
+export type CreateLotResult = { error: string } | { code: string };
+
+/**
+ * Génération d'un lot article (QR + numéro de série, lot 6, section 15 du
+ * document de logique) — granularité par lot, pas par pièce. Aucune
+ * vérification de rôle ici : `create_article_lot` (SECURITY DEFINER) fait
+ * autorité (chef de la section Coupe, ou responsable_production/
+ * administrateur). Composition par taille en saisie libre, sans validation
+ * contre les quantités du tracé — pas structurant (section 15).
+ */
+export async function createArticleLot(
+  productionOrderId: string,
+  categorie: "semi_fini" | "fini" | "dechet",
+  compositionTaille: Record<string, number>,
+  traceId?: string | null
+): Promise<CreateLotResult> {
+  await requireUser();
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .rpc("create_article_lot", {
+      p_production_order_id: productionOrderId,
+      p_trace_id: traceId || null,
+      p_categorie: categorie,
+      p_composition_taille: compositionTaille,
+    })
+    .single();
+
+  if (error) return { error: error.message };
+
+  revalidatePath("/atelier/section");
+  revalidatePath("/atelier/production");
+  return { code: (data as { code: string }).code };
+}

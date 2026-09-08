@@ -13,7 +13,10 @@ import { SectionsSizesEditor } from "./sections-sizes-editor";
 import { FichePatronnageLink } from "./fiche-patronnage-link";
 import { AnomaliesPanel } from "./anomalies-panel";
 import type { StatutFiche } from "@/lib/patronnage/types";
-import { CheckCircle2, Package } from "lucide-react";
+import { CheckCircle2, Package, QrCode } from "lucide-react";
+import Link from "next/link";
+
+const LOT_CATEGORIE_LABELS: Record<string, string> = { semi_fini: "Semi-fini", fini: "Fini", dechet: "Déchet" };
 
 export default async function ProductionOrderDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { profile } = await requireRole(["responsable_production", "administrateur"]);
@@ -28,7 +31,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
 
   if (!order) notFound();
 
-  const [{ data: workOrders }, { data: allSections }, { data: chosenSections }, { data: sizes }, { data: fiche }, { data: anomalies }] =
+  const [{ data: workOrders }, { data: allSections }, { data: chosenSections }, { data: sizes }, { data: fiche }, { data: anomalies }, { data: articleLots }] =
     await Promise.all([
       supabase.from("work_orders").select("*,sections(name)").eq("production_order_id", id).order("planned_start", { ascending: true }),
       supabase.from("sections").select("id,name").eq("active", true).order("display_order"),
@@ -38,6 +41,11 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
       supabase
         .from("production_order_anomalies")
         .select("id,message,created_at,resolved_at,resolved_by,sections(name)")
+        .eq("production_order_id", id)
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("article_lots")
+        .select("id,code,categorie,created_at")
         .eq("production_order_id", id)
         .order("created_at", { ascending: false }),
     ]);
@@ -186,6 +194,28 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
           )}
         </CardBody>
       </Card>
+
+      {articleLots && articleLots.length > 0 && (
+        <Card>
+          <CardHeader title="Lots générés" description="Sérialisation par lot (lot 6) — QR à imprimer par étiquette dédiée." />
+          <CardBody className="p-0">
+            <ul className="divide-y divide-border">
+              {articleLots.map((lot) => (
+                <li key={lot.id} className="flex items-center justify-between gap-3 px-5 py-3">
+                  <div className="flex items-center gap-2">
+                    <QrCode className="h-3.5 w-3.5 text-foreground-muted" />
+                    <span className="font-mono text-xs text-foreground">{lot.code}</span>
+                    <Badge tone="brand">{LOT_CATEGORIE_LABELS[lot.categorie] ?? lot.categorie}</Badge>
+                  </div>
+                  <Link href={`/lots/${lot.code}`} target="_blank" className="text-xs font-medium text-brand hover:underline">
+                    Voir le QR →
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </CardBody>
+        </Card>
+      )}
 
       <Card>
         <CardHeader title="Historique du cycle de vie" />

@@ -1,7 +1,7 @@
 import { requireRole } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
-import { SectionBoard, type WorkOrderRow, type MatelasRow } from "./section-board";
+import { SectionBoard, type WorkOrderRow, type MatelasRow, type TraceOption } from "./section-board";
 import { SectionSwitcher } from "./section-switcher";
 import { Card, CardBody } from "@/components/ui/card";
 
@@ -47,6 +47,7 @@ export default async function SectionQueuePage({
   // logique) — jamais ressaisies par l'opérateur.
   const isCoupe = section?.name === "Coupe";
   const matelasByWorkOrderId: Record<string, MatelasRow[]> = {};
+  const traceOptionsByWorkOrderId: Record<string, TraceOption[]> = {};
 
   if (isCoupe && workOrders && workOrders.length > 0) {
     const productionOrderIds = workOrders
@@ -72,6 +73,7 @@ export default async function SectionQueuePage({
     const closedTraceIds = new Set((closedEvents ?? []).map((e) => e.trace_id as string));
 
     const matelasByOdfId: Record<string, MatelasRow[]> = {};
+    const traceOptionsByOdfId: Record<string, TraceOption[]> = {};
     for (const fiche of fiches ?? []) {
       const traces = (fiche.traces_placement ?? []) as unknown as {
         id: string;
@@ -82,8 +84,9 @@ export default async function SectionQueuePage({
         approuve_par: string | null;
         justification: string | null;
       }[];
-      matelasByOdfId[fiche.odf_id as string] = traces
-        .filter((t) => !closedTraceIds.has(t.id) && (!t.est_correctif || t.approuve_par))
+      const usable = traces.filter((t) => !t.est_correctif || t.approuve_par);
+      matelasByOdfId[fiche.odf_id as string] = usable
+        .filter((t) => !closedTraceIds.has(t.id))
         .sort((a, b) => a.ordre - b.ordre)
         .map((t) => ({
           id: t.id,
@@ -92,11 +95,17 @@ export default async function SectionQueuePage({
           estCorrectif: t.est_correctif,
           justification: t.justification,
         }));
+      // Lot 6 : le tracé d'origine (optionnel) d'un lot article peut être
+      // n'importe quel matelas de la fiche, clôturé ou non.
+      traceOptionsByOdfId[fiche.odf_id as string] = usable
+        .sort((a, b) => a.ordre - b.ordre)
+        .map((t) => ({ id: t.id, reference: t.reference }));
     }
 
     for (const wo of workOrders) {
       const poId = (wo.production_orders as unknown as { id: string } | null)?.id;
       if (poId && matelasByOdfId[poId]) matelasByWorkOrderId[wo.id] = matelasByOdfId[poId];
+      if (poId && traceOptionsByOdfId[poId]) traceOptionsByWorkOrderId[wo.id] = traceOptionsByOdfId[poId];
     }
   }
 
@@ -119,6 +128,7 @@ export default async function SectionQueuePage({
         sectionId={sectionId}
         initialWorkOrders={(workOrders ?? []) as unknown as WorkOrderRow[]}
         matelasByWorkOrderId={matelasByWorkOrderId}
+        traceOptionsByWorkOrderId={traceOptionsByWorkOrderId}
       />
     </div>
   );
