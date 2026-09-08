@@ -62,6 +62,27 @@ export async function searchClient(query: string) {
   return (data ?? []).map((c) => ({ code: c.sage_code as string, name: c.name as string }));
 }
 
+/**
+ * Recherche de fiches à lier depuis la section Coupe d'un ODF (lot 2, sens
+ * inverse de searchOdf ci-dessus — le lien est accessible des deux côtés,
+ * section 10 du document de logique). Ne propose que les fiches déjà libres
+ * ou déjà liées à cet ODF précis : toute autre fiche échouerait de toute
+ * façon sur la contrainte d'unicité fiches_placement.odf_id.
+ */
+export async function searchFichesForOdf(query: string, productionOrderId: string) {
+  await requirePermission("view");
+  if (query.trim().length < 1) return [];
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("fiches_placement")
+    .select("id,numero_ot,statut,client_libelle,odf_id")
+    .or(`numero_ot.ilike.%${query.trim()}%,client_libelle.ilike.%${query.trim()}%`)
+    .or(`odf_id.is.null,odf_id.eq.${productionOrderId}`)
+    .order("created_at", { ascending: false })
+    .limit(10);
+  return data ?? [];
+}
+
 // ------------------------------------------------------------
 // Cycle de vie de la fiche
 // ------------------------------------------------------------

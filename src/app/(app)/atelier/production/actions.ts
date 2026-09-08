@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { requireRole } from "@/lib/auth/current-user";
 import { revalidatePath } from "next/cache";
+import { REPARTITION_TAILLES_KEYS } from "@/lib/patronnage/types";
 
 function revalidateOdf(productionOrderId: string) {
   revalidatePath(`/atelier/production/${productionOrderId}`);
@@ -57,6 +58,10 @@ export async function setProductionOrderSizes(
   if (delError) return { error: delError.message };
 
   const rows = sizes.filter((s) => s.taille.trim().length > 0 && s.quantite_demandee > 0);
+  const tailleInvalide = rows.find((s) => !REPARTITION_TAILLES_KEYS.includes(s.taille.trim() as (typeof REPARTITION_TAILLES_KEYS)[number]));
+  if (tailleInvalide) {
+    return { error: `Taille invalide : "${tailleInvalide.taille}" — choisissez parmi ${REPARTITION_TAILLES_KEYS.join(", ")}.` };
+  }
   if (rows.length > 0) {
     const { error: insError } = await supabase.from("production_order_sizes").insert(
       rows.map((s) => ({

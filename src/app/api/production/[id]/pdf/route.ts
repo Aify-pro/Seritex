@@ -34,7 +34,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   if (!order) return NextResponse.json({ error: "Ordre de fabrication introuvable" }, { status: 404 });
 
-  const [{ data: sections }, { data: sizes }, { data: workOrders }] = await Promise.all([
+  const [{ data: sections }, { data: sizes }, { data: workOrders }, { data: fiche }] = await Promise.all([
     supabase
       .from("production_order_sections")
       .select("ordre,sections(name)")
@@ -42,6 +42,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       .order("ordre"),
     supabase.from("production_order_sizes").select("taille,quantite_demandee").eq("production_order_id", id),
     supabase.from("work_orders").select("reference,quantity_planned,quantity_done,sections(name)").eq("production_order_id", id),
+    supabase.from("fiches_placement").select("numero_ot,statut").eq("odf_id", id).maybeSingle(),
   ]);
 
   const userIds = [order.launched_by, order.cloture_demandee_par, order.closed_by].filter(
@@ -157,6 +158,17 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     "Quantités par taille",
     (sizes ?? []).map((s) => `${s.taille} : ${s.quantite_demandee}`).join(" · ") || "aucune"
   );
+  if (fiche) {
+    drawField("Fiche Patronnage liée", `${fiche.numero_ot} (${fiche.statut})`);
+  }
+  if (order.mention_surplus_traces) {
+    drawField(
+      "Surplus tracé vs quantité demandée",
+      Object.entries(order.mention_surplus_traces as Record<string, number>)
+        .map(([taille, surplus]) => `${taille} : +${surplus}`)
+        .join(" · ")
+    );
+  }
 
   if (workOrders && workOrders.length > 0) {
     drawSectionTitle("Avancement des sous-ODF");

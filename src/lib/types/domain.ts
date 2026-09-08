@@ -213,6 +213,9 @@ export interface ProductionOrder {
   closed_by: string | null;
   cloture_note: string | null;
   replaced_by_production_order_id: string | null;
+  // Lot 2 : surplus tracé par taille au moment de la validation (section 11
+  // du document de logique), ex. { "L": 5, "XL": 2 } — null si aucun surplus.
+  mention_surplus_traces: Record<string, number> | null;
   created_at: string;
   companies?: Pick<Company, "id" | "name">;
 }
