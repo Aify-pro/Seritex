@@ -212,6 +212,44 @@ export async function unarchiveProductionOrder(productionOrderId: string) {
   return {};
 }
 
+/**
+ * Signalement d'anomalie (lot 5, section 14 du document de logique) — jamais
+ * bloquant, juste un flag calculé (has_open_anomaly) qui fait apparaître le
+ * triangle sur la liste des ODF. Aucune vérification de rôle ici : c'est
+ * `report_anomaly` (SECURITY DEFINER) qui fait autorité — un chef de section
+ * ne peut signaler que pour sa propre section (dérivée de son profil côté
+ * fonction, jamais du paramètre passé ici), responsable_production/
+ * administrateur peuvent signaler sans section précise.
+ */
+export async function reportAnomaly(
+  productionOrderId: string,
+  message: string,
+  opts?: { sectionId?: string | null; workOrderId?: string | null; traceId?: string | null }
+) {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("report_anomaly", {
+    p_production_order_id: productionOrderId,
+    p_section_id: opts?.sectionId ?? null,
+    p_work_order_id: opts?.workOrderId ?? null,
+    p_trace_id: opts?.traceId ?? null,
+    p_message: message,
+  });
+  if (error) return { error: error.message };
+  revalidateOdf(productionOrderId);
+  revalidatePath("/atelier/section");
+  return {};
+}
+
+/** Réservé à responsable_production/administrateur — vérifié par `resolve_anomaly` (SECURITY DEFINER). */
+export async function resolveAnomaly(anomalyId: string, productionOrderId: string) {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("resolve_anomaly", { p_anomaly_id: anomalyId });
+  if (error) return { error: error.message };
+  revalidateOdf(productionOrderId);
+  revalidatePath("/atelier/section");
+  return {};
+}
+
 export async function reassignSectionChief(workOrderId: string, userId: string | null) {
   await requireRole(["responsable_production", "administrateur"]);
   const supabase = await createClient();

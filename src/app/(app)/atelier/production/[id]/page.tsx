@@ -11,6 +11,7 @@ import { ArchiveButton } from "./archive-button";
 import { LifecycleActions } from "./lifecycle-actions";
 import { SectionsSizesEditor } from "./sections-sizes-editor";
 import { FichePatronnageLink } from "./fiche-patronnage-link";
+import { AnomaliesPanel } from "./anomalies-panel";
 import type { StatutFiche } from "@/lib/patronnage/types";
 import { CheckCircle2, Package } from "lucide-react";
 
@@ -27,13 +28,18 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
 
   if (!order) notFound();
 
-  const [{ data: workOrders }, { data: allSections }, { data: chosenSections }, { data: sizes }, { data: fiche }] =
+  const [{ data: workOrders }, { data: allSections }, { data: chosenSections }, { data: sizes }, { data: fiche }, { data: anomalies }] =
     await Promise.all([
       supabase.from("work_orders").select("*,sections(name)").eq("production_order_id", id).order("planned_start", { ascending: true }),
       supabase.from("sections").select("id,name").eq("active", true).order("display_order"),
       supabase.from("production_order_sections").select("section_id").eq("production_order_id", id).order("ordre"),
       supabase.from("production_order_sizes").select("taille,quantite_demandee").eq("production_order_id", id),
       supabase.from("fiches_placement").select("id,numero_ot,statut").eq("odf_id", id).maybeSingle(),
+      supabase
+        .from("production_order_anomalies")
+        .select("id,message,created_at,resolved_at,resolved_by,sections(name)")
+        .eq("production_order_id", id)
+        .order("created_at", { ascending: false }),
     ]);
 
   // Lot 2 : la fiche Patronnage liée n'est pertinente que si la section
@@ -47,12 +53,24 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
   // clôture — doivent apparaître à l'écran (et sur le PDF, hors périmètre de
   // cet écran) au même titre qu'archived_at/archived_by (section 4 du
   // document de logique).
-  const userIds = [order.launched_by, order.cloture_demandee_par, order.closed_by].filter(
-    (v): v is string => !!v
-  );
+  const userIds = [
+    order.launched_by,
+    order.cloture_demandee_par,
+    order.closed_by,
+    ...(anomalies ?? []).map((a) => a.resolved_by),
+  ].filter((v): v is string => !!v);
   const { data: users } =
     userIds.length > 0 ? await supabase.from("app_users").select("id,full_name").in("id", userIds) : { data: [] };
   const nameOf = (userId: string | null) => users?.find((u) => u.id === userId)?.full_name ?? "—";
+
+  const anomalyRows = (anomalies ?? []).map((a) => ({
+    id: a.id,
+    message: a.message,
+    sectionName: (a.sections as unknown as { name: string } | null)?.name ?? null,
+    createdAt: a.created_at,
+    resolvedAt: a.resolved_at,
+    resolvedByName: a.resolved_by ? nameOf(a.resolved_by) : null,
+  }));
 
   const company = order.companies as unknown as { name: string } | null;
   const quote = order.quotes as unknown as { reference: string } | null;
@@ -83,6 +101,8 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
           </CardBody>
         </Card>
       )}
+
+      <AnomaliesPanel productionOrderId={order.id} anomalies={anomalyRows} canResolve={isAdmin || profile.role === "responsable_production"} />
 
       {order.mention_surplus_traces && (
         <Card className="border-info/30 bg-info-soft/40">

@@ -6,8 +6,9 @@ import { createClient } from "@/lib/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { recordWorkOrderQuantity, closeMatelas } from "./actions";
+import { reportAnomaly } from "../production/actions";
 import { toast } from "sonner";
-import { CheckCircle2, Package, Plus, Scissors, AlertTriangle } from "lucide-react";
+import { CheckCircle2, Package, Plus, Scissors, AlertTriangle, TriangleAlert } from "lucide-react";
 import { formatDateTime, cn } from "@/lib/utils";
 import { REPARTITION_TAILLES_KEYS } from "@/lib/patronnage/types";
 import type { RepartitionTailles } from "@/lib/patronnage/types";
@@ -91,7 +92,7 @@ export function SectionBoard({
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <AnimatePresence initial={false}>
             {enCours.map((wo) => (
-              <WorkOrderCard key={wo.id} wo={wo} setOrders={setOrders} matelas={matelasByWorkOrderId[wo.id]} />
+              <WorkOrderCard key={wo.id} wo={wo} setOrders={setOrders} matelas={matelasByWorkOrderId[wo.id]} sectionId={sectionId} />
             ))}
           </AnimatePresence>
           {enCours.length === 0 && (
@@ -109,7 +110,7 @@ export function SectionBoard({
           </h3>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {termines.map((wo) => (
-              <WorkOrderCard key={wo.id} wo={wo} setOrders={setOrders} matelas={matelasByWorkOrderId[wo.id]} />
+              <WorkOrderCard key={wo.id} wo={wo} setOrders={setOrders} matelas={matelasByWorkOrderId[wo.id]} sectionId={sectionId} />
             ))}
           </div>
         </div>
@@ -122,16 +123,37 @@ function WorkOrderCard({
   wo,
   setOrders,
   matelas,
+  sectionId,
 }: {
   wo: WorkOrderRow;
   setOrders: React.Dispatch<React.SetStateAction<WorkOrderRow[]>>;
   /** Présent (même vide) uniquement pour un sous-ODF de la section Coupe (lot 4). */
   matelas?: MatelasRow[];
+  sectionId: string;
 }) {
   const [pending, startTransition] = useTransition();
   const [showAddForm, setShowAddForm] = useState(false);
   const [qty, setQty] = useState(Math.max(wo.quantity_planned - wo.quantity_done, 0));
+  const [showAnomalyForm, setShowAnomalyForm] = useState(false);
+  const [anomalyMessage, setAnomalyMessage] = useState("");
+  const [anomalyPending, startAnomalyTransition] = useTransition();
   const atteinte = wo.quantity_done >= wo.quantity_planned;
+
+  function submitAnomaly() {
+    if (!anomalyMessage.trim() || !wo.production_orders) return;
+    startAnomalyTransition(async () => {
+      const res = await reportAnomaly(wo.production_orders!.id, anomalyMessage.trim(), {
+        sectionId,
+        workOrderId: wo.id,
+      });
+      if (res.error) toast.error("Action refusée", { description: res.error });
+      else {
+        toast.success("Anomalie signalée");
+        setAnomalyMessage("");
+        setShowAnomalyForm(false);
+      }
+    });
+  }
 
   function submitQuantity() {
     if (!qty) return;
@@ -186,6 +208,35 @@ function WorkOrderCard({
 
         {wo.blocking_reason && (
           <p className="mt-2 rounded-md bg-danger-soft px-2 py-1.5 text-xs text-danger">⚠ {wo.blocking_reason}</p>
+        )}
+
+        {/* Lot 5 : signalement transverse, jamais bloquant — n'empêche pas de continuer le travail. */}
+        {!showAnomalyForm ? (
+          <button
+            onClick={() => setShowAnomalyForm(true)}
+            className="mt-2 inline-flex items-center gap-1 text-[11px] text-foreground-muted hover:text-warning"
+          >
+            <TriangleAlert className="h-3 w-3" /> Signaler une anomalie
+          </button>
+        ) : (
+          <div className="mt-2 space-y-1.5 rounded-md border border-warning/30 bg-warning-soft/40 p-2">
+            <textarea
+              autoFocus
+              rows={2}
+              value={anomalyMessage}
+              onChange={(e) => setAnomalyMessage(e.target.value)}
+              placeholder="Décrire l'incident"
+              className="w-full rounded-md border border-border bg-surface p-1.5 text-xs outline-none focus:ring-2 focus:ring-brand/30"
+            />
+            <div className="flex gap-1.5">
+              <Button size="sm" loading={anomalyPending} disabled={!anomalyMessage.trim()} onClick={submitAnomaly}>
+                Envoyer
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setShowAnomalyForm(false)}>
+                Annuler
+              </Button>
+            </div>
+          </div>
         )}
 
         {wo.actual_start && (
