@@ -42,3 +42,40 @@ export async function recordWorkOrderQuantity(
   revalidatePath("/dashboard");
   return {};
 }
+
+/**
+ * Clôture d'un matelas (lot 4, section Coupe uniquement) — quantités
+ * pré-remplies depuis le tracé Patronnage, jamais ressaisies. Comme pour
+ * recordWorkOrderQuantity, aucune vérification de rôle ici : c'est
+ * `close_matelas` (SECURITY DEFINER) qui fait autorité (chef de la section
+ * Coupe exacte, ou responsable_production/administrateur) et qui refuse
+ * toute quantité à la hausse ou tout manquant sans justification.
+ */
+export async function closeMatelas(
+  workOrderId: string,
+  traceId: string,
+  quantitesObtenues: Record<string, number>,
+  poidsDechetKg: number,
+  justification?: string
+): Promise<RecordQuantityResult> {
+  await requireUser();
+  const supabase = await createClient();
+
+  const { error } = await supabase.rpc("close_matelas", {
+    p_work_order_id: workOrderId,
+    p_trace_id: traceId,
+    p_quantites_obtenues: quantitesObtenues,
+    p_poids_dechet_kg: poidsDechetKg,
+    p_justification: justification?.trim() || null,
+  });
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  revalidatePath("/atelier/section");
+  revalidatePath("/atelier/production");
+  revalidatePath("/atelier/patronnage");
+  revalidatePath("/dashboard");
+  return {};
+}
