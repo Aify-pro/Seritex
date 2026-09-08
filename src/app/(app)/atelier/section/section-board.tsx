@@ -5,10 +5,12 @@ import { motion, AnimatePresence } from "framer-motion";
 import { createClient } from "@/lib/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { recordWorkOrderQuantity } from "./actions";
+import { recordWorkOrderQuantity, closeMatelas } from "./actions";
 import { toast } from "sonner";
-import { CheckCircle2, Package, Plus } from "lucide-react";
+import { CheckCircle2, Package, Plus, Scissors, AlertTriangle } from "lucide-react";
 import { formatDateTime, cn } from "@/lib/utils";
+import { REPARTITION_TAILLES_KEYS } from "@/lib/patronnage/types";
+import type { RepartitionTailles } from "@/lib/patronnage/types";
 
 export type WorkOrderRow = {
   id: string;
@@ -27,12 +29,23 @@ export type WorkOrderRow = {
   } | null;
 };
 
+/** Lot 4 : un matelas = un tracé Patronnage d'une fiche "Bon pour coupe", pas encore clôturé. */
+export type MatelasRow = {
+  id: string;
+  reference: string;
+  repartitionParCouche: RepartitionTailles;
+  estCorrectif: boolean;
+  justification: string | null;
+};
+
 export function SectionBoard({
   sectionId,
   initialWorkOrders,
+  matelasByWorkOrderId = {},
 }: {
   sectionId: string;
   initialWorkOrders: WorkOrderRow[];
+  matelasByWorkOrderId?: Record<string, MatelasRow[]>;
 }) {
   // `initialWorkOrders` change (nouvelle section, ou re-rendu serveur après
   // revalidation) : le composant est remonté via `key={sectionId}` côté page
@@ -78,7 +91,7 @@ export function SectionBoard({
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <AnimatePresence initial={false}>
             {enCours.map((wo) => (
-              <WorkOrderCard key={wo.id} wo={wo} setOrders={setOrders} />
+              <WorkOrderCard key={wo.id} wo={wo} setOrders={setOrders} matelas={matelasByWorkOrderId[wo.id]} />
             ))}
           </AnimatePresence>
           {enCours.length === 0 && (
@@ -96,7 +109,7 @@ export function SectionBoard({
           </h3>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {termines.map((wo) => (
-              <WorkOrderCard key={wo.id} wo={wo} setOrders={setOrders} />
+              <WorkOrderCard key={wo.id} wo={wo} setOrders={setOrders} matelas={matelasByWorkOrderId[wo.id]} />
             ))}
           </div>
         </div>
@@ -108,9 +121,12 @@ export function SectionBoard({
 function WorkOrderCard({
   wo,
   setOrders,
+  matelas,
 }: {
   wo: WorkOrderRow;
   setOrders: React.Dispatch<React.SetStateAction<WorkOrderRow[]>>;
+  /** Présent (même vide) uniquement pour un sous-ODF de la section Coupe (lot 4). */
+  matelas?: MatelasRow[];
 }) {
   const [pending, startTransition] = useTransition();
   const [showAddForm, setShowAddForm] = useState(false);
@@ -176,7 +192,9 @@ function WorkOrderCard({
           <p className="mt-2 text-[11px] text-foreground-muted">Démarré le {formatDateTime(wo.actual_start)}</p>
         )}
 
-        {!showAddForm ? (
+        {matelas !== undefined ? (
+          <MatelasList workOrderId={wo.id} matelas={matelas} />
+        ) : !showAddForm ? (
           <div className="mt-3">
             <Button size="sm" onClick={() => setShowAddForm(true)} loading={pending}>
               <Plus className="h-3.5 w-3.5" /> Ajouter une quantité
@@ -204,5 +222,140 @@ function WorkOrderCard({
         )}
       </Card>
     </motion.div>
+  );
+}
+
+/* ============================================================
+   Clôture de matelas (lot 4, section Coupe)
+============================================================ */
+
+function MatelasList({ workOrderId, matelas }: { workOrderId: string; matelas: MatelasRow[] }) {
+  const [openId, setOpenId] = useState<string | null>(null);
+
+  if (matelas.length === 0) {
+    return <p className="mt-3 text-xs text-foreground-muted">Aucun matelas en attente de clôture.</p>;
+  }
+
+  return (
+    <div className="mt-3 space-y-2">
+      {matelas.map((m) =>
+        openId === m.id ? (
+          <MatelasCloseForm key={m.id} workOrderId={workOrderId} matelas={m} onDone={() => setOpenId(null)} />
+        ) : (
+          <button
+            key={m.id}
+            onClick={() => setOpenId(m.id)}
+            className="flex w-full items-center justify-between gap-2 rounded-md border border-border bg-surface px-2.5 py-2 text-left text-xs hover:bg-surface-muted"
+          >
+            <span className="inline-flex items-center gap-1.5 text-foreground">
+              <Scissors className="h-3.5 w-3.5 text-foreground-muted" /> {m.reference}
+              {m.estCorrectif && <span className="text-warning">(rattrapage)</span>}
+            </span>
+            <span className="text-foreground-muted">Clôturer</span>
+          </button>
+        )
+      )}
+    </div>
+  );
+}
+
+function MatelasCloseForm({
+  workOrderId,
+  matelas,
+  onDone,
+}: {
+  workOrderId: string;
+  matelas: MatelasRow;
+  onDone: () => void;
+}) {
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const tailles = REPARTITION_TAILLES_KEYS.filter((k) => (matelas.repartitionParCouche[k] ?? 0) > 0);
+  const [quantites, setQuantites] = useState<Record<string, number>>(
+    Object.fromEntries(tailles.map((k) => [k, matelas.repartitionParCouche[k] ?? 0]))
+  );
+  const [poidsDechet, setPoidsDechet] = useState("");
+  const [justification, setJustification] = useState("");
+
+  const manque = tailles.some((k) => (quantites[k] ?? 0) < (matelas.repartitionParCouche[k] ?? 0));
+
+  function submit() {
+    setError(null);
+    if (poidsDechet.trim() === "" || Number(poidsDechet) < 0) {
+      setError("Poids des déchets obligatoire (kg, ≥ 0).");
+      return;
+    }
+    if (manque && !justification.trim()) {
+      setError("Justification obligatoire : au moins une quantité est inférieure au pré-rempli.");
+      return;
+    }
+    startTransition(async () => {
+      const res = await closeMatelas(workOrderId, matelas.id, quantites, Number(poidsDechet), justification);
+      if (res.error) {
+        setError(res.error);
+        return;
+      }
+      toast.success(`${matelas.reference} clôturé`);
+      onDone();
+    });
+  }
+
+  return (
+    <div className="space-y-2 rounded-md border border-brand/30 bg-brand-soft/30 p-3">
+      <p className="text-xs font-medium text-foreground">{matelas.reference}</p>
+      {error && (
+        <div className="flex items-center gap-1.5 rounded-md border border-danger/30 bg-danger-soft px-2 py-1.5 text-xs text-danger">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> {error}
+        </div>
+      )}
+      <div className="grid grid-cols-4 gap-2">
+        {tailles.map((k) => (
+          <div key={k}>
+            <label className="block text-[10px] text-foreground-muted">{k}</label>
+            <input
+              type="number"
+              min={0}
+              max={matelas.repartitionParCouche[k] ?? 0}
+              value={quantites[k] ?? 0}
+              onChange={(e) => setQuantites((q) => ({ ...q, [k]: Number(e.target.value) }))}
+              className="w-full rounded-md border border-border bg-surface p-1.5 text-xs outline-none focus:ring-2 focus:ring-brand/30"
+            />
+          </div>
+        ))}
+      </div>
+      <div>
+        <label className="block text-[10px] text-foreground-muted">Poids des déchets (kg)</label>
+        <input
+          type="number"
+          min={0}
+          step="0.01"
+          value={poidsDechet}
+          onChange={(e) => setPoidsDechet(e.target.value)}
+          className="w-full rounded-md border border-border bg-surface p-1.5 text-xs outline-none focus:ring-2 focus:ring-brand/30"
+        />
+      </div>
+      {manque && (
+        <div>
+          <label className="block text-[10px] text-foreground-muted">
+            Justification (obligatoire — quantité inférieure au pré-rempli)
+          </label>
+          <textarea
+            rows={2}
+            value={justification}
+            onChange={(e) => setJustification(e.target.value)}
+            placeholder="ex. erreur de ciseaux"
+            className="w-full rounded-md border border-border bg-surface p-1.5 text-xs outline-none focus:ring-2 focus:ring-brand/30"
+          />
+        </div>
+      )}
+      <div className="flex gap-1.5">
+        <Button size="sm" onClick={submit} loading={pending}>
+          Clôturer le matelas
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onDone}>
+          Annuler
+        </Button>
+      </div>
+    </div>
   );
 }
