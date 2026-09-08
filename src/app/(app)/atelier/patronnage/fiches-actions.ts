@@ -144,6 +144,30 @@ async function assertFicheModifiable(ficheId: string): Promise<{ error: string }
   return { ok: true, numeroOt: fiche.numero_ot, statut: fiche.statut as StatutFiche };
 }
 
+/**
+ * Même rôle qu'assertFicheModifiable, mais laisse passer un tracé de
+ * rattrapage déjà approuvé (lot 3) même si la fiche elle-même est verrouillée
+ * — c'est tout le principe du rattrapage : ce tracé précis redevient
+ * éditable par le circuit normal (updateTrace, uploadTraceDxf...), le reste
+ * de la fiche reste figé. Une demande encore en attente d'approbation
+ * (est_correctif=true, approuve_par=null) n'est PAS éditable ici : elle
+ * suit son propre circuit (approveCorrectiveTrace/rejectCorrectiveTrace).
+ */
+async function assertTraceEditable(traceId: string, ficheId: string): Promise<{ error: string } | { ok: true; numeroOt: string; statut: StatutFiche }> {
+  const supabase = await createClient();
+  const { data: trace } = await supabase
+    .from("traces_placement")
+    .select("est_correctif,approuve_par")
+    .eq("id", traceId)
+    .single();
+  if (trace?.est_correctif && trace.approuve_par) {
+    const { data: fiche } = await supabase.from("fiches_placement").select("numero_ot,statut").eq("id", ficheId).single();
+    if (!fiche) return { error: "Fiche introuvable" };
+    return { ok: true, numeroOt: fiche.numero_ot, statut: fiche.statut as StatutFiche };
+  }
+  return assertFicheModifiable(ficheId);
+}
+
 export async function updateFiche(ficheId: string, formData: FormData) {
   await requirePermission("modify");
   const gate = await assertFicheModifiable(ficheId);
@@ -329,6 +353,48 @@ export async function deleteFicheDefinitively(ficheId: string) {
 }
 
 // ------------------------------------------------------------
+// Tracé de rattrapage (lot 3) — demande, approbation, refus.
+// Seule porte d'entrée pour toucher une fiche "Bon pour coupe" : le circuit
+// normal (addTrace...) reste bloqué par assertFicheModifiable/la RLS.
+// ------------------------------------------------------------
+
+/** Chef de section (ou tout rôle create/modify sur patronnage) : demande motivée. */
+export async function requestCorrectiveTrace(ficheId: string, justification: string) {
+  await requirePermission("modify");
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("request_corrective_trace", {
+    p_fiche_id: ficheId,
+    p_justification: justification,
+  });
+  if (error) return { error: error.message };
+
+  revalidatePath("/atelier/patronnage");
+  return { traceId: data as string };
+}
+
+/** Chef de production (has_permission('patronnage','validate')) : approuve — le tracé redevient éditable. */
+export async function approveCorrectiveTrace(traceId: string) {
+  await requirePermission("validate");
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("approve_corrective_trace", { p_trace_id: traceId });
+  if (error) return { error: error.message };
+
+  revalidatePath("/atelier/patronnage");
+  return {};
+}
+
+/** Chef de production : refuse une demande encore en attente — la ligne est supprimée (jamais entrée dans le circuit normal). */
+export async function rejectCorrectiveTrace(traceId: string, motif: string) {
+  await requirePermission("validate");
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("reject_corrective_trace", { p_trace_id: traceId, p_motif: motif });
+  if (error) return { error: error.message };
+
+  revalidatePath("/atelier/patronnage");
+  return {};
+}
+
+// ------------------------------------------------------------
 // Tracés
 // ------------------------------------------------------------
 
@@ -364,7 +430,7 @@ export async function addTrace(ficheId: string, formData: FormData) {
 
 export async function updateTrace(traceId: string, ficheId: string, formData: FormData) {
   await requirePermission("modify");
-  const gate = await assertFicheModifiable(ficheId);
+  const gate = await assertTraceEditable(traceId, ficheId);
   if ("error" in gate) return gate;
 
   const supabase = await createClient();
@@ -387,7 +453,7 @@ export async function updateTrace(traceId: string, ficheId: string, formData: Fo
 
 export async function deleteTrace(traceId: string, ficheId: string) {
   await requirePermission("modify");
-  const gate = await assertFicheModifiable(ficheId);
+  const gate = await assertTraceEditable(traceId, ficheId);
   if ("error" in gate) return gate;
 
   const supabase = await createClient();
@@ -407,7 +473,7 @@ export async function deleteTrace(traceId: string, ficheId: string) {
 
 export async function removeTraceDxf(traceId: string, ficheId: string) {
   await requirePermission("modify");
-  const gate = await assertFicheModifiable(ficheId);
+  const gate = await assertTraceEditable(traceId, ficheId);
   if ("error" in gate) return gate;
 
   const supabase = await createClient();
@@ -435,7 +501,7 @@ export async function removeTraceDxf(traceId: string, ficheId: string) {
 
 export async function uploadTraceDxf(traceId: string, ficheId: string, formData: FormData) {
   const { authId } = await requirePermission("modify");
-  const gate = await assertFicheModifiable(ficheId);
+  const gate = await assertTraceEditable(traceId, ficheId);
   if ("error" in gate) return gate;
 
   const read = readDxfFile(formData);

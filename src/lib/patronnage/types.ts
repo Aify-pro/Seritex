@@ -76,6 +76,13 @@ export interface TracePlacement {
   fichierNom: string | null;
   chargeLe: string | null;
   analyse: AnalyseTrace | null;
+  // Lot 3 : tracé de rattrapage — voir supabase/migrations/0012_lot3_trace_rattrapage.sql.
+  // estCorrectif=false → tracé normal. true + approuveLe=null → demande en
+  // attente d'approbation. true + approuveLe renseigné → rattrapage approuvé
+  // (de nouveau éditable malgré le verrou de la fiche).
+  estCorrectif: boolean;
+  justification: string | null;
+  approuveLe: string | null;
 }
 
 export interface FichePlacement {
