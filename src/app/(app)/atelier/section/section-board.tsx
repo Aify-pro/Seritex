@@ -5,10 +5,10 @@ import { motion, AnimatePresence } from "framer-motion";
 import { createClient } from "@/lib/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { recordWorkOrderQuantity, closeMatelas } from "./actions";
+import { recordWorkOrderQuantity, closeMatelas, createArticleLot } from "./actions";
 import { reportAnomaly } from "../production/actions";
 import { toast } from "sonner";
-import { CheckCircle2, Package, Plus, Scissors, AlertTriangle, TriangleAlert } from "lucide-react";
+import { CheckCircle2, Package, Plus, Scissors, AlertTriangle, TriangleAlert, QrCode } from "lucide-react";
 import { formatDateTime, cn } from "@/lib/utils";
 import { REPARTITION_TAILLES_KEYS } from "@/lib/patronnage/types";
 import type { RepartitionTailles } from "@/lib/patronnage/types";
@@ -39,14 +39,19 @@ export type MatelasRow = {
   justification: string | null;
 };
 
+/** Lot 6 : tracé d'origine optionnel d'un lot article — clôturé ou non. */
+export type TraceOption = { id: string; reference: string };
+
 export function SectionBoard({
   sectionId,
   initialWorkOrders,
   matelasByWorkOrderId = {},
+  traceOptionsByWorkOrderId = {},
 }: {
   sectionId: string;
   initialWorkOrders: WorkOrderRow[];
   matelasByWorkOrderId?: Record<string, MatelasRow[]>;
+  traceOptionsByWorkOrderId?: Record<string, TraceOption[]>;
 }) {
   // `initialWorkOrders` change (nouvelle section, ou re-rendu serveur après
   // revalidation) : le composant est remonté via `key={sectionId}` côté page
@@ -92,7 +97,14 @@ export function SectionBoard({
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <AnimatePresence initial={false}>
             {enCours.map((wo) => (
-              <WorkOrderCard key={wo.id} wo={wo} setOrders={setOrders} matelas={matelasByWorkOrderId[wo.id]} sectionId={sectionId} />
+              <WorkOrderCard
+                key={wo.id}
+                wo={wo}
+                setOrders={setOrders}
+                matelas={matelasByWorkOrderId[wo.id]}
+                traceOptions={traceOptionsByWorkOrderId[wo.id] ?? []}
+                sectionId={sectionId}
+              />
             ))}
           </AnimatePresence>
           {enCours.length === 0 && (
@@ -110,7 +122,14 @@ export function SectionBoard({
           </h3>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {termines.map((wo) => (
-              <WorkOrderCard key={wo.id} wo={wo} setOrders={setOrders} matelas={matelasByWorkOrderId[wo.id]} sectionId={sectionId} />
+              <WorkOrderCard
+                key={wo.id}
+                wo={wo}
+                setOrders={setOrders}
+                matelas={matelasByWorkOrderId[wo.id]}
+                traceOptions={traceOptionsByWorkOrderId[wo.id] ?? []}
+                sectionId={sectionId}
+              />
             ))}
           </div>
         </div>
@@ -123,12 +142,15 @@ function WorkOrderCard({
   wo,
   setOrders,
   matelas,
+  traceOptions,
   sectionId,
 }: {
   wo: WorkOrderRow;
   setOrders: React.Dispatch<React.SetStateAction<WorkOrderRow[]>>;
   /** Présent (même vide) uniquement pour un sous-ODF de la section Coupe (lot 4). */
   matelas?: MatelasRow[];
+  /** Lot 6 : tracés disponibles (clôturés ou non) pour lier un lot article. */
+  traceOptions: TraceOption[];
   sectionId: string;
 }) {
   const [pending, startTransition] = useTransition();
@@ -244,7 +266,12 @@ function WorkOrderCard({
         )}
 
         {matelas !== undefined ? (
-          <MatelasList workOrderId={wo.id} matelas={matelas} />
+          <>
+            <MatelasList workOrderId={wo.id} matelas={matelas} />
+            {wo.production_orders && (
+              <CreateLotButton productionOrderId={wo.production_orders.id} traceOptions={traceOptions} />
+            )}
+          </>
         ) : !showAddForm ? (
           <div className="mt-3">
             <Button size="sm" onClick={() => setShowAddForm(true)} loading={pending}>
@@ -405,6 +432,126 @@ function MatelasCloseForm({
         </Button>
         <Button size="sm" variant="ghost" onClick={onDone}>
           Annuler
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   Génération d'un lot article (lot 6, section Coupe)
+============================================================ */
+
+const CATEGORIE_LABELS = { semi_fini: "Semi-fini", fini: "Fini", dechet: "Déchet" } as const;
+
+function CreateLotButton({
+  productionOrderId,
+  traceOptions,
+}: {
+  productionOrderId: string;
+  traceOptions: TraceOption[];
+}) {
+  const [open, setOpen] = useState(false);
+  const [pending, startTransition] = useTransition();
+  const [categorie, setCategorie] = useState<"semi_fini" | "fini" | "dechet">("fini");
+  const [traceId, setTraceId] = useState("");
+  const [composition, setComposition] = useState<Record<string, number>>({});
+  const [lastCode, setLastCode] = useState<string | null>(null);
+
+  function submit() {
+    const nonZero = Object.fromEntries(Object.entries(composition).filter(([, v]) => v > 0));
+    startTransition(async () => {
+      const res = await createArticleLot(productionOrderId, categorie, nonZero, traceId || null);
+      if ("error" in res) {
+        toast.error("Action refusée", { description: res.error });
+        return;
+      }
+      setLastCode(res.code);
+      setComposition({});
+      toast.success(`Lot ${res.code} généré`);
+    });
+  }
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="mt-2 inline-flex items-center gap-1 text-[11px] text-foreground-muted hover:text-brand"
+      >
+        <QrCode className="h-3 w-3" /> Créer un lot
+      </button>
+    );
+  }
+
+  return (
+    <div className="mt-2 space-y-2 rounded-md border border-brand/30 bg-brand-soft/30 p-2">
+      {lastCode && (
+        <a
+          href={`/lots/${lastCode}`}
+          target="_blank"
+          rel="noreferrer"
+          className="block rounded-md border border-success/30 bg-success-soft px-2 py-1.5 text-xs text-success hover:underline"
+        >
+          Lot {lastCode} généré — voir le QR à imprimer →
+        </a>
+      )}
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="block text-[10px] text-foreground-muted">Catégorie</label>
+          <select
+            value={categorie}
+            onChange={(e) => setCategorie(e.target.value as typeof categorie)}
+            className="w-full rounded-md border border-border bg-surface p-1.5 text-xs outline-none focus:ring-2 focus:ring-brand/30"
+          >
+            {Object.entries(CATEGORIE_LABELS).map(([k, label]) => (
+              <option key={k} value={k}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </div>
+        {traceOptions.length > 0 && (
+          <div>
+            <label className="block text-[10px] text-foreground-muted">Tracé d&apos;origine (optionnel)</label>
+            <select
+              value={traceId}
+              onChange={(e) => setTraceId(e.target.value)}
+              className="w-full rounded-md border border-border bg-surface p-1.5 text-xs outline-none focus:ring-2 focus:ring-brand/30"
+            >
+              <option value="">Aucun</option>
+              {traceOptions.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.reference}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
+      <div>
+        <label className="block text-[10px] text-foreground-muted">
+          Composition par taille (libre — pas de contrôle automatique)
+        </label>
+        <div className="grid grid-cols-4 gap-1.5">
+          {REPARTITION_TAILLES_KEYS.map((k) => (
+            <input
+              key={k}
+              type="number"
+              min={0}
+              placeholder={k}
+              value={composition[k] ?? ""}
+              onChange={(e) => setComposition((c) => ({ ...c, [k]: Number(e.target.value) }))}
+              className="w-full rounded-md border border-border bg-surface p-1.5 text-xs outline-none focus:ring-2 focus:ring-brand/30"
+            />
+          ))}
+        </div>
+      </div>
+      <div className="flex gap-1.5">
+        <Button size="sm" onClick={submit} loading={pending}>
+          Générer le lot
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>
+          Fermer
         </Button>
       </div>
     </div>
