@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { Button } from "@/components/ui/button";
 import { BookMarked } from "lucide-react";
-import type { FichePlacement, PatronReconnu, PieceNonReconnue } from "@/lib/patronnage/types";
+import type { FichePlacement, PatronReconnu, PieceNonReconnue, RendementTrace } from "@/lib/patronnage/types";
 import { FichesPlacementClient } from "@/components/atelier/patronnage/fiches-placement-client";
 
 export default async function PatronnagePage() {
@@ -42,6 +42,30 @@ export default async function PatronnagePage() {
     .from("pattern_pieces")
     .select("id,name,patterns(size,pattern_articles(article_code))")
     .order("id");
+
+  // Lot 8 : rendement matière par tracé (matelas déjà clôturés uniquement,
+  // voir migration 0018) — une requête à part sur la fiche_id des fiches
+  // déjà chargées, plutôt qu'un embed PostgREST (rendement_par_trace est une
+  // vue, pas une table liée par clé étrangère déclarée).
+  const ficheIds = (fichesRaw ?? []).map((f) => f.id);
+  const { data: rendementRows } =
+    ficheIds.length > 0
+      ? await supabase.from("rendement_par_trace").select("*").in("fiche_id", ficheIds)
+      : { data: [] as never[] };
+  const rendementByTraceId = new Map(
+    (rendementRows ?? []).map((r) => [
+      r.trace_id as string,
+      {
+        clotureLe: r.cloture_le,
+        piecesObtenues: r.pieces_obtenues,
+        poidsTissuTheoriqueKg: r.poids_tissu_theorique_kg,
+        poidsDechetKg: r.poids_dechet_kg,
+        poidsTissuReelEstimeKg: r.poids_tissu_reel_estime_kg,
+        rendementTheoriquePiecesParKg: r.rendement_theorique_pieces_par_kg,
+        rendementEstimePiecesParKg: r.rendement_estime_pieces_par_kg,
+      } satisfies RendementTrace,
+    ])
+  );
 
   const referenceOptions = (libraryPieces ?? []).map((p) => {
     const pat = p.patterns as unknown as { size: string; pattern_articles: { article_code: string } | null } | null;
@@ -109,6 +133,7 @@ export default async function PatronnagePage() {
           estCorrectif: t.est_correctif,
           justification: t.justification,
           approuveLe: t.approuve_le,
+          rendement: rendementByTraceId.get(t.id) ?? null,
           analyse: analyse
             ? {
                 id: analyse.id,

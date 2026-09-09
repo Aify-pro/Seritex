@@ -1,7 +1,7 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Plus,
   Eye,
@@ -97,7 +97,15 @@ export function FichesPlacementClient({
 }) {
   const [filtreStatut, setFiltreStatut] = useState<StatutFiche | "tous">("tous");
   const [showCreate, setShowCreate] = useState(false);
-  const [openFicheId, setOpenFicheId] = useState<string | null>(null);
+
+  // Lien direct depuis l'ODF (carte "Rendement matière", lot 8) :
+  // /atelier/patronnage?fiche=<id>&trace=<id> ouvre directement la fiche et
+  // amène au tracé concerné, sans recherche manuelle dans la liste. Lu une
+  // fois à l'initialisation de l'état (pas un effet) : on ne veut pas
+  // rouvrir la fiche si l'utilisateur la ferme ensuite sans changer d'URL.
+  const searchParams = useSearchParams();
+  const highlightTraceId = searchParams.get("trace");
+  const [openFicheId, setOpenFicheId] = useState<string | null>(() => searchParams.get("fiche"));
 
   const filtered = fiches.filter((f) => filtreStatut === "tous" || f.statut === filtreStatut);
   const openFiche = fiches.find((f) => f.id === openFicheId) ?? null;
@@ -189,7 +197,12 @@ export function FichesPlacementClient({
         size="lg"
       >
         {openFiche && (
-          <FicheDetailContent fiche={openFiche} referenceOptions={referenceOptions} permissions={permissions} />
+          <FicheDetailContent
+            fiche={openFiche}
+            referenceOptions={referenceOptions}
+            permissions={permissions}
+            highlightTraceId={highlightTraceId}
+          />
         )}
       </Dialog>
     </div>
@@ -417,10 +430,12 @@ function FicheDetailContent({
   fiche,
   referenceOptions,
   permissions,
+  highlightTraceId,
 }: {
   fiche: FichePlacement;
   referenceOptions: ReferenceOption[];
   permissions: Permissions;
+  highlightTraceId?: string | null;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -431,6 +446,17 @@ function FicheDetailContent({
   function refresh() {
     router.refresh();
   }
+
+  // Lien direct depuis l'ODF : une fois le tracé visé rendu, on l'amène à
+  // l'écran — délai court pour laisser la Dialog (portail + animation
+  // d'entrée) se poser avant de calculer sa position.
+  useEffect(() => {
+    if (!highlightTraceId) return;
+    const t = setTimeout(() => {
+      document.getElementById(`trace-${highlightTraceId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 150);
+    return () => clearTimeout(t);
+  }, [highlightTraceId]);
 
   function runAction(action: () => Promise<{ error?: string } | undefined>) {
     setError(null);
@@ -649,6 +675,7 @@ function FicheDetailContent({
             canValidate={permissions.canValidate}
             referenceOptions={referenceOptions}
             onChanged={refresh}
+            highlighted={trace.id === highlightTraceId}
           />
         ))}
       </div>
@@ -729,6 +756,7 @@ function TraceCard({
   canModify,
   canValidate,
   onChanged,
+  highlighted,
 }: {
   fiche: FichePlacement;
   trace: TracePlacement;
@@ -737,6 +765,7 @@ function TraceCard({
   canValidate: boolean;
   referenceOptions: ReferenceOption[];
   onChanged: () => void;
+  highlighted?: boolean;
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -763,7 +792,10 @@ function TraceCard({
 
   if (pendingApproval) {
     return (
-      <Card className="border-warning/30 bg-warning-soft/30">
+      <Card
+        id={`trace-${trace.id}`}
+        className={cn("border-warning/30 bg-warning-soft/30", highlighted && "ring-2 ring-brand ring-offset-2 ring-offset-background")}
+      >
         <CardHeader
           title={trace.reference}
           action={<Badge tone="warning">Rattrapage — en attente d&apos;approbation</Badge>}
@@ -838,7 +870,7 @@ function TraceCard({
   const a = trace.analyse;
 
   return (
-    <Card>
+    <Card id={`trace-${trace.id}`} className={cn(highlighted && "ring-2 ring-brand ring-offset-2 ring-offset-background")}>
       <CardHeader
         title={trace.reference}
         description={
@@ -988,6 +1020,36 @@ function TraceCard({
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {trace.rendement && (
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-foreground-muted">
+              Rendement matière — matelas clôturé le {formatDateTime(trace.rendement.clotureLe)}
+            </p>
+            <div className="grid grid-cols-2 gap-3 rounded-md border border-border bg-surface-muted p-3 text-sm sm:grid-cols-4">
+              <div>
+                <p className="text-xs text-foreground-muted">Pièces obtenues</p>
+                <p className="font-medium text-foreground">{trace.rendement.piecesObtenues}</p>
+              </div>
+              <div>
+                <p className="text-xs text-foreground-muted">Tissu engagé (théorique)</p>
+                <p className="font-medium text-foreground">
+                  {trace.rendement.poidsTissuTheoriqueKg !== null ? `${trace.rendement.poidsTissuTheoriqueKg} kg` : "incomplet"}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-foreground-muted">Déchet</p>
+                <p className="font-medium text-foreground">{trace.rendement.poidsDechetKg} kg</p>
+              </div>
+              <div>
+                <p className="text-xs text-foreground-muted">Rendement (théorique / estimé)</p>
+                <p className="font-medium text-foreground">
+                  {trace.rendement.rendementTheoriquePiecesParKg ?? "—"} / {trace.rendement.rendementEstimePiecesParKg ?? "—"} pièces/kg
+                </p>
+              </div>
+            </div>
           </div>
         )}
       </CardBody>

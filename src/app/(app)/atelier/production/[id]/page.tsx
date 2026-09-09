@@ -40,6 +40,8 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     { data: anomalies },
     { data: articleLots },
     { data: reconciliation },
+    { data: rendement },
+    { data: rendementTraces },
   ] = await Promise.all([
     supabase.from("work_orders").select("*,sections(name)").eq("production_order_id", id).order("planned_start", { ascending: true }),
     supabase.from("sections").select("id,name").eq("active", true).order("display_order"),
@@ -59,6 +61,17 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     // Lot 7 : réconciliation poids entrant / sortant (section 16 du document
     // de logique) — fonction plutôt que vue, voir migration 0017.
     supabase.rpc("get_production_order_reconciliation", { p_production_order_id: id }).single(),
+    // Lot 8 : rendement matière — vue calculée à partir des lots 4 et 7,
+    // voir migration 0018. maybeSingle() : la vue n'a une ligne pour cet ODF
+    // que si au moins un matelas y a déjà été clôturé.
+    supabase.from("rendement_par_odf").select("*").eq("odf_id", id).maybeSingle(),
+    // Détail par matelas, pour le lien direct vers chaque tracé dans le
+    // module Patronnage (voir carte "Rendement matière" plus bas).
+    supabase
+      .from("rendement_par_trace")
+      .select("trace_id,fiche_id,reference,cloture_le,pieces_obtenues,rendement_estime_pieces_par_kg")
+      .eq("odf_id", id)
+      .order("cloture_le", { ascending: false }),
   ]);
 
   // Lot 2 : la fiche Patronnage liée n'est pertinente que si la section
@@ -100,6 +113,15 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     ecart_kg: number;
   } | null;
   const hasReconciliationData = !!recon && (recon.poids_entrant_kg > 0 || recon.poids_sortant_total_kg > 0);
+
+  const rend = rendement as {
+    pieces_obtenues: number;
+    poids_tissu_theorique_kg: number | null;
+    theorique_complet: boolean;
+    poids_tissu_reel_mesure_kg: number;
+    rendement_theorique_pieces_par_kg: number | null;
+    rendement_mesure_pieces_par_kg: number | null;
+  } | null;
 
   const company = order.companies as unknown as { name: string } | null;
   const quote = order.quotes as unknown as { reference: string } | null;
@@ -272,6 +294,61 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
               </p>
             </div>
           </CardBody>
+        </Card>
+      )}
+
+      {rend && (
+        <Card>
+          <CardHeader
+            title="Rendement matière"
+            description="Pièces obtenues par kg de tissu engagé (lot 8) — théorique (dimensions des matelas) vs mesuré (pesées réelles, lot 7)."
+          />
+          <CardBody className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+            <div>
+              <p className="text-xs text-foreground-muted">Pièces obtenues</p>
+              <p className="font-medium text-foreground">{rend.pieces_obtenues}</p>
+            </div>
+            <div>
+              <p className="text-xs text-foreground-muted">Tissu engagé (théorique)</p>
+              <p className="font-medium text-foreground">
+                {rend.theorique_complet ? `${rend.poids_tissu_theorique_kg} kg` : "incomplet"}
+              </p>
+              {!rend.theorique_complet && (
+                <p className="text-xs text-foreground-muted">dimension ou grammage manquant sur un matelas</p>
+              )}
+            </div>
+            <div>
+              <p className="text-xs text-foreground-muted">Tissu engagé (mesuré)</p>
+              <p className="font-medium text-foreground">{rend.poids_tissu_reel_mesure_kg} kg</p>
+            </div>
+            <div>
+              <p className="text-xs text-foreground-muted">Rendement (théorique / mesuré)</p>
+              <p className="font-medium text-foreground">
+                {rend.rendement_theorique_pieces_par_kg ?? "—"} / {rend.rendement_mesure_pieces_par_kg ?? "—"} pièces/kg
+              </p>
+            </div>
+          </CardBody>
+          {rendementTraces && rendementTraces.length > 0 && (
+            <ul className="divide-y divide-border border-t border-border">
+              {rendementTraces.map((rt) => (
+                <li key={rt.trace_id} className="flex items-center justify-between gap-3 px-5 py-3">
+                  <div>
+                    <p className="text-sm text-foreground">{rt.reference}</p>
+                    <p className="text-xs text-foreground-muted">
+                      {rt.pieces_obtenues} pièces · {rt.rendement_estime_pieces_par_kg ?? "—"} pièces/kg ·
+                      {" "}clôturé le {formatDateTime(rt.cloture_le)}
+                    </p>
+                  </div>
+                  <Link
+                    href={`/atelier/patronnage?fiche=${rt.fiche_id}&trace=${rt.trace_id}`}
+                    className="shrink-0 text-xs font-medium text-brand hover:underline"
+                  >
+                    Voir le tracé →
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
         </Card>
       )}
 
