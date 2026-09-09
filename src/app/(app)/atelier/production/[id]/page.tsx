@@ -31,24 +31,35 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
 
   if (!order) notFound();
 
-  const [{ data: workOrders }, { data: allSections }, { data: chosenSections }, { data: sizes }, { data: fiche }, { data: anomalies }, { data: articleLots }] =
-    await Promise.all([
-      supabase.from("work_orders").select("*,sections(name)").eq("production_order_id", id).order("planned_start", { ascending: true }),
-      supabase.from("sections").select("id,name").eq("active", true).order("display_order"),
-      supabase.from("production_order_sections").select("section_id").eq("production_order_id", id).order("ordre"),
-      supabase.from("production_order_sizes").select("taille,quantite_demandee").eq("production_order_id", id),
-      supabase.from("fiches_placement").select("id,numero_ot,statut").eq("odf_id", id).maybeSingle(),
-      supabase
-        .from("production_order_anomalies")
-        .select("id,message,created_at,resolved_at,resolved_by,sections(name)")
-        .eq("production_order_id", id)
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("article_lots")
-        .select("id,code,categorie,created_at")
-        .eq("production_order_id", id)
-        .order("created_at", { ascending: false }),
-    ]);
+  const [
+    { data: workOrders },
+    { data: allSections },
+    { data: chosenSections },
+    { data: sizes },
+    { data: fiche },
+    { data: anomalies },
+    { data: articleLots },
+    { data: reconciliation },
+  ] = await Promise.all([
+    supabase.from("work_orders").select("*,sections(name)").eq("production_order_id", id).order("planned_start", { ascending: true }),
+    supabase.from("sections").select("id,name").eq("active", true).order("display_order"),
+    supabase.from("production_order_sections").select("section_id").eq("production_order_id", id).order("ordre"),
+    supabase.from("production_order_sizes").select("taille,quantite_demandee").eq("production_order_id", id),
+    supabase.from("fiches_placement").select("id,numero_ot,statut").eq("odf_id", id).maybeSingle(),
+    supabase
+      .from("production_order_anomalies")
+      .select("id,message,created_at,resolved_at,resolved_by,sections(name)")
+      .eq("production_order_id", id)
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("article_lots")
+      .select("id,code,categorie,created_at")
+      .eq("production_order_id", id)
+      .order("created_at", { ascending: false }),
+    // Lot 7 : réconciliation poids entrant / sortant (section 16 du document
+    // de logique) — fonction plutôt que vue, voir migration 0017.
+    supabase.rpc("get_production_order_reconciliation", { p_production_order_id: id }).single(),
+  ]);
 
   // Lot 2 : la fiche Patronnage liée n'est pertinente que si la section
   // Coupe est retenue (obligatoire pour valider, section 10 du document de
@@ -79,6 +90,16 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     resolvedAt: a.resolved_at,
     resolvedByName: a.resolved_by ? nameOf(a.resolved_by) : null,
   }));
+
+  const recon = reconciliation as {
+    poids_entrant_kg: number;
+    poids_sortie_lots_kg: number;
+    poids_dechets_kg: number;
+    poids_retour_kg: number;
+    poids_sortant_total_kg: number;
+    ecart_kg: number;
+  } | null;
+  const hasReconciliationData = !!recon && (recon.poids_entrant_kg > 0 || recon.poids_sortant_total_kg > 0);
 
   const company = order.companies as unknown as { name: string } | null;
   const quote = order.quotes as unknown as { reference: string } | null;
@@ -213,6 +234,43 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
                 </li>
               ))}
             </ul>
+          </CardBody>
+        </Card>
+      )}
+
+      {hasReconciliationData && (
+        <Card>
+          <CardHeader
+            title="Réconciliation matière"
+            description="Poids entrant (tissu reçu) vs poids sortant (lots + déchets + retours) — lot 7, section 16 du document de logique."
+          />
+          <CardBody className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
+            <div>
+              <p className="text-xs text-foreground-muted">Entrant (tissu)</p>
+              <p className="font-medium text-foreground">{recon!.poids_entrant_kg} kg</p>
+            </div>
+            <div>
+              <p className="text-xs text-foreground-muted">Sortie lots</p>
+              <p className="font-medium text-foreground">{recon!.poids_sortie_lots_kg} kg</p>
+            </div>
+            <div>
+              <p className="text-xs text-foreground-muted">Déchets</p>
+              <p className="font-medium text-foreground">{recon!.poids_dechets_kg} kg</p>
+            </div>
+            <div>
+              <p className="text-xs text-foreground-muted">Retour stock</p>
+              <p className="font-medium text-foreground">{recon!.poids_retour_kg} kg</p>
+            </div>
+            <div>
+              <p className="text-xs text-foreground-muted">Sortant total</p>
+              <p className="font-medium text-foreground">{recon!.poids_sortant_total_kg} kg</p>
+            </div>
+            <div>
+              <p className="text-xs text-foreground-muted">Écart</p>
+              <p className={Math.abs(recon!.ecart_kg) > 0.01 ? "font-medium text-warning" : "font-medium text-foreground"}>
+                {recon!.ecart_kg} kg
+              </p>
+            </div>
           </CardBody>
         </Card>
       )}

@@ -1,7 +1,15 @@
 import { requireRole } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
-import { SectionBoard, type WorkOrderRow, type MatelasRow, type TraceOption } from "./section-board";
+import {
+  SectionBoard,
+  type WorkOrderRow,
+  type MatelasRow,
+  type TraceOption,
+  type ArticleLotOption,
+  type ProductionOrderOption,
+  type WasteBagRow,
+} from "./section-board";
 import { SectionSwitcher } from "./section-switcher";
 import { Card, CardBody } from "@/components/ui/card";
 
@@ -48,11 +56,69 @@ export default async function SectionQueuePage({
   const isCoupe = section?.name === "Coupe";
   const matelasByWorkOrderId: Record<string, MatelasRow[]> = {};
   const traceOptionsByWorkOrderId: Record<string, TraceOption[]> = {};
+  const lotsByProductionOrderId: Record<string, ArticleLotOption[]> = {};
+  let productionOrderOptions: ProductionOrderOption[] = [];
+  let openWasteBags: WasteBagRow[] = [];
 
   if (isCoupe && workOrders && workOrders.length > 0) {
     const productionOrderIds = workOrders
       .map((wo) => (wo.production_orders as unknown as { id: string } | null)?.id)
       .filter((id): id is string => !!id);
+
+    // Lot 7 : ODF disponibles pour rattacher une pesée (reception_tissu /
+    // sortie_lot / retour_stock) ou la pesée incrémentale d'un sac —
+    // circonscrit aux ODF réellement visibles dans cette file Coupe.
+    const seenPoIds = new Set<string>();
+    productionOrderOptions = workOrders.reduce<ProductionOrderOption[]>((acc, wo) => {
+      const po = wo.production_orders as unknown as { id: string; reference: string; companies?: { name: string } | null } | null;
+      if (po && !seenPoIds.has(po.id)) {
+        seenPoIds.add(po.id);
+        acc.push({ id: po.id, reference: po.reference, companyName: po.companies?.name ?? null });
+      }
+      return acc;
+    }, []);
+
+    const { data: articleLots } = await supabase
+      .from("article_lots")
+      .select("id,code,categorie,production_order_id")
+      .in("production_order_id", productionOrderIds)
+      .order("created_at", { ascending: false });
+    for (const lot of articleLots ?? []) {
+      (lotsByProductionOrderId[lot.production_order_id] ??= []).push({
+        id: lot.id,
+        code: lot.code,
+        categorie: lot.categorie,
+      });
+    }
+
+    // Sacs de déchets ouverts — indépendants de tout ODF en propre (mélange
+    // de productions accepté, section 17), donc listés au niveau section,
+    // pas par sous-ODF.
+    const { data: bags } = await supabase
+      .from("sacs_dechets")
+      .select("id,code,created_at")
+      .eq("statut", "en_cours")
+      .order("created_at", { ascending: false })
+      .limit(20);
+
+    const bagIds = (bags ?? []).map((b) => b.id);
+    const lastWeightBySacId: Record<string, number> = {};
+    if (bagIds.length > 0) {
+      const { data: weighings } = await supabase
+        .from("sacs_dechets_pesees")
+        .select("sac_id,poids_releve_kg,occurred_at")
+        .in("sac_id", bagIds)
+        .order("occurred_at", { ascending: true });
+      for (const w of weighings ?? []) {
+        lastWeightBySacId[w.sac_id] = w.poids_releve_kg;
+      }
+    }
+    openWasteBags = (bags ?? []).map((b) => ({
+      id: b.id,
+      code: b.code,
+      currentWeightKg: lastWeightBySacId[b.id] ?? 0,
+      createdAt: b.created_at,
+    }));
 
     const { data: fiches } = await supabase
       .from("fiches_placement")
@@ -129,6 +195,10 @@ export default async function SectionQueuePage({
         initialWorkOrders={(workOrders ?? []) as unknown as WorkOrderRow[]}
         matelasByWorkOrderId={matelasByWorkOrderId}
         traceOptionsByWorkOrderId={traceOptionsByWorkOrderId}
+        isCoupe={isCoupe}
+        lotsByProductionOrderId={lotsByProductionOrderId}
+        productionOrderOptions={productionOrderOptions}
+        initialOpenWasteBags={openWasteBags}
       />
     </div>
   );
