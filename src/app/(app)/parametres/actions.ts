@@ -270,6 +270,24 @@ export async function toggleProductModelActive(productModelId: string, active: b
   return {};
 }
 
+/**
+ * Lot 10 : référence Sage d'un modèle de produit — colonne présente depuis
+ * la migration 0005 mais jamais éditable depuis l'application jusqu'ici.
+ * Nécessaire pour que les mouvements de stock entree_semi_fini/entree_fini
+ * (migration 0020) portent une référence exploitable par Sage.
+ */
+export async function setProductModelSageReference(productModelId: string, sageReference: string) {
+  await requireRole(["administrateur", "responsable_production"]);
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("product_models")
+    .update({ sage_reference: sageReference.trim() || null })
+    .eq("id", productModelId);
+  if (error) return { error: error.message };
+  revalidatePath("/parametres/produits");
+  return {};
+}
+
 const newZoneSchema = z.object({
   product_model_id: z.string().uuid(),
   zone_key: z

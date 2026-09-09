@@ -14,7 +14,9 @@ import { FichePatronnageLink } from "./fiche-patronnage-link";
 import { AnomaliesPanel } from "./anomalies-panel";
 import { ProductConfigurator } from "./product-configurator";
 import { ProductionOrderMediaFiles } from "./production-order-media-files";
+import { StockMovementsPanel } from "./stock-movements-panel";
 import type { StatutFiche } from "@/lib/patronnage/types";
+import type { StockMovement, StockExportFiche } from "@/lib/types/domain";
 import { CheckCircle2, Package, QrCode } from "lucide-react";
 import Link from "next/link";
 
@@ -50,6 +52,8 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     { data: zoneColors },
     { data: attachedMedia },
     { data: availableMedia },
+    { data: stockMovements },
+    { data: stockExportFiches },
   ] = await Promise.all([
     supabase.from("work_orders").select("*,sections(name)").eq("production_order_id", id).order("planned_start", { ascending: true }),
     supabase.from("sections").select("id,name").eq("active", true).order("display_order"),
@@ -99,6 +103,19 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
       .select("media_file_id,media_files(id,file_name,category)")
       .eq("production_order_id", id),
     supabase.from("media_files").select("id,file_name,category").eq("company_id", order.company_id),
+    // Lot 10 : mouvements de stock & fiches d'import Sage (section 19 du
+    // document de logique) — dérivés de record_pesee/create_article_lot,
+    // jamais saisis directement (migration 0020).
+    supabase
+      .from("stock_movements")
+      .select("id,production_order_id,type,article_ref,quantite_ou_poids,unite,exported_in_fiche_id,created_by,created_at")
+      .eq("production_order_id", id)
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("stock_export_fiches")
+      .select("id,numero,production_order_id,generated_at,generated_by")
+      .eq("production_order_id", id)
+      .order("generated_at", { ascending: false }),
   ]);
 
   // Lot 2 : la fiche Patronnage liée n'est pertinente que si la section
@@ -350,6 +367,13 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
           </CardBody>
         </Card>
       )}
+
+      <StockMovementsPanel
+        productionOrderId={order.id}
+        movements={(stockMovements ?? []) as StockMovement[]}
+        fiches={(stockExportFiches ?? []) as StockExportFiche[]}
+        canGenerate={isAdmin || profile.role === "responsable_production"}
+      />
 
       {rend && (
         <Card>

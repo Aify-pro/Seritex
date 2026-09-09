@@ -59,6 +59,9 @@ export type ArticleLotOption = { id: string; code: string; categorie: string };
 /** Lot 7 : sac de déchets ouvert (statut en_cours), avec son dernier relevé connu. */
 export type WasteBagRow = { id: string; code: string; currentWeightKg: number; createdAt: string };
 
+/** Lot 10 : article du miroir Sage (stock_item_view), pour rattacher une pesée reception_tissu/retour_stock. */
+export type StockItemOption = { sageReference: string; designation: string };
+
 export function SectionBoard({
   sectionId,
   initialWorkOrders,
@@ -68,6 +71,7 @@ export function SectionBoard({
   lotsByProductionOrderId = {},
   productionOrderOptions = [],
   initialOpenWasteBags = [],
+  stockItemOptions = [],
 }: {
   sectionId: string;
   initialWorkOrders: WorkOrderRow[];
@@ -78,6 +82,8 @@ export function SectionBoard({
   lotsByProductionOrderId?: Record<string, ArticleLotOption[]>;
   productionOrderOptions?: ProductionOrderOption[];
   initialOpenWasteBags?: WasteBagRow[];
+  /** Lot 10 : miroir Sage — peut être vide si jamais synchronisé (Paramètres > Stock). */
+  stockItemOptions?: StockItemOption[];
 }) {
   // `initialWorkOrders` change (nouvelle section, ou re-rendu serveur après
   // revalidation) : le composant est remonté via `key={sectionId}` côté page
@@ -122,7 +128,11 @@ export function SectionBoard({
       {isCoupe && (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <WasteBagsPanel initialBags={initialOpenWasteBags} productionOrderOptions={productionOrderOptions} />
-          <PeseeQuickForm productionOrderOptions={productionOrderOptions} lotsByProductionOrderId={lotsByProductionOrderId} />
+          <PeseeQuickForm
+            productionOrderOptions={productionOrderOptions}
+            lotsByProductionOrderId={lotsByProductionOrderId}
+            stockItemOptions={stockItemOptions}
+          />
         </div>
       )}
 
@@ -802,9 +812,11 @@ const PESEE_TYPE_LABELS = {
 function PeseeQuickForm({
   productionOrderOptions,
   lotsByProductionOrderId,
+  stockItemOptions,
 }: {
   productionOrderOptions: ProductionOrderOption[];
   lotsByProductionOrderId: Record<string, ArticleLotOption[]>;
+  stockItemOptions: StockItemOption[];
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -812,6 +824,10 @@ function PeseeQuickForm({
   const [productionOrderId, setProductionOrderId] = useState(productionOrderOptions[0]?.id ?? "");
   const [lotId, setLotId] = useState("");
   const [poidsKg, setPoidsKg] = useState("");
+  // Lot 10 : article Sage concerné (reception_tissu/retour_stock uniquement)
+  // — optionnel, alimente le mouvement de stock sortie_mp/retour_mp sans
+  // bloquer la pesée si le miroir Sage n'est pas encore synchronisé.
+  const [articleRef, setArticleRef] = useState("");
 
   const availableLots = lotsByProductionOrderId[productionOrderId] ?? [];
 
@@ -830,7 +846,13 @@ function PeseeQuickForm({
       return;
     }
     startTransition(async () => {
-      const res = await recordPesee(type, productionOrderId, Number(poidsKg), type === "sortie_lot" ? lotId : null);
+      const res = await recordPesee(
+        type,
+        productionOrderId,
+        Number(poidsKg),
+        type === "sortie_lot" ? lotId : null,
+        type !== "sortie_lot" ? articleRef || null : null
+      );
       if ("error" in res) {
         setError(res.error);
         return;
@@ -838,6 +860,7 @@ function PeseeQuickForm({
       toast.success(`Pesée enregistrée — ${PESEE_TYPE_LABELS[type].toLowerCase()}`);
       setPoidsKg("");
       setLotId("");
+      setArticleRef("");
     });
   }
 
@@ -898,6 +921,27 @@ function PeseeQuickForm({
               {availableLots.map((lot) => (
                 <option key={lot.id} value={lot.id}>
                   {lot.code}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        {type !== "sortie_lot" && (
+          <div>
+            <label className="block text-[10px] text-foreground-muted">
+              Article Sage <span className="normal-case text-foreground-muted">(optionnel)</span>
+            </label>
+            <select
+              value={articleRef}
+              onChange={(e) => setArticleRef(e.target.value)}
+              className="w-full rounded-md border border-border bg-surface p-1.5 text-xs outline-none focus:ring-2 focus:ring-brand/30"
+            >
+              <option value="">
+                {stockItemOptions.length === 0 ? "Aucun article synchronisé" : "— non renseigné —"}
+              </option>
+              {stockItemOptions.map((item) => (
+                <option key={item.sageReference} value={item.sageReference}>
+                  {item.designation} ({item.sageReference})
                 </option>
               ))}
             </select>

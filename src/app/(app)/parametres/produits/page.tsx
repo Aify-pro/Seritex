@@ -5,13 +5,14 @@ import { Card, CardHeader, CardBody } from "@/components/ui/card";
 import { NewProductModelForm } from "./new-product-model-form";
 import { ProductModelActiveToggle } from "./product-model-active-toggle";
 import { ZoneTemplateEditor } from "./zone-template-editor";
+import { ProductModelSageReference } from "./product-model-sage-reference";
 
 export default async function ProductModelsPage() {
   await requireRole(["administrateur", "responsable_production"]);
   const supabase = await createClient();
 
   const [{ data: models }, { data: zones }] = await Promise.all([
-    supabase.from("product_models").select("id,name,category,active").order("name"),
+    supabase.from("product_models").select("id,name,category,active,sage_reference").order("name"),
     supabase.from("product_zone_templates").select("*").order("display_order"),
   ]);
 
@@ -34,7 +35,8 @@ export default async function ProductModelsPage() {
                 description={m.category ?? "Sans catégorie"}
                 action={<ProductModelActiveToggle productModelId={m.id} active={m.active} />}
               />
-              <CardBody>
+              <CardBody className="space-y-4">
+                <ProductModelSageReference productModelId={m.id} sageReference={m.sage_reference} />
                 <ZoneTemplateEditor productModelId={m.id} zones={modelZones} />
               </CardBody>
             </Card>

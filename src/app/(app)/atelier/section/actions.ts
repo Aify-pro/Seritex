@@ -128,12 +128,20 @@ export type RecordPeseeResult = { error: string } | { id: string };
  * périmètre que create_article_lot/close_matelas. `sac_dechet` est exclu ici
  * volontairement — il passe par recordBagWeighing (mécanique par différence,
  * section 17).
+ *
+ * `articleRef` (lot 10, section 19) : référence Sage de l'article livré/
+ * retourné (stock_item_view.sage_reference), utile uniquement pour
+ * reception_tissu/retour_stock — génère alors un mouvement de stock
+ * sortie_mp/retour_mp exploitable pour l'export vers Sage. Optionnel : le
+ * mirroir Sage peut être vide (pas encore synchronisé), la pesée reste
+ * possible sans, comme avant ce lot.
  */
 export async function recordPesee(
   type: "reception_tissu" | "sortie_lot" | "retour_stock",
   productionOrderId: string,
   poidsKg: number,
-  referenceId?: string | null
+  referenceId?: string | null,
+  articleRef?: string | null
 ): Promise<RecordPeseeResult> {
   await requireUser();
   const supabase = await createClient();
@@ -143,6 +151,7 @@ export async function recordPesee(
     p_production_order_id: productionOrderId,
     p_poids_kg: poidsKg,
     p_reference_id: referenceId || null,
+    p_article_ref: articleRef || null,
   });
 
   if (error) return { error: error.message };
