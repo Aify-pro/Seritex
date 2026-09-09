@@ -33,3 +33,6 @@ npm-debug.log*
 
 # cache local de la CLI Supabase (project-ref, pooler-url...)
 /supabase/.temp/
+
+# préférences Claude Code personnelles (non partagées avec l'équipe)
+/.claude/settings.local.json
