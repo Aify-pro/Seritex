@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
 import { Badge, StatusBadge } from "@/components/ui/badge";
-import { PRODUCTION_ORDER_STATUS_LABELS } from "@/lib/types/domain";
+import { PRODUCTION_ORDER_STATUS_LABELS, type MediaFileCategory } from "@/lib/types/domain";
 import { formatDate, formatDateTime } from "@/lib/utils";
 import { can } from "@/lib/auth/permissions";
 import { notFound } from "next/navigation";
@@ -12,6 +12,8 @@ import { LifecycleActions } from "./lifecycle-actions";
 import { SectionsSizesEditor } from "./sections-sizes-editor";
 import { FichePatronnageLink } from "./fiche-patronnage-link";
 import { AnomaliesPanel } from "./anomalies-panel";
+import { ProductConfigurator } from "./product-configurator";
+import { ProductionOrderMediaFiles } from "./production-order-media-files";
 import type { StatutFiche } from "@/lib/patronnage/types";
 import { CheckCircle2, Package, QrCode } from "lucide-react";
 import Link from "next/link";
@@ -25,7 +27,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
 
   const { data: order } = await supabase
     .from("production_orders")
-    .select("*,companies(name),quotes(reference)")
+    .select("*,companies(name),quotes(reference),product_models(id,name)")
     .eq("id", id)
     .single();
 
@@ -42,6 +44,12 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     { data: reconciliation },
     { data: rendement },
     { data: rendementTraces },
+    { data: productModels },
+    { data: activeColors },
+    { data: zoneTemplate },
+    { data: zoneColors },
+    { data: attachedMedia },
+    { data: availableMedia },
   ] = await Promise.all([
     supabase.from("work_orders").select("*,sections(name)").eq("production_order_id", id).order("planned_start", { ascending: true }),
     supabase.from("sections").select("id,name").eq("active", true).order("display_order"),
@@ -72,6 +80,25 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
       .select("trace_id,fiche_id,reference,cloture_le,pieces_obtenues,rendement_estime_pieces_par_kg")
       .eq("odf_id", id)
       .order("cloture_le", { ascending: false }),
+    // Lot 9 : configurateur couleur par zone (section 8/9 du document de logique).
+    supabase.from("product_models").select("id,name").eq("active", true).order("name"),
+    supabase.from("colors").select("id,name,code").eq("active", true).order("name"),
+    // .eq() sur une colonne uuid avec une chaîne vide lèverait une erreur
+    // Postgres ("invalid input syntax for type uuid") — pas de requête tant
+    // qu'aucun modèle de produit n'est encore choisi pour cet ODF.
+    order.product_model_id
+      ? supabase
+          .from("product_zone_templates")
+          .select("zone_key,zone_label,display_order")
+          .eq("product_model_id", order.product_model_id)
+          .order("display_order")
+      : Promise.resolve({ data: [] as { zone_key: string; zone_label: string; display_order: number }[] }),
+    supabase.from("production_order_zone_colors").select("zone_key,color_id").eq("production_order_id", id),
+    supabase
+      .from("production_order_media_files")
+      .select("media_file_id,media_files(id,file_name,category)")
+      .eq("production_order_id", id),
+    supabase.from("media_files").select("id,file_name,category").eq("company_id", order.company_id),
   ]);
 
   // Lot 2 : la fiche Patronnage liée n'est pertinente que si la section
@@ -125,6 +152,15 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
 
   const company = order.companies as unknown as { name: string } | null;
   const quote = order.quotes as unknown as { reference: string } | null;
+  const productModel = order.product_models as unknown as { id: string; name: string } | null;
+
+  // Lot 9 : fichiers déjà joints à l'ODF (visuel/maquette) + ceux encore
+  // disponibles dans la médiathèque du client, pour le sélecteur d'ajout.
+  const attachedMediaFiles = (attachedMedia ?? [])
+    .map((m) => m.media_files as unknown as { id: string; file_name: string; category: MediaFileCategory } | null)
+    .filter((f): f is { id: string; file_name: string; category: MediaFileCategory } => !!f);
+  const availableMediaFiles = (availableMedia ?? []) as { id: string; file_name: string; category: MediaFileCategory }[];
+
   const canArchive = await can("ordres_fabrication", "archive");
   const canValidate = await can("ordres_fabrication", "validate");
   const canRequestClosure = profile.role === "responsable_production" || profile.role === "administrateur";
@@ -176,6 +212,24 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
           initialSizes={sizes ?? []}
         />
       )}
+
+      <ProductConfigurator
+        productionOrderId={order.id}
+        editable={order.status === "brouillon"}
+        productModels={productModels ?? []}
+        currentProductModelId={order.product_model_id}
+        currentProductModelName={productModel?.name ?? null}
+        zoneTemplate={zoneTemplate ?? []}
+        colors={activeColors ?? []}
+        initialZoneColors={zoneColors ?? []}
+        initialNote={order.note_disponibilite_couleurs}
+      />
+
+      <ProductionOrderMediaFiles
+        productionOrderId={order.id}
+        attached={attachedMediaFiles}
+        available={availableMediaFiles}
+      />
 
       {(coupeSelected || fiche) && (
         <FichePatronnageLink

@@ -21,6 +21,8 @@ import {
   Plug,
   Contact,
   Ruler,
+  Shirt,
+  SwatchBook,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { createElement, type ReactNode } from "react";
@@ -85,6 +87,8 @@ export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
     { href: "/atelier/production", label: "Ordres de fabrication", icon: navIcon(Factory) },
     { href: "/atelier/patronnage", label: "Patronnage", icon: navIcon(Ruler) },
     { href: "/mediatheque", label: "Médiathèque", icon: navIcon(FolderOpen) },
+    { href: "/parametres/produits", label: "Modèles de produits", icon: navIcon(Shirt), section: PARAMETRES },
+    { href: "/parametres/couleurs", label: "Palette de couleurs", icon: navIcon(SwatchBook), section: PARAMETRES },
     { href: "/parametres/gammes", label: "Gammes opératoires", icon: navIcon(Route), section: PARAMETRES },
     { href: "/parametres/stock", label: "Stock Sage (lecture)", icon: navIcon(Warehouse), section: PARAMETRES },
     {
@@ -112,6 +116,8 @@ export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
     { href: "/parametres/utilisateurs", label: "Utilisateurs", icon: navIcon(Users), section: PARAMETRES },
     { href: "/parametres/roles", label: "Rôles & permissions", icon: navIcon(ShieldCheck), section: PARAMETRES },
     { href: "/parametres/sections", label: "Sections d'atelier", icon: navIcon(Boxes), section: PARAMETRES },
+    { href: "/parametres/produits", label: "Modèles de produits", icon: navIcon(Shirt), section: PARAMETRES },
+    { href: "/parametres/couleurs", label: "Palette de couleurs", icon: navIcon(SwatchBook), section: PARAMETRES },
     { href: "/parametres/gammes", label: "Gammes opératoires", icon: navIcon(Route), section: PARAMETRES },
     { href: "/parametres/stockage", label: "Stockage médiathèque", icon: navIcon(Database), section: PARAMETRES },
     { href: "/parametres/sage", label: "Intégration Sage", icon: navIcon(Plug), section: PARAMETRES },
