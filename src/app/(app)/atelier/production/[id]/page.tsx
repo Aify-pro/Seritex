@@ -40,6 +40,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     { data: anomalies },
     { data: articleLots },
     { data: reconciliation },
+    { data: rendement },
   ] = await Promise.all([
     supabase.from("work_orders").select("*,sections(name)").eq("production_order_id", id).order("planned_start", { ascending: true }),
     supabase.from("sections").select("id,name").eq("active", true).order("display_order"),
@@ -59,6 +60,10 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     // Lot 7 : réconciliation poids entrant / sortant (section 16 du document
     // de logique) — fonction plutôt que vue, voir migration 0017.
     supabase.rpc("get_production_order_reconciliation", { p_production_order_id: id }).single(),
+    // Lot 8 : rendement matière — vue calculée à partir des lots 4 et 7,
+    // voir migration 0018. maybeSingle() : la vue n'a une ligne pour cet ODF
+    // que si au moins un matelas y a déjà été clôturé.
+    supabase.from("rendement_par_odf").select("*").eq("odf_id", id).maybeSingle(),
   ]);
 
   // Lot 2 : la fiche Patronnage liée n'est pertinente que si la section
@@ -100,6 +105,15 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     ecart_kg: number;
   } | null;
   const hasReconciliationData = !!recon && (recon.poids_entrant_kg > 0 || recon.poids_sortant_total_kg > 0);
+
+  const rend = rendement as {
+    pieces_obtenues: number;
+    poids_tissu_theorique_kg: number | null;
+    theorique_complet: boolean;
+    poids_tissu_reel_mesure_kg: number;
+    rendement_theorique_pieces_par_kg: number | null;
+    rendement_mesure_pieces_par_kg: number | null;
+  } | null;
 
   const company = order.companies as unknown as { name: string } | null;
   const quote = order.quotes as unknown as { reference: string } | null;
@@ -269,6 +283,40 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
               <p className="text-xs text-foreground-muted">Écart</p>
               <p className={Math.abs(recon!.ecart_kg) > 0.01 ? "font-medium text-warning" : "font-medium text-foreground"}>
                 {recon!.ecart_kg} kg
+              </p>
+            </div>
+          </CardBody>
+        </Card>
+      )}
+
+      {rend && (
+        <Card>
+          <CardHeader
+            title="Rendement matière"
+            description="Pièces obtenues par kg de tissu engagé (lot 8) — théorique (dimensions des matelas) vs mesuré (pesées réelles, lot 7)."
+          />
+          <CardBody className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+            <div>
+              <p className="text-xs text-foreground-muted">Pièces obtenues</p>
+              <p className="font-medium text-foreground">{rend.pieces_obtenues}</p>
+            </div>
+            <div>
+              <p className="text-xs text-foreground-muted">Tissu engagé (théorique)</p>
+              <p className="font-medium text-foreground">
+                {rend.theorique_complet ? `${rend.poids_tissu_theorique_kg} kg` : "incomplet"}
+              </p>
+              {!rend.theorique_complet && (
+                <p className="text-xs text-foreground-muted">dimension ou grammage manquant sur un matelas</p>
+              )}
+            </div>
+            <div>
+              <p className="text-xs text-foreground-muted">Tissu engagé (mesuré)</p>
+              <p className="font-medium text-foreground">{rend.poids_tissu_reel_mesure_kg} kg</p>
+            </div>
+            <div>
+              <p className="text-xs text-foreground-muted">Rendement (théorique / mesuré)</p>
+              <p className="font-medium text-foreground">
+                {rend.rendement_theorique_pieces_par_kg ?? "—"} / {rend.rendement_mesure_pieces_par_kg ?? "—"} pièces/kg
               </p>
             </div>
           </CardBody>

@@ -63,6 +63,21 @@ export interface AnalyseTrace {
   analyseeLe: string;
 }
 
+// Lot 8 : rendement matière — vue rendement_par_trace, voir
+// supabase/migrations/0018_lot8_rendement_matiere.sql. N'existe que pour un
+// matelas déjà clôturé (lot 4) ; poidsTissuReelEstimeKg est une ESTIMATION
+// dérivée (théorique − déchet du matelas), pas une pesée indépendante — voir
+// le commentaire en tête de la migration pour le détail.
+export interface RendementTrace {
+  clotureLe: string;
+  piecesObtenues: number;
+  poidsTissuTheoriqueKg: number | null;
+  poidsDechetKg: number;
+  poidsTissuReelEstimeKg: number | null;
+  rendementTheoriquePiecesParKg: number | null;
+  rendementEstimePiecesParKg: number | null;
+}
+
 export interface TracePlacement {
   id: string;
   ordre: number;
@@ -83,6 +98,9 @@ export interface TracePlacement {
   estCorrectif: boolean;
   justification: string | null;
   approuveLe: string | null;
+  // Lot 8 — voir RendementTrace ci-dessus. null tant que le matelas
+  // correspondant (section Coupe) n'a pas été clôturé.
+  rendement: RendementTrace | null;
 }
 
 export interface FichePlacement {

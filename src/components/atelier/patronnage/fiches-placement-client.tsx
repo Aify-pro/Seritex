@@ -990,6 +990,36 @@ function TraceCard({
             )}
           </div>
         )}
+
+        {trace.rendement && (
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-foreground-muted">
+              Rendement matière — matelas clôturé le {formatDateTime(trace.rendement.clotureLe)}
+            </p>
+            <div className="grid grid-cols-2 gap-3 rounded-md border border-border bg-surface-muted p-3 text-sm sm:grid-cols-4">
+              <div>
+                <p className="text-xs text-foreground-muted">Pièces obtenues</p>
+                <p className="font-medium text-foreground">{trace.rendement.piecesObtenues}</p>
+              </div>
+              <div>
+                <p className="text-xs text-foreground-muted">Tissu engagé (théorique)</p>
+                <p className="font-medium text-foreground">
+                  {trace.rendement.poidsTissuTheoriqueKg !== null ? `${trace.rendement.poidsTissuTheoriqueKg} kg` : "incomplet"}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-foreground-muted">Déchet</p>
+                <p className="font-medium text-foreground">{trace.rendement.poidsDechetKg} kg</p>
+              </div>
+              <div>
+                <p className="text-xs text-foreground-muted">Rendement (théorique / estimé)</p>
+                <p className="font-medium text-foreground">
+                  {trace.rendement.rendementTheoriquePiecesParKg ?? "—"} / {trace.rendement.rendementEstimePiecesParKg ?? "—"} pièces/kg
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
       </CardBody>
     </Card>
   );
