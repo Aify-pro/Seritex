@@ -41,6 +41,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     { data: articleLots },
     { data: reconciliation },
     { data: rendement },
+    { data: rendementTraces },
   ] = await Promise.all([
     supabase.from("work_orders").select("*,sections(name)").eq("production_order_id", id).order("planned_start", { ascending: true }),
     supabase.from("sections").select("id,name").eq("active", true).order("display_order"),
@@ -64,6 +65,13 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     // voir migration 0018. maybeSingle() : la vue n'a une ligne pour cet ODF
     // que si au moins un matelas y a déjà été clôturé.
     supabase.from("rendement_par_odf").select("*").eq("odf_id", id).maybeSingle(),
+    // Détail par matelas, pour le lien direct vers chaque tracé dans le
+    // module Patronnage (voir carte "Rendement matière" plus bas).
+    supabase
+      .from("rendement_par_trace")
+      .select("trace_id,fiche_id,reference,cloture_le,pieces_obtenues,rendement_estime_pieces_par_kg")
+      .eq("odf_id", id)
+      .order("cloture_le", { ascending: false }),
   ]);
 
   // Lot 2 : la fiche Patronnage liée n'est pertinente que si la section
@@ -320,6 +328,27 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
               </p>
             </div>
           </CardBody>
+          {rendementTraces && rendementTraces.length > 0 && (
+            <ul className="divide-y divide-border border-t border-border">
+              {rendementTraces.map((rt) => (
+                <li key={rt.trace_id} className="flex items-center justify-between gap-3 px-5 py-3">
+                  <div>
+                    <p className="text-sm text-foreground">{rt.reference}</p>
+                    <p className="text-xs text-foreground-muted">
+                      {rt.pieces_obtenues} pièces · {rt.rendement_estime_pieces_par_kg ?? "—"} pièces/kg ·
+                      {" "}clôturé le {formatDateTime(rt.cloture_le)}
+                    </p>
+                  </div>
+                  <Link
+                    href={`/atelier/patronnage?fiche=${rt.fiche_id}&trace=${rt.trace_id}`}
+                    className="shrink-0 text-xs font-medium text-brand hover:underline"
+                  >
+                    Voir le tracé →
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
         </Card>
       )}
 
