@@ -9,6 +9,7 @@ import {
   type ArticleLotOption,
   type ProductionOrderOption,
   type WasteBagRow,
+  type StockItemOption,
 } from "./section-board";
 import { SectionSwitcher } from "./section-switcher";
 import { Card, CardBody } from "@/components/ui/card";
@@ -59,6 +60,7 @@ export default async function SectionQueuePage({
   const lotsByProductionOrderId: Record<string, ArticleLotOption[]> = {};
   let productionOrderOptions: ProductionOrderOption[] = [];
   let openWasteBags: WasteBagRow[] = [];
+  let stockItemOptions: StockItemOption[] = [];
 
   if (isCoupe && workOrders && workOrders.length > 0) {
     const productionOrderIds = workOrders
@@ -77,6 +79,16 @@ export default async function SectionQueuePage({
       }
       return acc;
     }, []);
+
+    // Lot 10 : miroir Sage (stock_item_view) — pour rattacher un article à
+    // une pesée reception_tissu/retour_stock. Peut être vide (jamais
+    // synchronisé, cf. Paramètres > Stock) : le formulaire reste utilisable
+    // sans, comme avant ce lot.
+    const { data: stockItems } = await supabase
+      .from("stock_item_view")
+      .select("sage_reference,designation")
+      .order("designation");
+    stockItemOptions = (stockItems ?? []).map((i) => ({ sageReference: i.sage_reference, designation: i.designation }));
 
     const { data: articleLots } = await supabase
       .from("article_lots")
@@ -199,6 +211,7 @@ export default async function SectionQueuePage({
         lotsByProductionOrderId={lotsByProductionOrderId}
         productionOrderOptions={productionOrderOptions}
         initialOpenWasteBags={openWasteBags}
+        stockItemOptions={stockItemOptions}
       />
     </div>
   );

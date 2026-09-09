@@ -378,3 +378,31 @@ export async function reassignSectionChief(workOrderId: string, userId: string |
   revalidatePath("/atelier/production");
   return {};
 }
+
+// ============================================================================
+// Lot 10 — mouvements de stock & fiches d'import Sage (section 19).
+// ============================================================================
+
+export type GenerateStockExportFicheResult = { error: string } | { id: string; numero: string };
+
+/**
+ * Regroupe dans une fiche numérotée tous les mouvements de stock pas encore
+ * exportés de cet ODF (livraisons partielles possibles, section 19).
+ * Aucune vérification de rôle ici : `generate_stock_export_fiche` (SECURITY
+ * DEFINER) fait autorité (responsable_production/administrateur) — la fiche
+ * conditionne la sortie commerciale (BL), même périmètre que
+ * validateProductionOrder.
+ */
+export async function generateStockExportFiche(productionOrderId: string): Promise<GenerateStockExportFicheResult> {
+  await requireRole(["administrateur", "responsable_production"]);
+  const supabase = await createClient();
+
+  const { data, error } = await supabase.rpc("generate_stock_export_fiche", {
+    p_production_order_id: productionOrderId,
+  }).single();
+
+  if (error) return { error: error.message };
+  revalidateOdf(productionOrderId);
+  const fiche = data as { id: string; numero: string };
+  return { id: fiche.id, numero: fiche.numero };
+}

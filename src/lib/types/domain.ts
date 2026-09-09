@@ -151,6 +151,11 @@ export interface ProductModel {
   base_price: number | null;
   routing_template_id: string | null;
   active: boolean;
+  // Présent depuis la migration 0005, éditable depuis l'application seulement
+  // à partir du lot 10 (Paramètres > Modèles de produits) — nécessaire pour
+  // que les mouvements de stock entree_semi_fini/entree_fini portent une
+  // référence Sage exploitable.
+  sage_reference: string | null;
 }
 
 // Lot 9 — configurateur couleur par zone (section 8 du document de logique).
@@ -421,6 +426,42 @@ export interface StockItem {
   quantity_available: number;
   warehouse: string | null;
   last_sync_at: string;
+}
+
+// Lot 10 — mouvements de stock & fiches d'import Sage (sections 16/19/20).
+
+export type StockMovementType =
+  | "sortie_mp"
+  | "entree_semi_fini"
+  | "sortie_semi_fini"
+  | "entree_fini"
+  | "retour_mp";
+
+/**
+ * Toujours dérivé (record_pesee / create_article_lot), jamais saisi
+ * directement — voir migration 0020. `article_ref` est polymorphe et peut
+ * être absent (stock_item_view pas encore synchronisé, ou modèle de produit
+ * sans référence Sage saisie).
+ */
+export interface StockMovement {
+  id: string;
+  production_order_id: string;
+  type: StockMovementType;
+  article_ref: string | null;
+  quantite_ou_poids: number;
+  unite: "kg" | "piece";
+  exported_in_fiche_id: string | null;
+  created_by: string | null;
+  created_at: string;
+}
+
+/** Fiche numérotée regroupant les mouvements pas encore exportés d'un ODF, à un instant donné. */
+export interface StockExportFiche {
+  id: string;
+  numero: string;
+  production_order_id: string;
+  generated_at: string;
+  generated_by: string | null;
 }
 
 export interface ClientProductionStatus {
