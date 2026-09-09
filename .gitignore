@@ -30,3 +30,6 @@ npm-debug.log*
 *.patch
 /patches/
 /patbun/
+
+# cache local de la CLI Supabase (project-ref, pooler-url...)
+/supabase/.temp/

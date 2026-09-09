@@ -114,3 +114,99 @@ export async function createArticleLot(
   revalidatePath("/atelier/production");
   return { code: (data as { code: string }).code };
 }
+
+/* ============================================================
+   Pesées & sacs de déchets (lot 7, sections 16/17 du document de logique)
+============================================================ */
+
+export type RecordPeseeResult = { error: string } | { id: string };
+
+/**
+ * Pesée générique — reception_tissu / sortie_lot / retour_stock. Aucune
+ * vérification de rôle ici : `record_pesee` (SECURITY DEFINER) fait autorité
+ * (chef de la section Coupe, ou responsable_production/administrateur), même
+ * périmètre que create_article_lot/close_matelas. `sac_dechet` est exclu ici
+ * volontairement — il passe par recordBagWeighing (mécanique par différence,
+ * section 17).
+ */
+export async function recordPesee(
+  type: "reception_tissu" | "sortie_lot" | "retour_stock",
+  productionOrderId: string,
+  poidsKg: number,
+  referenceId?: string | null
+): Promise<RecordPeseeResult> {
+  await requireUser();
+  const supabase = await createClient();
+
+  const { data, error } = await supabase.rpc("record_pesee", {
+    p_type: type,
+    p_production_order_id: productionOrderId,
+    p_poids_kg: poidsKg,
+    p_reference_id: referenceId || null,
+  });
+
+  if (error) return { error: error.message };
+
+  revalidatePath("/atelier/section");
+  revalidatePath("/atelier/production");
+  return { id: data as string };
+}
+
+export type CreateWasteBagResult = { error: string } | { id: string; code: string };
+
+export async function createWasteBag(): Promise<CreateWasteBagResult> {
+  await requireUser();
+  const supabase = await createClient();
+
+  const { data, error } = await supabase.rpc("create_waste_bag").single();
+  if (error) return { error: error.message };
+
+  revalidatePath("/atelier/section");
+  const bag = data as { id: string; code: string };
+  return { id: bag.id, code: bag.code };
+}
+
+export type RecordBagWeighingResult = { error: string } | { deltaKg: number };
+
+/**
+ * Pesée incrémentale d'un sac de déchets — le delta (poids relevé − dernier
+ * relevé) est calculé côté Postgres, jamais côté client (section 17 : "aucun
+ * calcul mental requis côté atelier").
+ */
+export async function recordBagWeighing(
+  sacId: string,
+  poidsReleveKg: number,
+  productionOrderId: string,
+  traceId?: string | null
+): Promise<RecordBagWeighingResult> {
+  await requireUser();
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .rpc("record_bag_weighing", {
+      p_sac_id: sacId,
+      p_poids_releve_kg: poidsReleveKg,
+      p_production_order_id: productionOrderId,
+      p_trace_id: traceId || null,
+    })
+    .single();
+
+  if (error) return { error: error.message };
+
+  revalidatePath("/atelier/section");
+  revalidatePath("/atelier/production");
+  return { deltaKg: (data as { delta_kg: number }).delta_kg };
+}
+
+/** Marque un sac "chargé" — poids_total_kg figé sur le dernier relevé. */
+export async function closeWasteBag(sacId: string): Promise<RecordQuantityResult> {
+  await requireUser();
+  const supabase = await createClient();
+
+  const { error } = await supabase.rpc("close_waste_bag", { p_sac_id: sacId });
+  if (error) return { error: error.message };
+
+  revalidatePath("/atelier/section");
+  revalidatePath("/dechets");
+  return {};
+}
