@@ -250,6 +250,117 @@ export async function resolveAnomaly(anomalyId: string, productionOrderId: strin
   return {};
 }
 
+// ============================================================================
+// Lot 9 — configurateur couleur par zone (section 8/9 du document de
+// logique) : même pattern que sections/tailles ci-dessus — écriture directe
+// autorisée par la RLS (is_production_manager()), pas de RPC dédiée.
+// ============================================================================
+
+/** Choix du modèle de produit — détermine le gabarit de zones proposé ensuite. */
+export async function setProductionOrderProductModel(productionOrderId: string, productModelId: string) {
+  await requireRole(["administrateur", "responsable_production"]);
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("production_orders")
+    .update({ product_model_id: productModelId })
+    .eq("id", productionOrderId);
+  if (error) return { error: error.message };
+  revalidateOdf(productionOrderId);
+  return {};
+}
+
+/**
+ * Couleur choisie par zone — remplace intégralement la liste (même logique
+ * que setProductionOrderSizes). `zone_key` revalidé contre le gabarit réel
+ * du modèle de produit de l'ODF plutôt que de faire confiance à l'appelant.
+ */
+export async function setProductionOrderZoneColors(
+  productionOrderId: string,
+  entries: { zone_key: string; color_id: string }[]
+) {
+  await requireRole(["administrateur", "responsable_production"]);
+  const supabase = await createClient();
+
+  const { data: order } = await supabase
+    .from("production_orders")
+    .select("product_model_id")
+    .eq("id", productionOrderId)
+    .single();
+  if (!order?.product_model_id) return { error: "Choisissez d'abord un modèle de produit pour cet ODF." };
+
+  const { data: template } = await supabase
+    .from("product_zone_templates")
+    .select("zone_key")
+    .eq("product_model_id", order.product_model_id);
+  const validZoneKeys = new Set((template ?? []).map((z) => z.zone_key));
+
+  const rows = entries.filter((e) => e.zone_key && e.color_id);
+  const invalidZone = rows.find((e) => !validZoneKeys.has(e.zone_key));
+  if (invalidZone) {
+    return { error: `Zone inconnue pour ce modèle de produit : "${invalidZone.zone_key}".` };
+  }
+
+  const { error: delError } = await supabase
+    .from("production_order_zone_colors")
+    .delete()
+    .eq("production_order_id", productionOrderId);
+  if (delError) return { error: delError.message };
+
+  if (rows.length > 0) {
+    const { error: insError } = await supabase.from("production_order_zone_colors").insert(
+      rows.map((r) => ({
+        production_order_id: productionOrderId,
+        zone_key: r.zone_key,
+        color_id: r.color_id,
+      }))
+    );
+    if (insError) return { error: insError.message };
+  }
+
+  revalidateOdf(productionOrderId);
+  return {};
+}
+
+/** Commentaire libre de disponibilité (achats/stock) — jamais validé par le logiciel (section 9). */
+export async function setProductionOrderColorNote(productionOrderId: string, note: string) {
+  await requireRole(["administrateur", "responsable_production"]);
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("production_orders")
+    .update({ note_disponibilite_couleurs: note.trim() || null })
+    .eq("id", productionOrderId);
+  if (error) return { error: error.message };
+  revalidateOdf(productionOrderId);
+  return {};
+}
+
+/** Visuel/maquette joint à l'ODF (MEDIA_FILE) — même pattern que attachMediaFileToSample. */
+export async function attachMediaFileToProductionOrder(productionOrderId: string, mediaFileId: string) {
+  const { authId } = await requireRole(["administrateur", "responsable_production"]);
+  const supabase = await createClient();
+  const { error } = await supabase.from("production_order_media_files").insert({
+    production_order_id: productionOrderId,
+    media_file_id: mediaFileId,
+    added_by: authId,
+  });
+  if (error) return { error: error.message };
+  revalidateOdf(productionOrderId);
+  return {};
+}
+
+export async function detachMediaFileFromProductionOrder(productionOrderId: string, mediaFileId: string) {
+  await requireRole(["administrateur", "responsable_production"]);
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("production_order_media_files")
+    .delete()
+    .eq("production_order_id", productionOrderId)
+    .eq("media_file_id", mediaFileId);
+  if (error) return { error: error.message };
+  revalidateOdf(productionOrderId);
+  return {};
+}
+
 export async function reassignSectionChief(workOrderId: string, userId: string | null) {
   await requireRole(["responsable_production", "administrateur"]);
   const supabase = await createClient();

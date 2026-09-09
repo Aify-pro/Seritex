@@ -153,6 +153,48 @@ export interface ProductModel {
   active: boolean;
 }
 
+// Lot 9 — configurateur couleur par zone (section 8 du document de logique).
+
+/** Palette de couleurs de référence, indépendante du tissu (section 9). */
+export interface Color {
+  id: string;
+  name: string;
+  code: string;
+  active: boolean;
+  created_at: string;
+}
+
+/** Gabarit de zones fixe par modèle de produit (ex. 7 zones pour le t-shirt). */
+export interface ProductZoneTemplate {
+  id: string;
+  product_model_id: string;
+  zone_key: string;
+  zone_label: string;
+  display_order: number;
+  created_at: string;
+}
+
+/** Couleur choisie pour une zone donnée, sur un ODF donné. */
+export interface ProductionOrderZoneColor {
+  id: string;
+  production_order_id: string;
+  zone_key: string;
+  color_id: string;
+  created_by: string | null;
+  created_at: string;
+  colors?: Pick<Color, "id" | "name" | "code">;
+}
+
+/** Visuel/maquette joint à l'ODF (mécanisme MEDIA_FILE, pas un nouveau système de stockage). */
+export interface ProductionOrderMediaFile {
+  id: string;
+  production_order_id: string;
+  media_file_id: string;
+  added_by: string | null;
+  added_at: string;
+  media_files?: MediaFile;
+}
+
 export interface RequestRecord {
   id: string;
   reference: string;
@@ -216,8 +258,15 @@ export interface ProductionOrder {
   // Lot 2 : surplus tracé par taille au moment de la validation (section 11
   // du document de logique), ex. { "L": 5, "XL": 2 } — null si aucun surplus.
   mention_surplus_traces: Record<string, number> | null;
+  // Lot 9 : modèle de produit (détermine le gabarit de zones du
+  // configurateur couleur) et commentaire libre de disponibilité des
+  // couleurs — jamais validé par le logiciel, section 9 du document de
+  // logique.
+  product_model_id: string | null;
+  note_disponibilite_couleurs: string | null;
   created_at: string;
   companies?: Pick<Company, "id" | "name">;
+  product_models?: Pick<ProductModel, "id" | "name"> | null;
 }
 
 // Un ODF est rempli en plusieurs fois avant soumission : les sections

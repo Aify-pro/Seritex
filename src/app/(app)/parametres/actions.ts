@@ -195,6 +195,130 @@ export async function addRoutingStep(formData: FormData) {
   return {};
 }
 
+// ============================================================================
+// Lot 9 — configurateur couleur par zone : palette de couleurs et modèles de
+// produit / gabarit de zones (section 8/9 du document de logique).
+// ============================================================================
+
+const newColorSchema = z.object({
+  name: z.string().min(1),
+  code: z.string().min(1),
+});
+
+/** Palette de couleurs de référence (section 9) — réservée à responsable_production/administrateur. */
+export async function createColor(formData: FormData) {
+  await requireRole(["administrateur", "responsable_production"]);
+  const parsed = newColorSchema.safeParse({
+    name: formData.get("name"),
+    code: formData.get("code"),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message };
+
+  const supabase = await createClient();
+  const { error } = await supabase.from("colors").insert({
+    name: parsed.data.name.trim(),
+    code: parsed.data.code.trim(),
+  });
+  if (error) return { error: error.message };
+  revalidatePath("/parametres/couleurs");
+  return {};
+}
+
+export async function toggleColorActive(colorId: string, active: boolean) {
+  await requireRole(["administrateur", "responsable_production"]);
+  const supabase = await createClient();
+  const { error } = await supabase.from("colors").update({ active }).eq("id", colorId);
+  if (error) return { error: error.message };
+  revalidatePath("/parametres/couleurs");
+  return {};
+}
+
+const newProductModelSchema = z.object({
+  name: z.string().min(1),
+  category: z.string().optional(),
+});
+
+/**
+ * Modèles de produit — aucune page de gestion n'existait avant ce lot
+ * (product_models n'était consommé qu'en lecture, pour les devis et le
+ * catalogue Sage). Nécessaire ici pour rattacher un gabarit de zones.
+ */
+export async function createProductModel(formData: FormData) {
+  await requireRole(["administrateur", "responsable_production"]);
+  const parsed = newProductModelSchema.safeParse({
+    name: formData.get("name"),
+    category: formData.get("category"),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message };
+
+  const supabase = await createClient();
+  const { error } = await supabase.from("product_models").insert({
+    name: parsed.data.name.trim(),
+    category: parsed.data.category?.trim() || null,
+  });
+  if (error) return { error: error.message };
+  revalidatePath("/parametres/produits");
+  return {};
+}
+
+export async function toggleProductModelActive(productModelId: string, active: boolean) {
+  await requireRole(["administrateur", "responsable_production"]);
+  const supabase = await createClient();
+  const { error } = await supabase.from("product_models").update({ active }).eq("id", productModelId);
+  if (error) return { error: error.message };
+  revalidatePath("/parametres/produits");
+  return {};
+}
+
+const newZoneSchema = z.object({
+  product_model_id: z.string().uuid(),
+  zone_key: z
+    .string()
+    .trim()
+    .min(1)
+    .regex(/^[a-z0-9_]+$/, "Clé de zone : minuscules, chiffres et underscores uniquement"),
+  zone_label: z.string().trim().min(1),
+});
+
+/** Ajoute une zone au gabarit d'un modèle de produit (section 8) — placée après les zones existantes. */
+export async function addProductZoneTemplate(formData: FormData) {
+  await requireRole(["administrateur", "responsable_production"]);
+  const parsed = newZoneSchema.safeParse({
+    product_model_id: formData.get("product_model_id"),
+    zone_key: formData.get("zone_key"),
+    zone_label: formData.get("zone_label"),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message };
+
+  const supabase = await createClient();
+  const { data: existing } = await supabase
+    .from("product_zone_templates")
+    .select("display_order")
+    .eq("product_model_id", parsed.data.product_model_id)
+    .order("display_order", { ascending: false })
+    .limit(1);
+
+  const { error } = await supabase.from("product_zone_templates").insert({
+    product_model_id: parsed.data.product_model_id,
+    zone_key: parsed.data.zone_key,
+    zone_label: parsed.data.zone_label,
+    display_order: (existing?.[0]?.display_order ?? 0) + 1,
+  });
+  if (error) return { error: error.message };
+  revalidatePath("/parametres/produits");
+  return {};
+}
+
+/** Retire une zone du gabarit — réservé à l'administrateur (cohérent avec product_zone_templates_delete). */
+export async function removeProductZoneTemplate(zoneTemplateId: string) {
+  await requireRole(["administrateur"]);
+  const supabase = await createClient();
+  const { error } = await supabase.from("product_zone_templates").delete().eq("id", zoneTemplateId);
+  if (error) return { error: error.message };
+  revalidatePath("/parametres/produits");
+  return {};
+}
+
 /**
  * Simule un cycle de synchronisation du miroir de stock Sage (section 7.1b).
  * En production, ce serait un job planifié utilisant un compte technique
