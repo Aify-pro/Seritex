@@ -97,7 +97,7 @@ alter table production_orders
 update production_orders po
 set product_model_id = sub.only_model_id
 from (
-  select ql.quote_id, min(ql.product_model_id) as only_model_id
+  select ql.quote_id, min(ql.product_model_id::text)::uuid as only_model_id
   from quote_lines ql
   where ql.product_model_id is not null
   group by ql.quote_id
@@ -141,7 +141,7 @@ begin
   -- Modèle de produit rempli automatiquement seulement si le devis ne
   -- mélange pas plusieurs modèles (lot 9) — sinon laissé null, à choisir
   -- manuellement sur l'écran ODF avant de configurer les zones/couleurs.
-  select min(product_model_id) into v_product_model_id
+  select min(product_model_id::text)::uuid into v_product_model_id
   from quote_lines
   where quote_id = p_quote_id and product_model_id is not null
   having count(distinct product_model_id) = 1;
