@@ -17,15 +17,18 @@ const ROUTE_ACCESS: { prefix: string; roles: string[] }[] = [
   { prefix: "/commercial/echantillons", roles: ["commercial", "responsable_production", "administrateur"] },
   { prefix: "/commercial", roles: ["commercial", "administrateur"] },
   { prefix: "/infographie", roles: ["infographiste", "administrateur"] },
-  { prefix: "/atelier/production", roles: ["responsable_production", "administrateur"] },
+  // Gestionnaire de stock : accès aux ODF pour la partie Stock de chaque
+  // fiche (réceptions/sorties/retours, migrations 0022/0023) — pas à
+  // /atelier/section, qui reste le terminal des chefs de section.
+  { prefix: "/atelier/production", roles: ["responsable_production", "administrateur", "gestionnaire_stock"] },
   { prefix: "/atelier/section", roles: ["chef_section", "responsable_production", "administrateur"] },
   // Règles spécifiques évaluées avant la règle générale /parametres ci-dessous :
   // ces écrans sont aussi utiles au responsable production et au commercial
   // (v4 : intégration Sage — stock, clients, articles).
   { prefix: "/parametres/gammes", roles: ["responsable_production", "administrateur"] },
-  { prefix: "/parametres/stock", roles: ["responsable_production", "chef_section", "administrateur"] },
-  { prefix: "/parametres/clients-sage", roles: ["commercial", "responsable_production", "administrateur"] },
-  { prefix: "/parametres/articles-sage", roles: ["commercial", "responsable_production", "administrateur"] },
+  { prefix: "/parametres/stock", roles: ["responsable_production", "chef_section", "administrateur", "gestionnaire_stock"] },
+  { prefix: "/parametres/clients-sage", roles: ["commercial", "responsable_production", "administrateur", "gestionnaire_stock"] },
+  { prefix: "/parametres/articles-sage", roles: ["commercial", "responsable_production", "administrateur", "gestionnaire_stock"] },
   { prefix: "/parametres", roles: ["administrateur"] },
 ];
 

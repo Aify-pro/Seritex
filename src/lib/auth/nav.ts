@@ -105,6 +105,18 @@ export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
     { href: "/atelier/section", label: "File de ma section", icon: navIcon(ClipboardList) },
     { href: "/parametres/stock", label: "Stock Sage (lecture)", icon: navIcon(Warehouse), section: PARAMETRES },
   ],
+  gestionnaire_stock: [
+    { href: "/dashboard", label: "Tableau de bord", icon: navIcon(LayoutDashboard) },
+    { href: "/atelier/production", label: "Ordres de fabrication", icon: navIcon(Factory) },
+    { href: "/parametres/stock", label: "Stock Sage (lecture)", icon: navIcon(Warehouse), section: PARAMETRES },
+    {
+      href: "/parametres/clients-sage",
+      label: "Clients Sage (lecture)",
+      icon: navIcon(Building2),
+      section: PARAMETRES,
+    },
+    { href: "/parametres/articles-sage", label: "Articles Sage (lecture)", icon: navIcon(Package), section: PARAMETRES },
+  ],
   administrateur: [
     { href: "/dashboard", label: "Tableau de bord", icon: navIcon(LayoutDashboard) },
     { href: "/commercial/clients", label: "Clients", icon: navIcon(Contact) },

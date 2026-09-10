@@ -9,7 +9,12 @@ export type UserRole =
   | "infographiste"
   | "responsable_production"
   | "chef_section"
-  | "administrateur";
+  | "administrateur"
+  // Réceptions/sorties/retours de matière — mouvements de stock et fiches
+  // d'export Sage, depuis la partie Stock de la fiche ODF. Ajouté suite au
+  // constat que la section Coupe ne devait pas saisir la réception de
+  // marchandise (migrations 0022/0023).
+  | "gestionnaire_stock";
 
 export type RequestStatus =
   | "nouvelle"
@@ -503,6 +508,7 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   responsable_production: "Responsable production",
   chef_section: "Chef de section",
   administrateur: "Administrateur",
+  gestionnaire_stock: "Gestionnaire de stock",
 };
 
 export const REQUEST_STATUS_LABELS: Record<RequestStatus, string> = {

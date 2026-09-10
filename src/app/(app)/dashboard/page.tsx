@@ -255,5 +255,27 @@ export default async function DashboardPage() {
     );
   }
 
+  if (profile.role === "gestionnaire_stock") {
+    const { data: movements } = await supabase
+      .from("stock_movements")
+      .select("id")
+      .is("exported_in_fiche_id", null);
+
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          title="Gestion du stock"
+          description="Réceptions, sorties et retours de matière, par ordre de fabrication."
+        />
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <StatCard label="Mouvements non exportés" value={movements?.length ?? 0} tone="warning" />
+        </div>
+        <Link href="/atelier/production" className="text-sm font-medium text-brand hover:underline">
+          Ouvrir les ordres de fabrication →
+        </Link>
+      </div>
+    );
+  }
+
   return null;
 }

@@ -18,7 +18,7 @@ export default async function ProductionOrdersPage({
 }: {
   searchParams: Promise<{ archives?: string }>;
 }) {
-  await requireRole(["responsable_production", "administrateur"]);
+  await requireRole(["responsable_production", "administrateur", "gestionnaire_stock"]);
   const { archives } = await searchParams;
   const showArchived = archives === "1";
   const supabase = await createClient();
