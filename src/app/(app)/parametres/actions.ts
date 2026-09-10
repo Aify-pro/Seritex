@@ -337,6 +337,43 @@ export async function removeProductZoneTemplate(zoneTemplateId: string) {
   return {};
 }
 
+// Lot 12 — nomenclature (fournitures constantes).
+
+const newNomenclatureLineSchema = z.object({
+  product_model_id: z.string().uuid(),
+  designation: z.string().trim().min(1),
+  quantite_par_piece: z.coerce.number().positive(),
+  unite: z.string().trim().min(1),
+});
+
+/** Ajoute une ligne de nomenclature (composant constant hors tissu) à un modèle de produit. */
+export async function addNomenclatureLine(formData: FormData) {
+  await requireRole(["administrateur", "responsable_production"]);
+  const parsed = newNomenclatureLineSchema.safeParse({
+    product_model_id: formData.get("product_model_id"),
+    designation: formData.get("designation"),
+    quantite_par_piece: formData.get("quantite_par_piece"),
+    unite: formData.get("unite"),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message };
+
+  const supabase = await createClient();
+  const { error } = await supabase.from("nomenclature_lines").insert(parsed.data);
+  if (error) return { error: error.message };
+  revalidatePath("/parametres/produits");
+  return {};
+}
+
+/** Retire une ligne de nomenclature — réservé à l'administrateur (cohérent avec nomenclature_lines_delete). */
+export async function removeNomenclatureLine(lineId: string) {
+  await requireRole(["administrateur"]);
+  const supabase = await createClient();
+  const { error } = await supabase.from("nomenclature_lines").delete().eq("id", lineId);
+  if (error) return { error: error.message };
+  revalidatePath("/parametres/produits");
+  return {};
+}
+
 /**
  * Simule un cycle de synchronisation du miroir de stock Sage (section 7.1b).
  * En production, ce serait un job planifié utilisant un compte technique

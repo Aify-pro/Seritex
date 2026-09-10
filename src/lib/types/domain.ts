@@ -179,6 +179,18 @@ export interface ProductZoneTemplate {
   created_at: string;
 }
 
+// Lot 12 — nomenclature (fournitures constantes).
+
+/** Composant constant hors tissu (boutons, fil, colle, col...) et sa quantité par pièce, pour un modèle de produit donné. */
+export interface NomenclatureLine {
+  id: string;
+  product_model_id: string;
+  designation: string;
+  quantite_par_piece: number;
+  unite: string;
+  created_at: string;
+}
+
 /** Couleur choisie pour une zone donnée, sur un ODF donné. */
 export interface ProductionOrderZoneColor {
   id: string;
