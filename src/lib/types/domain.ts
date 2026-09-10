@@ -50,7 +50,10 @@ export type WorkOrderEventType =
   | "termine"
   | "bloque"
   | "debloque"
-  | "quantite_ajoutee";
+  | "quantite_ajoutee"
+  // Lot 4 (0013_lot4_cloture_matelas_enum.sql) : clôture d'un matelas côté
+  // section Coupe — voir les colonnes dédiées sur WorkOrderEvent ci-dessous.
+  | "matelas_cloture";
 
 export type SampleRequestStatus =
   | "demande"
@@ -336,6 +339,12 @@ export interface WorkOrderEvent {
   quantity: number | null;
   comment: string | null;
   occurred_at: string;
+  // Lot 4 (0014_lot4_cloture_matelas.sql) : renseignés uniquement pour
+  // event_type = "matelas_cloture".
+  trace_id: string | null;
+  resultat: "ok" | "probleme" | null;
+  quantites_obtenues: Record<string, number> | null;
+  poids_dechet_kg: number | null;
 }
 
 export interface SampleRequestRecord {
