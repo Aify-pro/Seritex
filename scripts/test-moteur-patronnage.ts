@@ -8,6 +8,11 @@
  *  3. une pièce posée en miroir est reconnue ET marquée comme telle ;
  *  4. une pièce d'une AUTRE TAILLE reste non reconnue — la tolérance
  *     d'échelle fichier ne doit jamais absorber une erreur de gradation.
+ *  7. une pièce exportée en plusieurs contours imbriqués (ligne de coupe +
+ *     valeur de couture + détail interne, convention constatée sur des
+ *     tracés réels) ne compte que pour UNE pièce, sur son contour externe ;
+ *  8. une pièce posée via une entité INSERT référençant un bloc (dxf.blocks)
+ *     est reconnue au même titre qu'une entité LWPOLYLINE directe.
  *
  * Lancer : npx tsx scripts/test-moteur-patronnage.ts
  */
@@ -49,6 +54,21 @@ function mirror(pts: Point[]): Point[] {
   return pts.map(([x, y]) => [-x, y] as Point).reverse();
 }
 
+// Contour imbriqué à l'intérieur d'une pièce (valeur de couture, détail
+// interne) : un homothétique légèrement plus petit, centré sur le même
+// repère que la pièce d'origine — reproduit la convention constatée sur des
+// tracés réels (plusieurs contours quasi concentriques par pièce).
+function contourInterieur(pts: Point[], facteur: number): Point[] {
+  return pts.map(([x, y]) => [x * facteur, y * facteur] as Point);
+}
+
+// Petit détail interne (dart, cran) : un losange minuscule posé dans
+// l'emprise de la pièce.
+function detailInterne(cx: number, cy: number): Point[] {
+  const r = 5;
+  return [[cx, cy - r], [cx + r, cy], [cx, cy + r], [cx - r, cy]];
+}
+
 /* ---------- Écriture d'un DXF minimal mais valide ---------- */
 
 function toDxf(pieces: { layer: string; points: Point[] }[]): string {
@@ -59,6 +79,54 @@ function toDxf(pieces: { layer: string; points: Point[] }[]): string {
     for (const [x, y] of points) body.push("10", x.toFixed(4), "20", y.toFixed(4));
   }
   return [...head, ...body, "0", "ENDSEC", "0", "EOF"].join("\n");
+}
+
+// DXF utilisant la convention BLOCK/INSERT (une pièce = un bloc nommé posé
+// via une entité INSERT, position + rotation) au lieu de LWPOLYLINE au
+// niveau racine — convention constatée sur un tracé de placement réel.
+function toDxfWithBlocks(
+  inserts: { block: string; layer: string; points: Point[]; x: number; y: number; rotationDeg: number }[]
+): string {
+  const blockNames = [...new Set(inserts.map((i) => i.block))];
+  const blocksSection: string[] = ["0", "SECTION", "2", "BLOCKS"];
+  for (const name of blockNames) {
+    const def = inserts.find((i) => i.block === name)!;
+    blocksSection.push("0", "BLOCK", "8", "0", "2", name, "70", "0", "10", "0.0", "20", "0.0");
+    blocksSection.push(
+      "0",
+      "LWPOLYLINE",
+      "8",
+      def.layer,
+      "90",
+      String(def.points.length),
+      "70",
+      "1"
+    );
+    for (const [x, y] of def.points) blocksSection.push("10", x.toFixed(4), "20", y.toFixed(4));
+    blocksSection.push("0", "ENDBLK");
+  }
+  blocksSection.push("0", "ENDSEC");
+
+  const entitiesSection: string[] = ["0", "SECTION", "2", "ENTITIES"];
+  for (const i of inserts) {
+    entitiesSection.push(
+      "0",
+      "INSERT",
+      "8",
+      "0",
+      "2",
+      i.block,
+      "10",
+      i.x.toFixed(4),
+      "20",
+      i.y.toFixed(4),
+      "50",
+      String(i.rotationDeg)
+    );
+  }
+  entitiesSection.push("0", "ENDSEC");
+
+  return [...blocksSection, ...entitiesSection, "0", "EOF"].join("\n");
 }
 
 /* ---------- Bibliothèque de référence ---------- */
@@ -179,6 +247,39 @@ console.log("\n6. Tracé sans aucune correspondance dans la bibliothèque");
   const { res } = analyser([{ layer: "CONTOUR", points: etranger }]);
   check("aucun facteur d'échelle inventé", res.facteurEchelle === 1, `f=${res.facteurEchelle}`);
   check("pièce non reconnue", res.piecesNonReconnues.length === 1);
+}
+
+// --- 7. Contours imbriqués (ligne de coupe + valeur de couture + détail
+// interne) : convention constatée sur des tracés réels — une seule pièce
+// doit être comptée, sur son contour externe.
+console.log("\n7. Pièce exportée en 3 contours imbriqués (coupe + couture + détail)");
+{
+  const dev = devantTshirt();
+  const pieces = [
+    { layer: "CONTOUR", points: dev }, // contour de coupe (externe)
+    { layer: "CONTOUR", points: contourInterieur(dev, 0.95) }, // valeur de couture
+    { layer: "CONTOUR", points: detailInterne(300, 300) }, // détail interne
+    { layer: "CONTOUR", points: translate(manche(), 1500, 900) }, // pièce distincte, non imbriquée
+  ];
+  const { contours, res } = analyser(pieces);
+  check("contours imbriqués dédupliqués (2 pièces, pas 4)", contours.length === 2, `${contours.length} contour(s)`);
+  check("100 % reconnu sur le contour externe", res.reconnaissanceComplete, `taux=${(res.tauxReconnaissance * 100).toFixed(0)}%`);
+  const devantReconnu = res.patronsReconnus.find((p) => p.piece === "Devant");
+  check("Devant compté une seule fois", devantReconnu?.quantite === 1, `quantite=${devantReconnu?.quantite}`);
+}
+
+// --- 8. Pièces posées via bloc/INSERT (convention constatée sur un tracé de
+// placement réel) au lieu de LWPOLYLINE au niveau racine.
+console.log("\n8. Tracé utilisant des blocs (BLOCK/INSERT) au lieu de LWPOLYLINE racine");
+{
+  const dxfText = toDxfWithBlocks([
+    { block: "PCE_001", layer: "1", points: devantTshirt(), x: 0, y: 0, rotationDeg: 0 },
+    { block: "PCE_002", layer: "1", points: manche(), x: 1500, y: 400, rotationDeg: 90 },
+  ]);
+  const contours = parseDxfContours(dxfText);
+  const res = reconnaitreTrace(contours, biblio);
+  check("2 contours résolus depuis les blocs", contours.length === 2, `${contours.length} contour(s)`);
+  check("100 % reconnu (position/rotation de l'INSERT appliquées)", res.reconnaissanceComplete, `taux=${(res.tauxReconnaissance * 100).toFixed(0)}%`);
 }
 
 console.log(
