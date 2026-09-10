@@ -17,7 +17,7 @@ import { ProductionOrderMediaFiles } from "./production-order-media-files";
 import { StockMovementsPanel } from "./stock-movements-panel";
 import type { StatutFiche } from "@/lib/patronnage/types";
 import type { StockMovement, StockExportFiche } from "@/lib/types/domain";
-import { CheckCircle2, Package, QrCode } from "lucide-react";
+import { CheckCircle2, ChevronRight, Package, QrCode } from "lucide-react";
 import Link from "next/link";
 
 const LOT_CATEGORIE_LABELS: Record<string, string> = { semi_fini: "Semi-fini", fini: "Fini", dechet: "Déchet" };
@@ -267,7 +267,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
       <Card>
         <CardHeader
           title="Ordres de travail"
-          description="Un sous-ODF par section retenue, généré à la validation de l'ODF."
+          description="Un sous-ODF par section retenue, généré à la validation de l'ODF. Cliquez sur un sous-ODF pour son détail."
         />
         <CardBody className="p-0">
           {!workOrders || workOrders.length === 0 ? (
@@ -279,28 +279,34 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
               {workOrders.map((wo, i) => {
                 const atteinte = wo.quantity_done >= wo.quantity_planned;
                 return (
-                  <li key={wo.id} className="flex items-center gap-4 px-5 py-4">
-                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-surface-muted text-xs font-semibold text-foreground-muted">
-                      {i + 1}
-                    </span>
-                    <div className="flex-1">
-                      <p className="text-sm font-medium text-foreground">
-                        {(wo.sections as unknown as { name: string } | null)?.name} — {wo.reference}
-                      </p>
-                      <p className="text-xs text-foreground-muted">
-                        {wo.quantity_done}/{wo.quantity_planned} pièces
-                        {wo.actual_start ? ` · démarré le ${formatDateTime(wo.actual_start)}` : ""}
-                        {wo.actual_end ? ` · quantité atteinte le ${formatDateTime(wo.actual_end)}` : ""}
-                      </p>
-                      {wo.blocking_reason && (
-                        <p className="mt-1 text-xs text-danger">⚠ {wo.blocking_reason}</p>
+                  <li key={wo.id}>
+                    <Link
+                      href={`/atelier/production/${order.id}/ot/${wo.id}`}
+                      className="flex items-center gap-4 px-5 py-4 hover:bg-surface-muted"
+                    >
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-surface-muted text-xs font-semibold text-foreground-muted">
+                        {i + 1}
+                      </span>
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-foreground">
+                          {(wo.sections as unknown as { name: string } | null)?.name} — {wo.reference}
+                        </p>
+                        <p className="text-xs text-foreground-muted">
+                          {wo.quantity_done}/{wo.quantity_planned} pièces
+                          {wo.actual_start ? ` · démarré le ${formatDateTime(wo.actual_start)}` : ""}
+                          {wo.actual_end ? ` · quantité atteinte le ${formatDateTime(wo.actual_end)}` : ""}
+                        </p>
+                        {wo.blocking_reason && (
+                          <p className="mt-1 text-xs text-danger">⚠ {wo.blocking_reason}</p>
+                        )}
+                      </div>
+                      {atteinte ? (
+                        <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
+                      ) : (
+                        <Package className="h-4 w-4 shrink-0 text-foreground-muted" />
                       )}
-                    </div>
-                    {atteinte ? (
-                      <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
-                    ) : (
-                      <Package className="h-4 w-4 shrink-0 text-foreground-muted" />
-                    )}
+                      <ChevronRight className="h-4 w-4 shrink-0 text-foreground-muted" />
+                    </Link>
                   </li>
                 );
               })}
