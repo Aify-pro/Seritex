@@ -136,28 +136,11 @@ export interface Section {
   active: boolean;
 }
 
-export interface RoutingTemplate {
-  id: string;
-  name: string;
-  active: boolean;
-}
-
-export interface RoutingStep {
-  id: string;
-  routing_template_id: string;
-  section_id: string;
-  sequence_order: number;
-  depends_on_step_id: string | null;
-  standard_duration_minutes: number | null;
-  instructions: string | null;
-}
-
 export interface ProductModel {
   id: string;
   name: string;
   category: string | null;
   base_price: number | null;
-  routing_template_id: string | null;
   active: boolean;
   // Présent depuis la migration 0005, éditable depuis l'application seulement
   // à partir du lot 10 (Paramètres > Modèles de produits) — nécessaire pour
@@ -295,8 +278,10 @@ export interface ProductionOrder {
 }
 
 // Un ODF est rempli en plusieurs fois avant soumission : les sections
-// retenues (remplace la dépendance à routing_templates/routing_steps pour
-// la génération des sous-ODF) et les quantités par taille.
+// retenues, dans l'ordre où le travail doit passer (plus de gamme
+// opératoire figée par produit — module Paramètres > Gammes opératoires
+// retiré, routing_templates/routing_steps ne pilotaient plus rien) et les
+// quantités par taille.
 export interface ProductionOrderSection {
   id: string;
   production_order_id: string;
@@ -318,7 +303,6 @@ export interface WorkOrder {
   reference: string;
   production_order_id: string;
   section_id: string;
-  routing_step_id: string | null;
   predecessor_work_order_id: string | null;
   quantity_planned: number;
   quantity_done: number;

@@ -8,7 +8,6 @@ import {
   ClipboardList,
   Users,
   Boxes,
-  Route,
   Warehouse,
   ScrollText,
   Image as ImageIcon,
@@ -90,7 +89,6 @@ export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
     { href: "/mediatheque", label: "Médiathèque", icon: navIcon(FolderOpen) },
     { href: "/parametres/produits", label: "Modèles de produits", icon: navIcon(Shirt), section: PARAMETRES },
     { href: "/parametres/couleurs", label: "Palette de couleurs", icon: navIcon(SwatchBook), section: PARAMETRES },
-    { href: "/parametres/gammes", label: "Gammes opératoires", icon: navIcon(Route), section: PARAMETRES },
     { href: "/parametres/stock", label: "Stock Sage (lecture)", icon: navIcon(Warehouse), section: PARAMETRES },
     {
       href: "/parametres/clients-sage",
@@ -132,7 +130,6 @@ export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
     { href: "/parametres/sections", label: "Sections d'atelier", icon: navIcon(Boxes), section: PARAMETRES },
     { href: "/parametres/produits", label: "Modèles de produits", icon: navIcon(Shirt), section: PARAMETRES },
     { href: "/parametres/couleurs", label: "Palette de couleurs", icon: navIcon(SwatchBook), section: PARAMETRES },
-    { href: "/parametres/gammes", label: "Gammes opératoires", icon: navIcon(Route), section: PARAMETRES },
     { href: "/parametres/stockage", label: "Stockage médiathèque", icon: navIcon(Database), section: PARAMETRES },
     { href: "/parametres/sage", label: "Intégration Sage", icon: navIcon(Plug), section: PARAMETRES },
     { href: "/parametres/stock", label: "Stock Sage (lecture)", icon: navIcon(Warehouse), section: PARAMETRES },

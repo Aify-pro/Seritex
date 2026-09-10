@@ -25,7 +25,6 @@ const ROUTE_ACCESS: { prefix: string; roles: string[] }[] = [
   // Règles spécifiques évaluées avant la règle générale /parametres ci-dessous :
   // ces écrans sont aussi utiles au responsable production et au commercial
   // (v4 : intégration Sage — stock, clients, articles).
-  { prefix: "/parametres/gammes", roles: ["responsable_production", "administrateur"] },
   { prefix: "/parametres/stock", roles: ["responsable_production", "chef_section", "administrateur", "gestionnaire_stock"] },
   { prefix: "/parametres/clients-sage", roles: ["commercial", "responsable_production", "administrateur", "gestionnaire_stock"] },
   { prefix: "/parametres/articles-sage", roles: ["commercial", "responsable_production", "administrateur", "gestionnaire_stock"] },

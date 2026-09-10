@@ -138,64 +138,6 @@ export async function toggleSectionActive(sectionId: string, active: boolean) {
   return {};
 }
 
-const newTemplateSchema = z.object({ name: z.string().min(1) });
-
-export async function createRoutingTemplate(formData: FormData) {
-  await requireRole(["administrateur", "responsable_production"]);
-  const parsed = newTemplateSchema.safeParse({ name: formData.get("name") });
-  if (!parsed.success) return { error: parsed.error.issues[0]?.message };
-
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("routing_templates")
-    .insert({ name: parsed.data.name })
-    .select()
-    .single();
-  if (error) return { error: error.message };
-  revalidatePath("/parametres/gammes");
-  return { id: data.id as string };
-}
-
-const newStepSchema = z.object({
-  routing_template_id: z.string().uuid(),
-  section_id: z.string().uuid(),
-  standard_duration_minutes: z.coerce.number().int().positive().optional(),
-  instructions: z.string().optional(),
-});
-
-export async function addRoutingStep(formData: FormData) {
-  await requireRole(["administrateur", "responsable_production"]);
-  const parsed = newStepSchema.safeParse({
-    routing_template_id: formData.get("routing_template_id"),
-    section_id: formData.get("section_id"),
-    standard_duration_minutes: formData.get("standard_duration_minutes"),
-    instructions: formData.get("instructions"),
-  });
-  if (!parsed.success) return { error: parsed.error.issues[0]?.message };
-
-  const supabase = await createClient();
-  const { data: existingSteps } = await supabase
-    .from("routing_steps")
-    .select("id,sequence_order")
-    .eq("routing_template_id", parsed.data.routing_template_id)
-    .order("sequence_order", { ascending: false })
-    .limit(1);
-
-  const lastStep = existingSteps?.[0];
-
-  const { error } = await supabase.from("routing_steps").insert({
-    routing_template_id: parsed.data.routing_template_id,
-    section_id: parsed.data.section_id,
-    sequence_order: (lastStep?.sequence_order ?? 0) + 1,
-    depends_on_step_id: lastStep?.id ?? null,
-    standard_duration_minutes: parsed.data.standard_duration_minutes ?? null,
-    instructions: parsed.data.instructions || null,
-  });
-  if (error) return { error: error.message };
-  revalidatePath("/parametres/gammes");
-  return {};
-}
-
 // ============================================================================
 // Lot 9 — configurateur couleur par zone : palette de couleurs et modèles de
 // produit / gabarit de zones (section 8/9 du document de logique).
