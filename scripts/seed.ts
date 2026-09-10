@@ -75,39 +75,6 @@ async function main() {
     sectionIds[name] = data.id;
   }
 
-  console.log("→ Gamme opératoire");
-  const { data: routing, error: routingErr } = await admin
-    .from("routing_templates")
-    .insert({ name: "T-shirt sérigraphié standard" })
-    .select()
-    .single();
-  if (routingErr) throw routingErr;
-
-  const stepsInput = [
-    { section: "Coupe", order: 1, duration: 45 },
-    { section: "Sérigraphie", order: 2, duration: 90 },
-    { section: "Confection", order: 3, duration: 60 },
-  ];
-  const stepIds: string[] = [];
-  let prevStepId: string | null = null;
-  for (const s of stepsInput) {
-    const { data, error } = await admin
-      .from("routing_steps")
-      .insert({
-        routing_template_id: routing.id,
-        section_id: sectionIds[s.section],
-        sequence_order: s.order,
-        depends_on_step_id: prevStepId,
-        standard_duration_minutes: s.duration,
-        instructions: `Étape ${s.section} — gamme standard T-shirt sérigraphié.`,
-      })
-      .select()
-      .single();
-    if (error) throw error;
-    stepIds.push(data.id);
-    prevStepId = data.id;
-  }
-
   console.log("→ Catalogue produit");
   const { data: product, error: productErr } = await admin
     .from("product_models")
@@ -115,7 +82,6 @@ async function main() {
       name: "T-shirt col rond 180g",
       category: "T-shirt",
       base_price: 3500,
-      routing_template_id: routing.id,
     })
     .select()
     .single();
@@ -346,7 +312,6 @@ async function main() {
       reference: "OF-2026-0002-OT1",
       production_order_id: po!.id,
       section_id: sectionIds["Coupe"],
-      routing_step_id: stepIds[0],
       status: "termine",
       quantity_planned: 1000,
       quantity_done: 1000,
@@ -363,7 +328,6 @@ async function main() {
       reference: "OF-2026-0002-OT2",
       production_order_id: po!.id,
       section_id: sectionIds["Sérigraphie"],
-      routing_step_id: stepIds[1],
       predecessor_work_order_id: wo1!.id,
       status: "en_cours",
       quantity_planned: 1000,
@@ -378,7 +342,6 @@ async function main() {
     reference: "OF-2026-0002-OT3",
     production_order_id: po!.id,
     section_id: sectionIds["Confection"],
-    routing_step_id: stepIds[2],
     predecessor_work_order_id: wo2!.id,
     status: "en_attente",
     quantity_planned: 1000,
