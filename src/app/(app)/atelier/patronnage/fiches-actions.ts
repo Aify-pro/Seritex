@@ -196,6 +196,7 @@ export async function updateFiche(ficheId: string, formData: FormData) {
   if (error) return { error: error.message };
 
   revalidatePath("/atelier/patronnage");
+  revalidatePath(`/atelier/patronnage/${ficheId}`);
   return {};
 }
 
@@ -220,6 +221,7 @@ export async function linkOdf(ficheId: string, odfId: string | null) {
   if (error) return { error: error.message };
 
   revalidatePath("/atelier/patronnage");
+  revalidatePath(`/atelier/patronnage/${ficheId}`);
   return {};
 }
 
@@ -249,6 +251,7 @@ export async function validateFiche(ficheId: string) {
   });
 
   revalidatePath("/atelier/patronnage");
+  revalidatePath(`/atelier/patronnage/${ficheId}`);
   return {};
 }
 
@@ -282,6 +285,7 @@ export async function unlockFiche(ficheId: string) {
   });
 
   revalidatePath("/atelier/patronnage");
+  revalidatePath(`/atelier/patronnage/${ficheId}`);
   return {};
 }
 
@@ -298,6 +302,7 @@ export async function archiveFiche(ficheId: string) {
   if (error) return { error: error.message };
 
   revalidatePath("/atelier/patronnage");
+  revalidatePath(`/atelier/patronnage/${ficheId}`);
   return {};
 }
 
@@ -318,6 +323,7 @@ export async function unarchiveFiche(ficheId: string) {
   if (error) return { error: error.message };
 
   revalidatePath("/atelier/patronnage");
+  revalidatePath(`/atelier/patronnage/${ficheId}`);
   return {};
 }
 
@@ -349,6 +355,7 @@ export async function deleteFicheDefinitively(ficheId: string) {
   }
 
   revalidatePath("/atelier/patronnage");
+  revalidatePath(`/atelier/patronnage/${ficheId}`);
   return {};
 }
 
@@ -369,6 +376,7 @@ export async function requestCorrectiveTrace(ficheId: string, justification: str
   if (error) return { error: error.message };
 
   revalidatePath("/atelier/patronnage");
+  revalidatePath(`/atelier/patronnage/${ficheId}`);
   return { traceId: data as string };
 }
 
@@ -425,6 +433,7 @@ export async function addTrace(ficheId: string, formData: FormData) {
   if (error) return { error: error.message };
 
   revalidatePath("/atelier/patronnage");
+  revalidatePath(`/atelier/patronnage/${ficheId}`);
   return {};
 }
 
@@ -448,6 +457,7 @@ export async function updateTrace(traceId: string, ficheId: string, formData: Fo
   if (error) return { error: error.message };
 
   revalidatePath("/atelier/patronnage");
+  revalidatePath(`/atelier/patronnage/${ficheId}`);
   return {};
 }
 
@@ -468,6 +478,7 @@ export async function deleteTrace(traceId: string, ficheId: string) {
   if (error) return { error: error.message };
 
   revalidatePath("/atelier/patronnage");
+  revalidatePath(`/atelier/patronnage/${ficheId}`);
   return {};
 }
 
@@ -492,6 +503,7 @@ export async function removeTraceDxf(traceId: string, ficheId: string) {
   if (error) return { error: error.message };
 
   revalidatePath("/atelier/patronnage");
+  revalidatePath(`/atelier/patronnage/${ficheId}`);
   return {};
 }
 
@@ -595,6 +607,7 @@ export async function uploadTraceDxf(traceId: string, ficheId: string, formData:
   });
 
   revalidatePath("/atelier/patronnage");
+  revalidatePath(`/atelier/patronnage/${ficheId}`);
   return { reconnaissanceComplete: analyse.reconnaissanceComplete };
 }
 

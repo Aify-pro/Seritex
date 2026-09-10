@@ -445,7 +445,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
                     </p>
                   </div>
                   <Link
-                    href={`/atelier/patronnage?fiche=${rt.fiche_id}&trace=${rt.trace_id}`}
+                    href={`/atelier/patronnage/${rt.fiche_id}?trace=${rt.trace_id}`}
                     className="shrink-0 text-xs font-medium text-brand hover:underline"
                   >
                     Voir le tracé →
