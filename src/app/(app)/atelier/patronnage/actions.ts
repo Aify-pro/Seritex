@@ -4,14 +4,10 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireRole } from "@/lib/auth/current-user";
 import { parseDxfContours } from "@/lib/patronnage/dxf";
-import {
-  normalizeShape,
-  compareShapes,
-  appliquerEchelleFichier,
-  type Point,
-} from "@/lib/patronnage/geometry";
+import { normalizeShape, type Point } from "@/lib/patronnage/geometry";
 import { loadReferenceLibrary } from "@/lib/patronnage/bibliotheque";
-import { reconnaitreTrace, SEUIL_RECONNAISSANCE_DEFAUT } from "@/lib/patronnage/reconnaissance";
+import { SEUIL_RECONNAISSANCE_DEFAUT } from "@/lib/patronnage/reconnaissance";
+import { construireAnalyseDetaillee, type TraceAnalysisDetail } from "@/lib/patronnage/detail";
 import { readDxfFile } from "@/lib/patronnage/upload";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -223,46 +219,6 @@ function sanitizeFileName(name: string) {
   return name.replace(/[^a-zA-Z0-9.\-_]/g, "_");
 }
 
-export interface RecognizedGroup {
-  patternPieceId: string;
-  articleCode: string;
-  size: string;
-  pieceName: string;
-  count: number;
-  /** Sous-ensemble de `count` reconnu via la passe miroir — alerte, non bloquant. */
-  mirroredCount: number;
-  referencePoints: Point[];
-  exampleCandidatePoints: Point[];
-}
-
-export interface UnrecognizedPiece {
-  index: number;
-  points: Point[];
-  area: number;
-  perimeter: number;
-  bestGuess: {
-    articleCode: string;
-    size: string;
-    pieceName: string;
-    referencePoints: Point[];
-    confidence: number;
-    areaDiffPct: number;
-    perimDiffPct: number;
-    shapeDiffPct: number;
-  } | null;
-}
-
-export interface TraceAnalysis {
-  totalDetected: number;
-  recognized: RecognizedGroup[];
-  unrecognized: UnrecognizedPiece[];
-  allRecognized: boolean;
-  /** Facteur d'échelle fichier appliqué (1 = aucune correction). */
-  scaleFactor: number;
-  mirrorAlert: boolean;
-  scaleAlert: boolean;
-}
-
 /**
  * Analyse un tracé de placement Diamino : un seul fichier DXF contenant en
  * général de nombreuses pièces, potentiellement de plusieurs patrons, posées
@@ -293,7 +249,7 @@ export interface TraceAnalysis {
  * (`reconnaitreTrace`) : deux verdicts divergents sur le même fichier selon
  * le point d'entrée seraient un défaut de fiabilité du contrôle.
  */
-export async function analyzeTraceDxf(formData: FormData): Promise<TraceAnalysis | { error: string }> {
+export async function analyzeTraceDxf(formData: FormData): Promise<TraceAnalysisDetail | { error: string }> {
   await requireRole(ALLOWED_ROLES);
 
   const read = readDxfFile(formData);
@@ -320,68 +276,5 @@ export async function analyzeTraceDxf(formData: FormData): Promise<TraceAnalysis
   const library = await loadReferenceLibrary(supabase);
   if ("error" in library) return { error: library.error };
 
-  const analyse = reconnaitreTrace(contours, library.references, threshold);
-
-  // Géométries d'aperçu : reconstruites à l'échelle corrigée, pour que le
-  // rendu SVG superpose bien candidat et référence même quand le fichier
-  // était exporté dans une mauvaise unité.
-  const corrected = appliquerEchelleFichier(
-    contours.map((c) => c.points),
-    analyse.facteurEchelle
-  );
-  const byId = new Map(library.references.map((r) => [r.id, r]));
-
-  const recognized: RecognizedGroup[] = analyse.patronsReconnus.map((g) => {
-    const ref = byId.get(g.patron_id);
-    const exempleIndex = analyse.exempleParPatron[g.patron_id];
-    const exemple = exempleIndex !== undefined ? corrected[exempleIndex] : undefined;
-    return {
-      patternPieceId: g.patron_id,
-      articleCode: g.article,
-      size: g.taille,
-      pieceName: g.piece,
-      count: g.quantite,
-      mirroredCount: g.dont_en_miroir,
-      referencePoints: ref?.geom.points ?? [],
-      exampleCandidatePoints: exemple ? normalizeShape(exemple).points : [],
-    };
-  });
-
-  const unrecognized: UnrecognizedPiece[] = analyse.piecesNonReconnues.map((p) => {
-    const geom = normalizeShape(corrected[p.index_piece]);
-    const candidat = p.meilleur_candidat;
-    const ref = candidat ? byId.get(candidat.patron_id) : undefined;
-    // Détail des écarts recalculé pour l'affichage ; le score de confiance
-    // affiché reste celui retenu par le moteur (source unique du verdict).
-    const detail = ref ? compareShapes(geom, ref.geom) : null;
-    return {
-      index: p.index_piece,
-      points: geom.points,
-      area: Math.round(geom.area),
-      perimeter: Math.round(geom.perimeter),
-      bestGuess:
-        candidat && ref && detail
-          ? {
-              articleCode: candidat.article,
-              size: candidat.taille,
-              pieceName: candidat.piece,
-              referencePoints: ref.geom.points,
-              confidence: p.meilleur_score,
-              areaDiffPct: detail.areaDiffPct,
-              perimDiffPct: detail.perimDiffPct,
-              shapeDiffPct: detail.shapeDiffPct,
-            }
-          : null,
-    };
-  });
-
-  return {
-    totalDetected: analyse.nbPiecesDetectees,
-    recognized,
-    unrecognized,
-    allRecognized: analyse.reconnaissanceComplete,
-    scaleFactor: analyse.facteurEchelle,
-    mirrorAlert: analyse.alerteMiroir,
-    scaleAlert: analyse.alerteEchelle,
-  };
+  return construireAnalyseDetaillee(contours, library.references, threshold);
 }

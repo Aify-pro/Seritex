@@ -7,6 +7,7 @@ import { can } from "@/lib/auth/permissions";
 import { parseDxfContours } from "@/lib/patronnage/dxf";
 import { loadReferenceLibrary } from "@/lib/patronnage/bibliotheque";
 import { reconnaitreTrace } from "@/lib/patronnage/reconnaissance";
+import { construireAnalyseDetaillee, type TraceAnalysisDetail } from "@/lib/patronnage/detail";
 import { readDxfFile } from "@/lib/patronnage/upload";
 import type { StatutFiche, RepartitionTailles } from "@/lib/patronnage/types";
 import { revalidatePath } from "next/cache";
@@ -613,4 +614,49 @@ export async function uploadTraceDxf(traceId: string, ficheId: string, formData:
 
 function sanitizeFileName(name: string) {
   return name.replace(/[^a-zA-Z0-9.\-_]/g, "_");
+}
+
+// ------------------------------------------------------------
+// Détail d'une analyse (bouton "Détail" d'un tracé déjà déposé)
+// ------------------------------------------------------------
+
+/**
+ * Reconstruit la vue détaillée d'un tracé déjà déposé — pièce par pièce,
+ * avec le rendu visuel de ce que le moteur a extrait et comparé. Relit le
+ * DXF déjà stocké (jamais de nouvel upload) et relance le moteur contre la
+ * bibliothèque ACTUELLE : aucun changement de schéma, le résultat reste donc
+ * cohérent même si la bibliothèque a évolué depuis le dépôt initial du
+ * tracé. Lecture seule : ne modifie ni le tracé ni son analyse persistée.
+ */
+export async function getTraceDetail(traceId: string, ficheId: string): Promise<TraceAnalysisDetail | { error: string }> {
+  await requirePermission("view");
+
+  const supabase = await createClient();
+  const { data: trace, error: traceError } = await supabase
+    .from("traces_placement")
+    .select("fiche_id,fichier_path")
+    .eq("id", traceId)
+    .single();
+  if (traceError || !trace || trace.fiche_id !== ficheId) return { error: "Tracé introuvable" };
+  if (!trace.fichier_path) return { error: "Aucun fichier déposé pour ce tracé." };
+
+  const admin = createAdminClient();
+  const { data: blob, error: downloadError } = await admin.storage.from("patronnage").download(trace.fichier_path);
+  if (downloadError || !blob) return { error: "Impossible de relire le fichier déposé." };
+
+  let text: string;
+  try {
+    text = await blob.text();
+  } catch {
+    return { error: "Impossible de lire le fichier déposé." };
+  }
+  const contours = parseDxfContours(text);
+  if (contours.length === 0) {
+    return { error: "Aucun contour exploitable détecté dans ce tracé." };
+  }
+
+  const library = await loadReferenceLibrary(supabase);
+  if ("error" in library) return { error: library.error };
+
+  return construireAnalyseDetaillee(contours, library.references, SEUIL_RECONNAISSANCE);
 }

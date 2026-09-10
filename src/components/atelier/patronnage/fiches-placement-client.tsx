@@ -17,6 +17,7 @@ import {
   ArchiveRestore,
   Search,
   Wrench,
+  ScanSearch,
 } from "lucide-react";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Table, Thead, Tbody, Tr, Th, Td, EmptyRow } from "@/components/ui/table";
@@ -25,8 +26,10 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { cn, formatDate, formatDateTime } from "@/lib/utils";
 import { QrScannerButton } from "@/components/atelier/patronnage/qr-scanner-button";
+import { TraceDetailDialog } from "@/components/atelier/patronnage/trace-detail-dialog";
 import type { FichePlacement, RepartitionTailles, StatutFiche, TracePlacement } from "@/lib/patronnage/types";
 import { REPARTITION_TAILLES_KEYS } from "@/lib/patronnage/types";
+import type { TraceAnalysisDetail } from "@/lib/patronnage/detail";
 import {
   createFiche,
   updateFiche,
@@ -46,6 +49,7 @@ import {
   rejectCorrectiveTrace,
   searchOdf,
   searchClient,
+  getTraceDetail,
 } from "@/app/(app)/atelier/patronnage/fiches-actions";
 
 const STATUT_LABELS: Record<StatutFiche, string> = {
@@ -759,8 +763,23 @@ function TraceCard({
   const [error, setError] = useState<string | null>(null);
   const [rejectMotif, setRejectMotif] = useState("");
   const [showReject, setShowReject] = useState(false);
+  const [showDetail, setShowDetail] = useState(false);
+  const [detailPending, startDetailTransition] = useTransition();
+  const [detail, setDetail] = useState<TraceAnalysisDetail | null>(null);
+  const [detailError, setDetailError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const matelasFormRef = useRef<HTMLFormElement>(null);
+
+  function openDetail() {
+    setShowDetail(true);
+    setDetail(null);
+    setDetailError(null);
+    startDetailTransition(async () => {
+      const res = await getTraceDetail(trace.id, fiche.id);
+      if ("error" in res) setDetailError(res.error);
+      else setDetail(res);
+    });
+  }
 
   function run(action: () => Promise<{ error?: string } | { reconnaissanceComplete?: boolean } | undefined>) {
     setError(null);
@@ -870,17 +889,23 @@ function TraceCard({
           ) : undefined
         }
         action={
-          !effectiveLocked &&
-          canModify && (
-            <button
-              onClick={() => {
-                if (confirm("Retirer ce tracé de la fiche ?")) run(() => deleteTrace(trace.id, fiche.id));
-              }}
-              className="text-foreground-muted hover:text-danger"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </button>
-          )
+          <div className="flex items-center gap-2">
+            {a && (
+              <Button size="sm" variant="secondary" onClick={openDetail}>
+                <ScanSearch className="h-3.5 w-3.5" /> Détail
+              </Button>
+            )}
+            {!effectiveLocked && canModify && (
+              <button
+                onClick={() => {
+                  if (confirm("Retirer ce tracé de la fiche ?")) run(() => deleteTrace(trace.id, fiche.id));
+                }}
+                className="text-foreground-muted hover:text-danger"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
         }
       />
       <CardBody className="space-y-4">
@@ -1041,6 +1066,17 @@ function TraceCard({
           </div>
         )}
       </CardBody>
+
+      {a && (
+        <TraceDetailDialog
+          open={showDetail}
+          onOpenChange={setShowDetail}
+          traceReference={trace.reference}
+          loading={detailPending}
+          error={detailError}
+          detail={detail}
+        />
+      )}
     </Card>
   );
 }
