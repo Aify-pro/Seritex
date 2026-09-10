@@ -803,8 +803,10 @@ function WeighBagForm({
    Pesée rapide — reception_tissu / sortie_lot / retour_stock (lot 7, section 16)
 ============================================================ */
 
+// Réception tissu retirée (migrations 0022/0023) : ce n'est plus le rôle de
+// la section Coupe, mais celui du gestionnaire de stock, depuis la partie
+// Stock de la fiche ODF (`/atelier/production/[id]`).
 const PESEE_TYPE_LABELS = {
-  reception_tissu: "Réception tissu",
   sortie_lot: "Sortie lot article",
   retour_stock: "Retour stock",
 } as const;
@@ -820,7 +822,7 @@ function PeseeQuickForm({
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [type, setType] = useState<keyof typeof PESEE_TYPE_LABELS>("reception_tissu");
+  const [type, setType] = useState<keyof typeof PESEE_TYPE_LABELS>("sortie_lot");
   const [productionOrderId, setProductionOrderId] = useState(productionOrderOptions[0]?.id ?? "");
   const [lotId, setLotId] = useState("");
   const [poidsKg, setPoidsKg] = useState("");

@@ -16,6 +16,7 @@ const newUserSchema = z.object({
     "responsable_production",
     "chef_section",
     "administrateur",
+    "gestionnaire_stock",
   ]),
   company_id: z.string().uuid().optional().or(z.literal("")),
   section_id: z.string().uuid().optional().or(z.literal("")),

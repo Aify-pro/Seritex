@@ -15,6 +15,7 @@ import { AnomaliesPanel } from "./anomalies-panel";
 import { ProductConfigurator } from "./product-configurator";
 import { ProductionOrderMediaFiles } from "./production-order-media-files";
 import { StockMovementsPanel } from "./stock-movements-panel";
+import { StockEntryForm } from "./stock-entry-form";
 import type { StatutFiche } from "@/lib/patronnage/types";
 import type { StockMovement, StockExportFiche } from "@/lib/types/domain";
 import { CheckCircle2, ChevronRight, Package, QrCode } from "lucide-react";
@@ -23,7 +24,7 @@ import Link from "next/link";
 const LOT_CATEGORIE_LABELS: Record<string, string> = { semi_fini: "Semi-fini", fini: "Fini", dechet: "Déchet" };
 
 export default async function ProductionOrderDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { profile } = await requireRole(["responsable_production", "administrateur"]);
+  const { profile } = await requireRole(["responsable_production", "administrateur", "gestionnaire_stock"]);
   const { id } = await params;
   const supabase = await createClient();
 
@@ -54,6 +55,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     { data: availableMedia },
     { data: stockMovements },
     { data: stockExportFiches },
+    { data: stockItems },
   ] = await Promise.all([
     supabase.from("work_orders").select("*,sections(name)").eq("production_order_id", id).order("planned_start", { ascending: true }),
     supabase.from("sections").select("id,name").eq("active", true).order("display_order"),
@@ -116,6 +118,11 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
       .select("id,numero,production_order_id,generated_at,generated_by")
       .eq("production_order_id", id)
       .order("generated_at", { ascending: false }),
+    // Lot gestionnaire de stock : article Sage optionnel pour une pesée
+    // reception_tissu/retour_stock saisie depuis la partie Stock de l'ODF —
+    // même source que le terminal Coupe (peut être vide si jamais
+    // synchronisé, cf. Paramètres > Stock).
+    supabase.from("stock_item_view").select("sage_reference,designation").order("designation"),
   ]);
 
   // Lot 2 : la fiche Patronnage liée n'est pertinente que si la section
@@ -182,6 +189,12 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
   const canValidate = await can("ordres_fabrication", "validate");
   const canRequestClosure = profile.role === "responsable_production" || profile.role === "administrateur";
   const isAdmin = profile.role === "administrateur";
+  // Réception tissu / sortie lot / retour stock, et génération des fiches
+  // d'export Sage — gestionnaire de stock ajouté suite au constat que la
+  // section Coupe ne devait pas saisir la réception de marchandise
+  // (migrations 0022/0023) : ce n'est plus elle qui le fait, c'est ici.
+  const canManageStock = isAdmin || profile.role === "responsable_production" || profile.role === "gestionnaire_stock";
+  const stockItemOptions = (stockItems ?? []).map((i) => ({ sageReference: i.sage_reference, designation: i.designation }));
 
   return (
     <div className="space-y-6">
@@ -374,11 +387,19 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
         </Card>
       )}
 
+      {canManageStock && (
+        <StockEntryForm
+          productionOrderId={order.id}
+          articleLots={(articleLots ?? []).map((l) => ({ id: l.id, code: l.code, categorie: l.categorie }))}
+          stockItemOptions={stockItemOptions}
+        />
+      )}
+
       <StockMovementsPanel
         productionOrderId={order.id}
         movements={(stockMovements ?? []) as StockMovement[]}
         fiches={(stockExportFiches ?? []) as StockExportFiche[]}
-        canGenerate={isAdmin || profile.role === "responsable_production"}
+        canGenerate={canManageStock}
       />
 
       {rend && (
