@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   Plus,
   Eye,
@@ -87,28 +88,16 @@ function repartitionTotal(r: RepartitionTailles): number {
 
 export function FichesPlacementClient({
   fiches,
-  referenceOptions,
   permissions,
 }: {
   fiches: FichePlacement[];
-  referenceOptions: ReferenceOption[];
   currentUserRole: string;
   permissions: Permissions;
 }) {
   const [filtreStatut, setFiltreStatut] = useState<StatutFiche | "tous">("tous");
   const [showCreate, setShowCreate] = useState(false);
 
-  // Lien direct depuis l'ODF (carte "Rendement matière", lot 8) :
-  // /atelier/patronnage?fiche=<id>&trace=<id> ouvre directement la fiche et
-  // amène au tracé concerné, sans recherche manuelle dans la liste. Lu une
-  // fois à l'initialisation de l'état (pas un effet) : on ne veut pas
-  // rouvrir la fiche si l'utilisateur la ferme ensuite sans changer d'URL.
-  const searchParams = useSearchParams();
-  const highlightTraceId = searchParams.get("trace");
-  const [openFicheId, setOpenFicheId] = useState<string | null>(() => searchParams.get("fiche"));
-
   const filtered = fiches.filter((f) => filtreStatut === "tous" || f.statut === filtreStatut);
-  const openFiche = fiches.find((f) => f.id === openFicheId) ?? null;
 
   return (
     <div className="space-y-4">
@@ -174,9 +163,11 @@ export function FichesPlacementClient({
                   <Td>{formatDate(f.dateEmission)}</Td>
                   <Td>{formatDate(f.dateRetourSouhaitee)}</Td>
                   <Td align="right">
-                    <Button variant="secondary" size="sm" onClick={() => setOpenFicheId(f.id)}>
-                      <Eye className="h-3.5 w-3.5" /> Voir
-                    </Button>
+                    <Link href={`/atelier/patronnage/${f.id}`}>
+                      <Button variant="secondary" size="sm">
+                        <Eye className="h-3.5 w-3.5" /> Voir
+                      </Button>
+                    </Link>
                   </Td>
                 </Tr>
               ))}
@@ -188,22 +179,6 @@ export function FichesPlacementClient({
 
       <Dialog open={showCreate} onOpenChange={setShowCreate} title="Nouvelle fiche de placement" size="lg">
         <CreateFicheForm onCreated={() => setShowCreate(false)} />
-      </Dialog>
-
-      <Dialog
-        open={!!openFiche}
-        onOpenChange={(v) => !v && setOpenFicheId(null)}
-        title={openFiche ? `Fiche ${openFiche.numeroOt}` : ""}
-        size="lg"
-      >
-        {openFiche && (
-          <FicheDetailContent
-            fiche={openFiche}
-            referenceOptions={referenceOptions}
-            permissions={permissions}
-            highlightTraceId={highlightTraceId}
-          />
-        )}
       </Dialog>
     </div>
   );
@@ -426,7 +401,7 @@ function CreateFicheForm({ onCreated }: { onCreated: () => void }) {
    Fiche détail
 ============================================================ */
 
-function FicheDetailContent({
+export function FicheDetailContent({
   fiche,
   referenceOptions,
   permissions,
@@ -474,6 +449,22 @@ function FicheDetailContent({
     runAction(() => updateFiche(fiche.id, fd));
   }
 
+  // Suppression définitive : la fiche cesse d'exister, donc pas de refresh()
+  // classique ici — la page dédiée (/atelier/patronnage/[id]) tomberait sur
+  // un 404 en tentant de la recharger. On repart vers la liste à la place.
+  function handleDelete() {
+    if (!confirm("Supprimer définitivement cette fiche ? Cette action est irréversible.")) return;
+    setError(null);
+    startTransition(async () => {
+      const res = await deleteFicheDefinitively(fiche.id);
+      if (res && "error" in res && res.error) {
+        setError(res.error);
+        return;
+      }
+      router.push("/atelier/patronnage");
+    });
+  }
+
   return (
     <div className="space-y-5">
       {error && (
@@ -519,10 +510,7 @@ function FicheDetailContent({
               size="sm"
               variant="ghost"
               loading={pending}
-              onClick={() => {
-                if (confirm("Supprimer définitivement cette fiche ? Cette action est irréversible."))
-                  runAction(() => deleteFicheDefinitively(fiche.id));
-              }}
+              onClick={handleDelete}
             >
               <Trash2 className="h-3.5 w-3.5 text-danger" />
             </Button>

@@ -101,9 +101,9 @@ export function FichePatronnageLink({
           <div className="flex items-center justify-between gap-3">
             <div>
               <Link
-                href="/atelier/patronnage"
+                href={`/atelier/patronnage/${fiche.id}`}
                 className="inline-flex items-center gap-1 text-sm font-medium text-brand hover:underline"
-                title="Voir dans le module Patronnage"
+                title="Voir la fiche de placement"
               >
                 {fiche.numeroOt} <ExternalLink className="h-3 w-3" />
               </Link>
