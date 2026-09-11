@@ -76,6 +76,14 @@ interface ReferenceOption {
 interface Permissions {
   canCreate: boolean;
   canModify: boolean;
+  /**
+   * Droits du module « Patronnage — tracés », distincts de ceux de la fiche :
+   * la PAO ajoute et corrige des tracés sans pouvoir toucher un seul cadre de
+   * la fiche. Un rôle qui a `modify` sur la fiche les a aussi, côté écran
+   * comme côté RLS.
+   */
+  canAddTrace: boolean;
+  canModifyTrace: boolean;
   canValidate: boolean;
   canUnlock: boolean;
   canArchive: boolean;
@@ -635,7 +643,7 @@ export function FicheDetailContent({
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-medium text-foreground">Tracés ({fiche.traces.length})</h3>
           <div className="flex gap-2">
-            {!locked && permissions.canModify && (
+            {!locked && permissions.canAddTrace && (
               <Button
                 size="sm"
                 variant="secondary"
@@ -663,7 +671,7 @@ export function FicheDetailContent({
             fiche={fiche}
             trace={trace}
             locked={locked}
-            canModify={permissions.canModify}
+            canModify={permissions.canModifyTrace}
             canValidate={permissions.canValidate}
             referenceOptions={referenceOptions}
             onChanged={refresh}

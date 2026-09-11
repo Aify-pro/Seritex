@@ -85,9 +85,13 @@ export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
     },
     { href: "/parametres/articles-sage", label: "Articles Sage (lecture)", icon: navIcon(Package), section: PARAMETRES, module: "articles_sage" },
   ],
+  // Base de cloisonnement partagée par l'infographiste et la PAO : chacun ne
+  // voit que l'entrée dont il a le droit `view`. L'infographiste a
+  // `demandes`, la PAO a `patronnage` — la liste est la même, le menu non.
   infographiste: [
     { href: "/dashboard", label: "Tableau de bord", icon: navIcon(LayoutDashboard) },
-    { href: "/infographie/demandes", label: "Demandes graphiques", icon: navIcon(ImageIcon) },
+    { href: "/infographie/demandes", label: "Demandes graphiques", icon: navIcon(ImageIcon), module: "demandes" },
+    { href: "/atelier/patronnage", label: "Patronnage", icon: navIcon(Ruler), module: "patronnage" },
   ],
   responsable_production: [
     { href: "/dashboard", label: "Tableau de bord", icon: navIcon(LayoutDashboard) },
