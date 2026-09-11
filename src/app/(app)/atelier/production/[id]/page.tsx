@@ -9,6 +9,7 @@ import { can } from "@/lib/auth/permissions";
 import { notFound } from "next/navigation";
 import { ArchiveButton } from "./archive-button";
 import { LifecycleActions } from "./lifecycle-actions";
+import { ReplacementOrderPicker } from "./replacement-order-picker";
 import { SectionsSizesEditor } from "./sections-sizes-editor";
 import { FichePatronnageLink } from "./fiche-patronnage-link";
 import { AnomaliesPanel } from "./anomalies-panel";
@@ -146,6 +147,35 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     userIds.length > 0 ? await supabase.from("app_users").select("id,full_name").in("id", userIds) : { data: [] };
   const nameOf = (userId: string | null) => users?.find((u) => u.id === userId)?.full_name ?? "—";
 
+  // Lot 1 — chaîne de remplacement d'un ODF annulé. Les deux sens sont
+  // chargés : la fiche annulée montre vers quoi elle a été relancée, et la
+  // fiche qui remplace montre ce qu'elle remplace. Les candidats ne sont
+  // proposés que sur un ODF annulé, et le serveur revérifie à l'écriture.
+  const [{ data: replacedBy }, { data: replaces }, { data: replacementCandidates }] = await Promise.all([
+    order.replaced_by_production_order_id
+      ? supabase
+          .from("production_orders")
+          .select("id,reference")
+          .eq("id", order.replaced_by_production_order_id)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
+    supabase
+      .from("production_orders")
+      .select("id,reference")
+      .eq("replaced_by_production_order_id", id)
+      .order("created_at"),
+    order.status === "annulee"
+      ? supabase
+          .from("production_orders")
+          .select("id,reference,status")
+          .eq("company_id", order.company_id)
+          .neq("id", id)
+          .neq("status", "annulee")
+          .order("created_at", { ascending: false })
+          .limit(50)
+      : Promise.resolve({ data: [] }),
+  ]);
+
   const anomalyRows = (anomalies ?? []).map((a) => ({
     id: a.id,
     message: a.message,
@@ -210,6 +240,21 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
         }
       />
 
+      {(replaces ?? []).length > 0 && (
+        <p className="text-sm text-foreground-muted">
+          Remplace{" "}
+          {(replaces ?? []).map((r, i) => (
+            <span key={r.id}>
+              {i > 0 && ", "}
+              <Link href={`/atelier/production/${r.id}`} className="text-brand hover:underline">
+                {r.reference}
+              </Link>
+            </span>
+          ))}{" "}
+          — ordre de fabrication annulé.
+        </p>
+      )}
+
       {order.cloture_note && (
         <Card className="border-warning/30 bg-warning-soft/40">
           <CardBody>
@@ -266,6 +311,15 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
           productionOrderId={order.id}
           editable={order.status === "brouillon"}
           fiche={fiche ? { id: fiche.id, numeroOt: fiche.numero_ot, statut: fiche.statut as StatutFiche } : null}
+        />
+      )}
+
+      {order.status === "annulee" && (
+        <ReplacementOrderPicker
+          productionOrderId={order.id}
+          current={replacedBy ?? null}
+          candidates={replacementCandidates ?? []}
+          editable={isAdmin || profile.role === "responsable_production"}
         />
       )}
 
