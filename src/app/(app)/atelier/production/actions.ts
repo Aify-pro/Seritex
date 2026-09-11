@@ -181,6 +181,70 @@ export async function cancelProductionOrder(productionOrderId: string, reason: s
 }
 
 /**
+ * Relie un ODF annulé à l'ODF qui le remplace (lot 1,
+ * `replaced_by_production_order_id`). La migration 0009 avait volontairement
+ * laissé cette colonne hors de `cancel_production_order()` — le remplaçant
+ * n'existe pas encore au moment où l'on annule — en renvoyant le geste « à
+ * part, une fois le nouvel ODF créé ». Ce « à part », c'est ici : l'audit
+ * avait relevé que la colonne existait sans que rien ne la renseigne jamais.
+ *
+ * Écriture directe, autorisée par la RLS pour `is_production_manager()` —
+ * même pattern que `setProductionOrderSections`. Passer `null` délie.
+ */
+export async function setReplacementProductionOrder(
+  productionOrderId: string,
+  replacementId: string | null
+) {
+  await requireRole(["administrateur", "responsable_production"]);
+  const supabase = await createClient();
+
+  const { data: order, error: orderError } = await supabase
+    .from("production_orders")
+    .select("id,status,company_id")
+    .eq("id", productionOrderId)
+    .single();
+  if (orderError || !order) return { error: "Ordre de fabrication introuvable." };
+  if (order.status !== "annulee") {
+    return { error: "Seul un ordre de fabrication annulé peut être relié à un remplaçant." };
+  }
+
+  if (replacementId) {
+    if (replacementId === productionOrderId) {
+      return { error: "Un ordre de fabrication ne peut pas se remplacer lui-même." };
+    }
+
+    const { data: replacement, error: replacementError } = await supabase
+      .from("production_orders")
+      .select("id,reference,status,company_id,replaced_by_production_order_id")
+      .eq("id", replacementId)
+      .single();
+    if (replacementError || !replacement) return { error: "Ordre de fabrication de remplacement introuvable." };
+    if (replacement.status === "annulee") {
+      return { error: `${replacement.reference} est lui-même annulé : choisissez un ordre de fabrication actif.` };
+    }
+    if (replacement.company_id !== order.company_id) {
+      return { error: `${replacement.reference} appartient à un autre client.` };
+    }
+    // Deux ODF annulés qui se désigneraient l'un l'autre rendraient la chaîne
+    // de remplacement illisible — et le cas se produit vite quand on annule
+    // deux fois de suite.
+    if (replacement.replaced_by_production_order_id === productionOrderId) {
+      return { error: `${replacement.reference} désigne déjà cet ordre de fabrication comme son remplaçant.` };
+    }
+  }
+
+  const { error } = await supabase
+    .from("production_orders")
+    .update({ replaced_by_production_order_id: replacementId })
+    .eq("id", productionOrderId);
+  if (error) return { error: error.message };
+
+  revalidateOdf(productionOrderId);
+  if (replacementId) revalidateOdf(replacementId);
+  return {};
+}
+
+/**
  * Archive/désarchive un ordre de fabrication (ODF) — distinct du statut
  * d'avancement, retire l'ODF des vues actives sans toucher à ses données.
  * L'autorisation vient de `archive_production_order()`/`unarchive_...()`
