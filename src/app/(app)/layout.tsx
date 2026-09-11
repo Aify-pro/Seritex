@@ -1,4 +1,5 @@
 import { requireUser } from "@/lib/auth/current-user";
+import { getPermissionMap } from "@/lib/auth/permissions";
 import { NAV_BY_ROLE } from "@/lib/auth/nav";
 import { SidebarNav } from "@/components/shell/sidebar-nav";
 import { MobileSidebar } from "@/components/shell/mobile-sidebar";
@@ -7,7 +8,16 @@ import { Shirt } from "lucide-react";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const { profile } = await requireUser();
-  const items = NAV_BY_ROLE[profile.role];
+  const permissions = await getPermissionMap();
+
+  // Une entrée rattachée à un module de droits n'apparaît que si le rôle a
+  // `view` dessus : un module sans droit n'est pas grisé ni refusé à
+  // l'arrivée, il n'existe simplement pas dans le menu. Les entrées sans
+  // module (tableau de bord, portail client, écrans commerciaux, modèles de
+  // produits, couleurs) restent commandées par le seul base_role.
+  const items = NAV_BY_ROLE[profile.role].filter(
+    (item) => !item.module || permissions[item.module]?.view === true
+  );
 
   return (
     <div className="flex min-h-screen">

@@ -1,7 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { requireRole } from "@/lib/auth/current-user";
+import { requirePlatformAdmin } from "@/lib/auth/current-user";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { PermissionAction, UserRole } from "@/lib/types/domain";
@@ -33,7 +33,7 @@ const newRoleSchema = z.object({
  * démarrent tous à faux et se règlent ensuite depuis la matrice ci-dessous.
  */
 export async function createRole(formData: FormData) {
-  await requireRole(["administrateur"]);
+  await requirePlatformAdmin();
   const parsed = newRoleSchema.safeParse({
     key: formData.get("key"),
     label: formData.get("label"),
@@ -69,7 +69,7 @@ export async function createRole(formData: FormData) {
 }
 
 export async function toggleRoleActive(roleId: string, active: boolean) {
-  await requireRole(["administrateur"]);
+  await requirePlatformAdmin();
   const supabase = await createClient();
   const { error } = await supabase.from("roles").update({ active }).eq("id", roleId);
   if (error) return { error: error.message };
@@ -84,7 +84,7 @@ export async function toggleRoleActive(roleId: string, active: boolean) {
  * l'erreur Postgres est traduite en message compréhensible.
  */
 export async function deleteRole(roleId: string) {
-  await requireRole(["administrateur"]);
+  await requirePlatformAdmin();
   const supabase = await createClient();
   const { error } = await supabase.from("roles").delete().eq("id", roleId);
   if (error) {
@@ -120,7 +120,7 @@ export async function setRolePermission(
   action: PermissionAction,
   value: boolean
 ) {
-  const { profile } = await requireRole(["administrateur"]);
+  const { profile } = await requirePlatformAdmin();
   const supabase = await createClient();
   const column = COLUMN_BY_ACTION[action];
 

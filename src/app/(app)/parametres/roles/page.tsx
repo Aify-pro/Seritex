@@ -1,11 +1,11 @@
-import { requireRole } from "@/lib/auth/current-user";
+import { requirePlatformAdmin } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import type { ModuleRecord, RolePermissionRecord, RoleRecord } from "@/lib/types/domain";
 import { RoleManager } from "./role-manager";
 
 export default async function RolesPage() {
-  await requireRole(["administrateur"]);
+  await requirePlatformAdmin();
   const supabase = await createClient();
 
   const [{ data: roles }, { data: modules }, { data: permissions }, { data: usersByRole }] = await Promise.all([

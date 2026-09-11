@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { requireUser, requireRole } from "@/lib/auth/current-user";
+import { requireUser, requirePlatformAdmin } from "@/lib/auth/current-user";
 import { replicateToTargets } from "@/lib/storage";
 import type { StorageTargetRow } from "@/lib/storage/types";
 import { revalidatePath } from "next/cache";
@@ -209,9 +209,9 @@ const targetSchema = z.object({
   base_path: z.string().trim().optional(),
 });
 
-/** Création d'une cible de stockage — réservé à l'administrateur (section 9). */
+/** Création d'une cible de stockage — réservé à l'administrateur de plateforme (section 9). */
 export async function createStorageTarget(formData: FormData) {
-  const { authId } = await requireRole(["administrateur"]);
+  const { authId } = await requirePlatformAdmin();
 
   const parsed = targetSchema.safeParse({
     type: formData.get("type"),
@@ -265,9 +265,9 @@ export async function createStorageTarget(formData: FormData) {
   return {};
 }
 
-/** Active/désactive une cible de stockage — réservé à l'administrateur. */
+/** Active/désactive une cible de stockage — réservé à l'administrateur de plateforme. */
 export async function toggleStorageTargetActive(targetId: string, active: boolean) {
-  await requireRole(["administrateur"]);
+  await requirePlatformAdmin();
   const supabase = await createClient();
   const { error } = await supabase.from("storage_targets").update({ active }).eq("id", targetId);
   if (error) return { error: error.message };

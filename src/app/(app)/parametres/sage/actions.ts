@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { requireRole } from "@/lib/auth/current-user";
+import { requirePlatformAdmin } from "@/lib/auth/current-user";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
@@ -30,7 +30,7 @@ const configSchema = z.object({
  * interface.
  */
 export async function updateSageConnectionConfig(formData: FormData) {
-  await requireRole(["administrateur"]);
+  await requirePlatformAdmin();
   const parsed = configSchema.safeParse({
     id: formData.get("id"),
     label: formData.get("label"),
@@ -67,7 +67,7 @@ export async function updateSageConnectionConfig(formData: FormData) {
 }
 
 export async function toggleSageConnectionActive(id: string, active: boolean) {
-  await requireRole(["administrateur"]);
+  await requirePlatformAdmin();
   const supabase = await createClient();
   const { error } = await supabase
     .from("sage_connection_configs")
@@ -85,7 +85,7 @@ export async function toggleSageConnectionActive(id: string, active: boolean) {
  * l'application locale de synchronisation Sage n'existe.
  */
 export async function simulateClientsSync() {
-  await requireRole(["administrateur"]);
+  await requirePlatformAdmin();
   const admin = createAdminClient();
   const { data: companies } = await admin.from("companies").select("id,name,siret,address,phone,email");
 
@@ -110,7 +110,7 @@ export async function simulateClientsSync() {
 
 /** Simule un cycle de synchronisation des ARTICLES Sage — même principe. */
 export async function simulateArticlesSync() {
-  await requireRole(["administrateur"]);
+  await requirePlatformAdmin();
   const admin = createAdminClient();
   const { data: models } = await admin.from("product_models").select("id,name,category,base_price,active");
 

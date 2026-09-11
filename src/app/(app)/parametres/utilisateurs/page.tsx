@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { requireRole } from "@/lib/auth/current-user";
+import { requirePlatformAdmin } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardBody } from "@/components/ui/card";
@@ -8,7 +8,7 @@ import { NewUserForm } from "./new-user-form";
 import { UserActiveToggle } from "./user-active-toggle";
 
 export default async function UsersPage() {
-  await requireRole(["administrateur"]);
+  await requirePlatformAdmin();
   const supabase = await createClient();
 
   const [{ data: users }, { data: companies }, { data: sections }, { data: contacts }] = await Promise.all([

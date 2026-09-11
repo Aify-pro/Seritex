@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { requireRole } from "@/lib/auth/current-user";
+import { requireRole, requirePlatformAdmin } from "@/lib/auth/current-user";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
@@ -24,12 +24,15 @@ const newUserSchema = z.object({
 });
 
 /**
- * Création de compte utilisateur — action réservée à l'administrateur.
- * `requireRole` s'exécute AVANT tout usage du client admin (service_role) :
+ * Création de compte utilisateur — réservée à l'administrateur de
+ * plateforme (l'informatique), pas à un rôle qui hérite seulement de son
+ * cloisonnement de données.
+ * `requirePlatformAdmin` s'exécute AVANT tout usage du client admin
+ * (service_role) :
  * on ne construit jamais ce client privilégié pour un appelant non vérifié.
  */
 export async function createUserAccount(formData: FormData) {
-  await requireRole(["administrateur"]);
+  await requirePlatformAdmin();
 
   const parsed = newUserSchema.safeParse({
     full_name: formData.get("full_name"),
@@ -90,7 +93,7 @@ export async function createUserAccount(formData: FormData) {
 }
 
 export async function toggleUserActive(userId: string, active: boolean) {
-  await requireRole(["administrateur"]);
+  await requirePlatformAdmin();
   const supabase = await createClient();
   const { error } = await supabase.from("app_users").update({ active }).eq("id", userId);
   if (error) return { error: error.message };
