@@ -1,4 +1,4 @@
-import { requireRole } from "@/lib/auth/current-user";
+import { requirePlatformAdmin } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
@@ -10,7 +10,7 @@ import { Info } from "lucide-react";
 import Link from "next/link";
 
 export default async function SageSettingsPage() {
-  await requireRole(["administrateur"]);
+  await requirePlatformAdmin();
   const supabase = await createClient();
 
   const { data: config } = await supabase.from("sage_connection_configs").select("*").limit(1).single();

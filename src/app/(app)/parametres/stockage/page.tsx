@@ -1,4 +1,4 @@
-import { requireRole } from "@/lib/auth/current-user";
+import { requirePlatformAdmin } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardBody } from "@/components/ui/card";
@@ -15,7 +15,7 @@ import { Database } from "lucide-react";
  * (identifiants) des cibles, jamais exposée ailleurs dans l'application.
  */
 export default async function StorageTargetsPage() {
-  await requireRole(["administrateur"]);
+  await requirePlatformAdmin();
   const supabase = await createClient();
 
   const { data: targets } = await supabase.from("storage_targets").select("*").order("created_at", { ascending: true });
