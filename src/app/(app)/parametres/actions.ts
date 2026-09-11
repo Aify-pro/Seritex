@@ -18,9 +18,15 @@ const newUserSchema = z.object({
     "administrateur",
     "gestionnaire_stock",
   ]),
-  company_id: z.string().uuid().optional().or(z.literal("")),
-  section_id: z.string().uuid().optional().or(z.literal("")),
-  contact_id: z.string().uuid().optional().or(z.literal("")),
+  // `nullish()` et pas `optional()` : le formulaire n'affiche l'entreprise et
+  // le contact que pour un compte client, et la section que pour un chef de
+  // section. Les champs non affichés ne sont pas dans le FormData, et
+  // `formData.get()` renvoie alors `null` — que `optional()` (qui n'accepte
+  // qu'`undefined`) rejetait. Chaque rôle laissait donc au moins un de ces
+  // trois champs à `null`, et aucune création de compte ne pouvait aboutir.
+  company_id: z.string().uuid().or(z.literal("")).nullish(),
+  section_id: z.string().uuid().or(z.literal("")).nullish(),
+  contact_id: z.string().uuid().or(z.literal("")).nullish(),
 });
 
 /**
@@ -42,7 +48,13 @@ export async function createUserAccount(formData: FormData) {
     section_id: formData.get("section_id"),
     contact_id: formData.get("contact_id"),
   });
-  if (!parsed.success) return { error: parsed.error.issues[0]?.message };
+  if (!parsed.success) {
+    // Le champ fautif dans le message : « Invalid input » seul ne dit pas
+    // lequel des six champs a été refusé, et c'est exactement ce qui a rendu
+    // cette panne difficile à lire.
+    const issue = parsed.error.issues[0];
+    return { error: issue ? `${issue.path.join(".") || "Saisie"} : ${issue.message}` : "Saisie invalide" };
+  }
 
   if (parsed.data.role === "client" && !parsed.data.company_id) {
     return { error: "Une entreprise est requise pour un compte client" };
