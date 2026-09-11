@@ -12,6 +12,7 @@ const BASE_ROLES: UserRole[] = [
   "infographiste",
   "responsable_production",
   "chef_section",
+  "gestionnaire_stock",
   "administrateur",
 ];
 

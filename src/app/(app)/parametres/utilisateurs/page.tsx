@@ -3,29 +3,31 @@ import { requirePlatformAdmin } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardBody } from "@/components/ui/card";
-import { ROLE_LABELS, type UserRole } from "@/lib/types/domain";
 import { NewUserForm } from "./new-user-form";
 import { UserActiveToggle } from "./user-active-toggle";
+import { UserRoleSelect } from "./user-role-select";
 
 export default async function UsersPage() {
   await requirePlatformAdmin();
   const supabase = await createClient();
 
-  const [{ data: users }, { data: companies }, { data: sections }, { data: contacts }] = await Promise.all([
-    supabase
-      .from("app_users")
-      .select("id,full_name,email,role,active,company_id,companies(name),sections(name),contacts(first_name,last_name)")
-      .order("full_name"),
-    supabase.from("companies").select("id,name").order("name"),
-    supabase.from("sections").select("id,name").order("display_order"),
-    supabase.from("contacts").select("id,company_id,first_name,last_name").eq("status", "actif").order("last_name"),
-  ]);
+  const [{ data: users }, { data: companies }, { data: sections }, { data: contacts }, { data: roles }] =
+    await Promise.all([
+      supabase
+        .from("app_users")
+        .select("id,full_name,email,role,role_id,active,company_id,companies(name),sections(name),contacts(first_name,last_name)")
+        .order("full_name"),
+      supabase.from("companies").select("id,name").order("name"),
+      supabase.from("sections").select("id,name").order("display_order"),
+      supabase.from("contacts").select("id,company_id,first_name,last_name").eq("status", "actif").order("last_name"),
+      supabase.from("roles").select("id,label").eq("active", true).order("label"),
+    ]);
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Utilisateurs"
-        description="Chaque compte porte un rôle qui détermine ses accès (réglés dans Rôles & permissions). Un compte client représente une vraie fiche contact CRM."
+        description="Chaque compte porte un rôle qui détermine ses accès (réglés dans Rôles & permissions) — y compris les rôles que vous créez vous-même. Un compte client représente une vraie fiche contact CRM."
         action={<NewUserForm companies={companies ?? []} sections={sections ?? []} contacts={contacts ?? []} />}
       />
 
@@ -50,7 +52,9 @@ export default async function UsersPage() {
                   <tr key={u.id}>
                     <td className="px-5 py-3 font-medium text-foreground">{u.full_name}</td>
                     <td className="px-5 py-3 text-foreground-muted">{u.email}</td>
-                    <td className="px-5 py-3 text-foreground-muted">{ROLE_LABELS[u.role as UserRole]}</td>
+                    <td className="px-5 py-3 text-foreground-muted">
+                      <UserRoleSelect userId={u.id} roleId={u.role_id} roles={roles ?? []} />
+                    </td>
                     <td className="px-5 py-3 text-foreground-muted">
                       {company ? (
                         <Link href={`/commercial/clients/${u.company_id}`} className="text-brand hover:underline">

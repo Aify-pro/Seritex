@@ -24,6 +24,26 @@ async function requirePermission(action: "view" | "create" | "modify" | "validat
   return current;
 }
 
+/**
+ * Droit sur un TRACÉ — module « Patronnage — tracés » (migration 0027),
+ * distinct du droit sur la fiche : la PAO ajoute et corrige des tracés sans
+ * pouvoir toucher un cadre de la fiche. `patronnage/modify` reste accepté,
+ * pour qu'un rôle ayant la main sur la fiche garde la main sur ses tracés —
+ * exactement la règle que porte la RLS, pour que l'écran ne puisse pas
+ * diverger de la base.
+ */
+async function requireTracePermission(action: "create" | "modify") {
+  const current = await requireUser();
+  const [surTraces, surFiche] = await Promise.all([
+    can("patronnage_traces", action),
+    can("patronnage", "modify"),
+  ]);
+  if (!surTraces && !surFiche) {
+    redirect("/dashboard?erreur=acces_refuse");
+  }
+  return current;
+}
+
 function repartitionJson(formData: FormData, prefix: string): RepartitionTailles {
   const out: RepartitionTailles = {};
   for (const key of ["XS", "S", "M", "L", "XL", "XXL", "XXXL", "Autre"] as const) {
@@ -408,7 +428,7 @@ export async function rejectCorrectiveTrace(traceId: string, motif: string) {
 // ------------------------------------------------------------
 
 export async function addTrace(ficheId: string, formData: FormData) {
-  await requirePermission("modify");
+  await requireTracePermission("create");
   const gate = await assertFicheModifiable(ficheId);
   if ("error" in gate) return gate;
 
@@ -439,7 +459,7 @@ export async function addTrace(ficheId: string, formData: FormData) {
 }
 
 export async function updateTrace(traceId: string, ficheId: string, formData: FormData) {
-  await requirePermission("modify");
+  await requireTracePermission("modify");
   const gate = await assertTraceEditable(traceId, ficheId);
   if ("error" in gate) return gate;
 
@@ -463,7 +483,7 @@ export async function updateTrace(traceId: string, ficheId: string, formData: Fo
 }
 
 export async function deleteTrace(traceId: string, ficheId: string) {
-  await requirePermission("modify");
+  await requireTracePermission("modify");
   const gate = await assertTraceEditable(traceId, ficheId);
   if ("error" in gate) return gate;
 
@@ -484,7 +504,7 @@ export async function deleteTrace(traceId: string, ficheId: string) {
 }
 
 export async function removeTraceDxf(traceId: string, ficheId: string) {
-  await requirePermission("modify");
+  await requireTracePermission("modify");
   const gate = await assertTraceEditable(traceId, ficheId);
   if ("error" in gate) return gate;
 
@@ -513,7 +533,7 @@ export async function removeTraceDxf(traceId: string, ficheId: string) {
 // ------------------------------------------------------------
 
 export async function uploadTraceDxf(traceId: string, ficheId: string, formData: FormData) {
-  const { authId } = await requirePermission("modify");
+  const { authId } = await requireTracePermission("create");
   const gate = await assertTraceEditable(traceId, ficheId);
   if ("error" in gate) return gate;
 

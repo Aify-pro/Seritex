@@ -10,15 +10,25 @@ import { FichesPlacementClient } from "@/components/atelier/patronnage/fiches-pl
 
 export default async function PatronnagePage() {
   const { profile } = await requireUser();
-  const [canView, canCreate, canModify, canValidate, canUnlock, canArchive, canDelete] = await Promise.all([
-    can("patronnage", "view"),
-    can("patronnage", "create"),
-    can("patronnage", "modify"),
-    can("patronnage", "validate"),
-    can("patronnage", "unlock"),
-    can("patronnage", "archive"),
-    can("patronnage", "delete"),
-  ]);
+  const [canView, canCreate, canModify, canValidate, canUnlock, canArchive, canDelete, createTrace, modifyTrace] =
+    await Promise.all([
+      can("patronnage", "view"),
+      can("patronnage", "create"),
+      can("patronnage", "modify"),
+      can("patronnage", "validate"),
+      can("patronnage", "unlock"),
+      can("patronnage", "archive"),
+      can("patronnage", "delete"),
+      can("patronnage_traces", "create"),
+      can("patronnage_traces", "modify"),
+    ]);
+
+  // Le droit sur les tracés est un module à part (« Patronnage — tracés ») :
+  // la PAO en dispose sans avoir le moindre droit sur la fiche. `canModify`
+  // reste inclus pour qu'un rôle ayant la main sur la fiche garde la main sur
+  // ses tracés — même règle que la RLS (migration 0027).
+  const canAddTrace = createTrace || canModify;
+  const canModifyTrace = modifyTrace || canModify;
   if (!canView) redirect("/dashboard?erreur=acces_refuse");
 
   const fiches = await getFichesPlacement();
@@ -42,7 +52,7 @@ export default async function PatronnagePage() {
       <FichesPlacementClient
         fiches={fiches}
         currentUserRole={profile.role}
-        permissions={{ canCreate, canModify, canValidate, canUnlock, canArchive, canDelete }}
+        permissions={{ canCreate, canModify, canAddTrace, canModifyTrace, canValidate, canUnlock, canArchive, canDelete }}
       />
     </div>
   );

@@ -101,6 +101,62 @@ export async function toggleUserActive(userId: string, active: boolean) {
   return {};
 }
 
+/**
+ * Réattribue le rôle d'un compte existant. Passe par le client service_role :
+ * depuis la migration 0026, `app_users.role_id` n'est plus modifiable par un
+ * compte authentifié, quel qu'il soit — c'était la porte d'une auto-promotion
+ * en administrateur. Le trigger `trg_sync_app_user_role` recopie ensuite le
+ * base_role du rôle choisi dans `app_users.role`, dont dépend toute la RLS.
+ *
+ * Deux garde-fous : les contraintes métier de `app_users` (un compte client
+ * a une entreprise, un chef de section a une section) sont vérifiées avant
+ * l'écriture pour rendre un message lisible plutôt qu'une erreur Postgres, et
+ * le dernier administrateur de plateforme actif ne peut pas se retirer
+ * lui-même le rôle — sans quoi plus personne ne pourrait le rendre.
+ */
+export async function setUserRole(userId: string, roleId: string) {
+  await requirePlatformAdmin();
+  const admin = createAdminClient();
+
+  const [{ data: user }, { data: role }] = await Promise.all([
+    admin.from("app_users").select("id,role_id,company_id,section_id,active").eq("id", userId).single(),
+    admin.from("roles").select("id,key,label,base_role,active").eq("id", roleId).single(),
+  ]);
+  if (!user) return { error: "Compte introuvable." };
+  if (!role) return { error: "Rôle introuvable." };
+  if (!role.active) return { error: `Le rôle « ${role.label} » est désactivé.` };
+  if (user.role_id === roleId) return {};
+
+  if (role.base_role === "client" && !user.company_id) {
+    return { error: "Un compte client doit être rattaché à une entreprise : modifiez d'abord son rattachement." };
+  }
+  if (role.base_role === "chef_section" && !user.section_id) {
+    return { error: "Un chef de section doit être rattaché à une section : modifiez d'abord son rattachement." };
+  }
+
+  const { data: previous } = await admin.from("roles").select("key").eq("id", user.role_id).single();
+  if (previous?.key === "administrateur" && role.key !== "administrateur") {
+    const { count } = await admin
+      .from("app_users")
+      .select("id", { count: "exact", head: true })
+      .eq("role_id", user.role_id)
+      .eq("active", true);
+    if ((count ?? 0) <= 1) {
+      return {
+        error:
+          "C'est le dernier administrateur actif : attribuez d'abord ce rôle à un autre compte, sinon plus personne ne pourra accéder aux réglages.",
+      };
+    }
+  }
+
+  const { error } = await admin.from("app_users").update({ role_id: roleId }).eq("id", userId);
+  if (error) return { error: error.message };
+
+  revalidatePath("/parametres/utilisateurs");
+  revalidatePath("/parametres/roles");
+  return {};
+}
+
 const newSectionSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
