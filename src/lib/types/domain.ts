@@ -263,6 +263,10 @@ export interface ProductionOrder {
   closed_by: string | null;
   cloture_note: string | null;
   replaced_by_production_order_id: string | null;
+  /** Motif du dernier refus de validation, soldé à la resoumission (migration 0028). */
+  refus_motif: string | null;
+  refuse_par: string | null;
+  refuse_le: string | null;
   // Lot 2 : surplus tracé par taille au moment de la validation (section 11
   // du document de logique), ex. { "L": 5, "XL": 2 } — null si aucun surplus.
   mention_surplus_traces: Record<string, number> | null;
