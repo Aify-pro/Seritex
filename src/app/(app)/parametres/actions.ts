@@ -247,6 +247,107 @@ export async function toggleColorActive(colorId: string, active: boolean) {
   return {};
 }
 
+// ============================================================================
+// Référentiel de tailles (migration 0029)
+// ============================================================================
+
+const newSizeSchema = z.object({
+  groupe: z.string().trim().min(1, "Indiquez un groupe (Homme, Femme, Enfant…)"),
+  libelle: z.string().trim().min(1, "Indiquez un libellé de taille"),
+  display_order: z.coerce.number().int().min(0).default(0),
+});
+
+/**
+ * Ajoute une taille au référentiel. `cle` est générée en base (« Groupe/
+ * Libellé ») : c'est elle que stockent les ODF et les répartitions du
+ * patronnage, jamais le libellé seul — un « M » homme et un « M » femme sont
+ * deux tailles distinctes.
+ *
+ * `display_order` est demandé explicitement parce qu'une grille de tailles ne
+ * s'ordonne ni alphabétiquement ni numériquement : XS < S < M < L < XL.
+ */
+export async function createSize(formData: FormData) {
+  await requireRole(["administrateur", "responsable_production"]);
+  const parsed = newSizeSchema.safeParse({
+    groupe: formData.get("groupe"),
+    libelle: formData.get("libelle"),
+    display_order: formData.get("display_order") || 0,
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message };
+
+  const supabase = await createClient();
+  const { error } = await supabase.from("sizes").insert({
+    groupe: parsed.data.groupe,
+    libelle: parsed.data.libelle,
+    display_order: parsed.data.display_order,
+  });
+  if (error) {
+    if (error.code === "23505") return { error: `La taille « ${parsed.data.groupe}/${parsed.data.libelle} » existe déjà.` };
+    return { error: error.message };
+  }
+
+  revalidatePath("/parametres/couleurs");
+  return {};
+}
+
+export async function toggleSizeActive(sizeId: string, active: boolean) {
+  await requireRole(["administrateur", "responsable_production"]);
+  const supabase = await createClient();
+  const { error } = await supabase.from("sizes").update({ active }).eq("id", sizeId);
+  if (error) return { error: error.message };
+  revalidatePath("/parametres/couleurs");
+  return {};
+}
+
+/**
+ * Disponibilité d'un modèle : remplace intégralement la liste des tailles ou
+ * des couleurs proposables. Une liste vide signifie « aucune restriction
+ * déclarée » — tout le référentiel actif reste proposable — et non « rien
+ * n'est disponible » : sans cette convention, activer le référentiel rendrait
+ * d'un coup tous les modèles existants incomplets.
+ */
+export async function setProductModelSizes(productModelId: string, sizeIds: string[]) {
+  await requireRole(["administrateur", "responsable_production"]);
+  const supabase = await createClient();
+
+  const { error: delError } = await supabase
+    .from("product_model_sizes")
+    .delete()
+    .eq("product_model_id", productModelId);
+  if (delError) return { error: delError.message };
+
+  if (sizeIds.length > 0) {
+    const { error } = await supabase
+      .from("product_model_sizes")
+      .insert(sizeIds.map((size_id) => ({ product_model_id: productModelId, size_id })));
+    if (error) return { error: error.message };
+  }
+
+  revalidatePath("/parametres/produits");
+  return {};
+}
+
+export async function setProductModelColors(productModelId: string, colorIds: string[]) {
+  await requireRole(["administrateur", "responsable_production"]);
+  const supabase = await createClient();
+
+  const { error: delError } = await supabase
+    .from("product_model_colors")
+    .delete()
+    .eq("product_model_id", productModelId);
+  if (delError) return { error: delError.message };
+
+  if (colorIds.length > 0) {
+    const { error } = await supabase
+      .from("product_model_colors")
+      .insert(colorIds.map((color_id) => ({ product_model_id: productModelId, color_id })));
+    if (error) return { error: error.message };
+  }
+
+  revalidatePath("/parametres/produits");
+  return {};
+}
+
 const newProductModelSchema = z.object({
   name: z.string().min(1),
   category: z.string().optional(),
