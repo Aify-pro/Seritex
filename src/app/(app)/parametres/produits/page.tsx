@@ -8,6 +8,7 @@ import { ZoneTemplateEditor } from "./zone-template-editor";
 import { ProductModelSageReference } from "./product-model-sage-reference";
 import { NomenclatureEditor } from "./nomenclature-editor";
 import { AvailabilityEditor } from "./availability-editor";
+import { ProductModelTextile } from "./product-model-textile";
 
 export default async function ProductModelsPage() {
   await requireRole(["administrateur", "responsable_production"]);
@@ -21,14 +22,16 @@ export default async function ProductModelsPage() {
     { data: colors },
     { data: modelSizes },
     { data: modelColors },
+    { data: textiles },
   ] = await Promise.all([
-    supabase.from("product_models").select("id,name,category,active,sage_reference").order("name"),
+    supabase.from("product_models").select("id,name,category,active,sage_reference,textile_id").order("name"),
     supabase.from("product_zone_templates").select("*").order("display_order"),
     supabase.from("nomenclature_lines").select("*").order("created_at"),
     supabase.from("sizes").select("id,groupe,libelle").eq("active", true).order("groupe").order("display_order"),
     supabase.from("colors").select("id,name").eq("active", true).order("name"),
     supabase.from("product_model_sizes").select("product_model_id,size_id"),
     supabase.from("product_model_colors").select("product_model_id,color_id"),
+    supabase.from("textiles").select("id,nom").eq("active", true).order("nom"),
   ]);
 
   const sizeOptions = (sizes ?? []).map((s) => ({ id: s.id, label: s.libelle, groupe: s.groupe }));
@@ -56,6 +59,11 @@ export default async function ProductModelsPage() {
               />
               <CardBody className="space-y-4">
                 <ProductModelSageReference productModelId={m.id} sageReference={m.sage_reference} />
+                <ProductModelTextile
+                  productModelId={m.id}
+                  textileId={m.textile_id}
+                  textiles={textiles ?? []}
+                />
                 <ZoneTemplateEditor productModelId={m.id} zones={modelZones} />
                 <NomenclatureEditor productModelId={m.id} lines={modelNomenclatureLines} />
                 <AvailabilityEditor
