@@ -4,9 +4,9 @@ import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
-import { Plus, Trash2, Send, ChevronUp, ChevronDown } from "lucide-react";
+import { Trash2, Send, ChevronUp, ChevronDown } from "lucide-react";
 import { setProductionOrderSections, setProductionOrderSizes, submitProductionOrder } from "../actions";
-import { REPARTITION_TAILLES_KEYS } from "@/lib/patronnage/types";
+import type { Size } from "@/lib/sizes";
 
 /**
  * Édition d'un ODF en brouillon : sections retenues, DANS L'ORDRE où le
@@ -25,27 +25,49 @@ import { REPARTITION_TAILLES_KEYS } from "@/lib/patronnage/types";
  * des cases à cocher — setProductionOrderSections() écrit `ordre = index+1`
  * exactement dans cet ordre.
  *
- * Lot 2 : la taille est choisie dans le même ensemble fixe que le Patronnage
- * (XS/S/M/L/XL/XXL/XXXL/Autre) plutôt que tapée en texte libre — le contrôle
- * de quantité tracée vs demandée (validate_production_order()) compare les
- * deux valeurs telles quelles, un texte libre les aurait rendues fragiles.
+ * Les tailles viennent du référentiel (Paramètres > Couleurs et tailles),
+ * restreint à celles dans lesquelles le modèle existe. Elles ne sont jamais
+ * tapées en texte libre : le contrôle de quantité tracée vs demandée
+ * (validate_production_order(), lot 2) compare ces valeurs telles quelles, et
+ * un texte libre les rendrait fragiles — « Large » ne vaudrait jamais « L ».
+ *
+ * La grille est affichée en entier plutôt que ligne à ligne : on saisit une
+ * quantité en face d'une taille, sans avoir à l'ajouter d'abord. Le total
+ * réparti est confronté en permanence à la quantité commandée, parce que
+ * submit_production_order() refuse tout écart — autant le voir en saisissant
+ * plutôt qu'au moment de soumettre.
  */
 export function SectionsSizesEditor({
   productionOrderId,
   allSections,
   initialSectionIds,
   initialSizes,
+  referentielTailles,
+  totalQuantity,
 }: {
   productionOrderId: string;
   allSections: { id: string; name: string }[];
   initialSectionIds: string[];
   initialSizes: { taille: string; quantite_demandee: number }[];
+  /** Tailles proposables : le référentiel, restreint à la disponibilité du modèle. */
+  referentielTailles: Size[];
+  /** Quantité commandée, reprise du devis — la répartition doit la totaliser exactement. */
+  totalQuantity: number;
 }) {
   const [pending, startTransition] = useTransition();
   const [sectionIds, setSectionIds] = useState<string[]>(initialSectionIds);
-  const [sizes, setSizes] = useState<{ taille: string; quantite_demandee: number }[]>(
-    initialSizes.length > 0 ? initialSizes : [{ taille: "", quantite_demandee: 0 }]
+  const [quantites, setQuantites] = useState<Record<string, number>>(
+    Object.fromEntries(initialSizes.map((s) => [s.taille, s.quantite_demandee]))
   );
+
+  const sizes = referentielTailles
+    .filter((t) => (quantites[t.cle] ?? 0) > 0)
+    .map((t) => ({ taille: t.cle, quantite_demandee: quantites[t.cle] }));
+
+  const reparti = Object.values(quantites).reduce((somme, n) => somme + (n || 0), 0);
+  const ecart = reparti - totalQuantity;
+
+  const groupes = [...new Set(referentielTailles.map((t) => t.groupe))];
 
   const availableSections = allSections.filter((s) => !sectionIds.includes(s.id));
 
@@ -67,8 +89,8 @@ export function SectionsSizesEditor({
     });
   }
 
-  function updateSize(i: number, patch: Partial<{ taille: string; quantite_demandee: number }>) {
-    setSizes((prev) => prev.map((s, idx) => (idx === i ? { ...s, ...patch } : s)));
+  function setQuantite(cle: string, valeur: number) {
+    setQuantites((prev) => ({ ...prev, [cle]: Number.isFinite(valeur) && valeur > 0 ? valeur : 0 }));
   }
 
   function save(then?: () => void) {
@@ -172,47 +194,65 @@ export function SectionsSizesEditor({
         </div>
 
         <div>
-          <p className="mb-2 text-xs font-medium text-foreground-muted">Quantités par taille</p>
-          <div className="space-y-2">
-            {sizes.map((s, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <select
-                  value={s.taille}
-                  onChange={(e) => updateSize(i, { taille: e.target.value })}
-                  className="w-28 rounded-md border border-border bg-surface p-2 text-xs outline-none focus:ring-2 focus:ring-brand/30"
-                >
-                  <option value="">Taille…</option>
-                  {REPARTITION_TAILLES_KEYS.map((k) => (
-                    <option key={k} value={k}>
-                      {k}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  type="number"
-                  placeholder="Quantité"
-                  value={s.quantite_demandee || ""}
-                  onChange={(e) => updateSize(i, { quantite_demandee: Number(e.target.value) })}
-                  className="w-32 rounded-md border border-border bg-surface p-2 text-xs outline-none focus:ring-2 focus:ring-brand/30"
-                />
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => setSizes((prev) => prev.filter((_, idx) => idx !== i))}
-                  disabled={sizes.length === 1}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            ))}
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => setSizes((prev) => [...prev, { taille: "", quantite_demandee: 0 }])}
-            >
-              <Plus className="h-3.5 w-3.5" /> Ajouter une taille
-            </Button>
+          <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+            <p className="text-xs font-medium text-foreground-muted">Quantités par taille</p>
+            <p className="text-xs">
+              <span className="text-foreground-muted">Réparti </span>
+              <span className={ecart === 0 ? "font-semibold text-success" : "font-semibold text-warning"}>
+                {reparti}
+              </span>
+              <span className="text-foreground-muted"> / {totalQuantity} commandées</span>
+              {ecart !== 0 && (
+                <span className="text-warning">
+                  {" "}
+                  — {ecart > 0 ? `${ecart} en trop` : `il manque ${-ecart}`}
+                </span>
+              )}
+            </p>
           </div>
+
+          {referentielTailles.length === 0 ? (
+            <p className="rounded-md border border-dashed border-border p-3 text-xs text-foreground-muted">
+              Aucune taille proposable : le référentiel est vide, ou ce modèle n&apos;a aucune taille déclarée
+              disponible. Cela se règle dans Paramètres &gt; Couleurs et tailles, puis sur la carte du modèle.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {groupes.map((groupe) => (
+                <div key={groupe}>
+                  <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-foreground-muted">
+                    {groupe}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {referentielTailles
+                      .filter((t) => t.groupe === groupe)
+                      .map((t) => {
+                        const valeur = quantites[t.cle] ?? 0;
+                        return (
+                          <label
+                            key={t.cle}
+                            className={`flex w-20 flex-col gap-1 rounded-md border p-1.5 ${
+                              valeur > 0 ? "border-brand bg-brand-soft/40" : "border-border"
+                            }`}
+                          >
+                            <span className="text-center text-[11px] font-medium text-foreground">{t.libelle}</span>
+                            <input
+                              type="number"
+                              min={0}
+                              inputMode="numeric"
+                              value={valeur || ""}
+                              placeholder="0"
+                              onChange={(e) => setQuantite(t.cle, Number(e.target.value))}
+                              className="w-full rounded border border-border bg-surface p-1 text-center text-xs outline-none focus:ring-2 focus:ring-brand/30"
+                            />
+                          </label>
+                        );
+                      })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="flex flex-wrap gap-2 border-t border-border pt-4">
@@ -222,10 +262,21 @@ export function SectionsSizesEditor({
           <Button
             onClick={submit}
             loading={pending}
-            disabled={sectionIds.length === 0 || sizes.every((s) => !s.taille || !s.quantite_demandee)}
+            disabled={sectionIds.length === 0 || reparti === 0 || ecart !== 0}
+            title={
+              ecart !== 0
+                ? `La répartition doit totaliser exactement ${totalQuantity} pièces.`
+                : undefined
+            }
           >
             <Send className="h-3.5 w-3.5" /> Soumettre pour validation
           </Button>
+          {ecart !== 0 && reparti > 0 && (
+            <p className="w-full text-xs text-warning">
+              La soumission attend une répartition égale à la quantité commandée : {reparti} réparties contre{" "}
+              {totalQuantity} demandées.
+            </p>
+          )}
         </div>
       </CardBody>
     </Card>

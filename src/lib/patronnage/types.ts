@@ -30,9 +30,14 @@ export interface LibraryArticle {
 
 export type StatutFiche = "demande" | "traces_deposes" | "bon_pour_coupe" | "archive";
 
-export const REPARTITION_TAILLES_KEYS = ["XS", "S", "M", "L", "XL", "XXL", "XXXL", "Autre"] as const;
-export type TailleKey = (typeof REPARTITION_TAILLES_KEYS)[number];
-export type RepartitionTailles = Partial<Record<TailleKey, number>>;
+/**
+ * Quantités par taille, indexées par la CLÉ du référentiel (« Homme/M »), et
+ * non plus par une des huit valeurs autrefois codées en dur. Voir
+ * `src/lib/sizes.ts` : les tailles se règlent dans Paramètres > Couleurs et
+ * tailles, et la clé est ce qui relie la répartition d'un tracé aux quantités
+ * demandées d'un ODF — le rapprochement dont dépend la validation (lot 2).
+ */
+export type RepartitionTailles = Record<string, number>;
 
 export interface PatronReconnu {
   patron_id: string;

@@ -10,6 +10,7 @@ import { notFound } from "next/navigation";
 import { ArchiveButton } from "./archive-button";
 import { LifecycleActions } from "./lifecycle-actions";
 import { ReplacementOrderPicker } from "./replacement-order-picker";
+import { getSizesForProductModel } from "@/lib/sizes";
 import { SectionsSizesEditor } from "./sections-sizes-editor";
 import { FichePatronnageLink } from "./fiche-patronnage-link";
 import { AnomaliesPanel } from "./anomalies-panel";
@@ -182,6 +183,11 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
   // (submit_production_order accepte les deux statuts depuis 0028).
   const modifiable = order.status === "brouillon" || order.status === "refuse";
 
+  // Tailles proposables au dispatching : le référentiel, restreint à celles
+  // dans lesquelles le modèle existe (aucune restriction déclarée = tout le
+  // référentiel actif, convention de la migration 0029).
+  const referentielTailles = await getSizesForProductModel(order.product_model_id);
+
   const anomalyRows = (anomalies ?? []).map((a) => ({
     id: a.id,
     message: a.message,
@@ -308,6 +314,8 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
           allSections={allSections ?? []}
           initialSectionIds={(chosenSections ?? []).map((s) => s.section_id)}
           initialSizes={sizes ?? []}
+          referentielTailles={referentielTailles}
+          totalQuantity={order.total_quantity}
         />
       )}
 

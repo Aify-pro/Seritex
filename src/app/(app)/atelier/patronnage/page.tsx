@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth/current-user";
 import { can } from "@/lib/auth/permissions";
+import { getSizes } from "@/lib/sizes";
 import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/shell/page-header";
 import { Button } from "@/components/ui/button";
@@ -27,6 +28,8 @@ export default async function PatronnagePage() {
   // la PAO en dispose sans avoir le moindre droit sur la fiche. `canModify`
   // reste inclus pour qu'un rôle ayant la main sur la fiche garde la main sur
   // ses tracés — même règle que la RLS (migration 0027).
+  const sizes = await getSizes();
+
   const canAddTrace = createTrace || canModify;
   const canModifyTrace = modifyTrace || canModify;
   if (!canView) redirect("/dashboard?erreur=acces_refuse");
@@ -53,6 +56,7 @@ export default async function PatronnagePage() {
         fiches={fiches}
         currentUserRole={profile.role}
         permissions={{ canCreate, canModify, canAddTrace, canModifyTrace, canValidate, canUnlock, canArchive, canDelete }}
+        sizes={sizes}
       />
     </div>
   );

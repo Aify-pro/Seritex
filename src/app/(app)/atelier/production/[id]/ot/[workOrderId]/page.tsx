@@ -7,7 +7,7 @@ import { formatDateTime } from "@/lib/utils";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, CheckCircle2, Circle, Scissors } from "lucide-react";
-import { REPARTITION_TAILLES_KEYS } from "@/lib/patronnage/types";
+import { getSizes, orderedRepartition, type Size } from "@/lib/sizes";
 import type { RepartitionTailles } from "@/lib/patronnage/types";
 
 const EVENT_TYPE_LABELS: Record<string, string> = {
@@ -21,9 +21,10 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   matelas_cloture: "Matelas clôturé",
 };
 
-function formatRepartition(rep: RepartitionTailles) {
-  return REPARTITION_TAILLES_KEYS.filter((k) => (rep[k] ?? 0) > 0)
-    .map((k) => `${k} : ${rep[k]}`)
+/** Répartition lisible, dans l'ordre du référentiel — jamais l'ordre d'insertion du JSON. */
+function formatRepartition(rep: RepartitionTailles, sizes: Size[]) {
+  return orderedRepartition(rep, sizes)
+    .map((t) => `${t.libelle} : ${t.quantite}`)
     .join(" · ");
 }
 
@@ -44,6 +45,7 @@ export default async function WorkOrderDetailPage({
   await requireRole(["responsable_production", "administrateur"]);
   const { id, workOrderId } = await params;
   const supabase = await createClient();
+  const sizes = await getSizes();
 
   const { data: wo } = await supabase
     .from("work_orders")
@@ -185,7 +187,7 @@ export default async function WorkOrderDetailPage({
                       <Circle className="h-3.5 w-3.5 text-foreground-muted" /> {m.reference}
                       {m.estCorrectif && <span className="text-xs text-warning">(rattrapage)</span>}
                     </span>
-                    <span className="text-xs text-foreground-muted">{formatRepartition(m.repartitionParCouche)}</span>
+                    <span className="text-xs text-foreground-muted">{formatRepartition(m.repartitionParCouche, sizes)}</span>
                   </li>
                 ))}
               </ul>
@@ -216,7 +218,7 @@ export default async function WorkOrderDetailPage({
                         </Badge>
                       </div>
                       <p className="text-xs text-foreground-muted">
-                        {formatRepartition(quantites)} · déchets {e.poids_dechet_kg ?? 0} kg
+                        {formatRepartition(quantites, sizes)} · déchets {e.poids_dechet_kg ?? 0} kg
                       </p>
                       {e.comment && <p className="text-xs text-warning">Justification : {e.comment}</p>}
                       <p className="text-[11px] text-foreground-muted">
