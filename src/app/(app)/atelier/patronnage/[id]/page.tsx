@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth/current-user";
 import { can } from "@/lib/auth/permissions";
+import { getSizes } from "@/lib/sizes";
 import { PageHeader } from "@/components/shell/page-header";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft } from "lucide-react";
@@ -43,6 +44,8 @@ export default async function FichePlacementPage({
   // la PAO en dispose sans avoir le moindre droit sur la fiche. `canModify`
   // reste inclus pour qu'un rôle ayant la main sur la fiche garde la main sur
   // ses tracés — même règle que la RLS (migration 0027).
+  const sizes = await getSizes();
+
   const canAddTrace = createTrace || canModify;
   const canModifyTrace = modifyTrace || canModify;
   if (!canView) redirect("/dashboard?erreur=acces_refuse");
@@ -71,6 +74,7 @@ export default async function FichePlacementPage({
         fiche={fiche}
         referenceOptions={referenceOptions}
         permissions={{ canCreate, canModify, canAddTrace, canModifyTrace, canValidate, canUnlock, canArchive, canDelete }}
+        sizes={sizes}
         highlightTraceId={trace ?? null}
       />
     </div>

@@ -1,5 +1,6 @@
 import { requireRole } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server";
+import { getSizes } from "@/lib/sizes";
 import { PageHeader } from "@/components/shell/page-header";
 import {
   SectionBoard,
@@ -212,6 +213,7 @@ export default async function SectionQueuePage({
         productionOrderOptions={productionOrderOptions}
         initialOpenWasteBags={openWasteBags}
         stockItemOptions={stockItemOptions}
+        sizes={await getSizes()}
       />
     </div>
   );

@@ -28,7 +28,8 @@ import { cn, formatDate, formatDateTime } from "@/lib/utils";
 import { QrScannerButton } from "@/components/atelier/patronnage/qr-scanner-button";
 import { TraceDetailDialog } from "@/components/atelier/patronnage/trace-detail-dialog";
 import type { FichePlacement, RepartitionTailles, StatutFiche, TracePlacement } from "@/lib/patronnage/types";
-import { REPARTITION_TAILLES_KEYS } from "@/lib/patronnage/types";
+import { createContext, useContext } from "react";
+import type { Size } from "@/lib/sizes";
 import type { TraceAnalysisDetail } from "@/lib/patronnage/detail";
 import {
   createFiche,
@@ -101,10 +102,13 @@ function repartitionTotal(r: RepartitionTailles): number {
 export function FichesPlacementClient({
   fiches,
   permissions,
+  sizes = [],
 }: {
   fiches: FichePlacement[];
   currentUserRole: string;
   permissions: Permissions;
+  /** Grille de tailles active (Paramètres > Couleurs et tailles). */
+  sizes?: Size[];
 }) {
   const [filtreStatut, setFiltreStatut] = useState<StatutFiche | "tous">("tous");
   const [showCreate, setShowCreate] = useState(false);
@@ -112,87 +116,89 @@ export function FichesPlacementClient({
   const filtered = fiches.filter((f) => filtreStatut === "tous" || f.statut === filtreStatut);
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex gap-1.5">
-          {(["tous", "demande", "traces_deposes", "bon_pour_coupe", "archive"] as const).map((s) => (
-            <button
-              key={s}
-              onClick={() => setFiltreStatut(s)}
-              className={cn(
-                "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
-                filtreStatut === s
-                  ? "border-brand bg-brand-soft text-brand"
-                  : "border-border text-foreground-muted hover:text-foreground"
-              )}
-            >
-              {s === "tous" ? "Toutes" : STATUT_LABELS[s]}
-            </button>
-          ))}
+    <SizesContext.Provider value={sizes}>
+      <div className="space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex gap-1.5">
+            {(["tous", "demande", "traces_deposes", "bon_pour_coupe", "archive"] as const).map((s) => (
+              <button
+                key={s}
+                onClick={() => setFiltreStatut(s)}
+                className={cn(
+                  "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                  filtreStatut === s
+                    ? "border-brand bg-brand-soft text-brand"
+                    : "border-border text-foreground-muted hover:text-foreground"
+                )}
+              >
+                {s === "tous" ? "Toutes" : STATUT_LABELS[s]}
+              </button>
+            ))}
+          </div>
+          {permissions.canCreate && (
+            <Button size="sm" onClick={() => setShowCreate(true)}>
+              <Plus className="h-3.5 w-3.5" /> Nouvelle fiche
+            </Button>
+          )}
         </div>
-        {permissions.canCreate && (
-          <Button size="sm" onClick={() => setShowCreate(true)}>
-            <Plus className="h-3.5 w-3.5" /> Nouvelle fiche
-          </Button>
-        )}
-      </div>
 
-      <Card>
-        <CardBody className="p-0">
-          <Table>
-            <Thead>
-              <Tr>
-                <Th>N° OT</Th>
-                <Th>Client</Th>
-                <Th>Réf. modèle</Th>
-                <Th>ODF lié</Th>
-                <Th align="center">Tracés</Th>
-                <Th>Statut</Th>
-                <Th>Émission</Th>
-                <Th>Retour souhaité</Th>
-                <Th align="right">Actions</Th>
-              </Tr>
-            </Thead>
-            <Tbody>
-              {filtered.map((f) => (
-                <Tr key={f.id}>
-                  <Td className="font-mono text-xs">{f.numeroOt}</Td>
-                  <Td>{f.clientLibelle ?? <span className="text-foreground-muted">—</span>}</Td>
-                  <Td>{f.referenceModele ?? <span className="text-foreground-muted">—</span>}</Td>
-                  <Td>
-                    {f.odfReference ? (
-                      <span className="text-foreground">{f.odfReference}</span>
-                    ) : (
-                      <span className="text-foreground-muted">—</span>
-                    )}
-                  </Td>
-                  <Td align="center">{f.traces.length}</Td>
-                  <Td>
-                    <Badge tone={STATUT_TONE[f.statut]} dot>
-                      {STATUT_LABELS[f.statut]}
-                    </Badge>
-                  </Td>
-                  <Td>{formatDate(f.dateEmission)}</Td>
-                  <Td>{formatDate(f.dateRetourSouhaitee)}</Td>
-                  <Td align="right">
-                    <Link href={`/atelier/patronnage/${f.id}`}>
-                      <Button variant="secondary" size="sm">
-                        <Eye className="h-3.5 w-3.5" /> Voir
-                      </Button>
-                    </Link>
-                  </Td>
+        <Card>
+          <CardBody className="p-0">
+            <Table>
+              <Thead>
+                <Tr>
+                  <Th>N° OT</Th>
+                  <Th>Client</Th>
+                  <Th>Réf. modèle</Th>
+                  <Th>ODF lié</Th>
+                  <Th align="center">Tracés</Th>
+                  <Th>Statut</Th>
+                  <Th>Émission</Th>
+                  <Th>Retour souhaité</Th>
+                  <Th align="right">Actions</Th>
                 </Tr>
-              ))}
-              {filtered.length === 0 && <EmptyRow colSpan={9}>Aucune fiche de placement.</EmptyRow>}
-            </Tbody>
-          </Table>
-        </CardBody>
-      </Card>
+              </Thead>
+              <Tbody>
+                {filtered.map((f) => (
+                  <Tr key={f.id}>
+                    <Td className="font-mono text-xs">{f.numeroOt}</Td>
+                    <Td>{f.clientLibelle ?? <span className="text-foreground-muted">—</span>}</Td>
+                    <Td>{f.referenceModele ?? <span className="text-foreground-muted">—</span>}</Td>
+                    <Td>
+                      {f.odfReference ? (
+                        <span className="text-foreground">{f.odfReference}</span>
+                      ) : (
+                        <span className="text-foreground-muted">—</span>
+                      )}
+                    </Td>
+                    <Td align="center">{f.traces.length}</Td>
+                    <Td>
+                      <Badge tone={STATUT_TONE[f.statut]} dot>
+                        {STATUT_LABELS[f.statut]}
+                      </Badge>
+                    </Td>
+                    <Td>{formatDate(f.dateEmission)}</Td>
+                    <Td>{formatDate(f.dateRetourSouhaitee)}</Td>
+                    <Td align="right">
+                      <Link href={`/atelier/patronnage/${f.id}`}>
+                        <Button variant="secondary" size="sm">
+                          <Eye className="h-3.5 w-3.5" /> Voir
+                        </Button>
+                      </Link>
+                    </Td>
+                  </Tr>
+                ))}
+                {filtered.length === 0 && <EmptyRow colSpan={9}>Aucune fiche de placement.</EmptyRow>}
+              </Tbody>
+            </Table>
+          </CardBody>
+        </Card>
 
-      <Dialog open={showCreate} onOpenChange={setShowCreate} title="Nouvelle fiche de placement" size="lg">
-        <CreateFicheForm onCreated={() => setShowCreate(false)} />
-      </Dialog>
-    </div>
+        <Dialog open={showCreate} onOpenChange={setShowCreate} title="Nouvelle fiche de placement" size="lg">
+          <CreateFicheForm onCreated={() => setShowCreate(false)} />
+        </Dialog>
+      </div>
+    </SizesContext.Provider>
   );
 }
 
@@ -270,19 +276,53 @@ function SearchPicker<T>({
   );
 }
 
+/**
+ * Grille de tailles du référentiel, partagée par l'écran. En contexte plutôt
+ * qu'en prop : RepartitionFields est appelée à trois endroits imbriqués
+ * différemment, et la prop n'aurait fait que traverser des composants qui
+ * n'en font rien.
+ */
+const SizesContext = createContext<Size[]>([]);
+
+/**
+ * Quantités par taille. Les champs sont nommés d'après la CLÉ du référentiel
+ * (« Homme/M »), lue telle quelle côté serveur : c'est cette clé qui relie la
+ * répartition d'un tracé aux quantités demandées de l'ODF, rapprochement dont
+ * dépend la validation (lot 2).
+ */
 function RepartitionFields({ prefix, initial }: { prefix: string; initial?: RepartitionTailles }) {
+  const sizes = useContext(SizesContext);
+  const groupes = [...new Set(sizes.map((t) => t.groupe))];
+
+  if (sizes.length === 0) {
+    return (
+      <p className="rounded-md border border-dashed border-border p-2 text-xs text-foreground-muted">
+        Aucune taille active : alimentez le référentiel dans Paramètres &gt; Couleurs et tailles.
+      </p>
+    );
+  }
+
   return (
-    <div className="grid grid-cols-4 gap-2 sm:grid-cols-8">
-      {REPARTITION_TAILLES_KEYS.map((k) => (
-        <div key={k}>
-          <label className="mb-1 block text-[11px] text-foreground-muted">{k}</label>
-          <input
-            type="number"
-            min={0}
-            name={`${prefix}_${k}`}
-            defaultValue={initial?.[k] ?? ""}
-            className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground"
-          />
+    <div className="space-y-2">
+      {groupes.map((groupe) => (
+        <div key={groupe}>
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-foreground-muted">{groupe}</p>
+          <div className="grid grid-cols-4 gap-2 sm:grid-cols-8">
+            {sizes
+              .filter((t) => t.groupe === groupe)
+              .map((t) => (
+                <div key={t.cle}>
+                  <label className="mb-1 block text-[11px] text-foreground-muted">{t.libelle}</label>
+                  <input
+                    type="number"
+                    min={0}
+                    name={`${prefix}_${t.cle}`}
+                    defaultValue={initial?.[t.cle] ?? ""}
+                    className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground"
+                  />
+                </div>
+              ))}
+          </div>
         </div>
       ))}
     </div>
@@ -418,11 +458,14 @@ export function FicheDetailContent({
   referenceOptions,
   permissions,
   highlightTraceId,
+  sizes = [],
 }: {
   fiche: FichePlacement;
   referenceOptions: ReferenceOption[];
   permissions: Permissions;
   highlightTraceId?: string | null;
+  /** Grille de tailles active (Paramètres > Couleurs et tailles). */
+  sizes?: Size[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -478,208 +521,210 @@ export function FicheDetailContent({
   }
 
   return (
-    <div className="space-y-5">
-      {error && (
-        <div className="flex items-center gap-2 rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger">
-          <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> {error}
-        </div>
-      )}
+    <SizesContext.Provider value={sizes}>
+      <div className="space-y-5">
+        {error && (
+          <div className="flex items-center gap-2 rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> {error}
+          </div>
+        )}
 
-      {/* En-tête : statut + actions de cycle de vie */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-surface-muted px-4 py-3">
-        <div className="flex items-center gap-3">
-          <Badge tone={STATUT_TONE[fiche.statut]} dot>
-            {STATUT_LABELS[fiche.statut]}
-          </Badge>
-          <span className="text-xs text-foreground-muted">Émise le {formatDate(fiche.dateEmission)}</span>
-          {fiche.valideLe && (
-            <span className="text-xs text-foreground-muted">· Validée le {formatDateTime(fiche.valideLe)}</span>
-          )}
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {fiche.statut !== "bon_pour_coupe" && fiche.statut !== "archive" && permissions.canValidate && (
-            <Button size="sm" variant="secondary" loading={pending} onClick={() => runAction(() => validateFiche(fiche.id))}>
-              <Lock className="h-3.5 w-3.5" /> Valider — bon pour coupe
-            </Button>
-          )}
-          {fiche.statut === "bon_pour_coupe" && permissions.canUnlock && (
-            <Button size="sm" variant="secondary" loading={pending} onClick={() => runAction(() => unlockFiche(fiche.id))}>
-              <Unlock className="h-3.5 w-3.5" /> Repasser en révision
-            </Button>
-          )}
-          {fiche.statut !== "archive" && permissions.canArchive && (
-            <Button size="sm" variant="ghost" loading={pending} onClick={() => runAction(() => archiveFiche(fiche.id))}>
-              <Archive className="h-3.5 w-3.5" /> Archiver
-            </Button>
-          )}
-          {fiche.statut === "archive" && permissions.canArchive && (
-            <Button size="sm" variant="ghost" loading={pending} onClick={() => runAction(() => unarchiveFiche(fiche.id))}>
-              <ArchiveRestore className="h-3.5 w-3.5" /> Désarchiver
-            </Button>
-          )}
-          {permissions.canDelete && !fiche.valideLe && !fiche.premiereLiaisonOdfLe && (
-            <Button
-              size="sm"
-              variant="ghost"
-              loading={pending}
-              onClick={handleDelete}
-            >
-              <Trash2 className="h-3.5 w-3.5 text-danger" />
-            </Button>
-          )}
-        </div>
-      </div>
-
-      {locked && (
-        <div className="flex items-center gap-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-xs text-foreground">
-          <Lock className="h-3.5 w-3.5 shrink-0" /> Fiche verrouillée — aucune modification des cadres ni des tracés
-          tant qu&apos;elle n&apos;est pas repassée en révision.
-        </div>
-      )}
-
-      {/* Lien ODF */}
-      <Card>
-        <CardHeader title="Ordre de fabrication lié" description={fiche.premiereLiaisonOdfLe ? `Première liaison le ${formatDate(fiche.premiereLiaisonOdfLe)}` : "Optionnel"} />
-        <CardBody>
-          {!locked && permissions.canModify ? (
-            <div className="flex gap-2">
-              <div className="flex-1">
-                <SearchPicker
-                  placeholder="Rechercher une référence ODF…"
-                  search={searchOdf}
-                  renderOption={(o: { id: string; reference: string }) => o.reference}
-                  onSelect={(o) => runAction(() => linkOdf(fiche.id, o.id ?? null))}
-                  displayValue={fiche.odfReference ?? ""}
-                />
-              </div>
-              <QrScannerButton
-                onScanned={async (reference) => {
-                  const results = await searchOdf(reference);
-                  if (results[0]) runAction(() => linkOdf(fiche.id, results[0].id ?? null));
-                }}
-              />
-            </div>
-          ) : (
-            <p className="text-sm text-foreground">{fiche.odfReference ?? "Aucun ODF lié"}</p>
-          )}
-        </CardBody>
-      </Card>
-
-      {/* Cadres 1-4 */}
-      <Card>
-        <CardHeader title="Demande" description="Cadres 1 à 4 — aucun champ n'est obligatoire" />
-        <CardBody>
-          <form ref={cadreFormRef} onSubmit={handleSaveCadres} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="Désignation article">
-                <input
-                  name="designation_article"
-                  defaultValue={fiche.designationArticle ?? ""}
-                  disabled={locked || !permissions.canModify}
-                  className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground disabled:opacity-60"
-                />
-              </Field>
-              <Field label="Référence modèle">
-                <input
-                  name="reference_modele"
-                  defaultValue={fiche.referenceModele ?? ""}
-                  disabled={locked || !permissions.canModify}
-                  className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground disabled:opacity-60"
-                />
-              </Field>
-            </div>
-
-            <Field label="Quantité totale à produire">
-              <input
-                type="number"
-                name="quantite_totale"
-                defaultValue={fiche.quantiteTotale ?? ""}
-                disabled={locked || !permissions.canModify}
-                className="w-40 rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground disabled:opacity-60"
-              />
-            </Field>
-
-            <Field label={`Répartition des tailles (total ${repartitionTotal(fiche.repartitionTailles)})`}>
-              <fieldset disabled={locked || !permissions.canModify}>
-                <RepartitionFields prefix="taille" initial={fiche.repartitionTailles} />
-              </fieldset>
-            </Field>
-
-            <div className="grid grid-cols-4 gap-4">
-              <Field label="Tissu">
-                <input name="tissu_type" defaultValue={fiche.tissuType ?? ""} disabled={locked || !permissions.canModify} className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground disabled:opacity-60" />
-              </Field>
-              <Field label="Grammage (g/m²)">
-                <input type="number" name="grammage" defaultValue={fiche.grammage ?? ""} disabled={locked || !permissions.canModify} className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground disabled:opacity-60" />
-              </Field>
-              <Field label="Couleur">
-                <input name="couleur" defaultValue={fiche.couleur ?? ""} disabled={locked || !permissions.canModify} className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground disabled:opacity-60" />
-              </Field>
-              <Field label="Laize utile (cm)">
-                <input type="number" name="laize_utile_cm" defaultValue={fiche.laizeUtileCm ?? ""} disabled={locked || !permissions.canModify} className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground disabled:opacity-60" />
-              </Field>
-            </div>
-
-            <Field label="Contraintes particulières">
-              <input name="contraintes" defaultValue={fiche.contraintes ?? ""} disabled={locked || !permissions.canModify} className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground disabled:opacity-60" />
-            </Field>
-            <Field label="Observations / instructions particulières">
-              <textarea name="observations" rows={2} defaultValue={fiche.observations ?? ""} disabled={locked || !permissions.canModify} className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground disabled:opacity-60" />
-            </Field>
-
-            {!locked && permissions.canModify && (
-              <div className="flex justify-end">
-                <Button type="submit" size="sm" loading={pending}>
-                  Enregistrer
-                </Button>
-              </div>
+        {/* En-tête : statut + actions de cycle de vie */}
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-surface-muted px-4 py-3">
+          <div className="flex items-center gap-3">
+            <Badge tone={STATUT_TONE[fiche.statut]} dot>
+              {STATUT_LABELS[fiche.statut]}
+            </Badge>
+            <span className="text-xs text-foreground-muted">Émise le {formatDate(fiche.dateEmission)}</span>
+            {fiche.valideLe && (
+              <span className="text-xs text-foreground-muted">· Validée le {formatDateTime(fiche.valideLe)}</span>
             )}
-          </form>
-        </CardBody>
-      </Card>
-
-      {/* Tracés */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-medium text-foreground">Tracés ({fiche.traces.length})</h3>
-          <div className="flex gap-2">
-            {!locked && permissions.canAddTrace && (
-              <Button
-                size="sm"
-                variant="secondary"
-                loading={pending}
-                onClick={() => runAction(() => addTrace(fiche.id, new FormData()))}
-              >
-                <Plus className="h-3.5 w-3.5" /> Ajouter un tracé
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {fiche.statut !== "bon_pour_coupe" && fiche.statut !== "archive" && permissions.canValidate && (
+              <Button size="sm" variant="secondary" loading={pending} onClick={() => runAction(() => validateFiche(fiche.id))}>
+                <Lock className="h-3.5 w-3.5" /> Valider — bon pour coupe
               </Button>
             )}
-            {locked && fiche.statut === "bon_pour_coupe" && permissions.canModify && (
-              <RequestCorrectiveTraceButton ficheId={fiche.id} onRequested={refresh} />
+            {fiche.statut === "bon_pour_coupe" && permissions.canUnlock && (
+              <Button size="sm" variant="secondary" loading={pending} onClick={() => runAction(() => unlockFiche(fiche.id))}>
+                <Unlock className="h-3.5 w-3.5" /> Repasser en révision
+              </Button>
+            )}
+            {fiche.statut !== "archive" && permissions.canArchive && (
+              <Button size="sm" variant="ghost" loading={pending} onClick={() => runAction(() => archiveFiche(fiche.id))}>
+                <Archive className="h-3.5 w-3.5" /> Archiver
+              </Button>
+            )}
+            {fiche.statut === "archive" && permissions.canArchive && (
+              <Button size="sm" variant="ghost" loading={pending} onClick={() => runAction(() => unarchiveFiche(fiche.id))}>
+                <ArchiveRestore className="h-3.5 w-3.5" /> Désarchiver
+              </Button>
+            )}
+            {permissions.canDelete && !fiche.valideLe && !fiche.premiereLiaisonOdfLe && (
+              <Button
+                size="sm"
+                variant="ghost"
+                loading={pending}
+                onClick={handleDelete}
+              >
+                <Trash2 className="h-3.5 w-3.5 text-danger" />
+              </Button>
             )}
           </div>
         </div>
 
-        {fiche.traces.length === 0 && (
-          <Card>
-            <CardBody className="text-sm text-foreground-muted">Aucun tracé déposé pour l&apos;instant.</CardBody>
-          </Card>
+        {locked && (
+          <div className="flex items-center gap-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-xs text-foreground">
+            <Lock className="h-3.5 w-3.5 shrink-0" /> Fiche verrouillée — aucune modification des cadres ni des tracés
+            tant qu&apos;elle n&apos;est pas repassée en révision.
+          </div>
         )}
 
-        {fiche.traces.map((trace) => (
-          <TraceCard
-            key={trace.id}
-            fiche={fiche}
-            trace={trace}
-            locked={locked}
-            canModify={permissions.canModifyTrace}
-            canValidate={permissions.canValidate}
-            referenceOptions={referenceOptions}
-            onChanged={refresh}
-            highlighted={trace.id === highlightTraceId}
-          />
-        ))}
+        {/* Lien ODF */}
+        <Card>
+          <CardHeader title="Ordre de fabrication lié" description={fiche.premiereLiaisonOdfLe ? `Première liaison le ${formatDate(fiche.premiereLiaisonOdfLe)}` : "Optionnel"} />
+          <CardBody>
+            {!locked && permissions.canModify ? (
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <SearchPicker
+                    placeholder="Rechercher une référence ODF…"
+                    search={searchOdf}
+                    renderOption={(o: { id: string; reference: string }) => o.reference}
+                    onSelect={(o) => runAction(() => linkOdf(fiche.id, o.id ?? null))}
+                    displayValue={fiche.odfReference ?? ""}
+                  />
+                </div>
+                <QrScannerButton
+                  onScanned={async (reference) => {
+                    const results = await searchOdf(reference);
+                    if (results[0]) runAction(() => linkOdf(fiche.id, results[0].id ?? null));
+                  }}
+                />
+              </div>
+            ) : (
+              <p className="text-sm text-foreground">{fiche.odfReference ?? "Aucun ODF lié"}</p>
+            )}
+          </CardBody>
+        </Card>
+
+        {/* Cadres 1-4 */}
+        <Card>
+          <CardHeader title="Demande" description="Cadres 1 à 4 — aucun champ n'est obligatoire" />
+          <CardBody>
+            <form ref={cadreFormRef} onSubmit={handleSaveCadres} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <Field label="Désignation article">
+                  <input
+                    name="designation_article"
+                    defaultValue={fiche.designationArticle ?? ""}
+                    disabled={locked || !permissions.canModify}
+                    className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground disabled:opacity-60"
+                  />
+                </Field>
+                <Field label="Référence modèle">
+                  <input
+                    name="reference_modele"
+                    defaultValue={fiche.referenceModele ?? ""}
+                    disabled={locked || !permissions.canModify}
+                    className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground disabled:opacity-60"
+                  />
+                </Field>
+              </div>
+
+              <Field label="Quantité totale à produire">
+                <input
+                  type="number"
+                  name="quantite_totale"
+                  defaultValue={fiche.quantiteTotale ?? ""}
+                  disabled={locked || !permissions.canModify}
+                  className="w-40 rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground disabled:opacity-60"
+                />
+              </Field>
+
+              <Field label={`Répartition des tailles (total ${repartitionTotal(fiche.repartitionTailles)})`}>
+                <fieldset disabled={locked || !permissions.canModify}>
+                  <RepartitionFields prefix="taille" initial={fiche.repartitionTailles} />
+                </fieldset>
+              </Field>
+
+              <div className="grid grid-cols-4 gap-4">
+                <Field label="Tissu">
+                  <input name="tissu_type" defaultValue={fiche.tissuType ?? ""} disabled={locked || !permissions.canModify} className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground disabled:opacity-60" />
+                </Field>
+                <Field label="Grammage (g/m²)">
+                  <input type="number" name="grammage" defaultValue={fiche.grammage ?? ""} disabled={locked || !permissions.canModify} className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground disabled:opacity-60" />
+                </Field>
+                <Field label="Couleur">
+                  <input name="couleur" defaultValue={fiche.couleur ?? ""} disabled={locked || !permissions.canModify} className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground disabled:opacity-60" />
+                </Field>
+                <Field label="Laize utile (cm)">
+                  <input type="number" name="laize_utile_cm" defaultValue={fiche.laizeUtileCm ?? ""} disabled={locked || !permissions.canModify} className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground disabled:opacity-60" />
+                </Field>
+              </div>
+
+              <Field label="Contraintes particulières">
+                <input name="contraintes" defaultValue={fiche.contraintes ?? ""} disabled={locked || !permissions.canModify} className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground disabled:opacity-60" />
+              </Field>
+              <Field label="Observations / instructions particulières">
+                <textarea name="observations" rows={2} defaultValue={fiche.observations ?? ""} disabled={locked || !permissions.canModify} className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground disabled:opacity-60" />
+              </Field>
+
+              {!locked && permissions.canModify && (
+                <div className="flex justify-end">
+                  <Button type="submit" size="sm" loading={pending}>
+                    Enregistrer
+                  </Button>
+                </div>
+              )}
+            </form>
+          </CardBody>
+        </Card>
+
+        {/* Tracés */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-medium text-foreground">Tracés ({fiche.traces.length})</h3>
+            <div className="flex gap-2">
+              {!locked && permissions.canAddTrace && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  loading={pending}
+                  onClick={() => runAction(() => addTrace(fiche.id, new FormData()))}
+                >
+                  <Plus className="h-3.5 w-3.5" /> Ajouter un tracé
+                </Button>
+              )}
+              {locked && fiche.statut === "bon_pour_coupe" && permissions.canModify && (
+                <RequestCorrectiveTraceButton ficheId={fiche.id} onRequested={refresh} />
+              )}
+            </div>
+          </div>
+
+          {fiche.traces.length === 0 && (
+            <Card>
+              <CardBody className="text-sm text-foreground-muted">Aucun tracé déposé pour l&apos;instant.</CardBody>
+            </Card>
+          )}
+
+          {fiche.traces.map((trace) => (
+            <TraceCard
+              key={trace.id}
+              fiche={fiche}
+              trace={trace}
+              locked={locked}
+              canModify={permissions.canModifyTrace}
+              canValidate={permissions.canValidate}
+              referenceOptions={referenceOptions}
+              onChanged={refresh}
+              highlighted={trace.id === highlightTraceId}
+            />
+          ))}
+        </div>
       </div>
-    </div>
+    </SizesContext.Provider>
   );
 }
 

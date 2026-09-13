@@ -18,7 +18,8 @@ import { reportAnomaly } from "../production/actions";
 import { toast } from "sonner";
 import { CheckCircle2, Package, Plus, Scissors, AlertTriangle, TriangleAlert, QrCode, Weight, Trash2 } from "lucide-react";
 import { formatDateTime, cn } from "@/lib/utils";
-import { REPARTITION_TAILLES_KEYS } from "@/lib/patronnage/types";
+import { createContext, useContext } from "react";
+import type { Size } from "@/lib/sizes";
 import type { RepartitionTailles } from "@/lib/patronnage/types";
 
 export type WorkOrderRow = {
@@ -62,6 +63,15 @@ export type WasteBagRow = { id: string; code: string; currentWeightKg: number; c
 /** Lot 10 : article du miroir Sage (stock_item_view), pour rattacher une pesée reception_tissu/retour_stock. */
 export type StockItemOption = { sageReference: string; designation: string };
 
+/**
+ * Grille de tailles du référentiel, partagée par tout l'écran. Passée par
+ * contexte et non de proche en proche : quatre niveaux de composants séparent
+ * le plateau du formulaire de clôture d'un matelas, et l'enfilade de props
+ * n'aurait rien appris à personne en chemin.
+ */
+const SizesContext = createContext<Size[]>([]);
+const useSizes = () => useContext(SizesContext);
+
 export function SectionBoard({
   sectionId,
   initialWorkOrders,
@@ -72,9 +82,12 @@ export function SectionBoard({
   productionOrderOptions = [],
   initialOpenWasteBags = [],
   stockItemOptions = [],
+  sizes = [],
 }: {
   sectionId: string;
   initialWorkOrders: WorkOrderRow[];
+  /** Grille de tailles active (Paramètres > Couleurs et tailles). */
+  sizes?: Size[];
   matelasByWorkOrderId?: Record<string, MatelasRow[]>;
   traceOptionsByWorkOrderId?: Record<string, TraceOption[]>;
   /** Lot 7 : section Coupe uniquement (sections 16/17 du document de logique). */
@@ -121,66 +134,68 @@ export function SectionBoard({
   const termines = orders.filter((o) => o.quantity_done >= o.quantity_planned);
 
   return (
-    <div className="space-y-6">
-      {/* Lot 7 : pesées & sacs de déchets — au niveau section, pas par
-          sous-ODF, puisqu'un sac n'appartient à aucun ODF en propre (mélange
-          de productions accepté, section 17 du document de logique). */}
-      {isCoupe && (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <WasteBagsPanel initialBags={initialOpenWasteBags} productionOrderOptions={productionOrderOptions} />
-          <PeseeQuickForm
-            productionOrderOptions={productionOrderOptions}
-            lotsByProductionOrderId={lotsByProductionOrderId}
-            stockItemOptions={stockItemOptions}
-          />
-        </div>
-      )}
+    <SizesContext.Provider value={sizes}>
+      <div className="space-y-6">
+        {/* Lot 7 : pesées & sacs de déchets — au niveau section, pas par
+            sous-ODF, puisqu'un sac n'appartient à aucun ODF en propre (mélange
+            de productions accepté, section 17 du document de logique). */}
+        {isCoupe && (
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <WasteBagsPanel initialBags={initialOpenWasteBags} productionOrderOptions={productionOrderOptions} />
+            <PeseeQuickForm
+              productionOrderOptions={productionOrderOptions}
+              lotsByProductionOrderId={lotsByProductionOrderId}
+              stockItemOptions={stockItemOptions}
+            />
+          </div>
+        )}
 
-      <div>
-        <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-foreground-muted">
-          À produire ({enCours.length})
-        </h3>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <AnimatePresence initial={false}>
-            {enCours.map((wo) => (
-              <WorkOrderCard
-                key={wo.id}
-                wo={wo}
-                setOrders={setOrders}
-                matelas={matelasByWorkOrderId[wo.id]}
-                traceOptions={traceOptionsByWorkOrderId[wo.id] ?? []}
-                sectionId={sectionId}
-              />
-            ))}
-          </AnimatePresence>
-          {enCours.length === 0 && (
-            <div className="rounded-md border border-dashed border-border p-4 text-center text-xs text-foreground-muted sm:col-span-2 lg:col-span-3">
-              Aucun ordre en cours
-            </div>
-          )}
-        </div>
-      </div>
-
-      {termines.length > 0 && (
         <div>
           <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-foreground-muted">
-            Quantité atteinte ({termines.length})
+            À produire ({enCours.length})
           </h3>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {termines.map((wo) => (
-              <WorkOrderCard
-                key={wo.id}
-                wo={wo}
-                setOrders={setOrders}
-                matelas={matelasByWorkOrderId[wo.id]}
-                traceOptions={traceOptionsByWorkOrderId[wo.id] ?? []}
-                sectionId={sectionId}
-              />
-            ))}
+            <AnimatePresence initial={false}>
+              {enCours.map((wo) => (
+                <WorkOrderCard
+                  key={wo.id}
+                  wo={wo}
+                  setOrders={setOrders}
+                  matelas={matelasByWorkOrderId[wo.id]}
+                  traceOptions={traceOptionsByWorkOrderId[wo.id] ?? []}
+                  sectionId={sectionId}
+                />
+              ))}
+            </AnimatePresence>
+            {enCours.length === 0 && (
+              <div className="rounded-md border border-dashed border-border p-4 text-center text-xs text-foreground-muted sm:col-span-2 lg:col-span-3">
+                Aucun ordre en cours
+              </div>
+            )}
           </div>
         </div>
-      )}
-    </div>
+
+        {termines.length > 0 && (
+          <div>
+            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-foreground-muted">
+              Quantité atteinte ({termines.length})
+            </h3>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {termines.map((wo) => (
+                <WorkOrderCard
+                  key={wo.id}
+                  wo={wo}
+                  setOrders={setOrders}
+                  matelas={matelasByWorkOrderId[wo.id]}
+                  traceOptions={traceOptionsByWorkOrderId[wo.id] ?? []}
+                  sectionId={sectionId}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </SizesContext.Provider>
   );
 }
 
@@ -394,7 +409,13 @@ function MatelasCloseForm({
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const tailles = REPARTITION_TAILLES_KEYS.filter((k) => (matelas.repartitionParCouche[k] ?? 0) > 0);
+  // Tailles réellement posées sur ce matelas, présentées dans l'ordre du
+  // référentiel plutôt que dans celui, arbitraire, des clés du JSON.
+  const referentiel = useSizes();
+  const tailles = referentiel
+    .filter((t) => (matelas.repartitionParCouche[t.cle] ?? 0) > 0)
+    .map((t) => t.cle);
+  const libelleDe = (cle: string) => referentiel.find((t) => t.cle === cle)?.libelle ?? cle;
   const [quantites, setQuantites] = useState<Record<string, number>>(
     Object.fromEntries(tailles.map((k) => [k, matelas.repartitionParCouche[k] ?? 0]))
   );
@@ -435,7 +456,7 @@ function MatelasCloseForm({
       <div className="grid grid-cols-4 gap-2">
         {tailles.map((k) => (
           <div key={k}>
-            <label className="block text-[10px] text-foreground-muted">{k}</label>
+            <label className="block text-[10px] text-foreground-muted">{libelleDe(k)}</label>
             <input
               type="number"
               min={0}
@@ -503,6 +524,7 @@ function CreateLotButton({
   const [traceId, setTraceId] = useState("");
   const [composition, setComposition] = useState<Record<string, number>>({});
   const [lastCode, setLastCode] = useState<string | null>(null);
+  const tailleOptions = useSizes();
 
   function submit() {
     const nonZero = Object.fromEntries(Object.entries(composition).filter(([, v]) => v > 0));
@@ -579,14 +601,14 @@ function CreateLotButton({
           Composition par taille (libre — pas de contrôle automatique)
         </label>
         <div className="grid grid-cols-4 gap-1.5">
-          {REPARTITION_TAILLES_KEYS.map((k) => (
+          {tailleOptions.map((t) => (
             <input
-              key={k}
+              key={t.cle}
               type="number"
               min={0}
-              placeholder={k}
-              value={composition[k] ?? ""}
-              onChange={(e) => setComposition((c) => ({ ...c, [k]: Number(e.target.value) }))}
+              placeholder={t.libelle}
+              value={composition[t.cle] ?? ""}
+              onChange={(e) => setComposition((c) => ({ ...c, [t.cle]: Number(e.target.value) }))}
               className="w-full rounded-md border border-border bg-surface p-1.5 text-xs outline-none focus:ring-2 focus:ring-brand/30"
             />
           ))}

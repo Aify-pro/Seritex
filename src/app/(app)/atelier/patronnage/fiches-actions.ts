@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireUser } from "@/lib/auth/current-user";
 import { can } from "@/lib/auth/permissions";
+import { getSizes } from "@/lib/sizes";
 import { parseDxfContours } from "@/lib/patronnage/dxf";
 import { loadReferenceLibrary } from "@/lib/patronnage/bibliotheque";
 import { reconnaitreTrace } from "@/lib/patronnage/reconnaissance";
@@ -44,12 +45,20 @@ async function requireTracePermission(action: "create" | "modify") {
   return current;
 }
 
-function repartitionJson(formData: FormData, prefix: string): RepartitionTailles {
+/**
+ * Quantités par taille saisies dans un formulaire. Les champs sont nommés
+ * d'après la CLÉ du référentiel (« couche_Homme/M »), et c'est cette clé qui
+ * est stockée : elle relie la répartition d'un tracé aux quantités demandées
+ * d'un ODF, rapprochement dont dépend la validation (lot 2). Les tailles sont
+ * lues au référentiel plutôt qu'à une liste figée, donc la fonction est
+ * asynchrone — `getSizes()` est mise en cache par requête serveur.
+ */
+async function repartitionJson(formData: FormData, prefix: string): Promise<RepartitionTailles> {
   const out: RepartitionTailles = {};
-  for (const key of ["XS", "S", "M", "L", "XL", "XXL", "XXXL", "Autre"] as const) {
-    const raw = formData.get(`${prefix}_${key}`);
+  for (const taille of await getSizes()) {
+    const raw = formData.get(`${prefix}_${taille.cle}`);
     const n = raw !== null ? Number(raw) : 0;
-    if (n > 0) out[key] = n;
+    if (n > 0) out[taille.cle] = n;
   }
   return out;
 }
@@ -125,7 +134,7 @@ export async function createFiche(formData: FormData) {
       designation_article: String(formData.get("designation_article") ?? "").trim() || null,
       reference_modele: String(formData.get("reference_modele") ?? "").trim() || null,
       quantite_totale: formData.get("quantite_totale") ? Number(formData.get("quantite_totale")) : null,
-      repartition_tailles: repartitionJson(formData, "taille"),
+      repartition_tailles: await repartitionJson(formData, "taille"),
       tissu_type: String(formData.get("tissu_type") ?? "").trim() || null,
       grammage: formData.get("grammage") ? Number(formData.get("grammage")) : null,
       couleur: String(formData.get("couleur") ?? "").trim() || null,
@@ -204,7 +213,7 @@ export async function updateFiche(ficheId: string, formData: FormData) {
       designation_article: String(formData.get("designation_article") ?? "").trim() || null,
       reference_modele: String(formData.get("reference_modele") ?? "").trim() || null,
       quantite_totale: formData.get("quantite_totale") ? Number(formData.get("quantite_totale")) : null,
-      repartition_tailles: repartitionJson(formData, "taille"),
+      repartition_tailles: await repartitionJson(formData, "taille"),
       tissu_type: String(formData.get("tissu_type") ?? "").trim() || null,
       grammage: formData.get("grammage") ? Number(formData.get("grammage")) : null,
       couleur: String(formData.get("couleur") ?? "").trim() || null,
@@ -449,7 +458,7 @@ export async function addTrace(ficheId: string, formData: FormData) {
     longueur_matelas_m: formData.get("longueur_matelas_m") ? Number(formData.get("longueur_matelas_m")) : null,
     largeur_matelas_cm: formData.get("largeur_matelas_cm") ? Number(formData.get("largeur_matelas_cm")) : null,
     nb_plis: formData.get("nb_plis") ? Number(formData.get("nb_plis")) : null,
-    repartition_par_couche: repartitionJson(formData, "couche"),
+    repartition_par_couche: await repartitionJson(formData, "couche"),
   });
   if (error) return { error: error.message };
 
@@ -471,7 +480,7 @@ export async function updateTrace(traceId: string, ficheId: string, formData: Fo
       longueur_matelas_m: formData.get("longueur_matelas_m") ? Number(formData.get("longueur_matelas_m")) : null,
       largeur_matelas_cm: formData.get("largeur_matelas_cm") ? Number(formData.get("largeur_matelas_cm")) : null,
       nb_plis: formData.get("nb_plis") ? Number(formData.get("nb_plis")) : null,
-      repartition_par_couche: repartitionJson(formData, "couche"),
+      repartition_par_couche: await repartitionJson(formData, "couche"),
       updated_at: new Date().toISOString(),
     })
     .eq("id", traceId);
