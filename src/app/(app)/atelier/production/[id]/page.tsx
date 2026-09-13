@@ -141,6 +141,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     order.launched_by,
     order.cloture_demandee_par,
     order.closed_by,
+    order.refuse_par,
     ...(anomalies ?? []).map((a) => a.resolved_by),
   ].filter((v): v is string => !!v);
   const { data: users } =
@@ -175,6 +176,11 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
           .limit(50)
       : Promise.resolve({ data: [] }),
   ]);
+
+  // Un refus de validation n'est pas une annulation : il sanctionne souvent
+  // une faute de frappe, et l'ODF doit redevenir modifiable puis resoumis
+  // (submit_production_order accepte les deux statuts depuis 0028).
+  const modifiable = order.status === "brouillon" || order.status === "refuse";
 
   const anomalyRows = (anomalies ?? []).map((a) => ({
     id: a.id,
@@ -255,6 +261,23 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
         </p>
       )}
 
+      {order.status === "refuse" && (
+        <Card className="border-danger/30 bg-danger-soft/40">
+          <CardBody>
+            <p className="text-xs font-medium text-foreground-muted">
+              Validation refusée{order.refuse_le ? ` le ${formatDate(order.refuse_le)}` : ""}
+              {order.refuse_par ? ` par ${nameOf(order.refuse_par)}` : ""}
+            </p>
+            <p className="text-sm text-foreground">
+              {order.refus_motif ?? "Aucun motif précisé."}
+            </p>
+            <p className="mt-1 text-xs text-foreground-muted">
+              Corrigez ce qui doit l&apos;être ci-dessous, puis soumettez à nouveau : le motif sera soldé.
+            </p>
+          </CardBody>
+        </Card>
+      )}
+
       {order.cloture_note && (
         <Card className="border-warning/30 bg-warning-soft/40">
           <CardBody>
@@ -279,7 +302,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
         </Card>
       )}
 
-      {order.status === "brouillon" && (
+      {modifiable && (
         <SectionsSizesEditor
           productionOrderId={order.id}
           allSections={allSections ?? []}
@@ -290,7 +313,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
 
       <ProductConfigurator
         productionOrderId={order.id}
-        editable={order.status === "brouillon"}
+        editable={modifiable}
         productModels={productModels ?? []}
         currentProductModelId={order.product_model_id}
         currentProductModelName={productModel?.name ?? null}
@@ -309,7 +332,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
       {(coupeSelected || fiche) && (
         <FichePatronnageLink
           productionOrderId={order.id}
-          editable={order.status === "brouillon"}
+          editable={modifiable}
           fiche={fiche ? { id: fiche.id, numeroOt: fiche.numero_ot, statut: fiche.statut as StatutFiche } : null}
         />
       )}
