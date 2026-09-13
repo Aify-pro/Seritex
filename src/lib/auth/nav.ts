@@ -102,7 +102,7 @@ export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
     { href: "/atelier/section", label: "Terminaux de section", icon: navIcon(ClipboardList), module: "ordres_travail" },
     { href: "/mediatheque", label: "Médiathèque", icon: navIcon(FolderOpen), module: "mediatheque" },
     { href: "/parametres/produits", label: "Modèles de produits", icon: navIcon(Shirt), section: PARAMETRES },
-    { href: "/parametres/couleurs", label: "Palette de couleurs", icon: navIcon(SwatchBook), section: PARAMETRES },
+    { href: "/parametres/couleurs", label: "Couleurs et tailles", icon: navIcon(SwatchBook), section: PARAMETRES },
     { href: "/parametres/stock", label: "Stock Sage (lecture)", icon: navIcon(Warehouse), section: PARAMETRES, module: "stock_sage" },
     {
       href: "/parametres/clients-sage",
@@ -145,7 +145,7 @@ export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
     { href: "/parametres/roles", label: "Rôles & permissions", icon: navIcon(ShieldCheck), section: PARAMETRES, module: "roles" },
     { href: "/parametres/sections", label: "Sections d'atelier", icon: navIcon(Boxes), section: PARAMETRES, module: "sections" },
     { href: "/parametres/produits", label: "Modèles de produits", icon: navIcon(Shirt), section: PARAMETRES },
-    { href: "/parametres/couleurs", label: "Palette de couleurs", icon: navIcon(SwatchBook), section: PARAMETRES },
+    { href: "/parametres/couleurs", label: "Couleurs et tailles", icon: navIcon(SwatchBook), section: PARAMETRES },
     { href: "/parametres/stockage", label: "Stockage médiathèque", icon: navIcon(Database), section: PARAMETRES, module: "stockage_cibles" },
     { href: "/parametres/sage", label: "Intégration Sage", icon: navIcon(Plug), section: PARAMETRES, module: "parametres_sage" },
     { href: "/parametres/stock", label: "Stock Sage (lecture)", icon: navIcon(Warehouse), section: PARAMETRES, module: "stock_sage" },
