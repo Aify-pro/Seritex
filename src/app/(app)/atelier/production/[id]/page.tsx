@@ -342,6 +342,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
           productionOrderId={order.id}
           editable={modifiable}
           fiche={fiche ? { id: fiche.id, numeroOt: fiche.numero_ot, statut: fiche.statut as StatutFiche } : null}
+          productModelId={order.product_model_id}
         />
       )}
 

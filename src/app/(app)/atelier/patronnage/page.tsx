@@ -6,7 +6,7 @@ import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/shell/page-header";
 import { Button } from "@/components/ui/button";
 import { BookMarked } from "lucide-react";
-import { getFichesPlacement } from "@/lib/patronnage/fiches-query";
+import { getFichesPlacement, getProductModelOptions } from "@/lib/patronnage/fiches-query";
 import { FichesPlacementClient } from "@/components/atelier/patronnage/fiches-placement-client";
 
 export default async function PatronnagePage() {
@@ -34,7 +34,7 @@ export default async function PatronnagePage() {
   const canModifyTrace = modifyTrace || canModify;
   if (!canView) redirect("/dashboard?erreur=acces_refuse");
 
-  const fiches = await getFichesPlacement();
+  const [fiches, productModels] = await Promise.all([getFichesPlacement(), getProductModelOptions()]);
 
   return (
     <div className="space-y-6">
@@ -57,6 +57,7 @@ export default async function PatronnagePage() {
         currentUserRole={profile.role}
         permissions={{ canCreate, canModify, canAddTrace, canModifyTrace, canValidate, canUnlock, canArchive, canDelete }}
         sizes={sizes}
+        productModels={productModels}
       />
     </div>
   );

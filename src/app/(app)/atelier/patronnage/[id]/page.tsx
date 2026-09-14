@@ -6,7 +6,7 @@ import { getSizes } from "@/lib/sizes";
 import { PageHeader } from "@/components/shell/page-header";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft } from "lucide-react";
-import { getFichePlacementById, getPatternReferenceOptions } from "@/lib/patronnage/fiches-query";
+import { getFichePlacementById, getPatternReferenceOptions, getProductModelOptions } from "@/lib/patronnage/fiches-query";
 import { FicheDetailContent } from "@/components/atelier/patronnage/fiches-placement-client";
 
 /**
@@ -53,7 +53,11 @@ export default async function FichePlacementPage({
   const { id } = await params;
   const { trace } = await searchParams;
 
-  const [fiche, referenceOptions] = await Promise.all([getFichePlacementById(id), getPatternReferenceOptions()]);
+  const [fiche, referenceOptions, productModels] = await Promise.all([
+    getFichePlacementById(id),
+    getPatternReferenceOptions(),
+    getProductModelOptions(),
+  ]);
   if (!fiche) notFound();
 
   return (
@@ -75,6 +79,7 @@ export default async function FichePlacementPage({
         referenceOptions={referenceOptions}
         permissions={{ canCreate, canModify, canAddTrace, canModifyTrace, canValidate, canUnlock, canArchive, canDelete }}
         sizes={sizes}
+        productModels={productModels}
         highlightTraceId={trace ?? null}
       />
     </div>
