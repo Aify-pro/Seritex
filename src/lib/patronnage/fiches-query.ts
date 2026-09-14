@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { FichePlacement, PatronReconnu, PieceNonReconnue, RendementTrace } from "@/lib/patronnage/types";
 
 const FICHE_SELECT = `id,numero_ot,statut,statut_precedent,odf_id,premiere_liaison_odf_le,client_code,client_libelle,
-   date_emission,date_retour_souhaitee,designation_article,reference_modele,quantite_totale,
+   date_emission,date_retour_souhaitee,designation_article,reference_modele,product_model_id,quantite_totale,
    repartition_tailles,tissu_type,grammage,couleur,laize_utile_cm,contraintes,observations,
    valide_le,created_at,
    production_orders(reference),
@@ -29,6 +29,7 @@ type FicheRow = {
   date_retour_souhaitee: string | null;
   designation_article: string | null;
   reference_modele: string | null;
+  product_model_id: string | null;
   quantite_totale: number | null;
   repartition_tailles: FichePlacement["repartitionTailles"] | null;
   tissu_type: string | null;
@@ -114,6 +115,7 @@ async function mapFiches(
     dateRetourSouhaitee: f.date_retour_souhaitee,
     designationArticle: f.designation_article,
     referenceModele: f.reference_modele,
+    productModelId: f.product_model_id,
     quantiteTotale: f.quantite_totale,
     repartitionTailles: f.repartition_tailles ?? {},
     tissuType: f.tissu_type,
@@ -187,6 +189,35 @@ export async function getFichePlacementById(id: string): Promise<FichePlacement 
 
   const [mapped] = await mapFiches([ficheRaw as unknown as FicheRow], supabase);
   return mapped;
+}
+
+/**
+ * Modèles actifs pour le cadre 1 d'une fiche (lot C2), avec leur textile
+ * principal déjà résolu (lot C1) — le formulaire n'a ainsi aucun aller-retour
+ * à faire pour prévisualiser tissu/grammage/laize au choix du modèle.
+ * Commune à l'écran liste et à la page dédiée d'une fiche, comme
+ * getPatternReferenceOptions ci-dessous.
+ */
+export async function getProductModelOptions(): Promise<
+  { id: string; name: string; textile: { nom: string | null; grammage: number | null; laizeCm: number | null } | null }[]
+> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("product_models")
+    .select("id,name,textiles(nom,grammage,laize_cm)")
+    .eq("active", true)
+    .order("name");
+
+  return (data ?? []).map((m) => {
+    const textile = (Array.isArray(m.textiles) ? m.textiles[0] : m.textiles) as
+      | { nom: string; grammage: number | null; laize_cm: number | null }
+      | null;
+    return {
+      id: m.id as string,
+      name: m.name as string,
+      textile: textile ? { nom: textile.nom, grammage: textile.grammage, laizeCm: textile.laize_cm } : null,
+    };
+  });
 }
 
 /**

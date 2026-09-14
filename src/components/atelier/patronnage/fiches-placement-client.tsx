@@ -35,6 +35,7 @@ import {
   createFiche,
   updateFiche,
   linkOdf,
+  sizesForProductModel,
   validateFiche,
   unlockFiche,
   archiveFiche,
@@ -74,6 +75,13 @@ interface ReferenceOption {
   name: string;
 }
 
+/** Modèle actif proposable en cadre 1, avec son textile principal (lot C1) déjà résolu côté serveur. */
+interface ProductModelOption {
+  id: string;
+  name: string;
+  textile: { nom: string | null; grammage: number | null; laizeCm: number | null } | null;
+}
+
 interface Permissions {
   canCreate: boolean;
   canModify: boolean;
@@ -103,12 +111,15 @@ export function FichesPlacementClient({
   fiches,
   permissions,
   sizes = [],
+  productModels = [],
 }: {
   fiches: FichePlacement[];
   currentUserRole: string;
   permissions: Permissions;
   /** Grille de tailles active (Paramètres > Couleurs et tailles). */
   sizes?: Size[];
+  /** Modèles actifs, pour le cadre 1 (lot C2). */
+  productModels?: ProductModelOption[];
 }) {
   const [filtreStatut, setFiltreStatut] = useState<StatutFiche | "tous">("tous");
   const [showCreate, setShowCreate] = useState(false);
@@ -163,7 +174,7 @@ export function FichesPlacementClient({
                   <Tr key={f.id}>
                     <Td className="font-mono text-xs">{f.numeroOt}</Td>
                     <Td>{f.clientLibelle ?? <span className="text-foreground-muted">—</span>}</Td>
-                    <Td>{f.referenceModele ?? <span className="text-foreground-muted">—</span>}</Td>
+                    <Td>{f.designationArticle ?? f.referenceModele ?? <span className="text-foreground-muted">—</span>}</Td>
                     <Td>
                       {f.odfReference ? (
                         <span className="text-foreground">{f.odfReference}</span>
@@ -195,7 +206,7 @@ export function FichesPlacementClient({
         </Card>
 
         <Dialog open={showCreate} onOpenChange={setShowCreate} title="Nouvelle fiche de placement" size="lg">
-          <CreateFicheForm onCreated={() => setShowCreate(false)} />
+          <CreateFicheForm onCreated={() => setShowCreate(false)} productModels={productModels} />
         </Dialog>
       </div>
     </SizesContext.Provider>
@@ -329,16 +340,149 @@ function RepartitionFields({ prefix, initial }: { prefix: string; initial?: Repa
   );
 }
 
+/**
+ * Cadre 1/3 : choix du modèle d'article, qui pilote désignation, tissu,
+ * grammage et laize (hérités du textile principal du modèle, lot C1) au lieu
+ * de les faire retaper. Tant qu'aucun modèle n'est choisi, la fiche reste
+ * une demande libre (convention existante : aucun champ obligatoire) et ces
+ * trois champs restent des zones de texte libre. `onSizesChange` fait
+ * remonter les tailles proposables (product_model_sizes) pour que le
+ * formulaire appelant restreigne RepartitionFields au lieu des huit tailles
+ * du référentiel entier.
+ */
+function ProductModelFields({
+  productModels,
+  initialModelId,
+  disabled,
+  onSizesChange,
+  initialTissu,
+  initialGrammage,
+  initialLaize,
+}: {
+  productModels: ProductModelOption[];
+  initialModelId: string | null;
+  disabled?: boolean;
+  onSizesChange: (sizes: Size[]) => void;
+  initialTissu?: string | null;
+  initialGrammage?: number | null;
+  initialLaize?: number | null;
+}) {
+  const allSizes = useContext(SizesContext);
+  const [modelId, setModelId] = useState(initialModelId);
+  const selected = productModels.find((m) => m.id === modelId) ?? null;
+
+  // Au chargement d'une fiche qui porte déjà un modèle, restreint tout de
+  // suite les tailles affichées — sans ça RepartitionFields resterait sur
+  // les huit tailles du référentiel entier jusqu'au premier changement de
+  // modèle par l'utilisateur.
+  useEffect(() => {
+    if (initialModelId) sizesForProductModel(initialModelId).then(onSizesChange);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function handleChange(id: string) {
+    const next = id || null;
+    setModelId(next);
+    if (!next) {
+      onSizesChange(allSizes);
+      return;
+    }
+    sizesForProductModel(next).then(onSizesChange);
+  }
+
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-4">
+        <Field label="Modèle d'article">
+          <select
+            name="product_model_id"
+            defaultValue={initialModelId ?? ""}
+            onChange={(e) => handleChange(e.target.value)}
+            disabled={disabled}
+            className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground disabled:opacity-60"
+          >
+            <option value="">— Aucun (demande libre) —</option>
+            {productModels.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </div>
+
+      <div className="grid grid-cols-3 gap-4">
+        {modelId ? (
+          <>
+            <Field label="Tissu (hérité du modèle)">
+              <p className="rounded-md border border-dashed border-border bg-surface-muted px-2.5 py-2 text-sm text-foreground-muted">
+                {selected?.textile?.nom ?? "Aucun textile rattaché à ce modèle"}
+              </p>
+            </Field>
+            <Field label="Grammage (g/m²)">
+              <p className="rounded-md border border-dashed border-border bg-surface-muted px-2.5 py-2 text-sm text-foreground-muted">
+                {selected?.textile?.grammage ?? "—"}
+              </p>
+            </Field>
+            <Field label="Laize utile (cm)">
+              <p className="rounded-md border border-dashed border-border bg-surface-muted px-2.5 py-2 text-sm text-foreground-muted">
+                {selected?.textile?.laizeCm ?? "—"}
+              </p>
+            </Field>
+          </>
+        ) : (
+          <>
+            <Field label="Tissu">
+              <input
+                name="tissu_type"
+                defaultValue={initialTissu ?? ""}
+                disabled={disabled}
+                className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground disabled:opacity-60"
+              />
+            </Field>
+            <Field label="Grammage (g/m²)">
+              <input
+                type="number"
+                name="grammage"
+                defaultValue={initialGrammage ?? ""}
+                disabled={disabled}
+                className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground disabled:opacity-60"
+              />
+            </Field>
+            <Field label="Laize utile (cm)">
+              <input
+                type="number"
+                name="laize_utile_cm"
+                defaultValue={initialLaize ?? ""}
+                disabled={disabled}
+                className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground disabled:opacity-60"
+              />
+            </Field>
+          </>
+        )}
+      </div>
+    </>
+  );
+}
+
 /* ============================================================
    Création d'une fiche
 ============================================================ */
 
-function CreateFicheForm({ onCreated }: { onCreated: () => void }) {
+function CreateFicheForm({
+  onCreated,
+  productModels,
+}: {
+  onCreated: () => void;
+  productModels: ProductModelOption[];
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [odfId, setOdfId] = useState<string | null>(null);
   const [clientCode, setClientCode] = useState<string | null>(null);
+  const pageSizes = useContext(SizesContext);
+  const [sizes, setSizes] = useState<Size[]>(pageSizes);
   const formRef = useRef<HTMLFormElement>(null);
 
   function handleSubmit(e: React.FormEvent) {
@@ -400,37 +544,21 @@ function CreateFicheForm({ onCreated }: { onCreated: () => void }) {
         </Field>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <Field label="Désignation article">
-          <input name="designation_article" className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground" />
-        </Field>
-        <Field label="Référence modèle">
-          <input name="reference_modele" className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground" />
-        </Field>
-      </div>
+      <ProductModelFields productModels={productModels} initialModelId={null} onSizesChange={setSizes} />
 
       <Field label="Quantité totale à produire">
         <input type="number" min={0} name="quantite_totale" className="w-40 rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground" />
       </Field>
 
       <Field label="Répartition des tailles">
-        <RepartitionFields prefix="taille" />
+        <SizesContext.Provider value={sizes}>
+          <RepartitionFields prefix="taille" />
+        </SizesContext.Provider>
       </Field>
 
-      <div className="grid grid-cols-4 gap-4">
-        <Field label="Tissu">
-          <input name="tissu_type" className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground" />
-        </Field>
-        <Field label="Grammage (g/m²)">
-          <input type="number" name="grammage" className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground" />
-        </Field>
-        <Field label="Couleur">
-          <input name="couleur" className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground" />
-        </Field>
-        <Field label="Laize utile (cm)">
-          <input type="number" name="laize_utile_cm" className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground" />
-        </Field>
-      </div>
+      <Field label="Couleur">
+        <input name="couleur" className="w-64 rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground" />
+      </Field>
 
       <Field label="Contraintes particulières">
         <input name="contraintes" className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground" />
@@ -459,6 +587,7 @@ export function FicheDetailContent({
   permissions,
   highlightTraceId,
   sizes = [],
+  productModels = [],
 }: {
   fiche: FichePlacement;
   referenceOptions: ReferenceOption[];
@@ -466,12 +595,15 @@ export function FicheDetailContent({
   highlightTraceId?: string | null;
   /** Grille de tailles active (Paramètres > Couleurs et tailles). */
   sizes?: Size[];
+  /** Modèles actifs, pour le cadre 1 (lot C2). */
+  productModels?: ProductModelOption[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const locked = fiche.statut === "bon_pour_coupe" || fiche.statut === "archive";
   const cadreFormRef = useRef<HTMLFormElement>(null);
+  const [cadreSizes, setCadreSizes] = useState<Size[]>(sizes);
 
   function refresh() {
     router.refresh();
@@ -614,24 +746,15 @@ export function FicheDetailContent({
           <CardHeader title="Demande" description="Cadres 1 à 4 — aucun champ n'est obligatoire" />
           <CardBody>
             <form ref={cadreFormRef} onSubmit={handleSaveCadres} className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <Field label="Désignation article">
-                  <input
-                    name="designation_article"
-                    defaultValue={fiche.designationArticle ?? ""}
-                    disabled={locked || !permissions.canModify}
-                    className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground disabled:opacity-60"
-                  />
-                </Field>
-                <Field label="Référence modèle">
-                  <input
-                    name="reference_modele"
-                    defaultValue={fiche.referenceModele ?? ""}
-                    disabled={locked || !permissions.canModify}
-                    className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground disabled:opacity-60"
-                  />
-                </Field>
-              </div>
+              <ProductModelFields
+                productModels={productModels}
+                initialModelId={fiche.productModelId}
+                disabled={locked || !permissions.canModify}
+                onSizesChange={setCadreSizes}
+                initialTissu={fiche.tissuType}
+                initialGrammage={fiche.grammage}
+                initialLaize={fiche.laizeUtileCm}
+              />
 
               <Field label="Quantité totale à produire">
                 <input
@@ -645,24 +768,15 @@ export function FicheDetailContent({
 
               <Field label={`Répartition des tailles (total ${repartitionTotal(fiche.repartitionTailles)})`}>
                 <fieldset disabled={locked || !permissions.canModify}>
-                  <RepartitionFields prefix="taille" initial={fiche.repartitionTailles} />
+                  <SizesContext.Provider value={cadreSizes}>
+                    <RepartitionFields prefix="taille" initial={fiche.repartitionTailles} />
+                  </SizesContext.Provider>
                 </fieldset>
               </Field>
 
-              <div className="grid grid-cols-4 gap-4">
-                <Field label="Tissu">
-                  <input name="tissu_type" defaultValue={fiche.tissuType ?? ""} disabled={locked || !permissions.canModify} className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground disabled:opacity-60" />
-                </Field>
-                <Field label="Grammage (g/m²)">
-                  <input type="number" name="grammage" defaultValue={fiche.grammage ?? ""} disabled={locked || !permissions.canModify} className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground disabled:opacity-60" />
-                </Field>
-                <Field label="Couleur">
-                  <input name="couleur" defaultValue={fiche.couleur ?? ""} disabled={locked || !permissions.canModify} className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground disabled:opacity-60" />
-                </Field>
-                <Field label="Laize utile (cm)">
-                  <input type="number" name="laize_utile_cm" defaultValue={fiche.laizeUtileCm ?? ""} disabled={locked || !permissions.canModify} className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground disabled:opacity-60" />
-                </Field>
-              </div>
+              <Field label="Couleur">
+                <input name="couleur" defaultValue={fiche.couleur ?? ""} disabled={locked || !permissions.canModify} className="w-64 rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground disabled:opacity-60" />
+              </Field>
 
               <Field label="Contraintes particulières">
                 <input name="contraintes" defaultValue={fiche.contraintes ?? ""} disabled={locked || !permissions.canModify} className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground disabled:opacity-60" />

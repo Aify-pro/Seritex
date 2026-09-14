@@ -1,13 +1,14 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Search, Lock, ExternalLink } from "lucide-react";
+import { Search, Lock, ExternalLink, Sparkles } from "lucide-react";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import { searchFichesForOdf, linkOdf } from "@/app/(app)/atelier/patronnage/fiches-actions";
+import { searchFichesForOdf, linkOdf, generateFicheFromOdf } from "@/app/(app)/atelier/patronnage/fiches-actions";
 import type { StatutFiche } from "@/lib/patronnage/types";
 
 const STATUT_LABELS: Record<StatutFiche, string> = {
@@ -48,15 +49,31 @@ export function FichePatronnageLink({
   productionOrderId,
   editable,
   fiche,
+  productModelId,
 }: {
   productionOrderId: string;
   editable: boolean;
   fiche: { id: string; numeroOt: string; statut: StatutFiche } | null;
+  /** Modèle de l'ODF — la génération automatique en a besoin (lot C2). */
+  productModelId: string | null;
 }) {
+  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [query, setQuery] = useState("");
   const [options, setOptions] = useState<FicheOption[]>([]);
   const [open, setOpen] = useState(false);
+
+  function generate() {
+    startTransition(async () => {
+      const res = await generateFicheFromOdf(productionOrderId);
+      if ("error" in res) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(`Ordre de tracé ${res.numeroOt} généré`);
+      router.refresh();
+    });
+  }
 
   async function handleChange(v: string) {
     setQuery(v);
@@ -131,6 +148,19 @@ export function FichePatronnageLink({
           <p className="flex items-center gap-1.5 text-xs text-foreground-muted">
             <Lock className="h-3 w-3" /> Liaison possible uniquement en brouillon.
           </p>
+        )}
+
+        {editable && !fiche && (
+          <div className="flex items-center justify-between gap-3 rounded-md border border-dashed border-border px-2.5 py-2">
+            <p className="text-xs text-foreground-muted">
+              {productModelId
+                ? "Génère une fiche pré-remplie depuis le modèle et le dispatching de cet ODF."
+                : "Sélectionnez un modèle sur cet ODF pour pouvoir générer sa fiche automatiquement."}
+            </p>
+            <Button size="sm" variant="secondary" loading={pending} disabled={!productModelId} onClick={generate}>
+              <Sparkles className="h-3.5 w-3.5" /> Générer
+            </Button>
+          </div>
         )}
 
         {editable && (

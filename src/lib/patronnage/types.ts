@@ -122,6 +122,13 @@ export interface FichePlacement {
   dateRetourSouhaitee: string | null;
   designationArticle: string | null;
   referenceModele: string | null;
+  /**
+   * Modèle choisi en cadre 1 (lot C2) — désignation, tissu, grammage et
+   * laize sont désormais dérivés de ce modèle (et de son textile, lot C1)
+   * plutôt que saisis librement. `null` tant que la fiche reste une simple
+   * demande sans modèle choisi.
+   */
+  productModelId: string | null;
   quantiteTotale: number | null;
   repartitionTailles: RepartitionTailles;
   tissuType: string | null;

@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireUser } from "@/lib/auth/current-user";
 import { can } from "@/lib/auth/permissions";
-import { getSizes } from "@/lib/sizes";
+import { getSizes, getSizesForProductModel, type Size } from "@/lib/sizes";
 import { parseDxfContours } from "@/lib/patronnage/dxf";
 import { loadReferenceLibrary } from "@/lib/patronnage/bibliotheque";
 import { reconnaitreTrace } from "@/lib/patronnage/reconnaissance";
@@ -53,14 +53,122 @@ async function requireTracePermission(action: "create" | "modify") {
  * lues au référentiel plutôt qu'à une liste figée, donc la fonction est
  * asynchrone — `getSizes()` est mise en cache par requête serveur.
  */
-async function repartitionJson(formData: FormData, prefix: string): Promise<RepartitionTailles> {
+async function repartitionJson(formData: FormData, prefix: string, allowedSizes?: Size[]): Promise<RepartitionTailles> {
   const out: RepartitionTailles = {};
-  for (const taille of await getSizes()) {
+  const sizes = allowedSizes ?? (await getSizes());
+  for (const taille of sizes) {
     const raw = formData.get(`${prefix}_${taille.cle}`);
     const n = raw !== null ? Number(raw) : 0;
     if (n > 0) out[taille.cle] = n;
   }
   return out;
+}
+
+/**
+ * Tailles proposables pour un modèle donné, exposées côté client : le
+ * formulaire de fiche l'appelle quand l'utilisateur choisit un modèle en
+ * cadre 1, pour ne plus afficher les 8 tailles du référentiel entier mais
+ * seulement celles déclarées disponibles pour ce modèle (src/lib/sizes.ts,
+ * même convention que le dispatching de l'ODF).
+ */
+export async function sizesForProductModel(productModelId: string | null) {
+  await requirePermission("view");
+  return getSizesForProductModel(productModelId);
+}
+
+/**
+ * Résout un modèle choisi en cadre 1 vers ses valeurs figées : désignation
+ * (le nom du modèle) et tissu/grammage/laize hérités de son textile
+ * principal (lot C1, migration 0032 — ces trois caractéristiques du
+ * placement ne se retapent plus, elles viennent du référentiel textiles).
+ * Renvoie des null si le modèle est introuvable ou n'a pas encore de
+ * textile rattaché — jamais une valeur inventée.
+ */
+async function resolveProductModel(productModelId: string | null): Promise<{
+  designation_article: string | null;
+  tissu_type: string | null;
+  grammage: number | null;
+  laize_utile_cm: number | null;
+}> {
+  const vide = { designation_article: null, tissu_type: null, grammage: null, laize_utile_cm: null };
+  if (!productModelId) return vide;
+
+  const supabase = await createClient();
+  const { data: model } = await supabase
+    .from("product_models")
+    .select("name,textile_id")
+    .eq("id", productModelId)
+    .single();
+  if (!model) return vide;
+
+  let tissu_type: string | null = null;
+  let grammage: number | null = null;
+  let laize_utile_cm: number | null = null;
+  if (model.textile_id) {
+    const { data: textile } = await supabase
+      .from("textiles")
+      .select("nom,grammage,laize_cm")
+      .eq("id", model.textile_id)
+      .single();
+    if (textile) {
+      tissu_type = textile.nom as string;
+      grammage = textile.grammage as number | null;
+      laize_utile_cm = textile.laize_cm as number | null;
+    }
+  }
+  return { designation_article: model.name as string, tissu_type, grammage, laize_utile_cm };
+}
+
+/**
+ * Peuple une fiche depuis un ODF : modèle (et ses valeurs figées via
+ * resolveProductModel), quantité totale et dispatching des tailles copiés
+ * depuis production_order_sizes. Partagée par generateFicheFromOdf
+ * (création) et linkOdf (liaison d'une fiche existante) pour que les deux
+ * chemins de création évoqués par Ayman — génération depuis l'ODF ou
+ * liaison depuis l'OT — peuplent la fiche exactement de la même façon.
+ * `premiere_liaison_odf_le` n'est jamais réécrit une fois posé : il
+ * conditionne l'interdiction de suppression définitive (commentaire de la
+ * colonne, migration 0007).
+ */
+async function applyOdfToFiche(ficheId: string, odfId: string): Promise<{ error: string } | { ok: true }> {
+  const supabase = await createClient();
+
+  const [{ data: odf, error: odfError }, { data: fiche }] = await Promise.all([
+    supabase.from("production_orders").select("product_model_id,total_quantity").eq("id", odfId).single(),
+    supabase.from("fiches_placement").select("premiere_liaison_odf_le").eq("id", ficheId).single(),
+  ]);
+  if (odfError || !odf) return { error: "Ordre de fabrication introuvable" };
+
+  const { data: sizesRows } = await supabase
+    .from("production_order_sizes")
+    .select("taille,quantite_demandee")
+    .eq("production_order_id", odfId);
+
+  const repartition: RepartitionTailles = {};
+  for (const row of sizesRows ?? []) {
+    repartition[row.taille as string] = row.quantite_demandee as number;
+  }
+
+  const resolved = await resolveProductModel(odf.product_model_id as string | null);
+
+  const patch: Record<string, unknown> = {
+    odf_id: odfId,
+    product_model_id: odf.product_model_id,
+    designation_article: resolved.designation_article,
+    tissu_type: resolved.tissu_type,
+    grammage: resolved.grammage,
+    laize_utile_cm: resolved.laize_utile_cm,
+    quantite_totale: odf.total_quantity,
+    repartition_tailles: repartition,
+    updated_at: new Date().toISOString(),
+  };
+  if (!fiche?.premiere_liaison_odf_le) {
+    patch.premiere_liaison_odf_le = new Date().toISOString();
+  }
+
+  const { error } = await supabase.from("fiches_placement").update(patch).eq("id", ficheId);
+  if (error) return { error: error.message };
+  return { ok: true };
 }
 
 // ------------------------------------------------------------
@@ -122,6 +230,9 @@ export async function createFiche(formData: FormData) {
   const supabase = await createClient();
 
   const odfId = String(formData.get("odf_id") ?? "").trim() || null;
+  const productModelId = String(formData.get("product_model_id") ?? "").trim() || null;
+  const resolved = await resolveProductModel(productModelId);
+  const allowedSizes = await getSizesForProductModel(productModelId);
 
   const { data, error } = await supabase
     .from("fiches_placement")
@@ -131,14 +242,20 @@ export async function createFiche(formData: FormData) {
       client_code: String(formData.get("client_code") ?? "").trim() || null,
       client_libelle: String(formData.get("client_libelle") ?? "").trim() || null,
       date_retour_souhaitee: String(formData.get("date_retour_souhaitee") ?? "").trim() || null,
-      designation_article: String(formData.get("designation_article") ?? "").trim() || null,
-      reference_modele: String(formData.get("reference_modele") ?? "").trim() || null,
+      product_model_id: productModelId,
+      designation_article: productModelId
+        ? resolved.designation_article
+        : String(formData.get("designation_article") ?? "").trim() || null,
       quantite_totale: formData.get("quantite_totale") ? Number(formData.get("quantite_totale")) : null,
-      repartition_tailles: await repartitionJson(formData, "taille"),
-      tissu_type: String(formData.get("tissu_type") ?? "").trim() || null,
-      grammage: formData.get("grammage") ? Number(formData.get("grammage")) : null,
+      repartition_tailles: await repartitionJson(formData, "taille", allowedSizes),
+      tissu_type: productModelId ? resolved.tissu_type : String(formData.get("tissu_type") ?? "").trim() || null,
+      grammage: productModelId ? resolved.grammage : formData.get("grammage") ? Number(formData.get("grammage")) : null,
       couleur: String(formData.get("couleur") ?? "").trim() || null,
-      laize_utile_cm: formData.get("laize_utile_cm") ? Number(formData.get("laize_utile_cm")) : null,
+      laize_utile_cm: productModelId
+        ? resolved.laize_utile_cm
+        : formData.get("laize_utile_cm")
+          ? Number(formData.get("laize_utile_cm"))
+          : null,
       contraintes: String(formData.get("contraintes") ?? "").trim() || null,
       observations: String(formData.get("observations") ?? "").trim() || null,
       cree_par: authId,
@@ -204,20 +321,30 @@ export async function updateFiche(ficheId: string, formData: FormData) {
   if ("error" in gate) return gate;
 
   const supabase = await createClient();
+  const productModelId = String(formData.get("product_model_id") ?? "").trim() || null;
+  const resolved = await resolveProductModel(productModelId);
+  const allowedSizes = await getSizesForProductModel(productModelId);
+
   const { error } = await supabase
     .from("fiches_placement")
     .update({
       client_code: String(formData.get("client_code") ?? "").trim() || null,
       client_libelle: String(formData.get("client_libelle") ?? "").trim() || null,
       date_retour_souhaitee: String(formData.get("date_retour_souhaitee") ?? "").trim() || null,
-      designation_article: String(formData.get("designation_article") ?? "").trim() || null,
-      reference_modele: String(formData.get("reference_modele") ?? "").trim() || null,
+      product_model_id: productModelId,
+      designation_article: productModelId
+        ? resolved.designation_article
+        : String(formData.get("designation_article") ?? "").trim() || null,
       quantite_totale: formData.get("quantite_totale") ? Number(formData.get("quantite_totale")) : null,
-      repartition_tailles: await repartitionJson(formData, "taille"),
-      tissu_type: String(formData.get("tissu_type") ?? "").trim() || null,
-      grammage: formData.get("grammage") ? Number(formData.get("grammage")) : null,
+      repartition_tailles: await repartitionJson(formData, "taille", allowedSizes),
+      tissu_type: productModelId ? resolved.tissu_type : String(formData.get("tissu_type") ?? "").trim() || null,
+      grammage: productModelId ? resolved.grammage : formData.get("grammage") ? Number(formData.get("grammage")) : null,
       couleur: String(formData.get("couleur") ?? "").trim() || null,
-      laize_utile_cm: formData.get("laize_utile_cm") ? Number(formData.get("laize_utile_cm")) : null,
+      laize_utile_cm: productModelId
+        ? resolved.laize_utile_cm
+        : formData.get("laize_utile_cm")
+          ? Number(formData.get("laize_utile_cm"))
+          : null,
       contraintes: String(formData.get("contraintes") ?? "").trim() || null,
       observations: String(formData.get("observations") ?? "").trim() || null,
       updated_at: new Date().toISOString(),
@@ -236,23 +363,100 @@ export async function linkOdf(ficheId: string, odfId: string | null) {
   if ("error" in gate) return gate;
 
   const supabase = await createClient();
-  const { data: current } = await supabase
-    .from("fiches_placement")
-    .select("premiere_liaison_odf_le")
-    .eq("id", ficheId)
-    .single();
 
-  const patch: Record<string, unknown> = { odf_id: odfId };
-  if (odfId && !current?.premiere_liaison_odf_le) {
-    patch.premiere_liaison_odf_le = new Date().toISOString();
+  if (!odfId) {
+    const { error } = await supabase.from("fiches_placement").update({ odf_id: null }).eq("id", ficheId);
+    if (error) return { error: error.message };
+    revalidatePath("/atelier/patronnage");
+    revalidatePath(`/atelier/patronnage/${ficheId}`);
+    return {};
   }
 
-  const { error } = await supabase.from("fiches_placement").update(patch).eq("id", ficheId);
-  if (error) return { error: error.message };
+  // La fiche prend ses tailles/tissu/quantité de l'ODF lié (applyOdfToFiche) —
+  // mais si elle porte déjà un modèle différent de celui de l'ODF ciblé, la
+  // liaison est refusée plutôt que silencieusement incohérente (cadre 1 de
+  // la fiche vs. modèle réel produit par l'ODF).
+  const { data: fiche } = await supabase
+    .from("fiches_placement")
+    .select("product_model_id")
+    .eq("id", ficheId)
+    .single();
+  const { data: odf } = await supabase
+    .from("production_orders")
+    .select("product_model_id,reference")
+    .eq("id", odfId)
+    .single();
+  if (!odf) return { error: "Ordre de fabrication introuvable" };
+  if (fiche?.product_model_id && odf.product_model_id && fiche.product_model_id !== odf.product_model_id) {
+    return { error: `Cette fiche porte un autre modèle que celui de ${odf.reference} — liaison refusée.` };
+  }
+
+  const applied = await applyOdfToFiche(ficheId, odfId);
+  if ("error" in applied) return applied;
 
   revalidatePath("/atelier/patronnage");
   revalidatePath(`/atelier/patronnage/${ficheId}`);
   return {};
+}
+
+/**
+ * Génère l'ordre de tracé d'un ODF (lot C2) : un OT par ODF, puisqu'un ODF
+ * ne porte qu'un seul modèle (production_orders.product_model_id, lot 9) —
+ * pas de logique de découpage à construire. Droit double, côté fiche ET
+ * côté ODF : un rôle qui crée des fiches mais ne touche pas aux ODF ne doit
+ * pas déclencher ça depuis l'écran ODF, et inversement.
+ * fiches_placement_odf_id_unique (migration 0010) garantit qu'un ODF ne
+ * peut porter qu'une seule fiche à la fois — la vérification ci-dessous
+ * évite juste l'erreur brute de contrainte au profit d'un retour propre
+ * (retourner la fiche déjà générée plutôt qu'échouer) si l'action est
+ * déclenchée deux fois.
+ */
+export async function generateFicheFromOdf(productionOrderId: string) {
+  const { authId } = await requirePermission("create");
+  if (!(await can("ordres_fabrication", "modify"))) {
+    return { error: "accès refusé : votre rôle ne permet pas de modifier cet ordre de fabrication" };
+  }
+
+  const supabase = await createClient();
+
+  const { data: odf, error: odfError } = await supabase
+    .from("production_orders")
+    .select("id,product_model_id")
+    .eq("id", productionOrderId)
+    .single();
+  if (odfError || !odf) return { error: "Ordre de fabrication introuvable" };
+  if (!odf.product_model_id) {
+    return { error: "Sélectionnez un modèle sur cet ODF avant de générer son ordre de tracé." };
+  }
+
+  const { data: existing } = await supabase
+    .from("fiches_placement")
+    .select("id,numero_ot")
+    .eq("odf_id", productionOrderId)
+    .maybeSingle();
+  if (existing) return { id: existing.id as string, numeroOt: existing.numero_ot as string };
+
+  const { data: created, error: createError } = await supabase
+    .from("fiches_placement")
+    .insert({ cree_par: authId })
+    .select("id,numero_ot")
+    .single();
+  if (createError || !created) return { error: createError?.message ?? "création impossible" };
+
+  const applied = await applyOdfToFiche(created.id, productionOrderId);
+  if ("error" in applied) return applied;
+
+  await supabase.from("audit_log").insert({
+    user_id: authId,
+    action: "generate_fiche_from_odf",
+    entity_type: "fiche_placement",
+    entity_id: created.id,
+    metadata: { numero_ot: created.numero_ot, production_order_id: productionOrderId },
+  });
+
+  revalidatePath("/atelier/patronnage");
+  revalidatePath(`/atelier/production/${productionOrderId}`);
+  return { id: created.id as string, numeroOt: created.numero_ot as string };
 }
 
 export async function validateFiche(ficheId: string) {
