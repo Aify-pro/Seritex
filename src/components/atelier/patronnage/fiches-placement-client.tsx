@@ -718,23 +718,35 @@ export function FicheDetailContent({
           <CardHeader title="Ordre de fabrication lié" description={fiche.premiereLiaisonOdfLe ? `Première liaison le ${formatDate(fiche.premiereLiaisonOdfLe)}` : "Optionnel"} />
           <CardBody>
             {!locked && permissions.canModify ? (
-              <div className="flex gap-2">
-                <div className="flex-1">
-                  <SearchPicker
-                    placeholder="Rechercher une référence ODF…"
-                    search={searchOdf}
-                    renderOption={(o: { id: string; reference: string }) => o.reference}
-                    onSelect={(o) => runAction(() => linkOdf(fiche.id, o.id ?? null))}
-                    displayValue={fiche.odfReference ?? ""}
+              fiche.odfId ? (
+                // Liée : on ne laisse plus rechercher un autre ODF par-dessus
+                // (linkOdf le refuse désormais tant que celui-ci n'est pas
+                // délié — évite qu'une fiche glisse silencieusement d'un ODF
+                // à l'autre). Correction : délier explicitement d'abord.
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm text-foreground">{fiche.odfReference}</p>
+                  <Button size="sm" variant="ghost" loading={pending} onClick={() => runAction(() => linkOdf(fiche.id, null))}>
+                    Délier
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex gap-2">
+                  <div className="flex-1">
+                    <SearchPicker
+                      placeholder="Rechercher une référence ODF…"
+                      search={searchOdf}
+                      renderOption={(o: { id: string; reference: string }) => o.reference}
+                      onSelect={(o) => runAction(() => linkOdf(fiche.id, o.id ?? null))}
+                    />
+                  </div>
+                  <QrScannerButton
+                    onScanned={async (reference) => {
+                      const results = await searchOdf(reference);
+                      if (results[0]) runAction(() => linkOdf(fiche.id, results[0].id ?? null));
+                    }}
                   />
                 </div>
-                <QrScannerButton
-                  onScanned={async (reference) => {
-                    const results = await searchOdf(reference);
-                    if (results[0]) runAction(() => linkOdf(fiche.id, results[0].id ?? null));
-                  }}
-                />
-              </div>
+              )
             ) : (
               <p className="text-sm text-foreground">{fiche.odfReference ?? "Aucun ODF lié"}</p>
             )}
