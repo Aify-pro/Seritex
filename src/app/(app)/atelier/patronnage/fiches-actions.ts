@@ -373,12 +373,14 @@ export async function linkOdf(ficheId: string, odfId: string | null) {
   }
 
   // La fiche prend ses tailles/tissu/quantité de l'ODF lié (applyOdfToFiche) —
-  // mais si elle porte déjà un modèle différent de celui de l'ODF ciblé, la
-  // liaison est refusée plutôt que silencieusement incohérente (cadre 1 de
-  // la fiche vs. modèle réel produit par l'ODF).
+  // mais deux garde-fous avant, dans les deux sens du lien 1:1 fiche <-> ODF
+  // (fiches_placement_odf_id_unique, migration 0010, garantit déjà qu'un ODF
+  // ne peut porter qu'une fiche ; côté fiche, odf_id est une colonne scalaire
+  // donc ne peut déjà référencer qu'un seul ODF — mais rien n'empêchait
+  // jusqu'ici de la faire glisser d'un ODF à l'autre sans le dire) :
   const { data: fiche } = await supabase
     .from("fiches_placement")
-    .select("product_model_id")
+    .select("odf_id,product_model_id")
     .eq("id", ficheId)
     .single();
   const { data: odf } = await supabase
@@ -387,6 +389,18 @@ export async function linkOdf(ficheId: string, odfId: string | null) {
     .eq("id", odfId)
     .single();
   if (!odf) return { error: "Ordre de fabrication introuvable" };
+
+  // 1. Fiche déjà liée à un AUTRE ODF : on refuse le glissement silencieux
+  //    (l'ODF d'origine perdrait sa fiche sans que personne ne le voie) —
+  //    déliaison explicite d'abord (linkOdf(ficheId, null)).
+  if (fiche?.odf_id && fiche.odf_id !== odfId) {
+    return {
+      error: "Cette fiche est déjà liée à un autre ODF — déliez-la d'abord avant de la lier à celui-ci.",
+    };
+  }
+
+  // 2. Modèles incompatibles : la fiche porte déjà un modèle différent de
+  //    celui de l'ODF ciblé (cadre 1 de la fiche vs. modèle réel produit).
   if (fiche?.product_model_id && odf.product_model_id && fiche.product_model_id !== odf.product_model_id) {
     return { error: `Cette fiche porte un autre modèle que celui de ${odf.reference} — liaison refusée.` };
   }
@@ -435,6 +449,30 @@ export async function generateFicheFromOdf(productionOrderId: string) {
     .eq("odf_id", productionOrderId)
     .maybeSingle();
   if (existing) return { id: existing.id as string, numeroOt: existing.numero_ot as string };
+
+  // Sens inverse : une fiche a pu être créée AVANT cet ODF (demande du
+  // commercial ou de la PAO, modèle déjà choisi, encore sans ODF). Générer
+  // quand même créerait un second OT pour le même modèle — on pointe vers
+  // celle qui existe déjà (à lier via la recherche ci-dessous) plutôt que
+  // d'en dupliquer une. `odf_id is null` exclut les fiches déjà prises par
+  // un autre ODF (fiches_placement_odf_id_unique les rendrait de toute façon
+  // indisponibles).
+  const { data: candidate } = await supabase
+    .from("fiches_placement")
+    .select("numero_ot,quantite_totale")
+    .eq("product_model_id", odf.product_model_id)
+    .is("odf_id", null)
+    .neq("statut", "archive")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (candidate) {
+    return {
+      error: `Une fiche existe déjà pour ce modèle (${candidate.numero_ot}${
+        candidate.quantite_totale ? `, ${candidate.quantite_totale} pièces` : ""
+      }) — liez-la ci-dessous au lieu d'en générer une nouvelle.`,
+    };
+  }
 
   const { data: created, error: createError } = await supabase
     .from("fiches_placement")
