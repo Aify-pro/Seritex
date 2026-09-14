@@ -238,6 +238,27 @@ export interface QuoteLine {
   quantity: number;
   unit_price: number;
   line_total: number;
+  // Configuration couleur (chantier config-produit-devis) — la « maquette »
+  // que le client valide en acceptant le devis, héritée dans l'ODF par
+  // accept_quote() quand le devis n'a qu'une seule ligne. couleur_unique_id
+  // et les lignes de quote_line_zone_colors ne sont jamais renseignés
+  // ensemble.
+  couleur_unique_id: string | null;
+  couleur_unique?: Pick<Color, "id" | "name" | "code"> | null;
+  zone_colors?: QuoteLineZoneColor[];
+}
+
+/** Couleur choisie pour une zone donnée, sur une ligne de devis donnée. */
+export interface QuoteLineZoneColor {
+  id: string;
+  quote_line_id: string;
+  zone_key: string;
+  color_id: string;
+  created_by: string | null;
+  created_at: string;
+  colors?: Pick<Color, "id" | "name" | "code">;
+  /** Libellé résolu depuis product_zone_templates — attaché à l'affichage, pas une colonne réelle. */
+  zone_label?: string;
 }
 
 export interface ProductionOrder {
@@ -276,6 +297,8 @@ export interface ProductionOrder {
   // logique.
   product_model_id: string | null;
   note_disponibilite_couleurs: string | null;
+  /** Couleur unique ("modèle uni") — alternative à production_order_zone_colors, jamais les deux ensemble. */
+  couleur_unique_id: string | null;
   created_at: string;
   companies?: Pick<Company, "id" | "name">;
   product_models?: Pick<ProductModel, "id" | "name"> | null;

@@ -44,6 +44,7 @@ export function SectionsSizesEditor({
   initialSizes,
   referentielTailles,
   totalQuantity,
+  productConfigured,
 }: {
   productionOrderId: string;
   allSections: { id: string; name: string }[];
@@ -53,6 +54,13 @@ export function SectionsSizesEditor({
   referentielTailles: Size[];
   /** Quantité commandée, reprise du devis — la répartition doit la totaliser exactement. */
   totalQuantity: number;
+  /**
+   * Modèle de produit + couleur(s) déjà configurés — reflet côté client du
+   * garde-fou serveur posé dans submit_production_order() (migration 0034).
+   * Sert uniquement à désactiver le bouton avec un message clair avant
+   * d'envoyer la requête ; le contrôle qui fait autorité reste le RPC.
+   */
+  productConfigured: boolean;
 }) {
   const [pending, startTransition] = useTransition();
   const [sectionIds, setSectionIds] = useState<string[]>(initialSectionIds);
@@ -262,11 +270,13 @@ export function SectionsSizesEditor({
           <Button
             onClick={submit}
             loading={pending}
-            disabled={sectionIds.length === 0 || reparti === 0 || ecart !== 0}
+            disabled={sectionIds.length === 0 || reparti === 0 || ecart !== 0 || !productConfigured}
             title={
-              ecart !== 0
-                ? `La répartition doit totaliser exactement ${totalQuantity} pièces.`
-                : undefined
+              !productConfigured
+                ? "Renseignez d'abord la configuration produit (modèle + couleur) ci-dessus."
+                : ecart !== 0
+                  ? `La répartition doit totaliser exactement ${totalQuantity} pièces.`
+                  : undefined
             }
           >
             <Send className="h-3.5 w-3.5" /> Soumettre pour validation
@@ -275,6 +285,12 @@ export function SectionsSizesEditor({
             <p className="w-full text-xs text-warning">
               La soumission attend une répartition égale à la quantité commandée : {reparti} réparties contre{" "}
               {totalQuantity} demandées.
+            </p>
+          )}
+          {ecart === 0 && reparti > 0 && !productConfigured && (
+            <p className="w-full text-xs text-warning">
+              La soumission attend un modèle de produit et sa couleur (par zone, ou « modèle uni ») — voir la carte
+              « Configuration produit » ci-dessus.
             </p>
           )}
         </div>

@@ -25,15 +25,29 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
 
   if (!request) notFound();
 
-  const [{ data: messages }, { data: quotes }, { data: products }] = await Promise.all([
-    supabase
-      .from("messages")
-      .select("id,body,created_at,sender_id,app_users(full_name)")
-      .eq("request_id", id)
-      .order("created_at", { ascending: true }),
-    supabase.from("quotes").select("id,reference,status,total_amount,created_at").eq("request_id", id),
-    supabase.from("product_models").select("id,name,base_price").eq("active", true),
-  ]);
+  const [{ data: messages }, { data: quotes }, { data: products }, { data: zoneTemplates }, { data: colors }] =
+    await Promise.all([
+      supabase
+        .from("messages")
+        .select("id,body,created_at,sender_id,app_users(full_name)")
+        .eq("request_id", id)
+        .order("created_at", { ascending: true }),
+      supabase.from("quotes").select("id,reference,status,total_amount,created_at").eq("request_id", id),
+      supabase.from("product_models").select("id,name,base_price").eq("active", true),
+      // Gabarits de zones de tous les modèles — nécessaire au sélecteur de
+      // couleur du devis (chantier config-produit-devis) dès qu'une ligne
+      // choisit un modèle, sans aller-retour supplémentaire par ligne.
+      supabase.from("product_zone_templates").select("product_model_id,zone_key,zone_label,display_order"),
+      supabase.from("colors").select("id,name,code").eq("active", true).order("name"),
+    ]);
+
+  const zoneTemplatesByModel = (zoneTemplates ?? []).reduce<Record<string, { zone_key: string; zone_label: string; display_order: number }[]>>(
+    (acc, z) => {
+      (acc[z.product_model_id] ??= []).push({ zone_key: z.zone_key, zone_label: z.zone_label, display_order: z.display_order });
+      return acc;
+    },
+    {}
+  );
 
   const company = request.companies as unknown as { id: string; name: string; email: string; phone: string };
   const contact = request.contacts as unknown as { first_name: string; last_name: string; email: string } | null;
@@ -76,7 +90,13 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
                   ))}
                 </ul>
               )}
-              <QuoteForm requestId={request.id} companyId={company.id} products={products ?? []} />
+              <QuoteForm
+                requestId={request.id}
+                companyId={company.id}
+                products={products ?? []}
+                zoneTemplatesByModel={zoneTemplatesByModel}
+                colors={colors ?? []}
+              />
             </CardBody>
           </Card>
 

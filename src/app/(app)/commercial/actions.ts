@@ -28,24 +28,38 @@ export async function updateRequestStatus(requestId: string, status: RequestStat
 }
 
 const quoteLineSchema = z.object({
-  description: z.string().min(1),
-  quantity: z.coerce.number().int().positive(),
-  unit_price: z.coerce.number().nonnegative(),
-  product_model_id: z.string().uuid().optional().or(z.literal("")),
+  description: z.string().min(1, "Description requise"),
+  quantity: z.coerce.number().int().positive("Quantité invalide"),
+  unit_price: z.coerce.number().nonnegative("Prix invalide"),
+  product_model_id: z.string().uuid().nullable(),
+  // Configuration couleur — la « maquette » que le client valide avec le
+  // devis (chantier config-produit-devis). Jamais les deux ensemble :
+  // couleur_unique_id pour un modèle « uni », zone_colors sinon.
+  couleur_unique_id: z.string().uuid().nullable(),
+  zone_colors: z.array(z.object({ zone_key: z.string().min(1), color_id: z.string().uuid() })),
 });
 
-export async function createQuote(requestId: string, companyId: string, formData: FormData) {
+const createQuoteSchema = z.object({
+  lines: z.array(quoteLineSchema).min(1, "Au moins un article est requis"),
+});
+
+export type QuoteLineInput = z.infer<typeof quoteLineSchema>;
+
+/**
+ * Un devis peut porter plusieurs articles (`quote_lines` est une vraie
+ * table enfant depuis le schéma initial — seule l'UI n'exposait qu'une
+ * ligne). Écriture ligne à ligne, pas de RPC dédiée : même convention que
+ * `setProductionOrderZoneColors` (écriture directe, autorisée par la RLS
+ * pour commercial/administrateur).
+ */
+export async function createQuote(requestId: string, companyId: string, lines: QuoteLineInput[]) {
   await requireRole(["commercial", "administrateur"]);
-  const parsed = quoteLineSchema.safeParse({
-    description: formData.get("description"),
-    quantity: formData.get("quantity"),
-    unit_price: formData.get("unit_price"),
-    product_model_id: formData.get("product_model_id"),
-  });
-  if (!parsed.success) return { error: parsed.error.issues[0]?.message };
+  const parsed = createQuoteSchema.safeParse({ lines });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Devis invalide" };
 
   const supabase = await createClient();
   const reference = "DEV-" + Date.now().toString(36).toUpperCase();
+  const totalAmount = parsed.data.lines.reduce((sum, l) => sum + l.quantity * l.unit_price, 0);
 
   const { data: quote, error } = await supabase
     .from("quotes")
@@ -54,20 +68,35 @@ export async function createQuote(requestId: string, companyId: string, formData
       request_id: requestId,
       company_id: companyId,
       status: "envoye",
-      total_amount: parsed.data.quantity * parsed.data.unit_price,
+      total_amount: totalAmount,
     })
     .select()
     .single();
 
   if (error) return { error: error.message };
 
-  await supabase.from("quote_lines").insert({
-    quote_id: quote.id,
-    product_model_id: parsed.data.product_model_id || null,
-    description: parsed.data.description,
-    quantity: parsed.data.quantity,
-    unit_price: parsed.data.unit_price,
-  });
+  for (const line of parsed.data.lines) {
+    const { data: quoteLine, error: lineError } = await supabase
+      .from("quote_lines")
+      .insert({
+        quote_id: quote.id,
+        product_model_id: line.product_model_id,
+        description: line.description,
+        quantity: line.quantity,
+        unit_price: line.unit_price,
+        couleur_unique_id: line.couleur_unique_id,
+      })
+      .select("id")
+      .single();
+    if (lineError) return { error: lineError.message };
+
+    if (!line.couleur_unique_id && line.zone_colors.length > 0) {
+      const { error: zoneError } = await supabase.from("quote_line_zone_colors").insert(
+        line.zone_colors.map((z) => ({ quote_line_id: quoteLine.id, zone_key: z.zone_key, color_id: z.color_id }))
+      );
+      if (zoneError) return { error: zoneError.message };
+    }
+  }
 
   await supabase.from("requests").update({ status: "devis_envoye" }).eq("id", requestId);
 

@@ -4,9 +4,11 @@ import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
+import { ZoneColorPicker, ZoneColorSummary, type ZoneColorDraft } from "@/components/product/zone-color-picker";
 import {
   setProductionOrderProductModel,
   setProductionOrderZoneColors,
+  setProductionOrderColorUnique,
   setProductionOrderColorNote,
 } from "../actions";
 
@@ -30,9 +32,15 @@ interface ZoneColorValue {
 /**
  * Configurateur couleur par zone (section 8 du document de logique) : choix
  * du modèle de produit puis, une fois le gabarit de zones connu, une
- * couleur par zone dans la palette de référence. Pas de visuel cliquable
- * (V1 actée) — juste une liste de zones nommées. Éditable uniquement en
- * brouillon, comme les autres champs de composition de l'ODF.
+ * couleur par zone (ou une couleur unique pour un modèle « uni »,
+ * ZoneColorPicker) dans la palette de référence. Pas de visuel cliquable
+ * (V1 actée) — juste une liste de zones nommées.
+ *
+ * Depuis la configuration côté devis (chantier config-produit-devis), ce
+ * modèle/ces couleurs sont normalement déjà hérités via accept_quote() —
+ * cet écran reste un filet de rattrapage (devis à plusieurs modèles, ou ODF
+ * sans devis) et un droit de correction pour l'atelier tant que l'ODF est
+ * éditable (brouillon/refuse).
  */
 export function ProductConfigurator({
   productionOrderId,
@@ -43,6 +51,7 @@ export function ProductConfigurator({
   zoneTemplate,
   colors,
   initialZoneColors,
+  initialColorUniqueId,
   initialNote,
 }: {
   productionOrderId: string;
@@ -53,12 +62,15 @@ export function ProductConfigurator({
   zoneTemplate: ZoneTemplate[];
   colors: ColorOption[];
   initialZoneColors: ZoneColorValue[];
+  initialColorUniqueId: string | null;
   initialNote: string | null;
 }) {
   const [pending, startTransition] = useTransition();
-  const [zoneColors, setZoneColors] = useState<Record<string, string>>(
-    Object.fromEntries(initialZoneColors.map((z) => [z.zone_key, z.color_id]))
-  );
+  const [draft, setDraft] = useState<ZoneColorDraft>({
+    isUni: !!initialColorUniqueId,
+    couleurUniqueId: initialColorUniqueId,
+    zoneColors: Object.fromEntries(initialZoneColors.map((z) => [z.zone_key, z.color_id])),
+  });
   const [note, setNote] = useState(initialNote ?? "");
 
   function chooseModel(productModelId: string) {
@@ -69,14 +81,19 @@ export function ProductConfigurator({
     });
   }
 
-  function saveZoneColors() {
-    const entries = Object.entries(zoneColors)
-      .filter(([, colorId]) => !!colorId)
-      .map(([zone_key, color_id]) => ({ zone_key, color_id }));
+  function saveColors() {
     startTransition(async () => {
-      const res = await setProductionOrderZoneColors(productionOrderId, entries);
+      const res =
+        draft.isUni || zoneTemplate.length === 0
+          ? await setProductionOrderColorUnique(productionOrderId, draft.couleurUniqueId)
+          : await setProductionOrderZoneColors(
+              productionOrderId,
+              Object.entries(draft.zoneColors)
+                .filter(([, colorId]) => !!colorId)
+                .map(([zone_key, color_id]) => ({ zone_key, color_id }))
+            );
       if (res.error) toast.error("Couleurs non enregistrées", { description: res.error });
-      else toast.success("Couleurs par zone enregistrées");
+      else toast.success("Couleurs enregistrées");
     });
   }
 
@@ -87,8 +104,6 @@ export function ProductConfigurator({
       else toast.success("Commentaire enregistré");
     });
   }
-
-  const colorById = (id: string) => colors.find((c) => c.id === id);
 
   return (
     <Card>
@@ -127,65 +142,29 @@ export function ProductConfigurator({
               Modèle : <span className="font-medium text-foreground">{currentProductModelName}</span>
             </p>
 
-            {zoneTemplate.length === 0 ? (
-              <p className="text-xs text-foreground-muted">
-                Ce modèle n&apos;a pas encore de gabarit de zones — à définir depuis Paramètres &gt; Modèles de
-                produits.
-              </p>
-            ) : editable ? (
+            {editable ? (
               <div className="space-y-2">
-                <p className="text-xs font-medium text-foreground-muted">Couleur par zone</p>
-                {zoneTemplate.map((z) => (
-                  <div key={z.zone_key} className="flex items-center gap-2">
-                    <span className="w-44 shrink-0 text-xs text-foreground">{z.zone_label}</span>
-                    <select
-                      value={zoneColors[z.zone_key] ?? ""}
-                      onChange={(e) => setZoneColors((prev) => ({ ...prev, [z.zone_key]: e.target.value }))}
-                      className="h-9 flex-1 max-w-xs rounded-md border border-border bg-surface px-2 text-sm outline-none focus:ring-2 focus:ring-brand/30"
-                    >
-                      <option value="">Couleur…</option>
-                      {colors.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </select>
-                    {zoneColors[z.zone_key] && (
-                      <span
-                        className="h-5 w-5 shrink-0 rounded-full border border-border"
-                        style={{ backgroundColor: colorById(zoneColors[z.zone_key])?.code }}
-                        aria-hidden
-                      />
-                    )}
-                  </div>
-                ))}
-                <Button size="sm" variant="secondary" onClick={saveZoneColors} loading={pending}>
+                <p className="text-xs font-medium text-foreground-muted">Couleur</p>
+                <ZoneColorPicker
+                  zoneTemplate={zoneTemplate}
+                  colors={colors}
+                  value={draft}
+                  onChange={setDraft}
+                  disabled={pending}
+                />
+                <Button size="sm" variant="secondary" onClick={saveColors} loading={pending}>
                   Enregistrer les couleurs
                 </Button>
               </div>
             ) : (
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {zoneTemplate.map((z) => {
-                  const color = zoneColors[z.zone_key] ? colorById(zoneColors[z.zone_key]) : null;
-                  return (
-                    <div key={z.zone_key} className="flex items-center gap-2 text-xs">
-                      <span className="w-44 shrink-0 text-foreground-muted">{z.zone_label}</span>
-                      {color ? (
-                        <span className="flex items-center gap-1.5 font-medium text-foreground">
-                          <span
-                            className="h-3.5 w-3.5 shrink-0 rounded-full border border-border"
-                            style={{ backgroundColor: color.code }}
-                            aria-hidden
-                          />
-                          {color.name}
-                        </span>
-                      ) : (
-                        <span className="text-foreground-muted">—</span>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+              <ZoneColorSummary
+                couleurUnique={draft.couleurUniqueId ? colors.find((c) => c.id === draft.couleurUniqueId) : null}
+                zoneColors={zoneTemplate.map((z) => ({
+                  zone_key: z.zone_key,
+                  zone_label: z.zone_label,
+                  colors: draft.zoneColors[z.zone_key] ? colors.find((c) => c.id === draft.zoneColors[z.zone_key]) : null,
+                }))}
+              />
             )}
           </>
         )}

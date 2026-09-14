@@ -1,5 +1,6 @@
 import { requireRole } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server";
+import { getQuoteLinesWithColorConfig } from "@/lib/quotes";
 import { notFound } from "next/navigation";
 import { QuoteDetail } from "@/components/quotes/quote-detail";
 
@@ -17,7 +18,7 @@ export default async function ClientQuoteDetailPage({ params }: { params: Promis
 
   if (!quote) notFound();
 
-  const { data: lines } = await supabase.from("quote_lines").select("*").eq("quote_id", id);
+  const lines = await getQuoteLinesWithColorConfig(id);
 
-  return <QuoteDetail quote={quote} lines={lines ?? []} canAccept />;
+  return <QuoteDetail quote={quote} lines={lines} canAccept />;
 }
