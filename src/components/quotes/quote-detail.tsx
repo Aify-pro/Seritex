@@ -3,6 +3,7 @@ import { StatusBadge } from "@/components/ui/badge";
 import { QUOTE_STATUS_LABELS, type Quote, type QuoteLine } from "@/lib/types/domain";
 import { formatAmount, formatDate } from "@/lib/utils";
 import { AcceptQuoteButton } from "./accept-quote-button";
+import { ZoneColorSummary } from "@/components/product/zone-color-picker";
 
 export function QuoteDetail({
   quote,
@@ -36,7 +37,21 @@ export function QuoteDetail({
             <tbody className="divide-y divide-border">
               {lines.map((l) => (
                 <tr key={l.id}>
-                  <td className="px-5 py-3">{l.description}</td>
+                  <td className="px-5 py-3">
+                    <p>{l.description}</p>
+                    {(l.couleur_unique || (l.zone_colors && l.zone_colors.length > 0)) && (
+                      <div className="mt-1">
+                        <ZoneColorSummary
+                          couleurUnique={l.couleur_unique}
+                          zoneColors={(l.zone_colors ?? []).map((z) => ({
+                            zone_key: z.zone_key,
+                            zone_label: z.zone_label,
+                            colors: z.colors,
+                          }))}
+                        />
+                      </div>
+                    )}
+                  </td>
                   <td className="px-5 py-3 text-foreground-muted">{l.quantity}</td>
                   <td className="px-5 py-3 text-foreground-muted">{formatAmount(l.unit_price)}</td>
                   <td className="px-5 py-3 font-medium text-foreground">{formatAmount(l.line_total)}</td>

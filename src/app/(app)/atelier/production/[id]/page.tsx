@@ -188,6 +188,14 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
   // référentiel actif, convention de la migration 0029).
   const referentielTailles = await getSizesForProductModel(order.product_model_id);
 
+  // Même logique que le garde-fou serveur de submit_production_order()
+  // (migration 0034) : sert uniquement à désactiver le bouton côté client
+  // avec un message clair — le contrôle qui fait autorité reste le RPC.
+  const zoneCount = (zoneTemplate ?? []).length;
+  const configuredZoneCount = (zoneColors ?? []).length;
+  const colorsConfigured = !!order.couleur_unique_id || (zoneCount > 0 && configuredZoneCount >= zoneCount);
+  const productConfigured = !!order.product_model_id && colorsConfigured;
+
   const anomalyRows = (anomalies ?? []).map((a) => ({
     id: a.id,
     message: a.message,
@@ -308,17 +316,6 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
         </Card>
       )}
 
-      {modifiable && (
-        <SectionsSizesEditor
-          productionOrderId={order.id}
-          allSections={allSections ?? []}
-          initialSectionIds={(chosenSections ?? []).map((s) => s.section_id)}
-          initialSizes={sizes ?? []}
-          referentielTailles={referentielTailles}
-          totalQuantity={order.total_quantity}
-        />
-      )}
-
       <ProductConfigurator
         productionOrderId={order.id}
         editable={modifiable}
@@ -328,8 +325,21 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
         zoneTemplate={zoneTemplate ?? []}
         colors={activeColors ?? []}
         initialZoneColors={zoneColors ?? []}
+        initialColorUniqueId={order.couleur_unique_id}
         initialNote={order.note_disponibilite_couleurs}
       />
+
+      {modifiable && (
+        <SectionsSizesEditor
+          productionOrderId={order.id}
+          allSections={allSections ?? []}
+          initialSectionIds={(chosenSections ?? []).map((s) => s.section_id)}
+          initialSizes={sizes ?? []}
+          referentielTailles={referentielTailles}
+          totalQuantity={order.total_quantity}
+          productConfigured={productConfigured}
+        />
+      )}
 
       <ProductionOrderMediaFiles
         productionOrderId={order.id}

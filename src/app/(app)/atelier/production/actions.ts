@@ -372,6 +372,15 @@ export async function setProductionOrderZoneColors(
     return { error: `Zone inconnue pour ce modèle de produit : "${invalidZone.zone_key}".` };
   }
 
+  // Mutuellement exclusif avec la couleur unique (voir
+  // setProductionOrderColorUnique) — poser des couleurs par zone repasse en
+  // mode "par zone" même si "modèle uni" avait été coché avant.
+  const { error: uniError } = await supabase
+    .from("production_orders")
+    .update({ couleur_unique_id: null })
+    .eq("id", productionOrderId);
+  if (uniError) return { error: uniError.message };
+
   const { error: delError } = await supabase
     .from("production_order_zone_colors")
     .delete()
@@ -387,6 +396,36 @@ export async function setProductionOrderZoneColors(
       }))
     );
     if (insError) return { error: insError.message };
+  }
+
+  revalidateOdf(productionOrderId);
+  return {};
+}
+
+/**
+ * Couleur unique ("modèle uni") — alternative à setProductionOrderZoneColors
+ * pour un modèle sans gabarit de zones, ou une commande volontairement
+ * monochrome malgré un gabarit existant. Les deux ne sont jamais actifs en
+ * même temps : poser une couleur unique efface les couleurs par zone déjà
+ * saisies, et inversement (submit_production_order() n'accepte que l'une
+ * ou l'autre, migration 0034).
+ */
+export async function setProductionOrderColorUnique(productionOrderId: string, colorId: string | null) {
+  await requireRole(["administrateur", "responsable_production"]);
+  const supabase = await createClient();
+
+  const { error: updError } = await supabase
+    .from("production_orders")
+    .update({ couleur_unique_id: colorId })
+    .eq("id", productionOrderId);
+  if (updError) return { error: updError.message };
+
+  if (colorId) {
+    const { error: delError } = await supabase
+      .from("production_order_zone_colors")
+      .delete()
+      .eq("production_order_id", productionOrderId);
+    if (delError) return { error: delError.message };
   }
 
   revalidateOdf(productionOrderId);
