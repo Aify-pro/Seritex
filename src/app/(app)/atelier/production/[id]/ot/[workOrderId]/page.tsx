@@ -49,7 +49,7 @@ export default async function WorkOrderDetailPage({
 
   const { data: wo } = await supabase
     .from("work_orders")
-    .select("*,sections(name),production_orders(id,reference,company_id,companies(name))")
+    .select("*,sections(name,atelier_categories(cle)),production_orders(id,reference,company_id,companies(name))")
     .eq("id", workOrderId)
     .eq("production_order_id", id)
     .maybeSingle();
@@ -67,13 +67,14 @@ export default async function WorkOrderDetailPage({
     userIds.length > 0 ? await supabase.from("app_users").select("id,full_name").in("id", userIds) : { data: [] };
   const nameOf = (userId: string | null) => (userId ? (users?.find((u) => u.id === userId)?.full_name ?? "—") : "—");
 
-  const section = wo.sections as unknown as { name: string } | null;
+  const section = wo.sections as unknown as { name: string; atelier_categories: { cle: string } | null } | null;
   const productionOrder = wo.production_orders as unknown as {
     id: string;
     reference: string;
     companies: { name: string } | null;
   } | null;
-  const isCoupe = section?.name === "Coupe";
+  // Migration 0036 : catégorie d'atelier (cle='coupe'), plus seulement le nom "Coupe".
+  const isCoupe = section?.atelier_categories?.cle === "coupe";
 
   const closureEvents = (events ?? []).filter((e) => e.event_type === "matelas_cloture");
   const closedTraceIds = new Set(closureEvents.map((e) => e.trace_id as string));
