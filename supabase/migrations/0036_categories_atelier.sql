@@ -22,8 +22,16 @@
 --     retenue). `requiert_fiche_trace` est aujourd'hui un synonyme 1:1 de
 --     `cle = 'coupe'` (fiches_placement reste ODF-wide, pas catégorisé) — ce
 --     n'est pas une divergence possible pour l'instant, juste une structure
---     prête pour un futur `requiert_fiche_montage` sans toucher aux 7
+--     prête pour un futur `requiert_fiche_couture` sans toucher aux 7
 --     fonctions de comportement.
+--
+-- Trois catégories fixes (Coupe, Impression, Couture) sont créées ici, une
+-- fois pour toutes (section 3) — décision produit : pas de création libre
+-- depuis l'UI, une nouvelle catégorie se décide et se fait par migration.
+-- Ce qui reste administrable en libre-service, ce sont les SECTIONS
+-- (Paramètres > Sections d'atelier) : chacune se rattache à l'une des trois
+-- catégories pour hériter du comportement associé et des conditions
+-- correspondantes sur l'ODF.
 --
 -- Les 8 fonctions ci-dessous sont recréées à l'identique de leur version
 -- vivante, seule la source de la comparaison "Coupe" change. Attention :
@@ -57,7 +65,9 @@ alter table atelier_categories enable row level security;
 -- Pas le pattern sizes/textiles (écriture ouverte à is_production_manager()) :
 -- cette table pilote 7 fonctions métier critiques + les blocages de
 -- validation ODF. Verrouillée comme `sections` (0002_rls.sql:152-155),
--- admin-only en écriture.
+-- admin-only en écriture. Aucune UI n'expose la création/modification (voir
+-- décision plus haut) — ces policies restent en défense en profondeur, pour
+-- une future évolution gérée directement en base.
 create policy atelier_categories_select on atelier_categories for select using (is_staff());
 create policy atelier_categories_write on atelier_categories for insert with check (is_admin());
 create policy atelier_categories_update on atelier_categories for update using (is_admin()) with check (is_admin());
@@ -78,12 +88,15 @@ alter table sections add column if not exists categorie_id uuid references ateli
 -- ============================================================================
 -- 3. Seed + backfill
 -- ============================================================================
--- Coupe est la seule catégorie backfillée automatiquement : les 7 fonctions
--- vivantes comparent déjà `sections.name = 'Coupe'` et fonctionnent en prod,
--- donc une section nommée exactement "Coupe" existe forcément. Impression et
--- Montage sont créées mais PAS rattachées automatiquement — rien ne garantit
--- qu'une section porte déjà ce nom exact ; le rattachement se fait à la main
--- via la nouvelle UI Paramètres après déploiement.
+-- Trois catégories fixes, créées ici une fois pour toutes — pas de création
+-- libre depuis l'UI (voir section 1) : une nouvelle catégorie se décide et se
+-- fait par migration, pas en libre-service. Coupe est la seule rattachée
+-- automatiquement à une section existante : les 7 fonctions vivantes
+-- comparent déjà `sections.name = 'Coupe'` et fonctionnent en prod, donc une
+-- section nommée exactement "Coupe" existe forcément. Impression et Couture
+-- sont créées mais PAS rattachées automatiquement — rien ne garantit qu'une
+-- section porte déjà ce nom exact ; le rattachement se fait à la main depuis
+-- Paramètres > Sections d'atelier après déploiement.
 
 insert into atelier_categories (nom, cle, requiert_fiche_trace, display_order)
 values ('Coupe', 'coupe', true, 1)
@@ -94,7 +107,7 @@ values ('Impression', 'impression', true, 2)
 on conflict (cle) do nothing;
 
 insert into atelier_categories (nom, cle, display_order)
-values ('Montage', 'montage', 3)
+values ('Couture', 'couture', 3)
 on conflict (cle) do nothing;
 
 update sections set categorie_id = (select id from atelier_categories where cle = 'coupe')
