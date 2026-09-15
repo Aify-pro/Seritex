@@ -212,64 +212,11 @@ export async function toggleSectionActive(sectionId: string, active: boolean) {
   return {};
 }
 
-// ============================================================================
-// Catégories d'atelier (migration 0036) — pilotent le comportement Coupe et
-// les blocages de validation ODF (fiche de tracé, visuel), voir sections.categorie_id.
-// ============================================================================
-
-const newAtelierCategorieSchema = z.object({
-  nom: z.string().min(1),
-  cle: z
-    .string()
-    .min(1)
-    .regex(/^[a-z0-9_]+$/, "La clé ne peut contenir que des minuscules, chiffres et underscores"),
-  requiert_fiche_trace: z.boolean(),
-  requiert_visuel: z.boolean(),
-});
-
-export async function createAtelierCategorie(formData: FormData) {
-  await requireRole(["administrateur"]);
-  const parsed = newAtelierCategorieSchema.safeParse({
-    nom: formData.get("nom"),
-    cle: formData.get("cle"),
-    requiert_fiche_trace: formData.get("requiert_fiche_trace") === "on",
-    requiert_visuel: formData.get("requiert_visuel") === "on",
-  });
-  if (!parsed.success) return { error: parsed.error.issues[0]?.message };
-
-  const supabase = await createClient();
-  const { data: max } = await supabase
-    .from("atelier_categories")
-    .select("display_order")
-    .order("display_order", { ascending: false })
-    .limit(1)
-    .single();
-
-  const { error } = await supabase.from("atelier_categories").insert({
-    nom: parsed.data.nom,
-    cle: parsed.data.cle,
-    requiert_fiche_trace: parsed.data.requiert_fiche_trace,
-    requiert_visuel: parsed.data.requiert_visuel,
-    display_order: (max?.display_order ?? 0) + 1,
-  });
-  if (error) {
-    if (error.code === "23505") return { error: `Le nom ou la clé « ${parsed.data.nom} » existe déjà.` };
-    return { error: error.message };
-  }
-  revalidatePath("/parametres/categories-atelier");
-  revalidatePath("/parametres/sections");
-  return {};
-}
-
-export async function toggleAtelierCategorieActive(categorieId: string, active: boolean) {
-  await requireRole(["administrateur"]);
-  const supabase = await createClient();
-  const { error } = await supabase.from("atelier_categories").update({ active }).eq("id", categorieId);
-  if (error) return { error: error.message };
-  revalidatePath("/parametres/categories-atelier");
-  revalidatePath("/parametres/sections");
-  return {};
-}
+// Catégories d'atelier (migration 0036) : Coupe/Impression/Couture, fixes,
+// créées par la migration — pas de création libre depuis l'UI (décision
+// produit : une nouvelle catégorie se fait par migration, pas en
+// libre-service). Ce qui reste administrable ici, c'est le rattachement
+// d'une section à l'une de ces catégories, via createSection ci-dessus.
 
 // ============================================================================
 // Lot 9 — configurateur couleur par zone : palette de couleurs et modèles de

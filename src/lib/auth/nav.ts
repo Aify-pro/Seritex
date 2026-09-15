@@ -23,7 +23,6 @@ import {
   Shirt,
   SwatchBook,
   Layers,
-  Tags,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { createElement, type ReactNode } from "react";
@@ -147,7 +146,6 @@ export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
     { href: "/parametres/utilisateurs", label: "Utilisateurs", icon: navIcon(Users), section: PARAMETRES, module: "utilisateurs" },
     { href: "/parametres/roles", label: "Rôles & permissions", icon: navIcon(ShieldCheck), section: PARAMETRES, module: "roles" },
     { href: "/parametres/sections", label: "Sections d'atelier", icon: navIcon(Boxes), section: PARAMETRES, module: "sections" },
-    { href: "/parametres/categories-atelier", label: "Catégories d'atelier", icon: navIcon(Tags), section: PARAMETRES, module: "sections" },
     { href: "/parametres/produits", label: "Modèles de produits", icon: navIcon(Shirt), section: PARAMETRES },
     { href: "/parametres/couleurs", label: "Couleurs et tailles", icon: navIcon(SwatchBook), section: PARAMETRES },
     { href: "/parametres/textiles", label: "Textiles", icon: navIcon(Layers), section: PARAMETRES },
