@@ -212,11 +212,46 @@ export async function toggleSectionActive(sectionId: string, active: boolean) {
   return {};
 }
 
+const updateSectionSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().optional(),
+});
+
+/** Modifie le nom/la description d'une section existante (créée via createSection ci-dessus). */
+export async function updateSectionDetails(sectionId: string, formData: FormData) {
+  await requireRole(["administrateur"]);
+  const parsed = updateSectionSchema.safeParse({
+    name: formData.get("name"),
+    description: formData.get("description"),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message };
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("sections")
+    .update({ name: parsed.data.name, description: parsed.data.description || null })
+    .eq("id", sectionId);
+  if (error) return { error: error.message };
+  revalidatePath("/parametres/sections");
+  return {};
+}
+
 // Catégories d'atelier (migration 0036) : Coupe/Impression/Couture, fixes,
 // créées par la migration — pas de création libre depuis l'UI (décision
 // produit : une nouvelle catégorie se fait par migration, pas en
 // libre-service). Ce qui reste administrable ici, c'est le rattachement
-// d'une section à l'une de ces catégories, via createSection ci-dessus.
+// d'une section (nom, description, catégorie) à l'une de ces catégories,
+// via createSection à la création ou setSectionCategory ensuite.
+
+/** Réaffecte la catégorie d'atelier d'une section existante (ou la détache avec `null`). */
+export async function setSectionCategory(sectionId: string, categorieId: string | null) {
+  await requireRole(["administrateur"]);
+  const supabase = await createClient();
+  const { error } = await supabase.from("sections").update({ categorie_id: categorieId }).eq("id", sectionId);
+  if (error) return { error: error.message };
+  revalidatePath("/parametres/sections");
+  return {};
+}
 
 // ============================================================================
 // Lot 9 — configurateur couleur par zone : palette de couleurs et modèles de
