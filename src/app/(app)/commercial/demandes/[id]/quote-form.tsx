@@ -20,6 +20,7 @@ type LineDraft = {
   quantity: string;
   unitPrice: string;
   colorDraft: ZoneColorDraft;
+  sampleItemId: string;
 };
 
 function newLine(): LineDraft {
@@ -30,6 +31,7 @@ function newLine(): LineDraft {
     quantity: "",
     unitPrice: "",
     colorDraft: EMPTY_ZONE_COLOR_DRAFT,
+    sampleItemId: "",
   };
 }
 
@@ -49,6 +51,7 @@ export function QuoteForm({
   products,
   zoneTemplatesByModel,
   colors,
+  sampleItemOptions,
 }: {
   requestId: string;
   companyId: string;
@@ -56,6 +59,8 @@ export function QuoteForm({
   /** Gabarit de zones par modèle de produit — nécessaire au ZoneColorPicker dès qu'une ligne choisit un modèle. */
   zoneTemplatesByModel: Record<string, ZoneTemplate[]>;
   colors: ColorOption[];
+  /** Échantillons déjà demandés pour cette demande (migration 0037) — un article d'échantillon par ligne de devis, au choix. */
+  sampleItemOptions: { id: string; label: string }[];
 }) {
   const [pending, startTransition] = useTransition();
   const [open, setOpen] = useState(false);
@@ -120,6 +125,7 @@ export function QuoteForm({
           : Object.entries(l.colorDraft.zoneColors)
               .filter(([, colorId]) => !!colorId)
               .map(([zone_key, color_id]) => ({ zone_key, color_id })),
+        sample_item_id: l.sampleItemId || null,
       };
     });
 
@@ -197,6 +203,25 @@ export function QuoteForm({
                   step="0.01"
                   className="h-9 w-full rounded-md border border-border bg-surface px-2 text-sm"
                 />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-foreground">
+                  Échantillon lié <span className="font-normal text-foreground-muted">(optionnel)</span>
+                </label>
+                <select
+                  value={line.sampleItemId}
+                  onChange={(e) => updateLine(line.key, { sampleItemId: e.target.value })}
+                  className="h-9 w-full rounded-md border border-border bg-surface px-2 text-sm"
+                >
+                  <option value="">
+                    {sampleItemOptions.length === 0 ? "Aucun échantillon pour cette demande" : "— Aucun —"}
+                  </option>
+                  {sampleItemOptions.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
 

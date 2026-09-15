@@ -25,7 +25,7 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
 
   if (!request) notFound();
 
-  const [{ data: messages }, { data: quotes }, { data: products }, { data: zoneTemplates }, { data: colors }] =
+  const [{ data: messages }, { data: quotes }, { data: products }, { data: zoneTemplates }, { data: colors }, { data: sampleRequests }] =
     await Promise.all([
       supabase
         .from("messages")
@@ -39,6 +39,14 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
       // choisit un modèle, sans aller-retour supplémentaire par ligne.
       supabase.from("product_zone_templates").select("product_model_id,zone_key,zone_label,display_order"),
       supabase.from("colors").select("id,name,code").eq("active", true).order("name"),
+      // Échantillons déjà demandés pour CETTE demande (migration 0037) — le
+      // commercial choisit, par ligne de devis, quel article d'échantillon
+      // la justifie.
+      supabase
+        .from("sample_requests")
+        .select("id,sample_number,sample_items(id,description,size,color)")
+        .eq("request_id", id)
+        .order("created_at"),
     ]);
 
   const zoneTemplatesByModel = (zoneTemplates ?? []).reduce<Record<string, { zone_key: string; zone_label: string; display_order: number }[]>>(
@@ -96,6 +104,12 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
                 products={products ?? []}
                 zoneTemplatesByModel={zoneTemplatesByModel}
                 colors={colors ?? []}
+                sampleItemOptions={(sampleRequests ?? []).flatMap((sr) =>
+                  (sr.sample_items ?? []).map((it) => ({
+                    id: it.id,
+                    label: `${sr.sample_number} — ${it.description}${it.size ? ` (${it.size})` : ""}${it.color ? ` ${it.color}` : ""}`,
+                  }))
+                )}
               />
             </CardBody>
           </Card>

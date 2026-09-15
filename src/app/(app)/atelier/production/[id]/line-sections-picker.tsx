@@ -25,12 +25,15 @@ export function LineSectionsPicker({
   lineLabel,
   allSections,
   initialSectionIds,
+  bare,
 }: {
   lineId: string;
   productionOrderId: string;
   lineLabel: string;
   allSections: { id: string; name: string }[];
   initialSectionIds: string[];
+  /** Rendu sans `<Card>` englobante — pour s'intégrer dans la carte d'un article (Configuration produit) plutôt qu'à part. */
+  bare?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -66,10 +69,8 @@ export function LineSectionsPicker({
     persist(next);
   }
 
-  return (
-    <Card>
-      <CardHeader title={`Sections retenues — ${lineLabel}`} description="Dans l'ordre de passage de cet article." />
-      <CardBody className="space-y-2">
+  const body = (
+      <div className="space-y-2">
         {sectionIds.length === 0 ? (
           <p className="rounded-md border border-dashed border-border bg-surface-muted px-3 py-2 text-xs text-foreground-muted">
             Aucune section retenue pour l&apos;instant.
@@ -137,7 +138,23 @@ export function LineSectionsPicker({
             ))}
           </select>
         )}
-      </CardBody>
+      </div>
+  );
+
+  if (bare) {
+    return (
+      <div>
+        <p className="text-xs font-medium text-foreground-muted">Sections retenues</p>
+        <p className="mb-2 text-[11px] text-foreground-muted">Dans l&apos;ordre de passage de cet article.</p>
+        {body}
+      </div>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader title={`Sections retenues — ${lineLabel}`} description="Dans l'ordre de passage de cet article." />
+      <CardBody className="space-y-2">{body}</CardBody>
     </Card>
   );
 }

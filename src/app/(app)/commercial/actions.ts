@@ -37,6 +37,9 @@ const quoteLineSchema = z.object({
   // couleur_unique_id pour un modèle « uni », zone_colors sinon.
   couleur_unique_id: z.string().uuid().nullable(),
   zone_colors: z.array(z.object({ zone_key: z.string().min(1), color_id: z.string().uuid() })),
+  // Article d'échantillon qui justifie cette ligne (migration 0037) — hérité
+  // tel quel dans l'ODF à l'acceptation, comme le modèle et la couleur.
+  sample_item_id: z.string().uuid().nullable(),
 });
 
 const createQuoteSchema = z.object({
@@ -85,6 +88,7 @@ export async function createQuote(requestId: string, companyId: string, lines: Q
         quantity: line.quantity,
         unit_price: line.unit_price,
         couleur_unique_id: line.couleur_unique_id,
+        sample_item_id: line.sample_item_id,
       })
       .select("id")
       .single();

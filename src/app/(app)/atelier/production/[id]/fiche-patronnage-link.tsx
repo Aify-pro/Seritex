@@ -51,6 +51,7 @@ export function FichePatronnageLink({
   editable,
   fiche,
   productModelId,
+  bare,
 }: {
   lineId: string;
   /** Description de l'article, affichée dans le titre de la carte. */
@@ -59,6 +60,8 @@ export function FichePatronnageLink({
   fiche: { id: string; numeroOt: string; statut: StatutFiche } | null;
   /** Modèle de l'article — la génération automatique en a besoin (lot C2). */
   productModelId: string | null;
+  /** Rendu sans `<Card>` englobante — pour s'intégrer dans la carte d'un article (Configuration produit) plutôt qu'à part. */
+  bare?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -110,13 +113,8 @@ export function FichePatronnageLink({
 
   const needsAttention = fiche && fiche.statut !== "bon_pour_coupe";
 
-  return (
-    <Card>
-      <CardHeader
-        title={`Fiche Patronnage liée — ${lineLabel}`}
-        description="Obligatoire pour valider l'ODF tant qu'une section Coupe est retenue sur cet article."
-      />
-      <CardBody className="space-y-3">
+  const body = (
+      <div className="space-y-3">
         {fiche ? (
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -196,7 +194,28 @@ export function FichePatronnageLink({
             )}
           </div>
         )}
-      </CardBody>
+      </div>
+  );
+
+  if (bare) {
+    return (
+      <div>
+        <p className="text-xs font-medium text-foreground-muted">Fiche Patronnage liée</p>
+        <p className="mb-2 text-[11px] text-foreground-muted">
+          Obligatoire tant qu&apos;une section Coupe est retenue sur cet article.
+        </p>
+        {body}
+      </div>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader
+        title={`Fiche Patronnage liée — ${lineLabel}`}
+        description="Obligatoire pour valider l'ODF tant qu'une section Coupe est retenue sur cet article."
+      />
+      <CardBody className="space-y-3">{body}</CardBody>
     </Card>
   );
 }

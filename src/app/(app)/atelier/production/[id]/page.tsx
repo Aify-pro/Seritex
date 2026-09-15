@@ -11,10 +11,7 @@ import { ArchiveButton } from "./archive-button";
 import { LifecycleActions } from "./lifecycle-actions";
 import { ReplacementOrderPicker } from "./replacement-order-picker";
 import { getSizesForProductModel } from "@/lib/sizes";
-import { LineSectionsPicker } from "./line-sections-picker";
 import { SubmitOdfPanel } from "./submit-odf-panel";
-import { FichePatronnageLink } from "./fiche-patronnage-link";
-import { LineVisuelPicker } from "./line-visuel-picker";
 import { AnomaliesPanel } from "./anomalies-panel";
 import { ProductionOrderLines, type LineData } from "./production-order-lines";
 import { ProductionOrderMediaFiles, type AttachableMediaFile } from "./production-order-media-files";
@@ -81,7 +78,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     supabase
       .from("production_order_lines")
       .select(
-        "id,description,quantity,product_model_id,couleur_unique_id,product_models(id,name,textile_id,textiles(nom,composition,grammage,laize_cm)),couleur_unique:couleur_unique_id(id,name,code),zone_colors:production_order_line_zone_colors(zone_key,colors:color_id(id,name,code)),sizes:production_order_sizes(taille,quantite_demandee),quote_lines(product_model_id)"
+        "id,description,quantity,product_model_id,couleur_unique_id,product_models(id,name,textile_id,textiles(nom,composition,grammage,laize_cm)),couleur_unique:couleur_unique_id(id,name,code),zone_colors:production_order_line_zone_colors(zone_key,colors:color_id(id,name,code)),sizes:production_order_sizes(taille,quantite_demandee),quote_lines(product_model_id),sample_items(id,description,size,color,sample_requests(sample_number))"
       )
       .eq("production_order_id", id)
       .order("created_at"),
@@ -139,7 +136,9 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     // jamais saisis directement (migration 0020).
     supabase
       .from("stock_movements")
-      .select("id,production_order_id,type,article_ref,quantite_ou_poids,unite,exported_in_fiche_id,created_by,created_at")
+      .select(
+        "id,production_order_id,production_order_line_id,type,article_ref,quantite_ou_poids,unite,exported_in_fiche_id,created_by,created_at"
+      )
       .eq("production_order_id", id)
       .order("created_at", { ascending: false }),
     supabase
@@ -182,6 +181,37 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     if (visuelRequiredSectionIds.has(s.section_id)) visuelRequiredByLine[s.production_order_line_id] = true;
   }
   const anySectionChosen = Object.values(sectionIdsByLine).some((ids) => ids.length > 0);
+
+  // Lot 9, par article depuis la migration 0037 pour le visuel : documents
+  // généraux de l'ODF entier + visuels déjà joints à chaque article, en plus
+  // de ceux encore disponibles dans la médiathèque du client pour le
+  // sélecteur d'ajout.
+  const attachedGeneralMediaFiles = (attachedGeneralMedia ?? [])
+    .map((m) => m.media_files as unknown as AttachableMediaFile | null)
+    .filter((f): f is AttachableMediaFile => !!f);
+  const availableMediaFiles = (availableMedia ?? []) as AttachableMediaFile[];
+  const visuelByLine: Record<string, AttachableMediaFile[]> = {};
+  for (const m of (attachedLineMedia ?? []) as unknown as { production_order_line_id: string; media_files: AttachableMediaFile | null }[]) {
+    if (m.media_files) (visuelByLine[m.production_order_line_id] ??= []).push(m.media_files);
+  }
+  const fichesByLine: Record<string, { id: string; numeroOt: string; statut: StatutFiche }> = {};
+  for (const f of (fiches ?? []) as unknown as { id: string; numero_ot: string; statut: StatutFiche; production_order_line_id: string }[]) {
+    fichesByLine[f.production_order_line_id] = { id: f.id, numeroOt: f.numero_ot, statut: f.statut };
+  }
+
+  // Mouvements de stock par article (migration 0037) — regroupés ici pour
+  // affichage dans la carte de chaque article ; la liste ODF-entière avec
+  // génération de fiche d'export reste inchangée plus bas.
+  const stockMovementsByLine: Record<string, { type: string; quantiteOuPoids: number; unite: string; createdAt: string }[]> = {};
+  for (const m of (stockMovements ?? []) as unknown as { production_order_line_id: string | null; type: string; quantite_ou_poids: number; unite: string; created_at: string }[]) {
+    if (!m.production_order_line_id) continue;
+    (stockMovementsByLine[m.production_order_line_id] ??= []).push({
+      type: m.type,
+      quantiteOuPoids: m.quantite_ou_poids,
+      unite: m.unite,
+      createdAt: m.created_at,
+    });
+  }
 
   // Noms des personnes ayant validé le lancement / demandé ou confirmé la
   // clôture — doivent apparaître à l'écran (et sur le PDF, hors périmètre de
@@ -248,6 +278,18 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
         textiles: { nom: string; composition: string | null; grammage: number | null; laize_cm: number | null } | null;
       } | null;
       const quoteLine = l.quote_lines as unknown as { product_model_id: string | null } | null;
+      const sampleItem = l.sample_items as unknown as {
+        id: string;
+        description: string;
+        size: string | null;
+        color: string | null;
+        sample_requests: { sample_number: string } | { sample_number: string }[] | null;
+      } | null;
+      const sampleRequest = sampleItem
+        ? Array.isArray(sampleItem.sample_requests)
+          ? sampleItem.sample_requests[0]
+          : sampleItem.sample_requests
+        : null;
       return {
         id: l.id,
         description: l.description,
@@ -266,6 +308,17 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
           .map((z) => ({ zone_key: z.zone_key, zone_label: z.zone_label, display_order: z.display_order })),
         referentielTailles: await getSizesForProductModel(l.product_model_id),
         initialSizes: (l.sizes ?? []) as { taille: string; quantite_demandee: number }[],
+        initialSectionIds: sectionIdsByLine[l.id] ?? [],
+        coupeSelected: !!coupeSelectedByLine[l.id],
+        visuelRequired: !!visuelRequiredByLine[l.id],
+        fiche: fichesByLine[l.id] ?? null,
+        attachedVisuel: visuelByLine[l.id] ?? [],
+        sampleItemId: sampleItem?.id ?? null,
+        sampleNumber: sampleRequest?.sample_number ?? null,
+        sampleLabel: sampleItem
+          ? `${sampleRequest?.sample_number ?? "?"} — ${sampleItem.description}${sampleItem.size ? ` (${sampleItem.size})` : ""}${sampleItem.color ? ` ${sampleItem.color}` : ""}`
+          : null,
+        stockMovements: stockMovementsByLine[l.id] ?? [],
       };
     })
   );
@@ -314,23 +367,6 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
 
   const company = order.companies as unknown as { name: string } | null;
   const quote = order.quotes as unknown as { reference: string } | null;
-
-  // Lot 9, par article depuis la migration 0037 pour le visuel : documents
-  // généraux de l'ODF entier + visuels déjà joints à chaque article, en plus
-  // de ceux encore disponibles dans la médiathèque du client pour le
-  // sélecteur d'ajout.
-  const attachedGeneralMediaFiles = (attachedGeneralMedia ?? [])
-    .map((m) => m.media_files as unknown as AttachableMediaFile | null)
-    .filter((f): f is AttachableMediaFile => !!f);
-  const availableMediaFiles = (availableMedia ?? []) as AttachableMediaFile[];
-  const visuelByLine: Record<string, AttachableMediaFile[]> = {};
-  for (const m of (attachedLineMedia ?? []) as unknown as { production_order_line_id: string; media_files: AttachableMediaFile | null }[]) {
-    if (m.media_files) (visuelByLine[m.production_order_line_id] ??= []).push(m.media_files);
-  }
-  const fichesByLine: Record<string, { id: string; numeroOt: string; statut: StatutFiche }> = {};
-  for (const f of (fiches ?? []) as unknown as { id: string; numero_ot: string; statut: StatutFiche; production_order_line_id: string }[]) {
-    fichesByLine[f.production_order_line_id] = { id: f.id, numeroOt: f.numero_ot, statut: f.statut };
-  }
 
   const canArchive = await can("ordres_fabrication", "archive");
   const canValidate = await can("ordres_fabrication", "validate");
@@ -420,47 +456,9 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
         productModels={productModels ?? []}
         colors={activeColors ?? []}
         initialNote={order.note_disponibilite_couleurs}
+        allSections={allSections ?? []}
+        availableMediaFiles={availableMediaFiles}
       />
-
-      {lines.map((line) => {
-        const lineLabel = `${line.description} (${line.quantity} pièces)`;
-        const lineFiche = fichesByLine[line.id] ?? null;
-        const lineVisuel = visuelByLine[line.id] ?? [];
-        return (
-          <div key={line.id} className="space-y-6">
-            {modifiable && (
-              <LineSectionsPicker
-                lineId={line.id}
-                productionOrderId={order.id}
-                lineLabel={lineLabel}
-                allSections={allSections ?? []}
-                initialSectionIds={sectionIdsByLine[line.id] ?? []}
-              />
-            )}
-
-            {(coupeSelectedByLine[line.id] || lineFiche) && (
-              <FichePatronnageLink
-                lineId={line.id}
-                lineLabel={lineLabel}
-                editable={modifiable}
-                fiche={lineFiche}
-                productModelId={line.productModelId}
-              />
-            )}
-
-            {(visuelRequiredByLine[line.id] || lineVisuel.length > 0) && (
-              <LineVisuelPicker
-                lineId={line.id}
-                lineLabel={lineLabel}
-                productionOrderId={order.id}
-                attached={lineVisuel}
-                available={availableMediaFiles}
-                required={!!visuelRequiredByLine[line.id]}
-              />
-            )}
-          </div>
-        );
-      })}
 
       {modifiable && (
         <SubmitOdfPanel productionOrderId={order.id} anySectionChosen={anySectionChosen} linesConfigured={linesConfigured} />
@@ -604,6 +602,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
           productionOrderId={order.id}
           articleLots={(articleLots ?? []).map((l) => ({ id: l.id, code: l.code, categorie: l.categorie }))}
           stockItemOptions={stockItemOptions}
+          lines={lines.map((l) => ({ id: l.id, description: l.description }))}
         />
       )}
 

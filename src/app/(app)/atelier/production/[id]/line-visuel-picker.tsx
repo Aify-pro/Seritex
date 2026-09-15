@@ -24,6 +24,7 @@ export function LineVisuelPicker({
   attached,
   available,
   required,
+  bare,
 }: {
   lineId: string;
   lineLabel: string;
@@ -31,6 +32,8 @@ export function LineVisuelPicker({
   attached: AttachableMediaFile[];
   available: AttachableMediaFile[];
   required: boolean;
+  /** Rendu sans `<Card>` englobante — pour s'intégrer dans la carte d'un article (Configuration produit) plutôt qu'à part. */
+  bare?: boolean;
 }) {
   const [pending, startTransition] = useTransition();
   const attachedIds = new Set(attached.map((f) => f.id));
@@ -52,13 +55,8 @@ export function LineVisuelPicker({
     });
   }
 
-  return (
-    <Card>
-      <CardHeader
-        title={`Visuel / maquette — ${lineLabel}`}
-        description="Maquette réalisée par les infographes, jointe à cet article depuis la médiathèque du client."
-      />
-      <CardBody className="space-y-1.5">
+  const body = (
+      <div className="space-y-1.5">
         {missingVisuel && (
           <p className="text-xs text-warning">
             ⚠ La validation de l&apos;ODF sera refusée tant qu&apos;aucun visuel n&apos;est joint à cet article.
@@ -107,7 +105,28 @@ export function LineVisuelPicker({
             </select>
           </div>
         )}
-      </CardBody>
+      </div>
+  );
+
+  if (bare) {
+    return (
+      <div>
+        <p className="text-xs font-medium text-foreground-muted">Visuel / maquette</p>
+        <p className="mb-1.5 text-[11px] text-foreground-muted">
+          Maquette réalisée par les infographes, jointe depuis la médiathèque du client.
+        </p>
+        {body}
+      </div>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader
+        title={`Visuel / maquette — ${lineLabel}`}
+        description="Maquette réalisée par les infographes, jointe à cet article depuis la médiathèque du client."
+      />
+      <CardBody className="space-y-1.5">{body}</CardBody>
     </Card>
   );
 }

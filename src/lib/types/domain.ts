@@ -538,6 +538,8 @@ export type StockMovementType =
 export interface StockMovement {
   id: string;
   production_order_id: string;
+  /** Article auquel ce mouvement se rattache (migration 0037) — null si non attribué. */
+  production_order_line_id: string | null;
   type: StockMovementType;
   article_ref: string | null;
   quantite_ou_poids: number;

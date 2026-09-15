@@ -748,6 +748,7 @@ declare
   v_lot article_lots;
   v_sage_reference text;
   v_total_pieces numeric;
+  v_production_order_line_id uuid;
 begin
   select role, section_id into v_role, v_section from app_users where id = auth.uid();
 
@@ -781,6 +782,16 @@ begin
   values (p_production_order_id, p_trace_id, p_categorie, coalesce(p_composition_taille, '{}'::jsonb), auth.uid())
   returning * into v_lot;
 
+  -- Migration 0037 : le lot vient d'un tracé, lui-même d'une fiche liée à
+  -- un article précis — le mouvement de stock qu'il génère hérite de cet
+  -- article automatiquement, sans saisie supplémentaire.
+  if p_trace_id is not null then
+    select fp.production_order_line_id into v_production_order_line_id
+    from traces_placement tp
+    join fiches_placement fp on fp.id = tp.fiche_id
+    where tp.id = p_trace_id;
+  end if;
+
   if p_categorie in ('semi_fini', 'fini') then
     select coalesce(sum(value::numeric), 0) into v_total_pieces
     from jsonb_each_text(coalesce(p_composition_taille, '{}'::jsonb));
@@ -791,9 +802,10 @@ begin
       join product_models pm on pm.id = po.product_model_id
       where po.id = p_production_order_id;
 
-      insert into stock_movements (production_order_id, type, article_ref, quantite_ou_poids, unite, created_by)
+      insert into stock_movements (production_order_id, production_order_line_id, type, article_ref, quantite_ou_poids, unite, created_by)
       values (
         p_production_order_id,
+        v_production_order_line_id,
         case p_categorie when 'semi_fini' then 'entree_semi_fini' else 'entree_fini' end,
         v_sage_reference,
         v_total_pieces,
@@ -910,7 +922,246 @@ revoke all on function record_bag_weighing(uuid, numeric, uuid, uuid) from publi
 grant execute on function record_bag_weighing(uuid, numeric, uuid, uuid) to authenticated;
 
 -- ============================================================================
--- 10. SUPPRESSION DE L'ANCIEN NIVEAU ODF-ENTIER
+-- 10. STOCK_MOVEMENTS PAR ARTICLE
+-- ============================================================================
+-- Chaque article a son propre stock (section 19 du document de logique,
+-- élargie ici) : jusqu'ici un mouvement de stock (réception tissu, sortie/
+-- entrée de lot, retour) n'était rattaché qu'à l'ODF entier. Nullable :
+-- dérivé automatiquement pour une sortie/entrée de lot (create_article_lot,
+-- ci-dessus, via le tracé) ; à choisir explicitement pour une réception
+-- tissu ou un retour stock, qui ne découlent d'aucun tracé (record_pesee,
+-- ci-dessous). Reste null pour les mouvements déjà existants (données
+-- historiques, jamais réattribuées rétroactivement) et pour un mouvement
+-- volontairement saisi sans article précis.
+
+alter table stock_movements
+  add column production_order_line_id uuid references production_order_lines(id);
+
+create index idx_stock_movements_line on stock_movements(production_order_line_id);
+
+comment on column stock_movements.production_order_line_id is
+  'Article auquel ce mouvement se rattache (migration 0037) — dérivé automatiquement du tracé/lot pour une sortie/entrée de lot (create_article_lot), choisi explicitement pour une réception tissu ou un retour stock (record_pesee). Null : mouvement non attribué à un article précis.';
+
+-- ============================================================================
+-- 11. RECORD_PESEE() : ARTICLE EXPLICITE POUR RÉCEPTION/RETOUR
+-- ============================================================================
+-- Nouveau paramètre p_production_order_line_id, nullable et en dernière
+-- position (défaut null) — même convention que l'ajout de p_article_ref en
+-- 0020 : la signature change (5 → 6 paramètres), donc ce create or replace
+-- crée un nouveau surcharge plutôt que de remplacer l'existant à 5
+-- paramètres, exactement comme 0017 → 0020 pour ce même record_pesee (la
+-- version à 5 paramètres reste dans le catalogue mais devient inatteignable
+-- tant que l'appelant TypeScript nomme systématiquement ce nouveau
+-- paramètre, ce qui est le cas ici). Seul le type reception_tissu/
+-- retour_stock l'utilise : sortie_lot n'écrit dans stock_movements que via
+-- create_article_lot (l'article s'y déduit déjà du tracé).
+
+create or replace function record_pesee(
+  p_type text,
+  p_production_order_id uuid,
+  p_poids_kg numeric,
+  p_reference_id uuid default null,
+  p_article_ref text default null,
+  p_production_order_line_id uuid default null
+) returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_role user_role;
+  v_section uuid;
+  v_categorie_cle text;
+  v_po_status production_order_status;
+  v_reference_id uuid;
+  v_id uuid;
+begin
+  select role, section_id into v_role, v_section from app_users where id = auth.uid();
+
+  if p_type not in ('reception_tissu', 'sortie_lot', 'retour_stock') then
+    raise exception 'type de pesée invalide pour record_pesee (%) — un sac de déchets se pèse via record_bag_weighing', p_type;
+  end if;
+
+  if p_type = 'reception_tissu' then
+    if v_role not in ('administrateur', 'responsable_production', 'gestionnaire_stock') then
+      raise exception 'accès refusé : la réception de marchandise est réservée au gestionnaire de stock';
+    end if;
+  elsif v_role = 'chef_section' then
+    select ac.cle into v_categorie_cle
+    from sections s left join atelier_categories ac on ac.id = s.categorie_id
+    where s.id = v_section;
+    if v_categorie_cle is distinct from 'coupe' then
+      raise exception 'accès refusé : la saisie de pesées est réservée à une section de catégorie Coupe';
+    end if;
+  elsif v_role not in ('administrateur', 'responsable_production', 'gestionnaire_stock') then
+    raise exception 'accès refusé : votre rôle ne permet pas de saisir une pesée';
+  end if;
+
+  select status into v_po_status from production_orders where id = p_production_order_id;
+  if not found then
+    raise exception 'ordre de fabrication introuvable';
+  end if;
+  if v_po_status in ('terminee', 'annulee') then
+    raise exception 'impossible d''enregistrer une pesée : cet ordre de fabrication est clôturé';
+  end if;
+
+  if p_poids_kg is null or p_poids_kg <= 0 then
+    raise exception 'poids invalide (kg, > 0)';
+  end if;
+
+  if p_production_order_line_id is not null and not exists (
+    select 1 from production_order_lines
+    where id = p_production_order_line_id and production_order_id = p_production_order_id
+  ) then
+    raise exception 'cet article n''appartient pas à cet ordre de fabrication';
+  end if;
+
+  if p_type = 'sortie_lot' then
+    if p_reference_id is null then
+      raise exception 'référence du lot article obligatoire pour une pesée de type sortie_lot';
+    end if;
+    if not exists (
+      select 1 from article_lots where id = p_reference_id and production_order_id = p_production_order_id
+    ) then
+      raise exception 'ce lot article n''appartient pas à cet ordre de fabrication';
+    end if;
+    v_reference_id := p_reference_id;
+  else
+    v_reference_id := null;
+  end if;
+
+  insert into pesees (type, reference_id, poids_kg, production_order_id, user_id)
+  values (p_type, v_reference_id, p_poids_kg, p_production_order_id, auth.uid())
+  returning id into v_id;
+
+  if p_type in ('reception_tissu', 'retour_stock') then
+    insert into stock_movements (production_order_id, production_order_line_id, type, article_ref, quantite_ou_poids, unite, created_by)
+    values (
+      p_production_order_id,
+      p_production_order_line_id,
+      case p_type when 'reception_tissu' then 'sortie_mp' else 'retour_mp' end,
+      p_article_ref,
+      p_poids_kg,
+      'kg',
+      auth.uid()
+    );
+  end if;
+
+  insert into audit_log (user_id, action, entity_type, entity_id, metadata)
+  values (auth.uid(), 'record_pesee', 'pesee', v_id,
+          jsonb_build_object('type', p_type, 'production_order_id', p_production_order_id,
+                              'poids_kg', p_poids_kg, 'reference_id', v_reference_id,
+                              'article_ref', p_article_ref, 'production_order_line_id', p_production_order_line_id));
+
+  return v_id;
+end;
+$$;
+revoke all on function record_pesee(text, uuid, numeric, uuid, text, uuid) from public, anon, authenticated;
+grant execute on function record_pesee(text, uuid, numeric, uuid, text, uuid) to authenticated;
+
+-- ============================================================================
+-- 12. ÉCHANTILLON LIÉ, DÈS LA LIGNE DE DEVIS
+-- ============================================================================
+-- Chaque article a son propre échantillon (section 2.7/3.6 déjà actée pour
+-- le lien libre ODF-entier de 0004, `sample_requests.production_order_id`,
+-- `link_sample_to_production_order()` — volontairement conservé tel quel,
+-- ce chantier ne le remplace pas). Ce qui manquait : un lien structurel,
+-- posé une fois pour toutes à l'écriture du devis (comme le modèle/la
+-- couleur), qui identifie PRÉCISÉMENT quel article d'échantillon (sample_
+-- items, pas sample_requests entier — une même demande d'échantillon peut
+-- porter plusieurs articles différents) justifie CETTE ligne de devis.
+-- Hérité tel quel dans l'ODF par accept_quote(), comme product_model_id/
+-- couleur_unique_id — jamais réattribué ensuite depuis l'ODF, le lien se
+-- décide au devis.
+
+alter table quote_lines add column sample_item_id uuid references sample_items(id);
+alter table production_order_lines add column sample_item_id uuid references sample_items(id);
+
+create index idx_quote_lines_sample_item on quote_lines(sample_item_id);
+create index idx_production_order_lines_sample_item on production_order_lines(sample_item_id);
+
+comment on column quote_lines.sample_item_id is
+  'Article d''échantillon (sample_items) qui justifie cette ligne de devis — choisi par le commercial à l''écriture du devis, parmi les échantillons déjà demandés pour la même demande (requests). Hérité tel quel par production_order_lines.sample_item_id à l''acceptation (migration 0037).';
+comment on column production_order_lines.sample_item_id is
+  'Hérité de quote_lines.sample_item_id à l''acceptation du devis (accept_quote()) — jamais modifiable depuis l''ODF, le lien se décide au devis (migration 0037).';
+
+create or replace function accept_quote(p_quote_id uuid)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_quote quotes;
+  v_total_qty int;
+  v_product_model_id uuid;
+  v_po_id uuid;
+  v_ref text;
+  v_line quote_lines;
+  v_line_id uuid;
+begin
+  select * into v_quote from quotes where id = p_quote_id;
+  if not found then
+    raise exception 'devis introuvable';
+  end if;
+
+  if not (is_commercial_or_above() or is_client_of(v_quote.company_id)) then
+    raise exception 'accès refusé : ce devis ne vous appartient pas';
+  end if;
+
+  if v_quote.status <> 'envoye' then
+    raise exception 'ce devis n''est pas en attente de validation (statut actuel : %)', v_quote.status;
+  end if;
+
+  select coalesce(sum(quantity), 0) into v_total_qty from quote_lines where quote_id = p_quote_id;
+
+  -- product_model_id sur l'ODF lui-même : rempli seulement si toutes les
+  -- lignes partagent le même modèle (même convention que 0019/0034) —
+  -- encore consommé par generateFicheFromLine()/create_article_lot(), hors
+  -- périmètre de cette migration.
+  select min(product_model_id::text)::uuid into v_product_model_id
+  from quote_lines
+  where quote_id = p_quote_id and product_model_id is not null
+  having count(distinct product_model_id) = 1;
+
+  v_ref := 'OF-' || to_char(now(), 'YYYYMMDD') || '-' || substr(p_quote_id::text, 1, 4);
+
+  update quotes set status = 'accepte' where id = p_quote_id;
+  update requests set status = 'acceptee' where id = v_quote.request_id;
+
+  insert into production_orders (reference, quote_id, company_id, total_quantity, product_model_id)
+  values (v_ref, p_quote_id, v_quote.company_id, v_total_qty, v_product_model_id)
+  returning id into v_po_id;
+
+  for v_line in select * from quote_lines where quote_id = p_quote_id
+  loop
+    insert into production_order_lines (
+      production_order_id, quote_line_id, product_model_id, description, quantity, couleur_unique_id, sample_item_id
+    ) values (
+      v_po_id, v_line.id, v_line.product_model_id, v_line.description, v_line.quantity, v_line.couleur_unique_id, v_line.sample_item_id
+    ) returning id into v_line_id;
+
+    insert into production_order_line_zone_colors (production_order_line_id, zone_key, color_id)
+    select v_line_id, qlzc.zone_key, qlzc.color_id
+    from quote_line_zone_colors qlzc
+    where qlzc.quote_line_id = v_line.id;
+  end loop;
+
+  insert into status_history (entity_type, entity_id, from_status, to_status, changed_by)
+  values ('quote', p_quote_id, 'envoye', 'accepte', auth.uid());
+
+  insert into audit_log (user_id, action, entity_type, entity_id, metadata)
+  values (auth.uid(), 'accept_quote', 'quote', p_quote_id, jsonb_build_object('production_order_id', v_po_id));
+
+  return v_po_id;
+end;
+$$;
+
+revoke all on function accept_quote(uuid) from public, anon;
+grant execute on function accept_quote(uuid) to authenticated;
+
+-- ============================================================================
+-- 13. SUPPRESSION DE L'ANCIEN NIVEAU ODF-ENTIER
 -- ============================================================================
 
 drop table production_order_sections;

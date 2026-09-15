@@ -141,7 +141,8 @@ export async function recordPesee(
   productionOrderId: string,
   poidsKg: number,
   referenceId?: string | null,
-  articleRef?: string | null
+  articleRef?: string | null,
+  productionOrderLineId?: string | null
 ): Promise<RecordPeseeResult> {
   await requireUser();
   const supabase = await createClient();
@@ -152,12 +153,14 @@ export async function recordPesee(
     p_poids_kg: poidsKg,
     p_reference_id: referenceId || null,
     p_article_ref: articleRef || null,
+    p_production_order_line_id: productionOrderLineId || null,
   });
 
   if (error) return { error: error.message };
 
   revalidatePath("/atelier/section");
   revalidatePath("/atelier/production");
+  revalidatePath(`/atelier/production/${productionOrderId}`);
   return { id: data as string };
 }
 

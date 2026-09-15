@@ -13,6 +13,13 @@ import {
   setProductionOrderColorNote,
 } from "../actions";
 import type { Size } from "@/lib/sizes";
+import { LineSectionsPicker } from "./line-sections-picker";
+import { FichePatronnageLink } from "./fiche-patronnage-link";
+import { LineVisuelPicker } from "./line-visuel-picker";
+import type { AttachableMediaFile } from "./production-order-media-files";
+import type { StatutFiche } from "@/lib/patronnage/types";
+import { formatDateTime } from "@/lib/utils";
+import Link from "next/link";
 
 interface ZoneTemplate {
   zone_key: string;
@@ -54,7 +61,29 @@ export interface LineData {
   zoneTemplate: ZoneTemplate[];
   referentielTailles: Size[];
   initialSizes: { taille: string; quantite_demandee: number }[];
+  /** Sections retenues sur cet article (migration 0037) — id des sections déjà choisies, dans l'ordre. */
+  initialSectionIds: string[];
+  /** Vrai si une des sections retenues sur cet article exige une fiche de tracé (catégorie Coupe). */
+  coupeSelected: boolean;
+  /** Vrai si une des sections retenues sur cet article exige un visuel (catégorie Impression). */
+  visuelRequired: boolean;
+  fiche: { id: string; numeroOt: string; statut: StatutFiche } | null;
+  attachedVisuel: AttachableMediaFile[];
+  /** Article d'échantillon hérité du devis (migration 0037) — jamais modifiable depuis l'ODF. */
+  sampleItemId: string | null;
+  sampleNumber: string | null;
+  sampleLabel: string | null;
+  /** Mouvements de stock rattachés à cet article (migration 0037). */
+  stockMovements: { type: string; quantiteOuPoids: number; unite: string; createdAt: string }[];
 }
+
+const STOCK_MOVEMENT_TYPE_LABELS: Record<string, string> = {
+  sortie_mp: "Sortie MP",
+  entree_semi_fini: "Entrée semi-fini",
+  sortie_semi_fini: "Sortie semi-fini",
+  entree_fini: "Entrée fini",
+  retour_mp: "Retour MP",
+};
 
 /**
  * Configuration produit de l'ODF, une carte par article du devis accepté
@@ -70,6 +99,8 @@ export function ProductionOrderLines({
   productModels,
   colors,
   initialNote,
+  allSections,
+  availableMediaFiles,
 }: {
   productionOrderId: string;
   editable: boolean;
@@ -78,12 +109,16 @@ export function ProductionOrderLines({
   colors: ColorOption[];
   /** Disponibilité couleurs, commentaire libre — jamais validé par le logiciel (section 9), reste au niveau de l'ODF entier. */
   initialNote: string | null;
+  /** Référentiel des sections d'atelier — pour LineSectionsPicker, partagé par tous les articles. */
+  allSections: { id: string; name: string }[];
+  /** Médiathèque du client — pour le sélecteur de visuel de LineVisuelPicker, partagé par tous les articles. */
+  availableMediaFiles: AttachableMediaFile[];
 }) {
   return (
     <Card>
       <CardHeader
         title="Configuration produit"
-        description="Un article par ligne du devis accepté — modèle, tissu et couleur hérités et non modifiables (déjà validés par le client), sauf ligne de devis sans modèle. Dispatching des tailles propre à chaque article."
+        description="Un article par ligne du devis accepté — modèle, tissu, couleur, tailles, sections retenues, fiche de tracé et visuel : tout ce qui concerne cet article, au même endroit."
       />
       <CardBody className="space-y-4">
         {lines.length === 0 ? (
@@ -97,6 +132,8 @@ export function ProductionOrderLines({
               line={line}
               productModels={productModels}
               colors={colors}
+              allSections={allSections}
+              availableMediaFiles={availableMediaFiles}
             />
           ))
         )}
@@ -157,12 +194,16 @@ function LineCard({
   line,
   productModels,
   colors,
+  allSections,
+  availableMediaFiles,
 }: {
   productionOrderId: string;
   editable: boolean;
   line: LineData;
   productModels: { id: string; name: string }[];
   colors: ColorOption[];
+  allSections: { id: string; name: string }[];
+  availableMediaFiles: AttachableMediaFile[];
 }) {
   const [pending, startTransition] = useTransition();
   const [draft, setDraft] = useState<ZoneColorDraft>({
@@ -358,6 +399,72 @@ function LineCard({
             )}
           </div>
         </>
+      )}
+
+      {editable && (
+        <div className="border-t border-border pt-3">
+          <LineSectionsPicker
+            bare
+            lineId={line.id}
+            productionOrderId={productionOrderId}
+            lineLabel={line.description}
+            allSections={allSections}
+            initialSectionIds={line.initialSectionIds}
+          />
+        </div>
+      )}
+
+      {(line.coupeSelected || line.fiche) && (
+        <div className="border-t border-border pt-3">
+          <FichePatronnageLink
+            bare
+            lineId={line.id}
+            lineLabel={line.description}
+            editable={editable}
+            fiche={line.fiche}
+            productModelId={line.productModelId}
+          />
+        </div>
+      )}
+
+      {(line.visuelRequired || line.attachedVisuel.length > 0) && (
+        <div className="border-t border-border pt-3">
+          <LineVisuelPicker
+            bare
+            lineId={line.id}
+            lineLabel={line.description}
+            productionOrderId={productionOrderId}
+            attached={line.attachedVisuel}
+            available={availableMediaFiles}
+            required={line.visuelRequired}
+          />
+        </div>
+      )}
+
+      {line.sampleLabel && (
+        <div className="border-t border-border pt-3">
+          <p className="text-xs font-medium text-foreground-muted">Échantillon lié</p>
+          <p className="mb-1 text-[11px] text-foreground-muted">Choisi au devis — non modifiable depuis l&apos;ODF.</p>
+          <Link href={`/echantillons/${line.sampleNumber}`} className="text-sm font-medium text-brand hover:underline">
+            {line.sampleLabel}
+          </Link>
+        </div>
+      )}
+
+      {line.stockMovements.length > 0 && (
+        <div className="border-t border-border pt-3">
+          <p className="mb-2 text-xs font-medium text-foreground-muted">Mouvements de stock</p>
+          <ul className="space-y-1">
+            {line.stockMovements.map((m, i) => (
+              <li key={i} className="flex items-center justify-between text-xs text-foreground">
+                <span>{STOCK_MOVEMENT_TYPE_LABELS[m.type] ?? m.type}</span>
+                <span className="text-foreground-muted">
+                  {m.quantiteOuPoids} {m.unite === "kg" ? "kg" : "pièce(s)"} · {formatDateTime(m.createdAt)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
     </div>
   );

@@ -10,6 +10,7 @@ import { recordPesee } from "../../section/actions";
 
 type ArticleLotOption = { id: string; code: string; categorie: string };
 type StockItemOption = { sageReference: string; designation: string };
+type LineOption = { id: string; description: string };
 
 const PESEE_TYPE_LABELS = {
   reception_tissu: "Réception tissu",
@@ -31,10 +32,13 @@ export function StockEntryForm({
   productionOrderId,
   articleLots,
   stockItemOptions,
+  lines,
 }: {
   productionOrderId: string;
   articleLots: ArticleLotOption[];
   stockItemOptions: StockItemOption[];
+  /** Articles de l'ODF (migration 0037) — à choisir pour une réception tissu/retour stock, sans lot associé pour en déduire l'article automatiquement. */
+  lines: LineOption[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -43,6 +47,7 @@ export function StockEntryForm({
   const [lotId, setLotId] = useState("");
   const [poidsKg, setPoidsKg] = useState("");
   const [articleRef, setArticleRef] = useState("");
+  const [lineId, setLineId] = useState("");
 
   function submit() {
     setError(null);
@@ -60,7 +65,8 @@ export function StockEntryForm({
         productionOrderId,
         Number(poidsKg),
         type === "sortie_lot" ? lotId : null,
-        type !== "sortie_lot" ? articleRef || null : null
+        type !== "sortie_lot" ? articleRef || null : null,
+        type !== "sortie_lot" ? lineId || null : null
       );
       if ("error" in res) {
         setError(res.error);
@@ -70,6 +76,7 @@ export function StockEntryForm({
       setPoidsKg("");
       setLotId("");
       setArticleRef("");
+      setLineId("");
       router.refresh();
     });
   }
@@ -83,7 +90,7 @@ export function StockEntryForm({
             <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> {error}
           </div>
         )}
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
           <div>
             <label className="block text-[10px] text-foreground-muted">Type</label>
             <select
@@ -133,6 +140,25 @@ export function StockEntryForm({
                 {stockItemOptions.map((item) => (
                   <option key={item.sageReference} value={item.sageReference}>
                     {item.designation} ({item.sageReference})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          {type !== "sortie_lot" && (
+            <div>
+              <label className="block text-[10px] text-foreground-muted">
+                Article <span className="normal-case text-foreground-muted">(optionnel)</span>
+              </label>
+              <select
+                value={lineId}
+                onChange={(e) => setLineId(e.target.value)}
+                className="h-9 w-full rounded-md border border-border bg-surface px-2 text-xs outline-none focus:ring-2 focus:ring-brand/30"
+              >
+                <option value="">{lines.length === 0 ? "Aucun article" : "— non attribué —"}</option>
+                {lines.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.description}
                   </option>
                 ))}
               </select>
