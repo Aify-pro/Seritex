@@ -2,11 +2,11 @@ import "server-only";
 import { createClient } from "@/lib/supabase/server";
 import type { FichePlacement, PatronReconnu, PieceNonReconnue, RendementTrace } from "@/lib/patronnage/types";
 
-const FICHE_SELECT = `id,numero_ot,statut,statut_precedent,odf_id,premiere_liaison_odf_le,client_code,client_libelle,
+const FICHE_SELECT = `id,numero_ot,statut,statut_precedent,production_order_line_id,premiere_liaison_le,client_code,client_libelle,
    date_emission,date_retour_souhaitee,designation_article,reference_modele,product_model_id,quantite_totale,
    repartition_tailles,tissu_type,grammage,couleur,laize_utile_cm,contraintes,observations,
    valide_le,created_at,
-   production_orders(reference),
+   production_order_lines(description,production_orders(reference)),
    traces_placement(id,ordre,reference,reference_patron,longueur_matelas_m,largeur_matelas_cm,nb_plis,
      repartition_par_couche,fichier_path,fichier_nom,charge_le,est_correctif,justification,approuve_le,
      analyses_trace(id,nb_pieces_detectees,facteur_echelle,patrons_reconnus,pieces_non_reconnues,
@@ -21,8 +21,8 @@ type FicheRow = {
   numero_ot: string;
   statut: FichePlacement["statut"];
   statut_precedent: FichePlacement["statutPrecedent"];
-  odf_id: string | null;
-  premiere_liaison_odf_le: string | null;
+  production_order_line_id: string | null;
+  premiere_liaison_le: string | null;
   client_code: string | null;
   client_libelle: string | null;
   date_emission: string;
@@ -40,7 +40,10 @@ type FicheRow = {
   observations: string | null;
   valide_le: string | null;
   created_at: string;
-  production_orders: { reference: string } | { reference: string }[] | null;
+  production_order_lines:
+    | { description: string; production_orders: { reference: string } | { reference: string }[] | null }
+    | { description: string; production_orders: { reference: string } | { reference: string }[] | null }[]
+    | null;
   traces_placement: {
     id: string;
     ordre: number;
@@ -101,14 +104,17 @@ async function mapFiches(
     ])
   );
 
-  return fichesRaw.map((f) => ({
+  return fichesRaw.map((f) => {
+    const line = Array.isArray(f.production_order_lines) ? f.production_order_lines[0] : f.production_order_lines;
+    const odf = line ? (Array.isArray(line.production_orders) ? line.production_orders[0] : line.production_orders) : null;
+    return {
     id: f.id,
     numeroOt: f.numero_ot,
     statut: f.statut,
     statutPrecedent: f.statut_precedent,
-    odfId: f.odf_id,
-    odfReference: (Array.isArray(f.production_orders) ? f.production_orders[0] : f.production_orders)?.reference ?? null,
-    premiereLiaisonOdfLe: f.premiere_liaison_odf_le,
+    lineId: f.production_order_line_id,
+    odfReference: odf ? `${odf.reference}${line?.description ? ` — ${line.description}` : ""}` : null,
+    premiereLiaisonLe: f.premiere_liaison_le,
     clientCode: f.client_code,
     clientLibelle: f.client_libelle,
     dateEmission: f.date_emission,
@@ -162,7 +168,8 @@ async function mapFiches(
             : null,
         };
       }),
-  }));
+    };
+  });
 }
 
 /** Liste complète, pour l'écran `/atelier/patronnage`. */

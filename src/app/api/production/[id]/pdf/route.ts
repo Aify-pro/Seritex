@@ -34,22 +34,26 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   if (!order) return NextResponse.json({ error: "Ordre de fabrication introuvable" }, { status: 404 });
 
-  const [{ data: sections }, { data: lines }, { data: workOrders }, { data: fiche }] = await Promise.all([
-    supabase
-      .from("production_order_sections")
-      .select("ordre,sections(name)")
-      .eq("production_order_id", id)
-      .order("ordre"),
-    // ODF multi-lignes : dispatching des tailles par article, plus par ODF
-    // entier (migration 0035).
+  const [{ data: lines }, { data: workOrders }] = await Promise.all([
+    // ODF multi-lignes : dispatching des tailles ET sections retenues par
+    // article, plus par ODF entier (migrations 0035/0037).
     supabase
       .from("production_order_lines")
-      .select("description,quantity,sizes:production_order_sizes(taille,quantite_demandee)")
+      .select(
+        "id,description,quantity,sizes:production_order_sizes(taille,quantite_demandee),line_sections:production_order_line_sections(ordre,sections(name))"
+      )
       .eq("production_order_id", id)
       .order("created_at"),
     supabase.from("work_orders").select("reference,quantity_planned,quantity_done,sections(name)").eq("production_order_id", id),
-    supabase.from("fiches_placement").select("numero_ot,statut").eq("odf_id", id).maybeSingle(),
   ]);
+
+  // Une fiche par article passant en Coupe (migration 0037, plus une seule
+  // par ODF entier) — récupérée après `lines` puisqu'elle s'y filtre.
+  const lineIds = (lines ?? []).map((l) => l.id);
+  const { data: fiches } =
+    lineIds.length > 0
+      ? await supabase.from("fiches_placement").select("numero_ot,statut,production_order_line_id").in("production_order_line_id", lineIds)
+      : { data: [] as { numero_ot: string; statut: string; production_order_line_id: string }[] };
 
   const userIds = [order.launched_by, order.cloture_demandee_par, order.closed_by].filter(
     (v): v is string => !!v
@@ -153,25 +157,25 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   drawField("Fin planifiée", order.planned_end_date ? formatFr(order.planned_end_date) : "—");
 
   drawSectionTitle("Composition");
-  drawField(
-    "Sections retenues",
-    (sections ?? [])
-      .map((s) => (s.sections as unknown as { name: string } | null)?.name)
-      .filter(Boolean)
-      .join(", ") || "aucune"
-  );
   if (lines && lines.length > 0) {
     for (const l of lines) {
+      const sectionNames = (l.line_sections ?? [])
+        .slice()
+        .sort((a, b) => a.ordre - b.ordre)
+        .map((s) => (s.sections as unknown as { name: string } | null)?.name)
+        .filter(Boolean)
+        .join(", ") || "aucune";
       drawField(
         `${l.description} (${l.quantity} pièces)`,
-        (l.sizes ?? []).map((s) => `${s.taille} : ${s.quantite_demandee}`).join(" · ") || "dispatching non renseigné"
+        `Sections : ${sectionNames} — ${(l.sizes ?? []).map((s) => `${s.taille} : ${s.quantite_demandee}`).join(" · ") || "dispatching non renseigné"}`
       );
+      const ficheForLine = (fiches ?? []).find((f) => f.production_order_line_id === l.id);
+      if (ficheForLine) {
+        drawField(`Fiche Patronnage liée — ${l.description}`, `${ficheForLine.numero_ot} (${ficheForLine.statut})`);
+      }
     }
   } else {
     drawField("Articles", "aucun");
-  }
-  if (fiche) {
-    drawField("Fiche Patronnage liée", `${fiche.numero_ot} (${fiche.statut})`);
   }
   if (order.mention_surplus_traces) {
     drawField(

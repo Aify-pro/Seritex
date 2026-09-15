@@ -120,58 +120,51 @@ async function resolveProductModel(productModelId: string | null): Promise<{
 }
 
 /**
- * Peuple une fiche depuis un ODF : modèle (et ses valeurs figées via
- * resolveProductModel), quantité totale et dispatching des tailles copiés
- * depuis production_order_sizes. Partagée par generateFicheFromOdf
- * (création) et linkOdf (liaison d'une fiche existante) pour que les deux
- * chemins de création évoqués par Ayman — génération depuis l'ODF ou
- * liaison depuis l'OT — peuplent la fiche exactement de la même façon.
- * `premiere_liaison_odf_le` n'est jamais réécrit une fois posé : il
+ * Peuple une fiche depuis un article d'ODF (production_order_lines) :
+ * modèle (et ses valeurs figées via resolveProductModel), quantité et
+ * dispatching des tailles copiés depuis production_order_sizes — de CET
+ * article seul (migration 0037, plus sommés sur tout l'ODF). Partagée par
+ * generateFicheFromLine (création) et linkLine (liaison d'une fiche
+ * existante) pour que les deux chemins de création — génération depuis
+ * l'ODF ou liaison depuis l'OT — peuplent la fiche exactement de la même
+ * façon. `premiere_liaison_le` n'est jamais réécrit une fois posé : il
  * conditionne l'interdiction de suppression définitive (commentaire de la
- * colonne, migration 0007).
+ * colonne, migration 0007/0037).
  */
-async function applyOdfToFiche(ficheId: string, odfId: string): Promise<{ error: string } | { ok: true }> {
+async function applyLineToFiche(ficheId: string, lineId: string): Promise<{ error: string } | { ok: true }> {
   const supabase = await createClient();
 
-  const [{ data: odf, error: odfError }, { data: fiche }] = await Promise.all([
-    supabase.from("production_orders").select("product_model_id,total_quantity").eq("id", odfId).single(),
-    supabase.from("fiches_placement").select("premiere_liaison_odf_le").eq("id", ficheId).single(),
+  const [{ data: line, error: lineError }, { data: fiche }] = await Promise.all([
+    supabase.from("production_order_lines").select("product_model_id,quantity").eq("id", lineId).single(),
+    supabase.from("fiches_placement").select("premiere_liaison_le").eq("id", ficheId).single(),
   ]);
-  if (odfError || !odf) return { error: "Ordre de fabrication introuvable" };
+  if (lineError || !line) return { error: "Article introuvable" };
 
-  // Le dispatching des tailles vit désormais par ligne d'ODF (un article =
-  // une couleur, chantier ODF multi-lignes, migration 0035) — sommé ici sur
-  // toutes les lignes de l'ODF puisque la fiche Patronnage reste, pour
-  // l'instant, unique par ODF entier (0033 : un OT par modèle, peu importe
-  // la couleur). Si deux lignes de couleurs différentes partagent une même
-  // taille, leurs quantités s'additionnent dans cette répartition globale —
-  // imprécision connue, à lever quand la fiche deviendra elle aussi par
-  // ligne/couleur (chantier suivant, cf. plan).
   const { data: sizesRows } = await supabase
     .from("production_order_sizes")
-    .select("taille,quantite_demandee,production_order_lines!inner(production_order_id)")
-    .eq("production_order_lines.production_order_id", odfId);
+    .select("taille,quantite_demandee")
+    .eq("production_order_line_id", lineId);
 
   const repartition: RepartitionTailles = {};
   for (const row of sizesRows ?? []) {
     repartition[row.taille as string] = (repartition[row.taille as string] ?? 0) + (row.quantite_demandee as number);
   }
 
-  const resolved = await resolveProductModel(odf.product_model_id as string | null);
+  const resolved = await resolveProductModel(line.product_model_id as string | null);
 
   const patch: Record<string, unknown> = {
-    odf_id: odfId,
-    product_model_id: odf.product_model_id,
+    production_order_line_id: lineId,
+    product_model_id: line.product_model_id,
     designation_article: resolved.designation_article,
     tissu_type: resolved.tissu_type,
     grammage: resolved.grammage,
     laize_utile_cm: resolved.laize_utile_cm,
-    quantite_totale: odf.total_quantity,
+    quantite_totale: line.quantity,
     repartition_tailles: repartition,
     updated_at: new Date().toISOString(),
   };
-  if (!fiche?.premiere_liaison_odf_le) {
-    patch.premiere_liaison_odf_le = new Date().toISOString();
+  if (!fiche?.premiere_liaison_le) {
+    patch.premiere_liaison_le = new Date().toISOString();
   }
 
   const { error } = await supabase.from("fiches_placement").update(patch).eq("id", ficheId);
@@ -183,17 +176,26 @@ async function applyOdfToFiche(ficheId: string, odfId: string): Promise<{ error:
 // Recherche (autocomplétion ODF / client)
 // ------------------------------------------------------------
 
-export async function searchOdf(query: string) {
+/**
+ * Recherche d'articles (production_order_lines) par référence de leur ODF —
+ * une fiche se lie désormais à un article précis, pas à l'ODF entier
+ * (migration 0037) : un ODF à plusieurs lignes propose ici une entrée par
+ * article, avec l'ODF et la désignation dans le libellé pour les distinguer.
+ */
+export async function searchOdfLines(query: string) {
   await requirePermission("view");
   if (query.trim().length < 1) return [];
   const supabase = await createClient();
   const { data } = await supabase
-    .from("production_orders")
-    .select("id,reference")
-    .ilike("reference", `%${query.trim()}%`)
+    .from("production_order_lines")
+    .select("id,description,production_orders!inner(reference)")
+    .ilike("production_orders.reference", `%${query.trim()}%`)
     .order("created_at", { ascending: false })
     .limit(10);
-  return data ?? [];
+  return (data ?? []).map((l) => ({
+    id: l.id as string,
+    reference: `${(l.production_orders as unknown as { reference: string }).reference} — ${l.description}`,
+  }));
 }
 
 export async function searchClient(query: string) {
@@ -209,21 +211,22 @@ export async function searchClient(query: string) {
 }
 
 /**
- * Recherche de fiches à lier depuis la section Coupe d'un ODF (lot 2, sens
- * inverse de searchOdf ci-dessus — le lien est accessible des deux côtés,
- * section 10 du document de logique). Ne propose que les fiches déjà libres
- * ou déjà liées à cet ODF précis : toute autre fiche échouerait de toute
- * façon sur la contrainte d'unicité fiches_placement.odf_id.
+ * Recherche de fiches à lier depuis un article précis d'un ODF (lot 2, sens
+ * inverse de searchOdfLines ci-dessus — le lien est accessible des deux
+ * côtés, section 10 du document de logique). Ne propose que les fiches déjà
+ * libres ou déjà liées à CET article précis : toute autre fiche échouerait
+ * de toute façon sur la contrainte d'unicité fiches_placement.production_
+ * order_line_id (migration 0037).
  */
-export async function searchFichesForOdf(query: string, productionOrderId: string) {
+export async function searchFichesForLine(query: string, lineId: string) {
   await requirePermission("view");
   if (query.trim().length < 1) return [];
   const supabase = await createClient();
   const { data } = await supabase
     .from("fiches_placement")
-    .select("id,numero_ot,statut,client_libelle,odf_id")
+    .select("id,numero_ot,statut,client_libelle,production_order_line_id")
     .or(`numero_ot.ilike.%${query.trim()}%,client_libelle.ilike.%${query.trim()}%`)
-    .or(`odf_id.is.null,odf_id.eq.${productionOrderId}`)
+    .or(`production_order_line_id.is.null,production_order_line_id.eq.${lineId}`)
     .order("created_at", { ascending: false })
     .limit(10);
   return data ?? [];
@@ -237,7 +240,7 @@ export async function createFiche(formData: FormData) {
   const { authId } = await requirePermission("create");
   const supabase = await createClient();
 
-  const odfId = String(formData.get("odf_id") ?? "").trim() || null;
+  const lineId = String(formData.get("production_order_line_id") ?? "").trim() || null;
   const productModelId = String(formData.get("product_model_id") ?? "").trim() || null;
   const resolved = await resolveProductModel(productModelId);
   const allowedSizes = await getSizesForProductModel(productModelId);
@@ -245,8 +248,8 @@ export async function createFiche(formData: FormData) {
   const { data, error } = await supabase
     .from("fiches_placement")
     .insert({
-      odf_id: odfId,
-      premiere_liaison_odf_le: odfId ? new Date().toISOString() : null,
+      production_order_line_id: lineId,
+      premiere_liaison_le: lineId ? new Date().toISOString() : null,
       client_code: String(formData.get("client_code") ?? "").trim() || null,
       client_libelle: String(formData.get("client_libelle") ?? "").trim() || null,
       date_retour_souhaitee: String(formData.get("date_retour_souhaitee") ?? "").trim() || null,
@@ -365,55 +368,60 @@ export async function updateFiche(ficheId: string, formData: FormData) {
   return {};
 }
 
-export async function linkOdf(ficheId: string, odfId: string | null) {
+export async function linkLine(ficheId: string, lineId: string | null) {
   await requirePermission("modify");
   const gate = await assertFicheModifiable(ficheId);
   if ("error" in gate) return gate;
 
   const supabase = await createClient();
 
-  if (!odfId) {
-    const { error } = await supabase.from("fiches_placement").update({ odf_id: null }).eq("id", ficheId);
+  if (!lineId) {
+    const { error } = await supabase
+      .from("fiches_placement")
+      .update({ production_order_line_id: null })
+      .eq("id", ficheId);
     if (error) return { error: error.message };
     revalidatePath("/atelier/patronnage");
     revalidatePath(`/atelier/patronnage/${ficheId}`);
     return {};
   }
 
-  // La fiche prend ses tailles/tissu/quantité de l'ODF lié (applyOdfToFiche) —
-  // mais deux garde-fous avant, dans les deux sens du lien 1:1 fiche <-> ODF
-  // (fiches_placement_odf_id_unique, migration 0010, garantit déjà qu'un ODF
-  // ne peut porter qu'une fiche ; côté fiche, odf_id est une colonne scalaire
-  // donc ne peut déjà référencer qu'un seul ODF — mais rien n'empêchait
-  // jusqu'ici de la faire glisser d'un ODF à l'autre sans le dire) :
+  // La fiche prend ses tailles/tissu/quantité de l'article lié
+  // (applyLineToFiche) — mais deux garde-fous avant, dans les deux sens du
+  // lien 1:1 fiche <-> article (fiches_placement_production_order_line_id_
+  // unique, migration 0037, garantit déjà qu'un article ne peut porter
+  // qu'une fiche ; côté fiche, la colonne est scalaire donc ne peut déjà
+  // référencer qu'un seul article — mais rien n'empêchait jusqu'ici de la
+  // faire glisser d'un article à l'autre sans le dire) :
   const { data: fiche } = await supabase
     .from("fiches_placement")
-    .select("odf_id,product_model_id")
+    .select("production_order_line_id,product_model_id")
     .eq("id", ficheId)
     .single();
-  const { data: odf } = await supabase
-    .from("production_orders")
-    .select("product_model_id,reference")
-    .eq("id", odfId)
+  const { data: line } = await supabase
+    .from("production_order_lines")
+    .select("product_model_id,description,production_orders(reference)")
+    .eq("id", lineId)
     .single();
-  if (!odf) return { error: "Ordre de fabrication introuvable" };
+  if (!line) return { error: "Article introuvable" };
+  const lineLabel = `${(line.production_orders as unknown as { reference: string } | null)?.reference ?? "?"} — ${line.description}`;
 
-  // 1. Fiche déjà liée à un AUTRE ODF : on refuse le glissement silencieux
-  //    (l'ODF d'origine perdrait sa fiche sans que personne ne le voie) —
-  //    déliaison explicite d'abord (linkOdf(ficheId, null)).
-  if (fiche?.odf_id && fiche.odf_id !== odfId) {
+  // 1. Fiche déjà liée à un AUTRE article : on refuse le glissement
+  //    silencieux (l'article d'origine perdrait sa fiche sans que personne
+  //    ne le voie) — déliaison explicite d'abord (linkLine(ficheId, null)).
+  if (fiche?.production_order_line_id && fiche.production_order_line_id !== lineId) {
     return {
-      error: "Cette fiche est déjà liée à un autre ODF — déliez-la d'abord avant de la lier à celui-ci.",
+      error: "Cette fiche est déjà liée à un autre article — déliez-la d'abord avant de la lier à celui-ci.",
     };
   }
 
   // 2. Modèles incompatibles : la fiche porte déjà un modèle différent de
-  //    celui de l'ODF ciblé (cadre 1 de la fiche vs. modèle réel produit).
-  if (fiche?.product_model_id && odf.product_model_id && fiche.product_model_id !== odf.product_model_id) {
-    return { error: `Cette fiche porte un autre modèle que celui de ${odf.reference} — liaison refusée.` };
+  //    celui de l'article ciblé (cadre 1 de la fiche vs. modèle réel produit).
+  if (fiche?.product_model_id && line.product_model_id && fiche.product_model_id !== line.product_model_id) {
+    return { error: `Cette fiche porte un autre modèle que celui de ${lineLabel} — liaison refusée.` };
   }
 
-  const applied = await applyOdfToFiche(ficheId, odfId);
+  const applied = await applyLineToFiche(ficheId, lineId);
   if ("error" in applied) return applied;
 
   revalidatePath("/atelier/patronnage");
@@ -422,18 +430,18 @@ export async function linkOdf(ficheId: string, odfId: string | null) {
 }
 
 /**
- * Génère l'ordre de tracé d'un ODF (lot C2) : un OT par ODF, puisqu'un ODF
- * ne porte qu'un seul modèle (production_orders.product_model_id, lot 9) —
- * pas de logique de découpage à construire. Droit double, côté fiche ET
- * côté ODF : un rôle qui crée des fiches mais ne touche pas aux ODF ne doit
- * pas déclencher ça depuis l'écran ODF, et inversement.
- * fiches_placement_odf_id_unique (migration 0010) garantit qu'un ODF ne
- * peut porter qu'une seule fiche à la fois — la vérification ci-dessous
- * évite juste l'erreur brute de contrainte au profit d'un retour propre
- * (retourner la fiche déjà générée plutôt qu'échouer) si l'action est
- * déclenchée deux fois.
+ * Génère l'ordre de tracé d'un article d'ODF (lot C2, devenu par article en
+ * migration 0037) : un OT par article, puisqu'un article ne porte qu'un
+ * seul modèle — pas de logique de découpage à construire. Droit double,
+ * côté fiche ET côté ODF : un rôle qui crée des fiches mais ne touche pas
+ * aux ODF ne doit pas déclencher ça depuis l'écran ODF, et inversement.
+ * fiches_placement_production_order_line_id_unique (migration 0037,
+ * remplace 0010) garantit qu'un article ne peut porter qu'une seule fiche à
+ * la fois — la vérification ci-dessous évite juste l'erreur brute de
+ * contrainte au profit d'un retour propre (retourner la fiche déjà générée
+ * plutôt qu'échouer) si l'action est déclenchée deux fois.
  */
-export async function generateFicheFromOdf(productionOrderId: string) {
+export async function generateFicheFromLine(lineId: string) {
   const { authId } = await requirePermission("create");
   if (!(await can("ordres_fabrication", "modify"))) {
     return { error: "accès refusé : votre rôle ne permet pas de modifier cet ordre de fabrication" };
@@ -441,20 +449,20 @@ export async function generateFicheFromOdf(productionOrderId: string) {
 
   const supabase = await createClient();
 
-  const { data: odf, error: odfError } = await supabase
-    .from("production_orders")
-    .select("id,product_model_id")
-    .eq("id", productionOrderId)
+  const { data: line, error: lineError } = await supabase
+    .from("production_order_lines")
+    .select("id,production_order_id,product_model_id")
+    .eq("id", lineId)
     .single();
-  if (odfError || !odf) return { error: "Ordre de fabrication introuvable" };
-  if (!odf.product_model_id) {
-    return { error: "Sélectionnez un modèle sur cet ODF avant de générer son ordre de tracé." };
+  if (lineError || !line) return { error: "Article introuvable" };
+  if (!line.product_model_id) {
+    return { error: "Sélectionnez un modèle sur cet article avant de générer son ordre de tracé." };
   }
 
   const { data: existing } = await supabase
     .from("fiches_placement")
     .select("id,numero_ot")
-    .eq("odf_id", productionOrderId)
+    .eq("production_order_line_id", lineId)
     .maybeSingle();
   if (existing) return { id: existing.id as string, numeroOt: existing.numero_ot as string };
 
@@ -462,14 +470,14 @@ export async function generateFicheFromOdf(productionOrderId: string) {
   // commercial ou de la PAO, modèle déjà choisi, encore sans ODF). Générer
   // quand même créerait un second OT pour le même modèle — on pointe vers
   // celle qui existe déjà (à lier via la recherche ci-dessous) plutôt que
-  // d'en dupliquer une. `odf_id is null` exclut les fiches déjà prises par
-  // un autre ODF (fiches_placement_odf_id_unique les rendrait de toute façon
-  // indisponibles).
+  // d'en dupliquer une. `production_order_line_id is null` exclut les
+  // fiches déjà prises par un autre article (la contrainte unique les
+  // rendrait de toute façon indisponibles).
   const { data: candidate } = await supabase
     .from("fiches_placement")
     .select("numero_ot,quantite_totale")
-    .eq("product_model_id", odf.product_model_id)
-    .is("odf_id", null)
+    .eq("product_model_id", line.product_model_id)
+    .is("production_order_line_id", null)
     .neq("statut", "archive")
     .order("created_at", { ascending: false })
     .limit(1)
@@ -489,7 +497,7 @@ export async function generateFicheFromOdf(productionOrderId: string) {
     .single();
   if (createError || !created) return { error: createError?.message ?? "création impossible" };
 
-  const applied = await applyOdfToFiche(created.id, productionOrderId);
+  const applied = await applyLineToFiche(created.id, lineId);
   if ("error" in applied) return applied;
 
   await supabase.from("audit_log").insert({
@@ -497,11 +505,11 @@ export async function generateFicheFromOdf(productionOrderId: string) {
     action: "generate_fiche_from_odf",
     entity_type: "fiche_placement",
     entity_id: created.id,
-    metadata: { numero_ot: created.numero_ot, production_order_id: productionOrderId },
+    metadata: { numero_ot: created.numero_ot, production_order_line_id: lineId },
   });
 
   revalidatePath("/atelier/patronnage");
-  revalidatePath(`/atelier/production/${productionOrderId}`);
+  revalidatePath(`/atelier/production/${line.production_order_id}`);
   return { id: created.id as string, numeroOt: created.numero_ot as string };
 }
 
@@ -615,11 +623,11 @@ export async function deleteFicheDefinitively(ficheId: string) {
 
   const { data: fiche } = await supabase
     .from("fiches_placement")
-    .select("valide_le,premiere_liaison_odf_le")
+    .select("valide_le,premiere_liaison_le")
     .eq("id", ficheId)
     .single();
   if (!fiche) return { error: "Fiche introuvable" };
-  if (fiche.valide_le || fiche.premiere_liaison_odf_le) {
+  if (fiche.valide_le || fiche.premiere_liaison_le) {
     return { error: "Suppression impossible : cette fiche a déjà été validée ou liée à un ODF. Archivez-la à la place." };
   }
 

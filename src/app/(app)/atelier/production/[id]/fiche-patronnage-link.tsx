@@ -8,7 +8,7 @@ import { Card, CardHeader, CardBody } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import { searchFichesForOdf, linkOdf, generateFicheFromOdf } from "@/app/(app)/atelier/patronnage/fiches-actions";
+import { searchFichesForLine, linkLine, generateFicheFromLine } from "@/app/(app)/atelier/patronnage/fiches-actions";
 import type { StatutFiche } from "@/lib/patronnage/types";
 
 const STATUT_LABELS: Record<StatutFiche, string> = {
@@ -33,11 +33,11 @@ interface FicheOption {
 }
 
 /**
- * Carte "Fiche Patronnage liée" sur la fiche ODF — pendant de la carte
- * "Ordre de fabrication lié" côté Patronnage : le lien est accessible des
- * deux côtés (section 10 du document de logique). N'apparaît que si la
- * section Coupe est retenue ou qu'une fiche est déjà liée (sinon aucune
- * pertinence à l'afficher).
+ * Carte "Fiche Patronnage liée" sur un article de l'ODF — pendant de la
+ * carte "Article d'ODF lié" côté Patronnage : le lien est accessible des
+ * deux côtés (section 10 du document de logique). Scopée par article
+ * (production_order_line_id, migration 0037) : un ODF à plusieurs articles
+ * peut avoir plusieurs fiches, une par article passant en Coupe.
  *
  * editable=false une fois l'ODF hors brouillon : à partir de
  * en_attente_validation, le lien ne change plus depuis cet écran — soit il a
@@ -46,15 +46,18 @@ interface FicheOption {
  * fiche elle-même dès que l'ODF atteint en_production.
  */
 export function FichePatronnageLink({
-  productionOrderId,
+  lineId,
+  lineLabel,
   editable,
   fiche,
   productModelId,
 }: {
-  productionOrderId: string;
+  lineId: string;
+  /** Description de l'article, affichée dans le titre de la carte. */
+  lineLabel: string;
   editable: boolean;
   fiche: { id: string; numeroOt: string; statut: StatutFiche } | null;
-  /** Modèle de l'ODF — la génération automatique en a besoin (lot C2). */
+  /** Modèle de l'article — la génération automatique en a besoin (lot C2). */
   productModelId: string | null;
 }) {
   const router = useRouter();
@@ -65,7 +68,7 @@ export function FichePatronnageLink({
 
   function generate() {
     startTransition(async () => {
-      const res = await generateFicheFromOdf(productionOrderId);
+      const res = await generateFicheFromLine(lineId);
       if ("error" in res) {
         toast.error(res.error);
         return;
@@ -81,14 +84,14 @@ export function FichePatronnageLink({
       setOptions([]);
       return;
     }
-    const res = await searchFichesForOdf(v, productionOrderId);
+    const res = await searchFichesForLine(v, lineId);
     setOptions(res as FicheOption[]);
     setOpen(true);
   }
 
   function linkTo(newFicheId: string) {
     startTransition(async () => {
-      const res: { error?: string } = await linkOdf(newFicheId, productionOrderId);
+      const res: { error?: string } = await linkLine(newFicheId, lineId);
       if (res.error) toast.error(res.error);
       else toast.success("Fiche Patronnage liée");
       setQuery("");
@@ -99,7 +102,7 @@ export function FichePatronnageLink({
   function unlink() {
     if (!fiche) return;
     startTransition(async () => {
-      const res: { error?: string } = await linkOdf(fiche.id, null);
+      const res: { error?: string } = await linkLine(fiche.id, null);
       if (res.error) toast.error(res.error);
       else toast.success("Fiche déliée");
     });
@@ -110,8 +113,8 @@ export function FichePatronnageLink({
   return (
     <Card>
       <CardHeader
-        title="Fiche Patronnage liée"
-        description="Obligatoire pour valider l'ODF tant que la section Coupe est retenue."
+        title={`Fiche Patronnage liée — ${lineLabel}`}
+        description="Obligatoire pour valider l'ODF tant qu'une section Coupe est retenue sur cet article."
       />
       <CardBody className="space-y-3">
         {fiche ? (
