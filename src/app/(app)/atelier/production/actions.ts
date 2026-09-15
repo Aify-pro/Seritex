@@ -43,8 +43,15 @@ export async function setProductionOrderSections(productionOrderId: string, sect
   return {};
 }
 
-/** Quantités demandées par taille — remplace intégralement la liste (saisie simple, pas d'édition ligne à ligne). */
-export async function setProductionOrderSizes(
+/**
+ * Quantités demandées par taille, pour une ligne d'ODF (un article) —
+ * remplace intégralement la liste de cette ligne (saisie simple, pas
+ * d'édition ligne à ligne). Chaque article a son propre dispatching depuis
+ * le chantier ODF multi-lignes (migration 0035) : le client peut demander
+ * le jaune en XL et le bleu en L, pas une seule grille mélangée.
+ */
+export async function setProductionOrderLineSizes(
+  lineId: string,
   productionOrderId: string,
   sizes: { taille: string; quantite_demandee: number }[]
 ) {
@@ -54,7 +61,7 @@ export async function setProductionOrderSizes(
   const { error: delError } = await supabase
     .from("production_order_sizes")
     .delete()
-    .eq("production_order_id", productionOrderId);
+    .eq("production_order_line_id", lineId);
   if (delError) return { error: delError.message };
 
   const rows = sizes.filter((s) => s.taille.trim().length > 0 && s.quantite_demandee > 0);
@@ -73,7 +80,7 @@ export async function setProductionOrderSizes(
   if (rows.length > 0) {
     const { error: insError } = await supabase.from("production_order_sizes").insert(
       rows.map((s) => ({
-        production_order_id: productionOrderId,
+        production_order_line_id: lineId,
         taille: s.taille.trim(),
         quantite_demandee: s.quantite_demandee,
       }))
@@ -81,6 +88,9 @@ export async function setProductionOrderSizes(
     if (insError) return { error: insError.message };
   }
 
+  // productionOrderId reçu de l'appelant plutôt que résolu ici (déjà
+  // disponible côté page, évite un aller-retour) pour revalider les bonnes
+  // routes.
   revalidateOdf(productionOrderId);
   return {};
 }
@@ -323,47 +333,57 @@ export async function resolveAnomaly(anomalyId: string, productionOrderId: strin
 }
 
 // ============================================================================
-// Lot 9 — configurateur couleur par zone (section 8/9 du document de
-// logique) : même pattern que sections/tailles ci-dessus — écriture directe
-// autorisée par la RLS (is_production_manager()), pas de RPC dédiée.
+// ODF multi-lignes — configuration produit par ligne (une ligne = un
+// article du devis, migration 0035). Même pattern que sections/tailles
+// ci-dessus — écriture directe autorisée par la RLS
+// (is_production_manager()), pas de RPC dédiée.
 // ============================================================================
 
-/** Choix du modèle de produit — détermine le gabarit de zones proposé ensuite. */
-export async function setProductionOrderProductModel(productionOrderId: string, productModelId: string) {
+/**
+ * Modèle de produit d'une ligne restée sans modèle après accept_quote()
+ * (la ligne de devis correspondante n'en portait aucun) — seul cas où le
+ * modèle reste à saisir côté ODF : dès qu'un modèle vient du devis, il est
+ * hérité et non modifiable ici, le client l'a déjà validé.
+ */
+export async function setProductionOrderLineProductModel(lineId: string, productModelId: string) {
   await requireRole(["administrateur", "responsable_production"]);
   const supabase = await createClient();
-  const { error } = await supabase
-    .from("production_orders")
+  const { data: line, error } = await supabase
+    .from("production_order_lines")
     .update({ product_model_id: productModelId })
-    .eq("id", productionOrderId);
+    .eq("id", lineId)
+    .select("production_order_id")
+    .single();
   if (error) return { error: error.message };
-  revalidateOdf(productionOrderId);
+  revalidateOdf(line.production_order_id);
   return {};
 }
 
 /**
- * Couleur choisie par zone — remplace intégralement la liste (même logique
- * que setProductionOrderSizes). `zone_key` revalidé contre le gabarit réel
- * du modèle de produit de l'ODF plutôt que de faire confiance à l'appelant.
+ * Couleur par zone d'une ligne — remplace intégralement la liste (même
+ * logique que setProductionOrderLineSizes). `zone_key` revalidé contre le
+ * gabarit réel du modèle de produit de la ligne plutôt que de faire
+ * confiance à l'appelant.
  */
-export async function setProductionOrderZoneColors(
-  productionOrderId: string,
+export async function setProductionOrderLineZoneColors(
+  lineId: string,
   entries: { zone_key: string; color_id: string }[]
 ) {
   await requireRole(["administrateur", "responsable_production"]);
   const supabase = await createClient();
 
-  const { data: order } = await supabase
-    .from("production_orders")
-    .select("product_model_id")
-    .eq("id", productionOrderId)
+  const { data: line } = await supabase
+    .from("production_order_lines")
+    .select("production_order_id,product_model_id")
+    .eq("id", lineId)
     .single();
-  if (!order?.product_model_id) return { error: "Choisissez d'abord un modèle de produit pour cet ODF." };
+  if (!line) return { error: "Article introuvable." };
+  if (!line.product_model_id) return { error: "Choisissez d'abord un modèle de produit pour cet article." };
 
   const { data: template } = await supabase
     .from("product_zone_templates")
     .select("zone_key")
-    .eq("product_model_id", order.product_model_id);
+    .eq("product_model_id", line.product_model_id);
   const validZoneKeys = new Set((template ?? []).map((z) => z.zone_key));
 
   const rows = entries.filter((e) => e.zone_key && e.color_id);
@@ -373,24 +393,24 @@ export async function setProductionOrderZoneColors(
   }
 
   // Mutuellement exclusif avec la couleur unique (voir
-  // setProductionOrderColorUnique) — poser des couleurs par zone repasse en
-  // mode "par zone" même si "modèle uni" avait été coché avant.
+  // setProductionOrderLineColorUnique) — poser des couleurs par zone
+  // repasse en mode "par zone" même si "modèle uni" avait été coché avant.
   const { error: uniError } = await supabase
-    .from("production_orders")
+    .from("production_order_lines")
     .update({ couleur_unique_id: null })
-    .eq("id", productionOrderId);
+    .eq("id", lineId);
   if (uniError) return { error: uniError.message };
 
   const { error: delError } = await supabase
-    .from("production_order_zone_colors")
+    .from("production_order_line_zone_colors")
     .delete()
-    .eq("production_order_id", productionOrderId);
+    .eq("production_order_line_id", lineId);
   if (delError) return { error: delError.message };
 
   if (rows.length > 0) {
-    const { error: insError } = await supabase.from("production_order_zone_colors").insert(
+    const { error: insError } = await supabase.from("production_order_line_zone_colors").insert(
       rows.map((r) => ({
-        production_order_id: productionOrderId,
+        production_order_line_id: lineId,
         zone_key: r.zone_key,
         color_id: r.color_id,
       }))
@@ -398,37 +418,40 @@ export async function setProductionOrderZoneColors(
     if (insError) return { error: insError.message };
   }
 
-  revalidateOdf(productionOrderId);
+  revalidateOdf(line.production_order_id);
   return {};
 }
 
 /**
- * Couleur unique ("modèle uni") — alternative à setProductionOrderZoneColors
- * pour un modèle sans gabarit de zones, ou une commande volontairement
- * monochrome malgré un gabarit existant. Les deux ne sont jamais actifs en
- * même temps : poser une couleur unique efface les couleurs par zone déjà
- * saisies, et inversement (submit_production_order() n'accepte que l'une
- * ou l'autre, migration 0034).
+ * Couleur unique ("modèle uni") d'une ligne — alternative à
+ * setProductionOrderLineZoneColors pour un modèle sans gabarit de zones,
+ * ou un article volontairement monochrome malgré un gabarit existant. Les
+ * deux ne sont jamais actifs en même temps : poser une couleur unique
+ * efface les couleurs par zone déjà saisies, et inversement
+ * (submit_production_order() n'accepte que l'une ou l'autre par ligne,
+ * migration 0035).
  */
-export async function setProductionOrderColorUnique(productionOrderId: string, colorId: string | null) {
+export async function setProductionOrderLineColorUnique(lineId: string, colorId: string | null) {
   await requireRole(["administrateur", "responsable_production"]);
   const supabase = await createClient();
 
-  const { error: updError } = await supabase
-    .from("production_orders")
+  const { data: line, error: updError } = await supabase
+    .from("production_order_lines")
     .update({ couleur_unique_id: colorId })
-    .eq("id", productionOrderId);
+    .eq("id", lineId)
+    .select("production_order_id")
+    .single();
   if (updError) return { error: updError.message };
 
   if (colorId) {
     const { error: delError } = await supabase
-      .from("production_order_zone_colors")
+      .from("production_order_line_zone_colors")
       .delete()
-      .eq("production_order_id", productionOrderId);
+      .eq("production_order_line_id", lineId);
     if (delError) return { error: delError.message };
   }
 
-  revalidateOdf(productionOrderId);
+  revalidateOdf(line.production_order_id);
   return {};
 }
 

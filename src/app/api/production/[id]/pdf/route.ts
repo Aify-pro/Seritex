@@ -34,13 +34,19 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   if (!order) return NextResponse.json({ error: "Ordre de fabrication introuvable" }, { status: 404 });
 
-  const [{ data: sections }, { data: sizes }, { data: workOrders }, { data: fiche }] = await Promise.all([
+  const [{ data: sections }, { data: lines }, { data: workOrders }, { data: fiche }] = await Promise.all([
     supabase
       .from("production_order_sections")
       .select("ordre,sections(name)")
       .eq("production_order_id", id)
       .order("ordre"),
-    supabase.from("production_order_sizes").select("taille,quantite_demandee").eq("production_order_id", id),
+    // ODF multi-lignes : dispatching des tailles par article, plus par ODF
+    // entier (migration 0035).
+    supabase
+      .from("production_order_lines")
+      .select("description,quantity,sizes:production_order_sizes(taille,quantite_demandee)")
+      .eq("production_order_id", id)
+      .order("created_at"),
     supabase.from("work_orders").select("reference,quantity_planned,quantity_done,sections(name)").eq("production_order_id", id),
     supabase.from("fiches_placement").select("numero_ot,statut").eq("odf_id", id).maybeSingle(),
   ]);
@@ -154,10 +160,16 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       .filter(Boolean)
       .join(", ") || "aucune"
   );
-  drawField(
-    "Quantités par taille",
-    (sizes ?? []).map((s) => `${s.taille} : ${s.quantite_demandee}`).join(" · ") || "aucune"
-  );
+  if (lines && lines.length > 0) {
+    for (const l of lines) {
+      drawField(
+        `${l.description} (${l.quantity} pièces)`,
+        (l.sizes ?? []).map((s) => `${s.taille} : ${s.quantite_demandee}`).join(" · ") || "dispatching non renseigné"
+      );
+    }
+  } else {
+    drawField("Articles", "aucun");
+  }
   if (fiche) {
     drawField("Fiche Patronnage liée", `${fiche.numero_ot} (${fiche.statut})`);
   }
