@@ -134,30 +134,16 @@ set production_order_line_id = (
 )
 where fp.odf_id is not null;
 
-alter table fiches_placement drop constraint if exists fiches_placement_odf_id_unique;
-alter table fiches_placement drop constraint if exists fiches_placement_odf_id_fkey;
-alter table fiches_placement drop column odf_id;
-
--- unique() sur colonne nullable : même règle qu'avant (0010) — plusieurs
--- fiches sans article ("vie indépendante") restent possibles, seul un
--- doublon sur un même article est bloqué.
-alter table fiches_placement
-  add constraint fiches_placement_production_order_line_id_unique unique (production_order_line_id);
-
-create index idx_fiches_placement_line on fiches_placement(production_order_line_id);
-
-alter table fiches_placement rename column premiere_liaison_odf_le to premiere_liaison_le;
-
-comment on column fiches_placement.production_order_line_id is
-  'Article (ligne d''ODF) auquel cette fiche est liée — un article = au plus une fiche (migration 0037). Remplace odf_id (un ODF entier = au plus une fiche, migrations 0007/0010), trop grossier pour un ODF multi-lignes où certains articles seulement passent par la Coupe.';
-comment on column fiches_placement.premiere_liaison_le is
-  'Date de première liaison à un article — jamais réécrite ensuite, conditionne l''interdiction de suppression définitive. Anciennement premiere_liaison_odf_le (liaison à l''ODF entier), renommée migration 0037.';
-
 -- ============================================================================
 -- 4. RLS : IMMUTABILITÉ FICHE/TRACÉS, VIA L'ARTICLE PLUTÔT QUE L'ODF DIRECT
 -- ============================================================================
 -- Même invariant qu'en 0010 (figé dès que l'ODF dépasse brouillon/en attente/
 -- refusé) — seul le chemin pour retrouver l'ODF depuis la fiche change.
+--
+-- Repositionné AVANT le drop de fiches_placement.odf_id ci-dessous : ces
+-- quatre policies dépendent de cette colonne (Postgres refuse de la
+-- supprimer tant qu'une policy la référence encore), elles doivent donc être
+-- recréées sur la nouvelle colonne avant, pas après.
 
 drop policy if exists fiches_placement_update on fiches_placement;
 create policy fiches_placement_update on fiches_placement
@@ -234,6 +220,27 @@ create policy traces_placement_delete on traces_placement
         and po.status not in ('brouillon', 'en_attente_validation', 'refuse')
     )
   );
+
+-- Les policies ci-dessus ne dépendent plus de fiches_placement.odf_id :
+-- la colonne peut maintenant être supprimée sans erreur de dépendance.
+alter table fiches_placement drop constraint if exists fiches_placement_odf_id_unique;
+alter table fiches_placement drop constraint if exists fiches_placement_odf_id_fkey;
+alter table fiches_placement drop column odf_id;
+
+-- unique() sur colonne nullable : même règle qu'avant (0010) — plusieurs
+-- fiches sans article ("vie indépendante") restent possibles, seul un
+-- doublon sur un même article est bloqué.
+alter table fiches_placement
+  add constraint fiches_placement_production_order_line_id_unique unique (production_order_line_id);
+
+create index idx_fiches_placement_line on fiches_placement(production_order_line_id);
+
+alter table fiches_placement rename column premiere_liaison_odf_le to premiere_liaison_le;
+
+comment on column fiches_placement.production_order_line_id is
+  'Article (ligne d''ODF) auquel cette fiche est liée — un article = au plus une fiche (migration 0037). Remplace odf_id (un ODF entier = au plus une fiche, migrations 0007/0010), trop grossier pour un ODF multi-lignes où certains articles seulement passent par la Coupe.';
+comment on column fiches_placement.premiere_liaison_le is
+  'Date de première liaison à un article — jamais réécrite ensuite, conditionne l''interdiction de suppression définitive. Anciennement premiere_liaison_odf_le (liaison à l''ODF entier), renommée migration 0037.';
 
 -- ============================================================================
 -- 5. VISUEL/MAQUETTE : RATTACHABLE À UN ARTICLE, EN PLUS DE L'ODF ENTIER
