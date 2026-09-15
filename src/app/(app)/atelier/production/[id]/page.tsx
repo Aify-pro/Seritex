@@ -59,7 +59,11 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     { data: stockItems },
   ] = await Promise.all([
     supabase.from("work_orders").select("*,sections(name)").eq("production_order_id", id).order("planned_start", { ascending: true }),
-    supabase.from("sections").select("id,name").eq("active", true).order("display_order"),
+    supabase
+      .from("sections")
+      .select("id,name,atelier_categories(cle,requiert_fiche_trace,requiert_visuel)")
+      .eq("active", true)
+      .order("display_order"),
     supabase.from("production_order_sections").select("section_id").eq("production_order_id", id).order("ordre"),
     // ODF multi-lignes : une ligne par article du devis accepté, avec sa
     // configuration (modèle/tissu/couleur héritée du devis, immuable sauf
@@ -128,12 +132,29 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     supabase.from("stock_item_view").select("sage_reference,designation").order("designation"),
   ]);
 
-  // Lot 2 : la fiche Patronnage liée n'est pertinente que si la section
-  // Coupe est retenue (obligatoire pour valider, section 10 du document de
-  // logique) — ou si une fiche est déjà liée alors que Coupe a depuis été
-  // décochée, pour ne pas faire disparaître un lien existant sans prévenir.
-  const coupeSectionId = allSections?.find((s) => s.name === "Coupe")?.id;
-  const coupeSelected = !!coupeSectionId && (chosenSections ?? []).some((s) => s.section_id === coupeSectionId);
+  // Lot 2, généralisé migration 0036 : la fiche Patronnage liée n'est
+  // pertinente que si une section de catégorie Coupe (cle='coupe', plus
+  // seulement le nom "Coupe") est retenue — obligatoire pour valider, section
+  // 10 du document de logique — ou si une fiche est déjà liée alors que Coupe
+  // a depuis été décochée, pour ne pas faire disparaître un lien existant
+  // sans prévenir.
+  const coupeSectionIds = new Set(
+    (allSections ?? [])
+      .filter((s) => (s.atelier_categories as unknown as { cle: string } | null)?.cle === "coupe")
+      .map((s) => s.id)
+  );
+  const coupeSelected = (chosenSections ?? []).some((s) => coupeSectionIds.has(s.section_id));
+
+  // Migration 0036 : visuel/maquette obligatoire si une section dont la
+  // catégorie exige un visuel (ex. Impression) est retenue — symétrique au
+  // blocage fiche de tracé ci-dessus, contrôlé côté serveur par
+  // validate_production_order().
+  const visuelRequiredSectionIds = new Set(
+    (allSections ?? [])
+      .filter((s) => (s.atelier_categories as unknown as { requiert_visuel: boolean } | null)?.requiert_visuel)
+      .map((s) => s.id)
+  );
+  const visuelRequired = (chosenSections ?? []).some((s) => visuelRequiredSectionIds.has(s.section_id));
 
   // Noms des personnes ayant validé le lancement / demandé ou confirmé la
   // clôture — doivent apparaître à l'écran (et sur le PDF, hors périmètre de
@@ -377,6 +398,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
         productionOrderId={order.id}
         attached={attachedMediaFiles}
         available={availableMediaFiles}
+        required={visuelRequired}
       />
 
       {(coupeSelected || fiche) && (

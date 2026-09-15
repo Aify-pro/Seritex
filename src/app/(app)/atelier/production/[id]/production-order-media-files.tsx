@@ -18,19 +18,28 @@ export interface AttachableMediaFile {
  * les fichiers liés à une fiche échantillon — aucun nouveau système de
  * stockage. Le dépôt du fichier lui-même se fait depuis la médiathèque du
  * client, ici on ne fait que le rattacher/détacher.
+ *
+ * `required` (migration 0036) : vrai si une section dont la catégorie exige
+ * un visuel (ex. Impression) est retenue — la validation de l'ODF sera
+ * refusée par validate_production_order() tant qu'aucun fichier de catégorie
+ * "visuel" n'est joint. Avertissement doux ici, comme pour la fiche
+ * Patronnage : le contrôle qui fait autorité reste le RPC.
  */
 export function ProductionOrderMediaFiles({
   productionOrderId,
   attached,
   available,
+  required,
 }: {
   productionOrderId: string;
   attached: AttachableMediaFile[];
   available: AttachableMediaFile[];
+  required: boolean;
 }) {
   const [pending, startTransition] = useTransition();
   const attachedIds = new Set(attached.map((f) => f.id));
   const selectable = available.filter((f) => !attachedIds.has(f.id));
+  const missingVisuel = required && !attached.some((f) => f.category === "visuel");
 
   function attach(mediaFileId: string) {
     if (!mediaFileId) return;
@@ -54,6 +63,11 @@ export function ProductionOrderMediaFiles({
         description="Maquette réalisée par les infographes, jointe à l'ODF depuis la médiathèque du client (section 8)."
       />
       <CardBody className="space-y-1.5">
+        {missingVisuel && (
+          <p className="text-xs text-warning">
+            ⚠ La validation de l&apos;ODF sera refusée tant qu&apos;aucun fichier de catégorie « Visuel » n&apos;est joint.
+          </p>
+        )}
         <p className="flex items-center gap-1 text-xs font-medium text-foreground-muted">
           <Paperclip className="h-3.5 w-3.5" /> Fichiers liés
         </p>

@@ -128,12 +128,28 @@ export interface Contact {
   companies?: Pick<Company, "id" | "name">;
 }
 
+// Catégorie d'atelier (migration 0036) : regroupe des sections (ex. "Coupe
+// numérique", "Coupe manuelle") sous un même comportement — `cle` pilote les
+// fonctions PL/pgSQL de comportement atelier (matelas, pesées, sacs déchets,
+// lots/QR, mouvements de stock), `requiert_fiche_trace`/`requiert_visuel`
+// pilotent les blocages de validation ODF.
+export interface AtelierCategorie {
+  id: string;
+  nom: string;
+  cle: string;
+  requiert_fiche_trace: boolean;
+  requiert_visuel: boolean;
+  display_order: number;
+  active: boolean;
+}
+
 export interface Section {
   id: string;
   name: string;
   description: string | null;
   display_order: number;
   active: boolean;
+  categorie_id: string | null;
 }
 
 export interface ProductModel {

@@ -41,7 +41,11 @@ export default async function SectionQueuePage({
     );
   }
 
-  const { data: section } = await supabase.from("sections").select("id,name").eq("id", sectionId).single();
+  const { data: section } = await supabase
+    .from("sections")
+    .select("id,name,atelier_categories(cle)")
+    .eq("id", sectionId)
+    .single();
 
   const { data: workOrders } = await supabase
     .from("work_orders")
@@ -51,11 +55,12 @@ export default async function SectionQueuePage({
     .eq("section_id", sectionId)
     .order("planned_start", { ascending: true });
 
-  // Lot 4 : section Coupe uniquement — un matelas = un tracé Patronnage
-  // d'une fiche "Bon pour coupe" liée à l'ODF du sous-ODF. Pré-remplissage
-  // des quantités depuis repartition_par_couche (section 13 du document de
-  // logique) — jamais ressaisies par l'opérateur.
-  const isCoupe = section?.name === "Coupe";
+  // Lot 4, généralisé migration 0036 : section de catégorie Coupe uniquement
+  // (cle='coupe', plus seulement le nom "Coupe") — un matelas = un tracé
+  // Patronnage d'une fiche "Bon pour coupe" liée à l'ODF du sous-ODF.
+  // Pré-remplissage des quantités depuis repartition_par_couche (section 13
+  // du document de logique) — jamais ressaisies par l'opérateur.
+  const isCoupe = (section?.atelier_categories as unknown as { cle: string } | null)?.cle === "coupe";
   const matelasByWorkOrderId: Record<string, MatelasRow[]> = {};
   const traceOptionsByWorkOrderId: Record<string, TraceOption[]> = {};
   const lotsByProductionOrderId: Record<string, ArticleLotOption[]> = {};
