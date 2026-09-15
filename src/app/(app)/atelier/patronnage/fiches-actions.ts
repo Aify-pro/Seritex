@@ -139,14 +139,22 @@ async function applyOdfToFiche(ficheId: string, odfId: string): Promise<{ error:
   ]);
   if (odfError || !odf) return { error: "Ordre de fabrication introuvable" };
 
+  // Le dispatching des tailles vit désormais par ligne d'ODF (un article =
+  // une couleur, chantier ODF multi-lignes, migration 0035) — sommé ici sur
+  // toutes les lignes de l'ODF puisque la fiche Patronnage reste, pour
+  // l'instant, unique par ODF entier (0033 : un OT par modèle, peu importe
+  // la couleur). Si deux lignes de couleurs différentes partagent une même
+  // taille, leurs quantités s'additionnent dans cette répartition globale —
+  // imprécision connue, à lever quand la fiche deviendra elle aussi par
+  // ligne/couleur (chantier suivant, cf. plan).
   const { data: sizesRows } = await supabase
     .from("production_order_sizes")
-    .select("taille,quantite_demandee")
-    .eq("production_order_id", odfId);
+    .select("taille,quantite_demandee,production_order_lines!inner(production_order_id)")
+    .eq("production_order_lines.production_order_id", odfId);
 
   const repartition: RepartitionTailles = {};
   for (const row of sizesRows ?? []) {
-    repartition[row.taille as string] = row.quantite_demandee as number;
+    repartition[row.taille as string] = (repartition[row.taille as string] ?? 0) + (row.quantite_demandee as number);
   }
 
   const resolved = await resolveProductModel(odf.product_model_id as string | null);

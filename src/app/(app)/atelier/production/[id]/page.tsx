@@ -14,7 +14,7 @@ import { getSizesForProductModel } from "@/lib/sizes";
 import { SectionsSizesEditor } from "./sections-sizes-editor";
 import { FichePatronnageLink } from "./fiche-patronnage-link";
 import { AnomaliesPanel } from "./anomalies-panel";
-import { ProductConfigurator } from "./product-configurator";
+import { ProductionOrderLines, type LineData } from "./production-order-lines";
 import { ProductionOrderMediaFiles } from "./production-order-media-files";
 import { StockMovementsPanel } from "./stock-movements-panel";
 import { StockEntryForm } from "./stock-entry-form";
@@ -32,7 +32,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
 
   const { data: order } = await supabase
     .from("production_orders")
-    .select("*,companies(name),quotes(reference),product_models(id,name)")
+    .select("*,companies(name),quotes(reference)")
     .eq("id", id)
     .single();
 
@@ -42,7 +42,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     { data: workOrders },
     { data: allSections },
     { data: chosenSections },
-    { data: sizes },
+    { data: productionOrderLines },
     { data: fiche },
     { data: anomalies },
     { data: articleLots },
@@ -51,8 +51,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     { data: rendementTraces },
     { data: productModels },
     { data: activeColors },
-    { data: zoneTemplate },
-    { data: zoneColors },
+    { data: zoneTemplatesAll },
     { data: attachedMedia },
     { data: availableMedia },
     { data: stockMovements },
@@ -62,7 +61,16 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     supabase.from("work_orders").select("*,sections(name)").eq("production_order_id", id).order("planned_start", { ascending: true }),
     supabase.from("sections").select("id,name").eq("active", true).order("display_order"),
     supabase.from("production_order_sections").select("section_id").eq("production_order_id", id).order("ordre"),
-    supabase.from("production_order_sizes").select("taille,quantite_demandee").eq("production_order_id", id),
+    // ODF multi-lignes : une ligne par article du devis accepté, avec sa
+    // configuration (modèle/tissu/couleur héritée du devis, immuable sauf
+    // ligne de devis sans modèle) et son propre dispatching de tailles.
+    supabase
+      .from("production_order_lines")
+      .select(
+        "id,description,quantity,product_model_id,couleur_unique_id,product_models(id,name,textile_id,textiles(nom,composition,grammage,laize_cm)),couleur_unique:couleur_unique_id(id,name,code),zone_colors:production_order_line_zone_colors(zone_key,colors:color_id(id,name,code)),sizes:production_order_sizes(taille,quantite_demandee),quote_lines(product_model_id)"
+      )
+      .eq("production_order_id", id)
+      .order("created_at"),
     supabase.from("fiches_placement").select("id,numero_ot,statut").eq("odf_id", id).maybeSingle(),
     supabase
       .from("production_order_anomalies")
@@ -91,17 +99,10 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     // Lot 9 : configurateur couleur par zone (section 8/9 du document de logique).
     supabase.from("product_models").select("id,name").eq("active", true).order("name"),
     supabase.from("colors").select("id,name,code").eq("active", true).order("name"),
-    // .eq() sur une colonne uuid avec une chaîne vide lèverait une erreur
-    // Postgres ("invalid input syntax for type uuid") — pas de requête tant
-    // qu'aucun modèle de produit n'est encore choisi pour cet ODF.
-    order.product_model_id
-      ? supabase
-          .from("product_zone_templates")
-          .select("zone_key,zone_label,display_order")
-          .eq("product_model_id", order.product_model_id)
-          .order("display_order")
-      : Promise.resolve({ data: [] as { zone_key: string; zone_label: string; display_order: number }[] }),
-    supabase.from("production_order_zone_colors").select("zone_key,color_id").eq("production_order_id", id),
+    // Gabarits de zones de tous les modèles — chaque ligne peut avoir un
+    // modèle différent (ODF multi-lignes), un seul aller-retour plutôt
+    // qu'une requête par ligne.
+    supabase.from("product_zone_templates").select("product_model_id,zone_key,zone_label,display_order"),
     supabase
       .from("production_order_media_files")
       .select("media_file_id,media_files(id,file_name,category)")
@@ -183,18 +184,57 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
   // (submit_production_order accepte les deux statuts depuis 0028).
   const modifiable = order.status === "brouillon" || order.status === "refuse";
 
-  // Tailles proposables au dispatching : le référentiel, restreint à celles
-  // dans lesquelles le modèle existe (aucune restriction déclarée = tout le
-  // référentiel actif, convention de la migration 0029).
-  const referentielTailles = await getSizesForProductModel(order.product_model_id);
+  // ODF multi-lignes (une ligne par article du devis) : construit les
+  // données d'affichage de chaque ligne — tailles proposables restreintes
+  // au modèle de CETTE ligne (getSizesForProductModel, convention 0029),
+  // gabarit de zones de son modèle (zoneTemplatesAll, chargé une fois pour
+  // toutes les lignes), et si son modèle/sa couleur viennent du devis
+  // (sourceHadModel) donc non modifiables ici.
+  type RawLine = NonNullable<typeof productionOrderLines>[number];
+  const lines: LineData[] = await Promise.all(
+    (productionOrderLines ?? []).map(async (l: RawLine) => {
+      const productModel = l.product_models as unknown as {
+        id: string;
+        name: string;
+        textile_id: string | null;
+        textiles: { nom: string; composition: string | null; grammage: number | null; laize_cm: number | null } | null;
+      } | null;
+      const quoteLine = l.quote_lines as unknown as { product_model_id: string | null } | null;
+      return {
+        id: l.id,
+        description: l.description,
+        quantity: l.quantity,
+        productModelId: l.product_model_id,
+        productModelName: productModel?.name ?? null,
+        sourceHadModel: !!quoteLine?.product_model_id,
+        textileNom: productModel?.textiles?.nom ?? null,
+        textileComposition: productModel?.textiles?.composition ?? null,
+        textileGrammage: productModel?.textiles?.grammage ?? null,
+        textileLaizeCm: productModel?.textiles?.laize_cm ?? null,
+        couleurUniqueId: l.couleur_unique_id,
+        zoneColors: (l.zone_colors ?? []).map((z) => ({ zone_key: z.zone_key, color_id: (z.colors as unknown as { id: string } | null)?.id ?? "" })),
+        zoneTemplate: (zoneTemplatesAll ?? [])
+          .filter((z) => z.product_model_id === l.product_model_id)
+          .map((z) => ({ zone_key: z.zone_key, zone_label: z.zone_label, display_order: z.display_order })),
+        referentielTailles: await getSizesForProductModel(l.product_model_id),
+        initialSizes: (l.sizes ?? []) as { taille: string; quantite_demandee: number }[],
+      };
+    })
+  );
 
   // Même logique que le garde-fou serveur de submit_production_order()
-  // (migration 0034) : sert uniquement à désactiver le bouton côté client
+  // (migration 0035) : sert uniquement à désactiver le bouton côté client
   // avec un message clair — le contrôle qui fait autorité reste le RPC.
-  const zoneCount = (zoneTemplate ?? []).length;
-  const configuredZoneCount = (zoneColors ?? []).length;
-  const colorsConfigured = !!order.couleur_unique_id || (zoneCount > 0 && configuredZoneCount >= zoneCount);
-  const productConfigured = !!order.product_model_id && colorsConfigured;
+  const linesConfigured =
+    lines.length > 0 &&
+    lines.every((line) => {
+      if (!line.productModelId) return false;
+      const zoneCount = line.zoneTemplate.length;
+      const colorsConfigured = !!line.couleurUniqueId || (zoneCount > 0 && line.zoneColors.length >= zoneCount);
+      if (!colorsConfigured) return false;
+      const reparti = line.initialSizes.reduce((sum, s) => sum + s.quantite_demandee, 0);
+      return reparti === line.quantity;
+    });
 
   const anomalyRows = (anomalies ?? []).map((a) => ({
     id: a.id,
@@ -226,7 +266,6 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
 
   const company = order.companies as unknown as { name: string } | null;
   const quote = order.quotes as unknown as { reference: string } | null;
-  const productModel = order.product_models as unknown as { id: string; name: string } | null;
 
   // Lot 9 : fichiers déjà joints à l'ODF (visuel/maquette) + ceux encore
   // disponibles dans la médiathèque du client, pour le sélecteur d'ajout.
@@ -316,16 +355,12 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
         </Card>
       )}
 
-      <ProductConfigurator
+      <ProductionOrderLines
         productionOrderId={order.id}
         editable={modifiable}
+        lines={lines}
         productModels={productModels ?? []}
-        currentProductModelId={order.product_model_id}
-        currentProductModelName={productModel?.name ?? null}
-        zoneTemplate={zoneTemplate ?? []}
         colors={activeColors ?? []}
-        initialZoneColors={zoneColors ?? []}
-        initialColorUniqueId={order.couleur_unique_id}
         initialNote={order.note_disponibilite_couleurs}
       />
 
@@ -334,10 +369,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
           productionOrderId={order.id}
           allSections={allSections ?? []}
           initialSectionIds={(chosenSections ?? []).map((s) => s.section_id)}
-          initialSizes={sizes ?? []}
-          referentielTailles={referentielTailles}
-          totalQuantity={order.total_quantity}
-          productConfigured={productConfigured}
+          linesConfigured={linesConfigured}
         />
       )}
 

@@ -147,6 +147,20 @@ export interface ProductModel {
   // que les mouvements de stock entree_semi_fini/entree_fini portent une
   // référence Sage exploitable.
   sage_reference: string | null;
+  // Lot C1 (référentiel textiles, migration 0032) — tissu de patronnage du
+  // modèle, distinct de sa disponibilité tailles/couleurs (lot B2).
+  textile_id: string | null;
+}
+
+/** Un tissu du référentiel (lot C1, migration 0032) — composition/grammage/laize, rattaché au catalogue Sage via textile_sage_articles. */
+export interface Textile {
+  id: string;
+  nom: string;
+  composition: string | null;
+  grammage: number | null;
+  laize_cm: number | null;
+  active: boolean;
+  created_at: string;
 }
 
 // Lot 9 — configurateur couleur par zone (section 8 du document de logique).
@@ -182,15 +196,36 @@ export interface NomenclatureLine {
   created_at: string;
 }
 
-/** Couleur choisie pour une zone donnée, sur un ODF donné. */
-export interface ProductionOrderZoneColor {
+/**
+ * Une ligne d'ODF = un article du devis accepté (miroir de QuoteLine,
+ * chantier ODF multi-lignes) — modèle/couleur hérités et non modifiables
+ * une fois le devis validé par le client, sauf ligne de devis sans modèle
+ * (à compléter ici).
+ */
+export interface ProductionOrderLine {
   id: string;
   production_order_id: string;
+  quote_line_id: string | null;
+  product_model_id: string | null;
+  description: string;
+  quantity: number;
+  couleur_unique_id: string | null;
+  created_at: string;
+  couleur_unique?: Pick<Color, "id" | "name" | "code"> | null;
+  zone_colors?: ProductionOrderLineZoneColor[];
+  product_models?: Pick<ProductModel, "id" | "name" | "textile_id">;
+}
+
+/** Couleur choisie pour une zone donnée, sur une ligne d'ODF donnée. */
+export interface ProductionOrderLineZoneColor {
+  id: string;
+  production_order_line_id: string;
   zone_key: string;
   color_id: string;
   created_by: string | null;
   created_at: string;
   colors?: Pick<Color, "id" | "name" | "code">;
+  zone_label?: string;
 }
 
 /** Visuel/maquette joint à l'ODF (mécanisme MEDIA_FILE, pas un nouveau système de stockage). */
@@ -239,10 +274,10 @@ export interface QuoteLine {
   unit_price: number;
   line_total: number;
   // Configuration couleur (chantier config-produit-devis) — la « maquette »
-  // que le client valide en acceptant le devis, héritée dans l'ODF par
-  // accept_quote() quand le devis n'a qu'une seule ligne. couleur_unique_id
-  // et les lignes de quote_line_zone_colors ne sont jamais renseignés
-  // ensemble.
+  // que le client valide en acceptant le devis, héritée 1:1 dans la ligne
+  // d'ODF correspondante par accept_quote() (chantier ODF multi-lignes).
+  // couleur_unique_id et les lignes de quote_line_zone_colors ne sont
+  // jamais renseignés ensemble.
   couleur_unique_id: string | null;
   couleur_unique?: Pick<Color, "id" | "name" | "code"> | null;
   zone_colors?: QuoteLineZoneColor[];
@@ -291,14 +326,16 @@ export interface ProductionOrder {
   // Lot 2 : surplus tracé par taille au moment de la validation (section 11
   // du document de logique), ex. { "L": 5, "XL": 2 } — null si aucun surplus.
   mention_surplus_traces: Record<string, number> | null;
-  // Lot 9 : modèle de produit (détermine le gabarit de zones du
-  // configurateur couleur) et commentaire libre de disponibilité des
-  // couleurs — jamais validé par le logiciel, section 9 du document de
-  // logique.
+  // Rempli automatiquement par accept_quote() seulement si toutes les
+  // lignes du devis partagent le même modèle (sinon null) — la
+  // configuration produit/couleur qui fait foi vit désormais par ligne
+  // (ProductionOrderLine, chantier ODF multi-lignes) ; ce champ ODF-entier
+  // reste consommé par generateFicheFromOdf()/create_article_lot(), pas
+  // par l'écran de configuration.
   product_model_id: string | null;
+  // Commentaire libre de disponibilité des couleurs — jamais validé par le
+  // logiciel, section 9 du document de logique.
   note_disponibilite_couleurs: string | null;
-  /** Couleur unique ("modèle uni") — alternative à production_order_zone_colors, jamais les deux ensemble. */
-  couleur_unique_id: string | null;
   created_at: string;
   companies?: Pick<Company, "id" | "name">;
   product_models?: Pick<ProductModel, "id" | "name"> | null;
@@ -318,9 +355,10 @@ export interface ProductionOrderSection {
   sections?: Pick<Section, "id" | "name">;
 }
 
+/** Dispatching des tailles — par ligne d'ODF (production_order_line_id), pas par ODF entier (chantier ODF multi-lignes). */
 export interface ProductionOrderSize {
   id: string;
-  production_order_id: string;
+  production_order_line_id: string;
   taille: string;
   quantite_demandee: number;
 }

@@ -5,15 +5,14 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
 import { Trash2, Send, ChevronUp, ChevronDown } from "lucide-react";
-import { setProductionOrderSections, setProductionOrderSizes, submitProductionOrder } from "../actions";
-import type { Size } from "@/lib/sizes";
+import { setProductionOrderSections, submitProductionOrder } from "../actions";
 
 /**
- * Édition d'un ODF en brouillon : sections retenues, DANS L'ORDRE où le
- * travail doit passer, et quantités par taille — nécessaires avant
- * soumission (submit_production_order() les exige, section 1 du cahier des
- * charges lot 1). Écriture directe sur production_order_sections/sizes,
- * autorisée par la RLS pour responsable_production/administrateur.
+ * Édition des sections d'un ODF en brouillon, DANS L'ORDRE où le travail
+ * doit passer — nécessaire avant soumission (submit_production_order() les
+ * exige, section 1 du cahier des charges lot 1). Écriture directe sur
+ * production_order_sections, autorisée par la RLS pour
+ * responsable_production/administrateur.
  *
  * Chaque ODF est unique (une commande peut suivre Coupe > Impression >
  * Montage, une autre n'a besoin que d'Impression si le support est déjà
@@ -25,57 +24,30 @@ import type { Size } from "@/lib/sizes";
  * des cases à cocher — setProductionOrderSections() écrit `ordre = index+1`
  * exactement dans cet ordre.
  *
- * Les tailles viennent du référentiel (Paramètres > Couleurs et tailles),
- * restreint à celles dans lesquelles le modèle existe. Elles ne sont jamais
- * tapées en texte libre : le contrôle de quantité tracée vs demandée
- * (validate_production_order(), lot 2) compare ces valeurs telles quelles, et
- * un texte libre les rendrait fragiles — « Large » ne vaudrait jamais « L ».
- *
- * La grille est affichée en entier plutôt que ligne à ligne : on saisit une
- * quantité en face d'une taille, sans avoir à l'ajouter d'abord. Le total
- * réparti est confronté en permanence à la quantité commandée, parce que
- * submit_production_order() refuse tout écart — autant le voir en saisissant
- * plutôt qu'au moment de soumettre.
+ * Le dispatching des tailles (un par article) vit désormais dans
+ * ProductionOrderLines, pas ici (chantier ODF multi-lignes) — cet écran ne
+ * porte plus que les sections, et le bouton de soumission final.
  */
 export function SectionsSizesEditor({
   productionOrderId,
   allSections,
   initialSectionIds,
-  initialSizes,
-  referentielTailles,
-  totalQuantity,
-  productConfigured,
+  linesConfigured,
 }: {
   productionOrderId: string;
   allSections: { id: string; name: string }[];
   initialSectionIds: string[];
-  initialSizes: { taille: string; quantite_demandee: number }[];
-  /** Tailles proposables : le référentiel, restreint à la disponibilité du modèle. */
-  referentielTailles: Size[];
-  /** Quantité commandée, reprise du devis — la répartition doit la totaliser exactement. */
-  totalQuantity: number;
   /**
-   * Modèle de produit + couleur(s) déjà configurés — reflet côté client du
-   * garde-fou serveur posé dans submit_production_order() (migration 0034).
-   * Sert uniquement à désactiver le bouton avec un message clair avant
-   * d'envoyer la requête ; le contrôle qui fait autorité reste le RPC.
+   * Chaque article a son modèle, sa couleur et son dispatching des tailles
+   * au complet — reflet côté client du garde-fou serveur posé dans
+   * submit_production_order() (migration 0035). Sert uniquement à
+   * désactiver le bouton avec un message clair avant d'envoyer la requête ;
+   * le contrôle qui fait autorité reste le RPC.
    */
-  productConfigured: boolean;
+  linesConfigured: boolean;
 }) {
   const [pending, startTransition] = useTransition();
   const [sectionIds, setSectionIds] = useState<string[]>(initialSectionIds);
-  const [quantites, setQuantites] = useState<Record<string, number>>(
-    Object.fromEntries(initialSizes.map((s) => [s.taille, s.quantite_demandee]))
-  );
-
-  const sizes = referentielTailles
-    .filter((t) => (quantites[t.cle] ?? 0) > 0)
-    .map((t) => ({ taille: t.cle, quantite_demandee: quantites[t.cle] }));
-
-  const reparti = Object.values(quantites).reduce((somme, n) => somme + (n || 0), 0);
-  const ecart = reparti - totalQuantity;
-
-  const groupes = [...new Set(referentielTailles.map((t) => t.groupe))];
 
   const availableSections = allSections.filter((s) => !sectionIds.includes(s.id));
 
@@ -97,23 +69,14 @@ export function SectionsSizesEditor({
     });
   }
 
-  function setQuantite(cle: string, valeur: number) {
-    setQuantites((prev) => ({ ...prev, [cle]: Number.isFinite(valeur) && valeur > 0 ? valeur : 0 }));
-  }
-
   function save(then?: () => void) {
     startTransition(async () => {
-      const r1 = await setProductionOrderSections(productionOrderId, sectionIds);
-      if (r1.error) {
-        toast.error("Sections non enregistrées", { description: r1.error });
+      const res = await setProductionOrderSections(productionOrderId, sectionIds);
+      if (res.error) {
+        toast.error("Sections non enregistrées", { description: res.error });
         return;
       }
-      const r2 = await setProductionOrderSizes(productionOrderId, sizes);
-      if (r2.error) {
-        toast.error("Quantités par taille non enregistrées", { description: r2.error });
-        return;
-      }
-      toast.success("Ordre de fabrication enregistré");
+      toast.success("Sections enregistrées");
       then?.();
     });
   }
@@ -130,10 +93,9 @@ export function SectionsSizesEditor({
 
   return (
     <Card>
-      <CardHeader title="Composition de l'ODF" description="Sections retenues et quantités par taille." />
+      <CardHeader title="Sections retenues" description="Sections de l'ODF, dans l'ordre de passage." />
       <CardBody className="space-y-5">
         <div>
-          <p className="mb-1 text-xs font-medium text-foreground-muted">Sections concernées, dans l&apos;ordre de passage</p>
           <p className="mb-2 text-xs text-foreground-muted">
             Chaque commande est unique : ajoutez uniquement les sections nécessaires (ex. Coupe puis Impression puis
             Montage, ou Impression seule si le support est déjà acheté) et ordonnez-les avec les flèches.
@@ -201,68 +163,6 @@ export function SectionsSizesEditor({
           )}
         </div>
 
-        <div>
-          <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-            <p className="text-xs font-medium text-foreground-muted">Quantités par taille</p>
-            <p className="text-xs">
-              <span className="text-foreground-muted">Réparti </span>
-              <span className={ecart === 0 ? "font-semibold text-success" : "font-semibold text-warning"}>
-                {reparti}
-              </span>
-              <span className="text-foreground-muted"> / {totalQuantity} commandées</span>
-              {ecart !== 0 && (
-                <span className="text-warning">
-                  {" "}
-                  — {ecart > 0 ? `${ecart} en trop` : `il manque ${-ecart}`}
-                </span>
-              )}
-            </p>
-          </div>
-
-          {referentielTailles.length === 0 ? (
-            <p className="rounded-md border border-dashed border-border p-3 text-xs text-foreground-muted">
-              Aucune taille proposable : le référentiel est vide, ou ce modèle n&apos;a aucune taille déclarée
-              disponible. Cela se règle dans Paramètres &gt; Couleurs et tailles, puis sur la carte du modèle.
-            </p>
-          ) : (
-            <div className="space-y-3">
-              {groupes.map((groupe) => (
-                <div key={groupe}>
-                  <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-foreground-muted">
-                    {groupe}
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {referentielTailles
-                      .filter((t) => t.groupe === groupe)
-                      .map((t) => {
-                        const valeur = quantites[t.cle] ?? 0;
-                        return (
-                          <label
-                            key={t.cle}
-                            className={`flex w-20 flex-col gap-1 rounded-md border p-1.5 ${
-                              valeur > 0 ? "border-brand bg-brand-soft/40" : "border-border"
-                            }`}
-                          >
-                            <span className="text-center text-[11px] font-medium text-foreground">{t.libelle}</span>
-                            <input
-                              type="number"
-                              min={0}
-                              inputMode="numeric"
-                              value={valeur || ""}
-                              placeholder="0"
-                              onChange={(e) => setQuantite(t.cle, Number(e.target.value))}
-                              className="w-full rounded border border-border bg-surface p-1 text-center text-xs outline-none focus:ring-2 focus:ring-brand/30"
-                            />
-                          </label>
-                        );
-                      })}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
         <div className="flex flex-wrap gap-2 border-t border-border pt-4">
           <Button variant="secondary" onClick={() => save()} loading={pending}>
             Enregistrer le brouillon
@@ -270,27 +170,19 @@ export function SectionsSizesEditor({
           <Button
             onClick={submit}
             loading={pending}
-            disabled={sectionIds.length === 0 || reparti === 0 || ecart !== 0 || !productConfigured}
+            disabled={sectionIds.length === 0 || !linesConfigured}
             title={
-              !productConfigured
-                ? "Renseignez d'abord la configuration produit (modèle + couleur) ci-dessus."
-                : ecart !== 0
-                  ? `La répartition doit totaliser exactement ${totalQuantity} pièces.`
-                  : undefined
+              !linesConfigured
+                ? "Chaque article doit avoir son modèle, sa couleur et son dispatching des tailles au complet (voir Configuration produit ci-dessus)."
+                : undefined
             }
           >
             <Send className="h-3.5 w-3.5" /> Soumettre pour validation
           </Button>
-          {ecart !== 0 && reparti > 0 && (
+          {sectionIds.length > 0 && !linesConfigured && (
             <p className="w-full text-xs text-warning">
-              La soumission attend une répartition égale à la quantité commandée : {reparti} réparties contre{" "}
-              {totalQuantity} demandées.
-            </p>
-          )}
-          {ecart === 0 && reparti > 0 && !productConfigured && (
-            <p className="w-full text-xs text-warning">
-              La soumission attend un modèle de produit et sa couleur (par zone, ou « modèle uni ») — voir la carte
-              « Configuration produit » ci-dessus.
+              La soumission attend, pour chaque article : un modèle, une couleur (par zone, ou « modèle uni ») et un
+              dispatching des tailles totalisant exactement sa quantité — voir « Configuration produit » ci-dessus.
             </p>
           )}
         </div>
