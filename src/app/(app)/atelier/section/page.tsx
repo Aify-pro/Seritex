@@ -50,7 +50,7 @@ export default async function SectionQueuePage({
   const { data: workOrders } = await supabase
     .from("work_orders")
     .select(
-      "id,reference,quantity_planned,quantity_done,blocking_reason,planned_start,planned_end,actual_start,production_orders(id,reference,company_id,companies(name))"
+      "id,reference,quantity_planned,quantity_done,blocking_reason,planned_start,planned_end,actual_start,production_order_line_id,production_orders(id,reference,company_id,companies(name))"
     )
     .eq("section_id", sectionId)
     .order("planned_start", { ascending: true });
@@ -138,12 +138,20 @@ export default async function SectionQueuePage({
       createdAt: b.created_at,
     }));
 
+    // Migration 0037 : une fiche par article (production_order_line_id),
+    // plus une seule par ODF entier — les matelas d'un OT se retrouvent
+    // désormais directement via l'article de CET OT précis, plus besoin de
+    // passer par l'ODF entier (deux OT Coupe du même ODF, un par article, ne
+    // se mélangent plus).
+    const lineIds = workOrders
+      .map((wo) => wo.production_order_line_id)
+      .filter((lineId): lineId is string => !!lineId);
     const { data: fiches } = await supabase
       .from("fiches_placement")
       .select(
-        "id,numero_ot,odf_id,traces_placement(id,ordre,reference,repartition_par_couche,est_correctif,approuve_par,justification)"
+        "id,numero_ot,production_order_line_id,traces_placement(id,ordre,reference,repartition_par_couche,est_correctif,approuve_par,justification)"
       )
-      .in("odf_id", productionOrderIds)
+      .in("production_order_line_id", lineIds)
       .eq("statut", "bon_pour_coupe");
 
     const { data: closedEvents } = await supabase
@@ -156,8 +164,8 @@ export default async function SectionQueuePage({
       );
     const closedTraceIds = new Set((closedEvents ?? []).map((e) => e.trace_id as string));
 
-    const matelasByOdfId: Record<string, MatelasRow[]> = {};
-    const traceOptionsByOdfId: Record<string, TraceOption[]> = {};
+    const matelasByLineId: Record<string, MatelasRow[]> = {};
+    const traceOptionsByLineId: Record<string, TraceOption[]> = {};
     for (const fiche of fiches ?? []) {
       const traces = (fiche.traces_placement ?? []) as unknown as {
         id: string;
@@ -169,7 +177,7 @@ export default async function SectionQueuePage({
         justification: string | null;
       }[];
       const usable = traces.filter((t) => !t.est_correctif || t.approuve_par);
-      matelasByOdfId[fiche.odf_id as string] = usable
+      matelasByLineId[fiche.production_order_line_id as string] = usable
         .filter((t) => !closedTraceIds.has(t.id))
         .sort((a, b) => a.ordre - b.ordre)
         .map((t) => ({
@@ -181,15 +189,15 @@ export default async function SectionQueuePage({
         }));
       // Lot 6 : le tracé d'origine (optionnel) d'un lot article peut être
       // n'importe quel matelas de la fiche, clôturé ou non.
-      traceOptionsByOdfId[fiche.odf_id as string] = usable
+      traceOptionsByLineId[fiche.production_order_line_id as string] = usable
         .sort((a, b) => a.ordre - b.ordre)
         .map((t) => ({ id: t.id, reference: t.reference }));
     }
 
     for (const wo of workOrders) {
-      const poId = (wo.production_orders as unknown as { id: string } | null)?.id;
-      if (poId && matelasByOdfId[poId]) matelasByWorkOrderId[wo.id] = matelasByOdfId[poId];
-      if (poId && traceOptionsByOdfId[poId]) traceOptionsByWorkOrderId[wo.id] = traceOptionsByOdfId[poId];
+      const lineId = wo.production_order_line_id;
+      if (lineId && matelasByLineId[lineId]) matelasByWorkOrderId[wo.id] = matelasByLineId[lineId];
+      if (lineId && traceOptionsByLineId[lineId]) traceOptionsByWorkOrderId[wo.id] = traceOptionsByLineId[lineId];
     }
   }
 

@@ -346,8 +346,9 @@ export interface ProductionOrder {
   // lignes du devis partagent le même modèle (sinon null) — la
   // configuration produit/couleur qui fait foi vit désormais par ligne
   // (ProductionOrderLine, chantier ODF multi-lignes) ; ce champ ODF-entier
-  // reste consommé par generateFicheFromOdf()/create_article_lot(), pas
-  // par l'écran de configuration.
+  // reste consommé par create_article_lot() (résolution de l'article Sage),
+  // pas par l'écran de configuration. generateFicheFromLine() (migration
+  // 0037) lit le modèle de la ligne elle-même, plus celui-ci.
   product_model_id: string | null;
   // Commentaire libre de disponibilité des couleurs — jamais validé par le
   // logiciel, section 9 du document de logique.

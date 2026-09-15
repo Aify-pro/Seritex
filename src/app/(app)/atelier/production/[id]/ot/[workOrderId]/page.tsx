@@ -49,7 +49,9 @@ export default async function WorkOrderDetailPage({
 
   const { data: wo } = await supabase
     .from("work_orders")
-    .select("*,sections(name,atelier_categories(cle)),production_orders(id,reference,company_id,companies(name))")
+    .select(
+      "*,sections(name,atelier_categories(cle)),production_orders(id,reference,company_id,companies(name))"
+    )
     .eq("id", workOrderId)
     .eq("production_order_id", id)
     .maybeSingle();
@@ -81,8 +83,9 @@ export default async function WorkOrderDetailPage({
   const otherEvents = (events ?? []).filter((e) => e.event_type !== "matelas_cloture");
 
   // Même requête que le terminal Coupe (`section-board.tsx`) : les matelas
-  // en attente sont les tracés d'une fiche "Bon pour coupe" liée à cet ODF,
-  // pas encore clôturés (correctifs non approuvés exclus).
+  // en attente sont les tracés d'une fiche "Bon pour coupe" liée à L'ARTICLE
+  // de cet OT (migration 0037, plus à l'ODF entier), pas encore clôturés
+  // (correctifs non approuvés exclus).
   let pendingMatelas: {
     id: string;
     reference: string;
@@ -93,7 +96,7 @@ export default async function WorkOrderDetailPage({
     const { data: fiches } = await supabase
       .from("fiches_placement")
       .select("id,traces_placement(id,ordre,reference,repartition_par_couche,est_correctif,approuve_par)")
-      .eq("odf_id", productionOrder.id)
+      .eq("production_order_line_id", wo.production_order_line_id)
       .eq("statut", "bon_pour_coupe");
 
     const traces = (fiches ?? []).flatMap(

@@ -12,26 +12,28 @@ function revalidateOdf(productionOrderId: string) {
 }
 
 /**
- * Sections retenues pour un ODF en brouillon — remplace la dépendance à une
- * gamme opératoire figée par produit (routing_templates/routing_steps) :
- * les sections sont choisies à la saisie, pas figées à l'avance. Écriture
+ * Sections retenues pour un article d'un ODF en brouillon (migration 0037,
+ * par article plutôt que par ODF entier — une commande peut mêler un
+ * article à imprimer et un autre non) — remplace la dépendance à une gamme
+ * opératoire figée par produit (routing_templates/routing_steps) : les
+ * sections sont choisies à la saisie, pas figées à l'avance. Écriture
  * directe autorisée par la RLS (is_production_manager()), même pattern que
  * `reassignSectionChief` ci-dessous.
  */
-export async function setProductionOrderSections(productionOrderId: string, sectionIds: string[]) {
+export async function setProductionOrderLineSections(lineId: string, productionOrderId: string, sectionIds: string[]) {
   await requireRole(["administrateur", "responsable_production"]);
   const supabase = await createClient();
 
   const { error: delError } = await supabase
-    .from("production_order_sections")
+    .from("production_order_line_sections")
     .delete()
-    .eq("production_order_id", productionOrderId);
+    .eq("production_order_line_id", lineId);
   if (delError) return { error: delError.message };
 
   if (sectionIds.length > 0) {
-    const { error: insError } = await supabase.from("production_order_sections").insert(
+    const { error: insError } = await supabase.from("production_order_line_sections").insert(
       sectionIds.map((sectionId, i) => ({
-        production_order_id: productionOrderId,
+        production_order_line_id: lineId,
         section_id: sectionId,
         ordre: i + 1,
       }))
@@ -207,7 +209,7 @@ export async function cancelProductionOrder(productionOrderId: string, reason: s
  * avait relevé que la colonne existait sans que rien ne la renseigne jamais.
  *
  * Écriture directe, autorisée par la RLS pour `is_production_manager()` —
- * même pattern que `setProductionOrderSections`. Passer `null` délie.
+ * même pattern que `setProductionOrderLineSections`. Passer `null` délie.
  */
 export async function setReplacementProductionOrder(
   productionOrderId: string,
@@ -489,6 +491,40 @@ export async function detachMediaFileFromProductionOrder(productionOrderId: stri
     .from("production_order_media_files")
     .delete()
     .eq("production_order_id", productionOrderId)
+    .eq("media_file_id", mediaFileId)
+    .is("production_order_line_id", null);
+  if (error) return { error: error.message };
+  revalidateOdf(productionOrderId);
+  return {};
+}
+
+/**
+ * Visuel/maquette joint à un article précis (migration 0037, plus seulement
+ * à l'ODF entier) : c'est ce rattachement, pas celui ci-dessus, que vérifie
+ * validate_production_order() pour une section de catégorie Impression
+ * retenue sur CET article.
+ */
+export async function attachVisuelToLine(lineId: string, productionOrderId: string, mediaFileId: string) {
+  const { authId } = await requireRole(["administrateur", "responsable_production"]);
+  const supabase = await createClient();
+  const { error } = await supabase.from("production_order_media_files").insert({
+    production_order_id: productionOrderId,
+    production_order_line_id: lineId,
+    media_file_id: mediaFileId,
+    added_by: authId,
+  });
+  if (error) return { error: error.message };
+  revalidateOdf(productionOrderId);
+  return {};
+}
+
+export async function detachVisuelFromLine(lineId: string, productionOrderId: string, mediaFileId: string) {
+  await requireRole(["administrateur", "responsable_production"]);
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("production_order_media_files")
+    .delete()
+    .eq("production_order_line_id", lineId)
     .eq("media_file_id", mediaFileId);
   if (error) return { error: error.message };
   revalidateOdf(productionOrderId);

@@ -34,7 +34,7 @@ import type { TraceAnalysisDetail } from "@/lib/patronnage/detail";
 import {
   createFiche,
   updateFiche,
-  linkOdf,
+  linkLine,
   sizesForProductModel,
   validateFiche,
   unlockFiche,
@@ -49,7 +49,7 @@ import {
   requestCorrectiveTrace,
   approveCorrectiveTrace,
   rejectCorrectiveTrace,
-  searchOdf,
+  searchOdfLines,
   searchClient,
   getTraceDetail,
 } from "@/app/(app)/atelier/patronnage/fiches-actions";
@@ -479,7 +479,7 @@ function CreateFicheForm({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [odfId, setOdfId] = useState<string | null>(null);
+  const [lineId, setLineId] = useState<string | null>(null);
   const [clientCode, setClientCode] = useState<string | null>(null);
   const pageSizes = useContext(SizesContext);
   const [sizes, setSizes] = useState<Size[]>(pageSizes);
@@ -489,7 +489,7 @@ function CreateFicheForm({
     e.preventDefault();
     if (!formRef.current) return;
     const fd = new FormData(formRef.current);
-    if (odfId) fd.set("odf_id", odfId);
+    if (lineId) fd.set("production_order_line_id", lineId);
     if (clientCode) fd.set("client_code", clientCode);
     startTransition(async () => {
       const res = await createFiche(fd);
@@ -524,20 +524,20 @@ function CreateFicheForm({
           />
           <input type="hidden" name="client_libelle" value="" />
         </Field>
-        <Field label="Lier à un ODF (optionnel)">
+        <Field label="Lier à un article d'ODF (optionnel)">
           <div className="flex gap-2">
             <div className="flex-1">
               <SearchPicker
                 placeholder="Rechercher une référence ODF…"
-                search={searchOdf}
+                search={searchOdfLines}
                 renderOption={(o: { id: string; reference: string }) => o.reference}
-                onSelect={(o) => setOdfId(o.id ?? null)}
+                onSelect={(o) => setLineId(o.id ?? null)}
               />
             </div>
             <QrScannerButton
               onScanned={async (reference) => {
-                const results = await searchOdf(reference);
-                if (results[0]) setOdfId(results[0].id ?? null);
+                const results = await searchOdfLines(reference);
+                if (results[0]) setLineId(results[0].id ?? null);
               }}
             />
           </div>
@@ -693,7 +693,7 @@ export function FicheDetailContent({
                 <ArchiveRestore className="h-3.5 w-3.5" /> Désarchiver
               </Button>
             )}
-            {permissions.canDelete && !fiche.valideLe && !fiche.premiereLiaisonOdfLe && (
+            {permissions.canDelete && !fiche.valideLe && !fiche.premiereLiaisonLe && (
               <Button
                 size="sm"
                 variant="ghost"
@@ -713,19 +713,20 @@ export function FicheDetailContent({
           </div>
         )}
 
-        {/* Lien ODF */}
+        {/* Lien ODF (article précis, migration 0037) */}
         <Card>
-          <CardHeader title="Ordre de fabrication lié" description={fiche.premiereLiaisonOdfLe ? `Première liaison le ${formatDate(fiche.premiereLiaisonOdfLe)}` : "Optionnel"} />
+          <CardHeader title="Article d'ODF lié" description={fiche.premiereLiaisonLe ? `Première liaison le ${formatDate(fiche.premiereLiaisonLe)}` : "Optionnel"} />
           <CardBody>
             {!locked && permissions.canModify ? (
-              fiche.odfId ? (
-                // Liée : on ne laisse plus rechercher un autre ODF par-dessus
-                // (linkOdf le refuse désormais tant que celui-ci n'est pas
-                // délié — évite qu'une fiche glisse silencieusement d'un ODF
-                // à l'autre). Correction : délier explicitement d'abord.
+              fiche.lineId ? (
+                // Liée : on ne laisse plus rechercher un autre article
+                // par-dessus (linkLine le refuse désormais tant que celui-ci
+                // n'est pas délié — évite qu'une fiche glisse silencieusement
+                // d'un article à l'autre). Correction : délier explicitement
+                // d'abord.
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-sm text-foreground">{fiche.odfReference}</p>
-                  <Button size="sm" variant="ghost" loading={pending} onClick={() => runAction(() => linkOdf(fiche.id, null))}>
+                  <Button size="sm" variant="ghost" loading={pending} onClick={() => runAction(() => linkLine(fiche.id, null))}>
                     Délier
                   </Button>
                 </div>
@@ -734,15 +735,15 @@ export function FicheDetailContent({
                   <div className="flex-1">
                     <SearchPicker
                       placeholder="Rechercher une référence ODF…"
-                      search={searchOdf}
+                      search={searchOdfLines}
                       renderOption={(o: { id: string; reference: string }) => o.reference}
-                      onSelect={(o) => runAction(() => linkOdf(fiche.id, o.id ?? null))}
+                      onSelect={(o) => runAction(() => linkLine(fiche.id, o.id ?? null))}
                     />
                   </div>
                   <QrScannerButton
                     onScanned={async (reference) => {
-                      const results = await searchOdf(reference);
-                      if (results[0]) runAction(() => linkOdf(fiche.id, results[0].id ?? null));
+                      const results = await searchOdfLines(reference);
+                      if (results[0]) runAction(() => linkLine(fiche.id, results[0].id ?? null));
                     }}
                   />
                 </div>

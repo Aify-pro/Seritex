@@ -4,52 +4,50 @@ import { useTransition } from "react";
 import { toast } from "sonner";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
 import { Paperclip, X, Plus } from "lucide-react";
-import { attachMediaFileToProductionOrder, detachMediaFileFromProductionOrder } from "../actions";
-import { MEDIA_CATEGORY_LABELS, type MediaFileCategory } from "@/lib/types/domain";
-
-export interface AttachableMediaFile {
-  id: string;
-  file_name: string;
-  category: MediaFileCategory;
-}
+import { attachVisuelToLine, detachVisuelFromLine } from "../actions";
+import type { AttachableMediaFile } from "./production-order-media-files";
 
 /**
- * Documents généraux joints à l'ODF entier (nuancier, image de marque, fiche
- * technique...) : réutilise MEDIA_FILE, comme les fichiers liés à une fiche
- * échantillon — aucun nouveau système de stockage. Le dépôt du fichier
- * lui-même se fait depuis la médiathèque du client, ici on ne fait que le
- * rattacher/détacher.
- *
- * Le visuel/maquette (catégorie "visuel", exigé par une section Impression)
- * est exclu d'ici depuis la migration 0037 : il se rattache désormais par
- * article (voir LineVisuelPicker), pas à l'ODF entier — un ODF mêlant un
- * article à imprimer et un autre non ne peut plus avoir un visuel ambigu
- * "pour tout l'ODF".
+ * Visuel/maquette joint à un article précis (migration 0037, plus à l'ODF
+ * entier — section 8 du document de logique) : un ODF mêlant un article à
+ * imprimer et un autre non ne peut plus avoir un visuel ambigu "pour tout
+ * l'ODF". `required` : vrai si une section de catégorie Impression est
+ * retenue sur CET article — la validation de l'ODF sera refusée par
+ * validate_production_order() tant qu'aucun visuel n'est joint à cet
+ * article précis. Avertissement doux ici, comme pour la fiche Patronnage :
+ * le contrôle qui fait autorité reste le RPC.
  */
-export function ProductionOrderMediaFiles({
+export function LineVisuelPicker({
+  lineId,
+  lineLabel,
   productionOrderId,
   attached,
   available,
+  required,
 }: {
+  lineId: string;
+  lineLabel: string;
   productionOrderId: string;
   attached: AttachableMediaFile[];
   available: AttachableMediaFile[];
+  required: boolean;
 }) {
   const [pending, startTransition] = useTransition();
   const attachedIds = new Set(attached.map((f) => f.id));
-  const selectable = available.filter((f) => !attachedIds.has(f.id) && f.category !== "visuel");
+  const selectable = available.filter((f) => !attachedIds.has(f.id) && f.category === "visuel");
+  const missingVisuel = required && attached.length === 0;
 
   function attach(mediaFileId: string) {
     if (!mediaFileId) return;
     startTransition(async () => {
-      const res = await attachMediaFileToProductionOrder(productionOrderId, mediaFileId);
+      const res = await attachVisuelToLine(lineId, productionOrderId, mediaFileId);
       if (res?.error) toast.error(res.error);
     });
   }
 
   function detach(mediaFileId: string) {
     startTransition(async () => {
-      const res = await detachMediaFileFromProductionOrder(productionOrderId, mediaFileId);
+      const res = await detachVisuelFromLine(lineId, productionOrderId, mediaFileId);
       if (res?.error) toast.error(res.error);
     });
   }
@@ -57,10 +55,15 @@ export function ProductionOrderMediaFiles({
   return (
     <Card>
       <CardHeader
-        title="Documents généraux"
-        description="Nuancier, image de marque, fiche technique... joints à l'ODF entier depuis la médiathèque du client."
+        title={`Visuel / maquette — ${lineLabel}`}
+        description="Maquette réalisée par les infographes, jointe à cet article depuis la médiathèque du client."
       />
       <CardBody className="space-y-1.5">
+        {missingVisuel && (
+          <p className="text-xs text-warning">
+            ⚠ La validation de l&apos;ODF sera refusée tant qu&apos;aucun visuel n&apos;est joint à cet article.
+          </p>
+        )}
         <p className="flex items-center gap-1 text-xs font-medium text-foreground-muted">
           <Paperclip className="h-3.5 w-3.5" /> Fichiers liés
         </p>
@@ -71,7 +74,6 @@ export function ProductionOrderMediaFiles({
               className="flex items-center gap-1 rounded-full bg-surface-muted px-2.5 py-1 text-xs text-foreground"
             >
               {f.file_name}
-              <span className="text-foreground-muted">· {MEDIA_CATEGORY_LABELS[f.category]}</span>
               <button
                 disabled={pending}
                 onClick={() => detach(f.id)}
@@ -96,10 +98,10 @@ export function ProductionOrderMediaFiles({
               }}
               className="h-7 rounded-md border border-border bg-surface px-2 text-xs disabled:opacity-60"
             >
-              <option value="">Joindre un fichier de la médiathèque…</option>
+              <option value="">Joindre un visuel de la médiathèque…</option>
               {selectable.map((f) => (
                 <option key={f.id} value={f.id}>
-                  {f.file_name} ({MEDIA_CATEGORY_LABELS[f.category]})
+                  {f.file_name}
                 </option>
               ))}
             </select>

@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
 import { Badge, StatusBadge } from "@/components/ui/badge";
-import { PRODUCTION_ORDER_STATUS_LABELS, type MediaFileCategory } from "@/lib/types/domain";
+import { PRODUCTION_ORDER_STATUS_LABELS } from "@/lib/types/domain";
 import { formatDate, formatDateTime } from "@/lib/utils";
 import { can } from "@/lib/auth/permissions";
 import { notFound } from "next/navigation";
@@ -11,11 +11,13 @@ import { ArchiveButton } from "./archive-button";
 import { LifecycleActions } from "./lifecycle-actions";
 import { ReplacementOrderPicker } from "./replacement-order-picker";
 import { getSizesForProductModel } from "@/lib/sizes";
-import { SectionsSizesEditor } from "./sections-sizes-editor";
+import { LineSectionsPicker } from "./line-sections-picker";
+import { SubmitOdfPanel } from "./submit-odf-panel";
 import { FichePatronnageLink } from "./fiche-patronnage-link";
+import { LineVisuelPicker } from "./line-visuel-picker";
 import { AnomaliesPanel } from "./anomalies-panel";
 import { ProductionOrderLines, type LineData } from "./production-order-lines";
-import { ProductionOrderMediaFiles } from "./production-order-media-files";
+import { ProductionOrderMediaFiles, type AttachableMediaFile } from "./production-order-media-files";
 import { StockMovementsPanel } from "./stock-movements-panel";
 import { StockEntryForm } from "./stock-entry-form";
 import type { StatutFiche } from "@/lib/patronnage/types";
@@ -41,9 +43,9 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
   const [
     { data: workOrders },
     { data: allSections },
-    { data: chosenSections },
+    { data: chosenLineSections },
     { data: productionOrderLines },
-    { data: fiche },
+    { data: fiches },
     { data: anomalies },
     { data: articleLots },
     { data: reconciliation },
@@ -52,7 +54,8 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     { data: productModels },
     { data: activeColors },
     { data: zoneTemplatesAll },
-    { data: attachedMedia },
+    { data: attachedGeneralMedia },
+    { data: attachedLineMedia },
     { data: availableMedia },
     { data: stockMovements },
     { data: stockExportFiches },
@@ -64,7 +67,14 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
       .select("id,name,atelier_categories(cle,requiert_fiche_trace,requiert_visuel)")
       .eq("active", true)
       .order("display_order"),
-    supabase.from("production_order_sections").select("section_id").eq("production_order_id", id).order("ordre"),
+    // Sections retenues par article (migration 0037, plus par ODF entier) —
+    // jointure vers production_order_lines pour filtrer par ODF, ces deux
+    // tables n'ayant pas de production_order_id en commun.
+    supabase
+      .from("production_order_line_sections")
+      .select("production_order_line_id,section_id,ordre,production_order_lines!inner(production_order_id)")
+      .eq("production_order_lines.production_order_id", id)
+      .order("ordre"),
     // ODF multi-lignes : une ligne par article du devis accepté, avec sa
     // configuration (modèle/tissu/couleur héritée du devis, immuable sauf
     // ligne de devis sans modèle) et son propre dispatching de tailles.
@@ -75,7 +85,12 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
       )
       .eq("production_order_id", id)
       .order("created_at"),
-    supabase.from("fiches_placement").select("id,numero_ot,statut").eq("odf_id", id).maybeSingle(),
+    // Une fiche par article passant en Coupe (migration 0037, plus une seule
+    // par ODF entier) — même jointure que ci-dessus pour filtrer par ODF.
+    supabase
+      .from("fiches_placement")
+      .select("id,numero_ot,statut,production_order_line_id,production_order_lines!inner(production_order_id)")
+      .eq("production_order_lines.production_order_id", id),
     supabase
       .from("production_order_anomalies")
       .select("id,message,created_at,resolved_at,resolved_by,sections(name)")
@@ -110,7 +125,14 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     supabase
       .from("production_order_media_files")
       .select("media_file_id,media_files(id,file_name,category)")
-      .eq("production_order_id", id),
+      .eq("production_order_id", id)
+      .is("production_order_line_id", null),
+    // Visuel/maquette par article (migration 0037, plus par ODF entier).
+    supabase
+      .from("production_order_media_files")
+      .select("production_order_line_id,media_file_id,media_files(id,file_name,category)")
+      .eq("production_order_id", id)
+      .not("production_order_line_id", "is", null),
     supabase.from("media_files").select("id,file_name,category").eq("company_id", order.company_id),
     // Lot 10 : mouvements de stock & fiches d'import Sage (section 19 du
     // document de logique) — dérivés de record_pesee/create_article_lot,
@@ -132,29 +154,34 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     supabase.from("stock_item_view").select("sage_reference,designation").order("designation"),
   ]);
 
-  // Lot 2, généralisé migration 0036 : la fiche Patronnage liée n'est
-  // pertinente que si une section de catégorie Coupe (cle='coupe', plus
-  // seulement le nom "Coupe") est retenue — obligatoire pour valider, section
-  // 10 du document de logique — ou si une fiche est déjà liée alors que Coupe
-  // a depuis été décochée, pour ne pas faire disparaître un lien existant
-  // sans prévenir.
+  // Lot 2, généralisé migration 0036, puis par article migration 0037 : la
+  // fiche Patronnage n'est pertinente pour un article que si une section de
+  // catégorie Coupe (cle='coupe') est retenue SUR CET ARTICLE — obligatoire
+  // pour valider (section 10 du document de logique) — ou si une fiche est
+  // déjà liée alors que Coupe a depuis été décochée, pour ne pas faire
+  // disparaître un lien existant sans prévenir. Même principe pour le
+  // visuel/maquette (migration 0036), symétrique, contrôlé côté serveur par
+  // validate_production_order().
   const coupeSectionIds = new Set(
     (allSections ?? [])
       .filter((s) => (s.atelier_categories as unknown as { cle: string } | null)?.cle === "coupe")
       .map((s) => s.id)
   );
-  const coupeSelected = (chosenSections ?? []).some((s) => coupeSectionIds.has(s.section_id));
-
-  // Migration 0036 : visuel/maquette obligatoire si une section dont la
-  // catégorie exige un visuel (ex. Impression) est retenue — symétrique au
-  // blocage fiche de tracé ci-dessus, contrôlé côté serveur par
-  // validate_production_order().
   const visuelRequiredSectionIds = new Set(
     (allSections ?? [])
       .filter((s) => (s.atelier_categories as unknown as { requiert_visuel: boolean } | null)?.requiert_visuel)
       .map((s) => s.id)
   );
-  const visuelRequired = (chosenSections ?? []).some((s) => visuelRequiredSectionIds.has(s.section_id));
+  type ChosenLineSection = { production_order_line_id: string; section_id: string; ordre: number };
+  const sectionIdsByLine: Record<string, string[]> = {};
+  const coupeSelectedByLine: Record<string, boolean> = {};
+  const visuelRequiredByLine: Record<string, boolean> = {};
+  for (const s of (chosenLineSections ?? []) as unknown as ChosenLineSection[]) {
+    (sectionIdsByLine[s.production_order_line_id] ??= []).push(s.section_id);
+    if (coupeSectionIds.has(s.section_id)) coupeSelectedByLine[s.production_order_line_id] = true;
+    if (visuelRequiredSectionIds.has(s.section_id)) visuelRequiredByLine[s.production_order_line_id] = true;
+  }
+  const anySectionChosen = Object.values(sectionIdsByLine).some((ids) => ids.length > 0);
 
   // Noms des personnes ayant validé le lancement / demandé ou confirmé la
   // clôture — doivent apparaître à l'écran (et sur le PDF, hors périmètre de
@@ -288,12 +315,22 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
   const company = order.companies as unknown as { name: string } | null;
   const quote = order.quotes as unknown as { reference: string } | null;
 
-  // Lot 9 : fichiers déjà joints à l'ODF (visuel/maquette) + ceux encore
-  // disponibles dans la médiathèque du client, pour le sélecteur d'ajout.
-  const attachedMediaFiles = (attachedMedia ?? [])
-    .map((m) => m.media_files as unknown as { id: string; file_name: string; category: MediaFileCategory } | null)
-    .filter((f): f is { id: string; file_name: string; category: MediaFileCategory } => !!f);
-  const availableMediaFiles = (availableMedia ?? []) as { id: string; file_name: string; category: MediaFileCategory }[];
+  // Lot 9, par article depuis la migration 0037 pour le visuel : documents
+  // généraux de l'ODF entier + visuels déjà joints à chaque article, en plus
+  // de ceux encore disponibles dans la médiathèque du client pour le
+  // sélecteur d'ajout.
+  const attachedGeneralMediaFiles = (attachedGeneralMedia ?? [])
+    .map((m) => m.media_files as unknown as AttachableMediaFile | null)
+    .filter((f): f is AttachableMediaFile => !!f);
+  const availableMediaFiles = (availableMedia ?? []) as AttachableMediaFile[];
+  const visuelByLine: Record<string, AttachableMediaFile[]> = {};
+  for (const m of (attachedLineMedia ?? []) as unknown as { production_order_line_id: string; media_files: AttachableMediaFile | null }[]) {
+    if (m.media_files) (visuelByLine[m.production_order_line_id] ??= []).push(m.media_files);
+  }
+  const fichesByLine: Record<string, { id: string; numeroOt: string; statut: StatutFiche }> = {};
+  for (const f of (fiches ?? []) as unknown as { id: string; numero_ot: string; statut: StatutFiche; production_order_line_id: string }[]) {
+    fichesByLine[f.production_order_line_id] = { id: f.id, numeroOt: f.numero_ot, statut: f.statut };
+  }
 
   const canArchive = await can("ordres_fabrication", "archive");
   const canValidate = await can("ordres_fabrication", "validate");
@@ -385,30 +422,55 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
         initialNote={order.note_disponibilite_couleurs}
       />
 
+      {lines.map((line) => {
+        const lineLabel = `${line.description} (${line.quantity} pièces)`;
+        const lineFiche = fichesByLine[line.id] ?? null;
+        const lineVisuel = visuelByLine[line.id] ?? [];
+        return (
+          <div key={line.id} className="space-y-6">
+            {modifiable && (
+              <LineSectionsPicker
+                lineId={line.id}
+                productionOrderId={order.id}
+                lineLabel={lineLabel}
+                allSections={allSections ?? []}
+                initialSectionIds={sectionIdsByLine[line.id] ?? []}
+              />
+            )}
+
+            {(coupeSelectedByLine[line.id] || lineFiche) && (
+              <FichePatronnageLink
+                lineId={line.id}
+                lineLabel={lineLabel}
+                editable={modifiable}
+                fiche={lineFiche}
+                productModelId={line.productModelId}
+              />
+            )}
+
+            {(visuelRequiredByLine[line.id] || lineVisuel.length > 0) && (
+              <LineVisuelPicker
+                lineId={line.id}
+                lineLabel={lineLabel}
+                productionOrderId={order.id}
+                attached={lineVisuel}
+                available={availableMediaFiles}
+                required={!!visuelRequiredByLine[line.id]}
+              />
+            )}
+          </div>
+        );
+      })}
+
       {modifiable && (
-        <SectionsSizesEditor
-          productionOrderId={order.id}
-          allSections={allSections ?? []}
-          initialSectionIds={(chosenSections ?? []).map((s) => s.section_id)}
-          linesConfigured={linesConfigured}
-        />
+        <SubmitOdfPanel productionOrderId={order.id} anySectionChosen={anySectionChosen} linesConfigured={linesConfigured} />
       )}
 
       <ProductionOrderMediaFiles
         productionOrderId={order.id}
-        attached={attachedMediaFiles}
+        attached={attachedGeneralMediaFiles}
         available={availableMediaFiles}
-        required={visuelRequired}
       />
-
-      {(coupeSelected || fiche) && (
-        <FichePatronnageLink
-          productionOrderId={order.id}
-          editable={modifiable}
-          fiche={fiche ? { id: fiche.id, numeroOt: fiche.numero_ot, statut: fiche.statut as StatutFiche } : null}
-          productModelId={order.product_model_id}
-        />
-      )}
 
       {order.status === "annulee" && (
         <ReplacementOrderPicker

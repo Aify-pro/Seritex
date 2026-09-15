@@ -113,9 +113,10 @@ export interface FichePlacement {
   numeroOt: string;
   statut: StatutFiche;
   statutPrecedent: StatutFiche | null;
-  odfId: string | null;
+  /** Article (ligne d'ODF) auquel cette fiche est liée — au plus un article par fiche (migration 0037). */
+  lineId: string | null;
   odfReference: string | null;
-  premiereLiaisonOdfLe: string | null;
+  premiereLiaisonLe: string | null;
   clientCode: string | null;
   clientLibelle: string | null;
   dateEmission: string;
