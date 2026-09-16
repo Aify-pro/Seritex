@@ -547,13 +547,22 @@ export interface StockMovement {
   created_at: string;
 }
 
-/** Fiche numérotée regroupant les mouvements pas encore exportés d'un ODF, à un instant donné. */
+/**
+ * Fiche numérotée regroupant les mouvements pas encore exportés — d'un ODF
+ * précis, ou globalement (production_order_id null, migration 0038) à un
+ * instant donné. sage_numero : numéro renvoyé par Sage une fois le CSV
+ * importé, saisi manuellement par le gestionnaire de stock tant qu'aucune
+ * connexion Sage réelle n'existe — sa présence vaut rapprochement.
+ */
 export interface StockExportFiche {
   id: string;
   numero: string;
-  production_order_id: string;
+  production_order_id: string | null;
   generated_at: string;
   generated_by: string | null;
+  sage_numero: string | null;
+  sage_rapproche_le: string | null;
+  sage_rapproche_par: string | null;
 }
 
 export interface ClientProductionStatus {

@@ -558,13 +558,13 @@ export type GenerateStockExportFicheResult = { error: string } | { id: string; n
 /**
  * Regroupe dans une fiche numérotée tous les mouvements de stock pas encore
  * exportés de cet ODF (livraisons partielles possibles, section 19).
- * Aucune vérification de rôle ici : `generate_stock_export_fiche` (SECURITY
- * DEFINER) fait autorité (responsable_production/administrateur) — la fiche
- * conditionne la sortie commerciale (BL), même périmètre que
- * validateProductionOrder.
+ * `generate_stock_export_fiche` (SECURITY DEFINER) fait autorité —
+ * administrateur/responsable_production/gestionnaire_stock (migration
+ * 0023) ; le `requireRole` ici doit rester le même périmètre, pas un sous-
+ * ensemble, sous peine de refuser ce que le RPC autoriserait.
  */
 export async function generateStockExportFiche(productionOrderId: string): Promise<GenerateStockExportFicheResult> {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requireRole(["administrateur", "responsable_production", "gestionnaire_stock"]);
   const supabase = await createClient();
 
   const { data, error } = await supabase.rpc("generate_stock_export_fiche", {
@@ -573,6 +573,7 @@ export async function generateStockExportFiche(productionOrderId: string): Promi
 
   if (error) return { error: error.message };
   revalidateOdf(productionOrderId);
+  revalidatePath("/atelier/stock");
   const fiche = data as { id: string; numero: string };
   return { id: fiche.id, numero: fiche.numero };
 }
