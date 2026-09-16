@@ -62,9 +62,13 @@ export function FichePatronnageLink({
   const [options, setOptions] = useState<FicheOption[]>([]);
   const [open, setOpen] = useState(false);
 
-  function generate() {
+  function generate(force = false) {
     startTransition(async () => {
-      const res = await generateFicheFromLine(lineId);
+      const res = await generateFicheFromLine(lineId, force);
+      if ("warning" in res) {
+        toast.warning(res.warning, { action: { label: "Générer quand même", onClick: () => generate(true) } });
+        return;
+      }
       if ("error" in res) {
         toast.error(res.error);
         return;
@@ -157,7 +161,7 @@ export function FichePatronnageLink({
                 ? "Génère une fiche pré-remplie depuis le modèle et le dispatching de cet ODF."
                 : "Sélectionnez un modèle sur cet ODF pour pouvoir générer sa fiche automatiquement."}
             </p>
-            <Button size="sm" variant="secondary" loading={pending} disabled={!productModelId} onClick={generate}>
+            <Button size="sm" variant="secondary" loading={pending} disabled={!productModelId} onClick={() => generate()}>
               <Sparkles className="h-3.5 w-3.5" /> Générer
             </Button>
           </div>

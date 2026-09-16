@@ -440,8 +440,13 @@ export async function linkLine(ficheId: string, lineId: string | null) {
  * la fois — la vérification ci-dessous évite juste l'erreur brute de
  * contrainte au profit d'un retour propre (retourner la fiche déjà générée
  * plutôt qu'échouer) si l'action est déclenchée deux fois.
+ *
+ * Une fiche orphine du même modèle (`candidate` ci-dessous) n'est plus un
+ * blocage (décision Ayman, 16/09) : elle ne fait que déclencher un
+ * avertissement — l'utilisateur reste libre de générer quand même
+ * (`force=true`) plutôt que d'être forcé à aller la lier d'abord.
  */
-export async function generateFicheFromLine(lineId: string) {
+export async function generateFicheFromLine(lineId: string, force = false) {
   const { authId } = await requirePermission("create");
   if (!(await can("ordres_fabrication", "modify"))) {
     return { error: "accès refusé : votre rôle ne permet pas de modifier cet ordre de fabrication" };
@@ -467,27 +472,32 @@ export async function generateFicheFromLine(lineId: string) {
   if (existing) return { id: existing.id as string, numeroOt: existing.numero_ot as string };
 
   // Sens inverse : une fiche a pu être créée AVANT cet ODF (demande du
-  // commercial ou de la PAO, modèle déjà choisi, encore sans ODF). Générer
-  // quand même créerait un second OT pour le même modèle — on pointe vers
-  // celle qui existe déjà (à lier via la recherche ci-dessous) plutôt que
-  // d'en dupliquer une. `production_order_line_id is null` exclut les
-  // fiches déjà prises par un autre article (la contrainte unique les
-  // rendrait de toute façon indisponibles).
-  const { data: candidate } = await supabase
-    .from("fiches_placement")
-    .select("numero_ot,quantite_totale")
-    .eq("product_model_id", line.product_model_id)
-    .is("production_order_line_id", null)
-    .neq("statut", "archive")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (candidate) {
-    return {
-      error: `Une fiche existe déjà pour ce modèle (${candidate.numero_ot}${
-        candidate.quantite_totale ? `, ${candidate.quantite_totale} pièces` : ""
-      }) — liez-la ci-dessous au lieu d'en générer une nouvelle.`,
-    };
+  // commercial ou de la PAO, modèle déjà choisi, encore sans ODF) et être
+  // restée orpheline (jamais liée à un article). La signaler plutôt que de
+  // bloquer : générer quand même est légitime (deux commandes distinctes du
+  // même modèle), lier l'orpheline aussi — à l'utilisateur de choisir.
+  // `production_order_line_id is null` exclut les fiches déjà prises par un
+  // autre article (la contrainte unique les rendrait de toute façon
+  // indisponibles).
+  if (!force) {
+    const { data: candidates, count } = await supabase
+      .from("fiches_placement")
+      .select("numero_ot,quantite_totale", { count: "exact" })
+      .eq("product_model_id", line.product_model_id)
+      .is("production_order_line_id", null)
+      .neq("statut", "archive")
+      .order("created_at", { ascending: false })
+      .limit(1);
+    const candidate = candidates?.[0];
+    if (candidate) {
+      const total = count ?? 1;
+      const autres = total - 1;
+      return {
+        warning: `${total === 1 ? "Une fiche" : `${total} fiches`} en suspens pour ce modèle, non liée${total === 1 ? "" : "s"} à un article (dont ${candidate.numero_ot}${
+          candidate.quantite_totale ? `, ${candidate.quantite_totale} pièces` : ""
+        }${autres > 0 ? `, +${autres} autre(s)` : ""}) — liez-la plutôt ci-dessous, ou confirmez pour générer quand même.`,
+      };
+    }
   }
 
   const { data: created, error: createError } = await supabase
