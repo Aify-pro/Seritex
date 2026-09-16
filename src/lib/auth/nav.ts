@@ -23,6 +23,7 @@ import {
   Shirt,
   SwatchBook,
   Layers,
+  ArrowLeftRight,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { createElement, type ReactNode } from "react";
@@ -101,6 +102,7 @@ export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
     { href: "/atelier/production", label: "Ordres de fabrication", icon: navIcon(Factory), module: "ordres_fabrication" },
     { href: "/atelier/patronnage", label: "Patronnage", icon: navIcon(Ruler), module: "patronnage" },
     { href: "/atelier/section", label: "Terminaux de section", icon: navIcon(ClipboardList), module: "ordres_travail" },
+    { href: "/atelier/stock", label: "Mouvements de stock", icon: navIcon(ArrowLeftRight) },
     { href: "/mediatheque", label: "Médiathèque", icon: navIcon(FolderOpen), module: "mediatheque" },
     { href: "/parametres/produits", label: "Modèles de produits", icon: navIcon(Shirt), section: PARAMETRES },
     { href: "/parametres/couleurs", label: "Couleurs et tailles", icon: navIcon(SwatchBook), section: PARAMETRES },
@@ -122,6 +124,8 @@ export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
   ],
   gestionnaire_stock: [
     { href: "/dashboard", label: "Tableau de bord", icon: navIcon(LayoutDashboard) },
+    { href: "/atelier/stock", label: "Mouvements de stock", icon: navIcon(ArrowLeftRight) },
+    { href: "/atelier/section", label: "Terminaux de section", icon: navIcon(ClipboardList) },
     { href: "/atelier/production", label: "Ordres de fabrication", icon: navIcon(Factory), module: "ordres_fabrication" },
     { href: "/parametres/stock", label: "Stock Sage (lecture)", icon: navIcon(Warehouse), section: PARAMETRES, module: "stock_sage" },
     {
@@ -143,6 +147,7 @@ export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
     { href: "/atelier/production", label: "Ordres de fabrication", icon: navIcon(Factory), module: "ordres_fabrication" },
     { href: "/atelier/patronnage", label: "Patronnage", icon: navIcon(Ruler), module: "patronnage" },
     { href: "/atelier/section", label: "Terminaux de section", icon: navIcon(ClipboardList), module: "ordres_travail" },
+    { href: "/atelier/stock", label: "Mouvements de stock", icon: navIcon(ArrowLeftRight) },
     { href: "/parametres/utilisateurs", label: "Utilisateurs", icon: navIcon(Users), section: PARAMETRES, module: "utilisateurs" },
     { href: "/parametres/roles", label: "Rôles & permissions", icon: navIcon(ShieldCheck), section: PARAMETRES, module: "roles" },
     { href: "/parametres/sections", label: "Sections d'atelier", icon: navIcon(Boxes), section: PARAMETRES, module: "sections" },

@@ -20,17 +20,28 @@ export default async function SectionQueuePage({
 }: {
   searchParams: Promise<{ section?: string }>;
 }) {
-  const { profile } = await requireRole(["chef_section", "responsable_production", "administrateur"]);
+  const { profile } = await requireRole(["chef_section", "responsable_production", "administrateur", "gestionnaire_stock"]);
   const supabase = await createClient();
   const params = await searchParams;
 
   let sectionId = profile.section_id;
   let sections: { id: string; name: string }[] = [];
+  const isStockManager = profile.role === "gestionnaire_stock";
 
   if (profile.role !== "chef_section") {
-    const { data } = await supabase.from("sections").select("id,name").eq("active", true).order("display_order");
-    sections = data ?? [];
-    sectionId = params.section ?? sections[0]?.id ?? null;
+    const { data } = await supabase
+      .from("sections")
+      .select("id,name,atelier_categories(cle)")
+      .eq("active", true)
+      .order("display_order");
+    sections = (data ?? []).map((s) => ({ id: s.id, name: s.name }));
+    // Le gestionnaire de stock n'a qu'un outil ici (pesées, section Coupe) —
+    // autant l'y amener directement plutôt que sur la première section de la
+    // liste, qui n'a souvent rien à lui montrer.
+    const defaultSectionId = isStockManager
+      ? (data ?? []).find((s) => (s.atelier_categories as unknown as { cle: string } | null)?.cle === "coupe")?.id
+      : undefined;
+    sectionId = params.section ?? defaultSectionId ?? sections[0]?.id ?? null;
   }
 
   if (!sectionId) {
@@ -204,11 +215,13 @@ export default async function SectionQueuePage({
   return (
     <div className="space-y-6">
       <PageHeader
-        title={`File de travail — ${section?.name ?? ""}`}
+        title={isStockManager ? `Pesées — ${section?.name ?? ""}` : `File de travail — ${section?.name ?? ""}`}
         description={
-          isCoupe
-            ? "Clôturez les matelas au fur et à mesure — quantités pré-remplies depuis le Patronnage."
-            : "Ajoutez la quantité produite au fur et à mesure sur vos ordres de travail."
+          isStockManager
+            ? "Sortie lot et retour stock — changez de section ci-contre si besoin."
+            : isCoupe
+              ? "Clôturez les matelas au fur et à mesure — quantités pré-remplies depuis le Patronnage."
+              : "Ajoutez la quantité produite au fur et à mesure sur vos ordres de travail."
         }
         action={
           sections.length > 0 ? <SectionSwitcher sections={sections} value={sectionId} /> : undefined
@@ -227,6 +240,7 @@ export default async function SectionQueuePage({
         initialOpenWasteBags={openWasteBags}
         stockItemOptions={stockItemOptions}
         sizes={await getSizes()}
+        stockManagerOnly={isStockManager}
       />
     </div>
   );

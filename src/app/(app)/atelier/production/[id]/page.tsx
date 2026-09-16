@@ -16,7 +16,6 @@ import { AnomaliesPanel } from "./anomalies-panel";
 import { ProductionOrderLines, type LineData } from "./production-order-lines";
 import { ProductionOrderMediaFiles, type AttachableMediaFile } from "./production-order-media-files";
 import { StockMovementsPanel } from "./stock-movements-panel";
-import { StockEntryForm } from "./stock-entry-form";
 import type { StatutFiche } from "@/lib/patronnage/types";
 import type { StockMovement, StockExportFiche } from "@/lib/types/domain";
 import { CheckCircle2, ChevronRight, Package, QrCode } from "lucide-react";
@@ -56,7 +55,6 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     { data: availableMedia },
     { data: stockMovements },
     { data: stockExportFiches },
-    { data: stockItems },
   ] = await Promise.all([
     supabase.from("work_orders").select("*,sections(name)").eq("production_order_id", id).order("planned_start", { ascending: true }),
     supabase
@@ -144,11 +142,6 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
       .select("id,numero,production_order_id,generated_at,generated_by")
       .eq("production_order_id", id)
       .order("generated_at", { ascending: false }),
-    // Lot gestionnaire de stock : article Sage optionnel pour une pesée
-    // reception_tissu/retour_stock saisie depuis la partie Stock de l'ODF —
-    // même source que le terminal Coupe (peut être vide si jamais
-    // synchronisé, cf. Paramètres > Stock).
-    supabase.from("stock_item_view").select("sage_reference,designation").order("designation"),
   ]);
 
   // Lot 2, généralisé migration 0036, puis par article migration 0037 : la
@@ -347,12 +340,10 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
   const canValidate = await can("ordres_fabrication", "validate");
   const canRequestClosure = profile.role === "responsable_production" || profile.role === "administrateur";
   const isAdmin = profile.role === "administrateur";
-  // Réception tissu / sortie lot / retour stock, et génération des fiches
-  // d'export Sage — gestionnaire de stock ajouté suite au constat que la
-  // section Coupe ne devait pas saisir la réception de marchandise
-  // (migrations 0022/0023) : ce n'est plus elle qui le fait, c'est ici.
+  // Génération des fiches d'export Sage — l'ODF n'affiche plus que la
+  // consultation des mouvements (saisie déplacée vers /atelier/stock,
+  // demande Ayman 16/09 : mouvements visibles sur l'ODF, gérés ailleurs).
   const canManageStock = isAdmin || profile.role === "responsable_production" || profile.role === "gestionnaire_stock";
-  const stockItemOptions = (stockItems ?? []).map((i) => ({ sageReference: i.sage_reference, designation: i.designation }));
 
   return (
     <div className="space-y-6">
@@ -573,11 +564,13 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
       )}
 
       {canManageStock && (
-        <StockEntryForm
-          productionOrderId={order.id}
-          articleLots={(articleLots ?? []).map((l) => ({ id: l.id, code: l.code, categorie: l.categorie }))}
-          stockItemOptions={stockItemOptions}
-        />
+        <p className="text-xs text-foreground-muted">
+          Mouvements de stock consultables ci-dessous — pour en enregistrer un nouveau, direction{" "}
+          <Link href={`/atelier/stock?odf=${order.id}`} className="font-medium text-brand hover:underline">
+            Mouvements de stock
+          </Link>
+          .
+        </p>
       )}
 
       <StockMovementsPanel

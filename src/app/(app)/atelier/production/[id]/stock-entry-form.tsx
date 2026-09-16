@@ -18,14 +18,13 @@ const PESEE_TYPE_LABELS = {
 } as const;
 
 /**
- * Partie Stock de la fiche ODF, réservée au gestionnaire de stock (+
- * responsable_production/administrateur en override) — migrations 0022/0023.
- * Remonté en usage réel : la réception de marchandise ne doit pas être
- * saisie par la section Coupe, c'est le travail du gestionnaire de stock ;
- * cette partie lui donne un endroit dédié, sur l'ODF concerné, pour
- * enregistrer entrées et sorties — d'où se génèrent ensuite les mouvements
- * de stock et les fiches d'export Sage (carte « Mouvements de stock »
- * juste en dessous).
+ * Saisie d'un mouvement de stock (réception tissu / sortie lot / retour),
+ * réservée au gestionnaire de stock (+ responsable_production/
+ * administrateur en override) — migrations 0022/0023. Vit sur
+ * `/atelier/stock` (demande Ayman 16/09 : la fiche ODF ne fait plus que
+ * consulter ses mouvements, la saisie a son propre écran, par ODF choisi) ;
+ * `productionOrderId` reste un prop plutôt qu'un contexte de route puisque
+ * cet écran passe d'un ODF à l'autre sans navigation complète.
  */
 export function StockEntryForm({
   productionOrderId,
