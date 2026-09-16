@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getBaseUrl } from "@/lib/url";
-import { buildOdfPdf, type OdfPdfArticle, type OdfPdfData, type OdfPdfSousOdf } from "@/lib/pdf/odf-pdf";
+import {
+  buildOdfPdf,
+  type OdfPdfArticle,
+  type OdfPdfColor,
+  type OdfPdfData,
+  type OdfPdfSousOdf,
+} from "@/lib/pdf/odf-pdf";
 import { PRODUCTION_ORDER_STATUS_LABELS, type ProductionOrderStatus } from "@/lib/types/domain";
 import type { StatutFiche } from "@/lib/patronnage/types";
 
@@ -54,7 +60,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       .select("id,reference,quantity_planned,quantity_done,sections(name)")
       .eq("production_order_id", id)
       .order("planned_start", { ascending: true }),
-    supabase.from("product_zone_templates").select("product_model_id,zone_key,zone_label"),
+    supabase.from("product_zone_templates").select("product_model_id,zone_key,zone_label,display_order"),
     // Visuels joints par article (migration 0037) — LineVisuelPicker ne
     // propose jamais que des fichiers de catégorie "visuel" à l'attache,
     // donc tout ce qui a un production_order_line_id ici EST un visuel.
@@ -111,25 +117,32 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     const textile = productModel?.textiles ?? null;
 
     // Couleur unique de la ligne, sinon déclinaison par zone du modèle.
+    // Le PDF dessine une pastille du ton réel : on lui passe le code du
+    // référentiel tel quel (un hexadécimal CSS) plutôt qu'une phrase.
     const couleurUnique = line.couleur_unique as unknown as { name: string; code: string } | null;
     let couleurLabel = "Couleur";
-    let couleur: string | null = null;
+    let couleurs: OdfPdfColor[] = [];
     if (couleurUnique) {
-      couleur = `${couleurUnique.name} (${couleurUnique.code})`;
+      couleurs = [{ zone: null, name: couleurUnique.name, code: couleurUnique.code }];
     } else if (line.zone_colors && line.zone_colors.length > 0) {
-      const zoneLabelByKey = new Map(
-        (zoneTemplatesAll ?? [])
-          .filter((z) => z.product_model_id === line.product_model_id)
-          .map((z) => [z.zone_key, z.zone_label])
-      );
+      const zones = (zoneTemplatesAll ?? []).filter((z) => z.product_model_id === line.product_model_id);
+      const zoneByKey = new Map(zones.map((z) => [z.zone_key, z]));
       couleurLabel = "Couleurs par zone";
-      couleur = line.zone_colors
+      couleurs = line.zone_colors
         .map((zc) => {
           const color = zc.colors as unknown as { name: string; code: string } | null;
-          const label = zoneLabelByKey.get(zc.zone_key) ?? zc.zone_key;
-          return color ? `${label} : ${color.name} (${color.code})` : `${label} : —`;
+          const zone = zoneByKey.get(zc.zone_key);
+          return {
+            zone: zone?.zone_label ?? zc.zone_key,
+            name: color?.name ?? "non renseignée",
+            code: color?.code ?? null,
+            ordre: zone?.display_order ?? Number.MAX_SAFE_INTEGER,
+          };
         })
-        .join(" · ");
+        // Les zones sortent dans l'ordre du gabarit du modèle (corps avant,
+        // corps arrière, col…) et pas dans l'ordre d'insertion en base.
+        .sort((a, b) => a.ordre - b.ordre)
+        .map(({ zone, name, code }) => ({ zone, name, code }));
     }
 
     const ficheForLine = (fiches ?? []).find((f) => f.production_order_line_id === line.id);
@@ -146,7 +159,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
           .filter(Boolean)
           .join(" · ") || null,
       couleurLabel,
-      couleur,
+      couleurs,
       sections:
         (line.line_sections ?? [])
           .slice()
