@@ -200,6 +200,16 @@ export interface ProductZoneTemplate {
   created_at: string;
 }
 
+/** Zone imprimable d'un modèle de produit — référentiel distinct du gabarit de zones couleur ci-dessus. */
+export interface ProductPrintableZone {
+  id: string;
+  product_model_id: string;
+  zone_key: string;
+  zone_label: string;
+  display_order: number;
+  created_at: string;
+}
+
 // Lot 12 — nomenclature (fournitures constantes).
 
 /** Composant constant hors tissu (boutons, fil, colle, col...) et sa quantité par pièce, pour un modèle de produit donné. */

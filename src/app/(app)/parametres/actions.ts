@@ -496,6 +496,57 @@ export async function removeProductZoneTemplate(zoneTemplateId: string) {
   return {};
 }
 
+// Zones imprimables (référentiel distinct du gabarit de zones couleur ci-dessus) — sections de catégorie Impression.
+
+const newPrintableZoneSchema = z.object({
+  product_model_id: z.string().uuid(),
+  zone_key: z
+    .string()
+    .trim()
+    .min(1)
+    .regex(/^[a-z0-9_]+$/, "Clé de zone : minuscules, chiffres et underscores uniquement"),
+  zone_label: z.string().trim().min(1),
+});
+
+/** Ajoute une zone imprimable à un modèle de produit — placée après les zones imprimables existantes. */
+export async function addProductPrintableZone(formData: FormData) {
+  await requireRole(["administrateur", "responsable_production"]);
+  const parsed = newPrintableZoneSchema.safeParse({
+    product_model_id: formData.get("product_model_id"),
+    zone_key: formData.get("zone_key"),
+    zone_label: formData.get("zone_label"),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message };
+
+  const supabase = await createClient();
+  const { data: existing } = await supabase
+    .from("product_printable_zones")
+    .select("display_order")
+    .eq("product_model_id", parsed.data.product_model_id)
+    .order("display_order", { ascending: false })
+    .limit(1);
+
+  const { error } = await supabase.from("product_printable_zones").insert({
+    product_model_id: parsed.data.product_model_id,
+    zone_key: parsed.data.zone_key,
+    zone_label: parsed.data.zone_label,
+    display_order: (existing?.[0]?.display_order ?? 0) + 1,
+  });
+  if (error) return { error: error.message };
+  revalidatePath("/parametres/produits");
+  return {};
+}
+
+/** Retire une zone imprimable — réservé à l'administrateur (cohérent avec product_printable_zones_delete). */
+export async function removeProductPrintableZone(zoneId: string) {
+  await requireRole(["administrateur"]);
+  const supabase = await createClient();
+  const { error } = await supabase.from("product_printable_zones").delete().eq("id", zoneId);
+  if (error) return { error: error.message };
+  revalidatePath("/parametres/produits");
+  return {};
+}
+
 // Lot 12 — nomenclature (fournitures constantes).
 
 const newNomenclatureLineSchema = z.object({
