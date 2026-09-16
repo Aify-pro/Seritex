@@ -16,6 +16,8 @@ import type { Size } from "@/lib/sizes";
 import { LineSectionsPicker } from "./line-sections-picker";
 import { FichePatronnageLink } from "./fiche-patronnage-link";
 import { LineVisuelPicker } from "./line-visuel-picker";
+import { LineMaquettePicker, type MaquetteFile } from "./line-maquette-picker";
+import { LinePrintableZonesPicker, type PrintableZoneOption } from "./line-printable-zones-picker";
 import type { AttachableMediaFile } from "./production-order-media-files";
 import type { StatutFiche } from "@/lib/patronnage/types";
 
@@ -64,9 +66,20 @@ export interface LineData {
   /** Une section de catégorie Coupe est-elle retenue ? Conditionne l'affichage de la fiche Patronnage. */
   coupeSelected: boolean;
   fiche: { id: string; numeroOt: string; statut: StatutFiche } | null;
-  /** Une section exigeant un visuel (ex. Impression) est-elle retenue ? */
-  visuelRequired: boolean;
+  /**
+   * Une section exigeant un visuel (ex. Impression) est-elle retenue ?
+   * Conditionne aussi l'affichage de la maquette et des zones imprimables
+   * (migration 0040) — les trois n'ont de sens que pour un article qui
+   * passe par l'Impression.
+   */
+  impressionSectionSelected: boolean;
   visuelAttached: AttachableMediaFile[];
+  /** Maquettes jointes à cet article (migration 0040), avec leur URL d'aperçu déjà résolue côté serveur. */
+  maquetteAttached: MaquetteFile[];
+  /** Zones imprimables définies pour le modèle de cet article (product_printable_zones). */
+  printableZoneOptions: PrintableZoneOption[];
+  /** Zones imprimables déjà cochées pour cet article. */
+  printableZoneIdsSelected: string[];
 }
 
 /**
@@ -404,15 +417,38 @@ function LineCard({
           />
         )}
 
-        {(line.visuelRequired || line.visuelAttached.length > 0) && (
+        {(line.impressionSectionSelected || line.visuelAttached.length > 0) && (
           <LineVisuelPicker
             lineId={line.id}
             productionOrderId={productionOrderId}
             attached={line.visuelAttached}
             available={availableMediaFiles}
-            required={line.visuelRequired}
+            required={line.impressionSectionSelected}
           />
         )}
+
+        {(line.impressionSectionSelected || line.maquetteAttached.length > 0) && (
+          <LineMaquettePicker
+            lineId={line.id}
+            productionOrderId={productionOrderId}
+            attached={line.maquetteAttached}
+            available={availableMediaFiles}
+          />
+        )}
+
+        {(line.impressionSectionSelected || line.printableZoneIdsSelected.length > 0) &&
+          (line.printableZoneOptions.length > 0 ? (
+            <LinePrintableZonesPicker
+              lineId={line.id}
+              productionOrderId={productionOrderId}
+              zones={line.printableZoneOptions}
+              initialZoneIds={line.printableZoneIdsSelected}
+            />
+          ) : (
+            <p className="text-xs text-foreground-muted">
+              Aucune zone imprimable définie pour ce modèle — Paramètres &gt; Produits.
+            </p>
+          ))}
       </div>
     </div>
   );

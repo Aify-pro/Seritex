@@ -80,7 +80,7 @@ export type MediaSyncStatus = "en_attente" | "synchronise" | "erreur";
 
 export type MediaEventType = "ajout" | "mise_a_jour" | "suppression";
 
-export type MediaFileCategory = "visuel" | "image_de_marque" | "fiche_technique" | "nuancier" | "autre";
+export type MediaFileCategory = "visuel" | "image_de_marque" | "fiche_technique" | "nuancier" | "maquette" | "autre";
 
 export interface AppUser {
   id: string;
@@ -192,6 +192,16 @@ export interface Color {
 
 /** Gabarit de zones fixe par modèle de produit (ex. 7 zones pour le t-shirt). */
 export interface ProductZoneTemplate {
+  id: string;
+  product_model_id: string;
+  zone_key: string;
+  zone_label: string;
+  display_order: number;
+  created_at: string;
+}
+
+/** Zone imprimable d'un modèle de produit — référentiel distinct du gabarit de zones couleur ci-dessus. */
+export interface ProductPrintableZone {
   id: string;
   product_model_id: string;
   zone_key: string;
@@ -629,6 +639,7 @@ export const MEDIA_CATEGORY_LABELS: Record<MediaFileCategory, string> = {
   image_de_marque: "Image de marque",
   fiche_technique: "Fiche technique",
   nuancier: "Nuancier",
+  maquette: "Maquette",
   autre: "Autre",
 };
 

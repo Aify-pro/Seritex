@@ -7,7 +7,7 @@ import { uploadMediaFile } from "@/lib/actions/media";
 import { MEDIA_CATEGORY_LABELS, type MediaFileCategory } from "@/lib/types/domain";
 import { UploadCloud } from "lucide-react";
 
-const CATEGORIES: MediaFileCategory[] = ["visuel", "image_de_marque", "fiche_technique", "nuancier", "autre"];
+const CATEGORIES: MediaFileCategory[] = ["visuel", "image_de_marque", "fiche_technique", "nuancier", "maquette", "autre"];
 
 /**
  * Dépôt d'un nouveau fichier dans la médiathèque du client — la raison est

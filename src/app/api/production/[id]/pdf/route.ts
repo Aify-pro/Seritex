@@ -3,6 +3,7 @@ import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFImage } from "pd
 import QRCode from "qrcode";
 import { createClient } from "@/lib/supabase/server";
 import { getBaseUrl } from "@/lib/url";
+import { getMediaFileBuffers } from "@/lib/media/preview";
 import { PRODUCTION_ORDER_STATUS_LABELS, type ProductionOrderStatus } from "@/lib/types/domain";
 
 /**
@@ -59,12 +60,12 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       .eq("production_order_id", id)
       .order("planned_start", { ascending: true }),
     supabase.from("product_zone_templates").select("product_model_id,zone_key,zone_label"),
-    // Visuels joints par article (migration 0037) — LineVisuelPicker ne
-    // propose jamais que des fichiers de catégorie "visuel" à l'attache,
-    // donc tout ce qui a un production_order_line_id ici EST un visuel.
+    // Visuels ET maquettes joints par article (migrations 0037/0040) —
+    // distingués par catégorie, contrairement à avant la migration 0040 où
+    // seul le visuel pouvait être scopé par article.
     supabase
       .from("production_order_media_files")
-      .select("production_order_line_id,media_files(file_name)")
+      .select("production_order_line_id,media_file_id,media_files(file_name,category)")
       .eq("production_order_id", id)
       .not("production_order_line_id", "is", null),
   ]);
@@ -78,14 +79,30 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       : { data: [] as { numero_ot: string; statut: string; production_order_line_id: string }[] };
 
   const visuelsByLine = new Map<string, string[]>();
+  const maquettesByLine = new Map<string, { id: string; file_name: string }[]>();
   for (const m of mediaFiles ?? []) {
     const lineId = m.production_order_line_id as string;
-    const fileName = (m.media_files as unknown as { file_name: string } | null)?.file_name;
-    if (!fileName) continue;
-    const list = visuelsByLine.get(lineId) ?? [];
-    list.push(fileName);
-    visuelsByLine.set(lineId, list);
+    const media = m.media_files as unknown as { file_name: string; category: string } | null;
+    if (!media) continue;
+    if (media.category === "maquette") {
+      const list = maquettesByLine.get(lineId) ?? [];
+      list.push({ id: m.media_file_id as string, file_name: media.file_name });
+      maquettesByLine.set(lineId, list);
+    } else if (media.category === "visuel") {
+      const list = visuelsByLine.get(lineId) ?? [];
+      list.push(media.file_name);
+      visuelsByLine.set(lineId, list);
+    }
   }
+
+  // Octets des maquettes (migration 0040) — récupérés ici, avant la création
+  // du PDF, car indépendants de `pdfDoc` ; embarqués dans le document plus
+  // bas, aux côtés des QR codes : même convention pour ne jamais entrelacer
+  // un await avec le dessin synchrone des pages.
+  const maquetteIds = Array.from(maquettesByLine.values())
+    .flat()
+    .map((m) => m.id);
+  const maquetteBuffers = await getMediaFileBuffers(maquetteIds);
 
   const userIds = [order.launched_by, order.cloture_demandee_par, order.closed_by].filter(
     (v): v is string => !!v
@@ -132,6 +149,20 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     workOrderQrImages.set(wo.id, await pdfDoc.embedPng(png));
   }
 
+  // Maquettes (migration 0040) : embarquées elles aussi avant le rendu. Un
+  // type MIME ni PNG ni JPEG, ou un fichier corrompu que pdf-lib refuse
+  // malgré un type déclaré correct, laisse simplement ce média absent de la
+  // map — la boucle de rendu affiche alors une mention texte à la place.
+  const maquetteImages = new Map<string, PDFImage>();
+  for (const [mediaFileId, { buffer, mimeType }] of maquetteBuffers) {
+    try {
+      if (mimeType === "image/png") maquetteImages.set(mediaFileId, await pdfDoc.embedPng(buffer));
+      else if (mimeType === "image/jpeg" || mimeType === "image/jpg") maquetteImages.set(mediaFileId, await pdfDoc.embedJpg(buffer));
+    } catch {
+      // format non pris en charge par pdf-lib — géré par l'absence dans la map
+    }
+  }
+
   const brand = rgb(0.059, 0.298, 0.361); // #0f4c5c
   const ink = rgb(0.11, 0.09, 0.09);
   const muted = rgb(0.42, 0.4, 0.38);
@@ -162,6 +193,12 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     }
     if (current) lines.push(current);
     return lines;
+  }
+
+  /** Dimensions maximales d'une image dans une boîte donnée, en conservant ses proportions (jamais déformée) — utilisé pour imprimer une maquette au format le plus grand possible. */
+  function fitImage(image: PDFImage, maxWidth: number, maxHeight: number) {
+    const ratio = Math.min(maxWidth / image.width, maxHeight / image.height);
+    return { width: image.width * ratio, height: image.height * ratio };
   }
 
   function drawField(label: string, value: string, opts: { x?: number; width?: number } = {}) {
@@ -362,6 +399,48 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       ensureSpace(1);
       page.drawLine({ start: { x: MARGIN, y }, end: { x: PAGE_WIDTH - MARGIN, y }, thickness: 0.5, color: rule });
       y -= 16;
+
+      // Maquette(s) (migration 0040) : imprimée telle quelle, sur sa propre
+      // page pour pouvoir occuper le format le plus grand possible sans
+      // être compressée dans la mise en page à deux colonnes du texte —
+      // demande explicite ("garder un format maximal"). Un fichier sans
+      // rendu embarqué (format non pris en charge, copie manquante) se
+      // signale par une simple mention texte plutôt que de bloquer le PDF.
+      for (const maquette of maquettesByLine.get(l.id) ?? []) {
+        const embedded = maquetteImages.get(maquette.id);
+        if (!embedded) {
+          drawField("Maquette", `${maquette.file_name} (aperçu non disponible dans ce PDF)`);
+          continue;
+        }
+
+        page = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+        y = PAGE_HEIGHT - MARGIN;
+        page.drawText(`Article ${index + 1} — ${l.description} — Maquette`, {
+          x: MARGIN,
+          y,
+          size: 12,
+          font: fontBold,
+          color: brand,
+        });
+        y -= 16;
+        page.drawText(maquette.file_name, { x: MARGIN, y, size: 9, font, color: muted });
+        y -= 20;
+
+        const maxWidth = CONTENT_WIDTH;
+        const maxHeight = y - MARGIN;
+        const { width: imgWidth, height: imgHeight } = fitImage(embedded, maxWidth, maxHeight);
+        page.drawImage(embedded, {
+          x: MARGIN + (maxWidth - imgWidth) / 2,
+          y: y - imgHeight,
+          width: imgWidth,
+          height: imgHeight,
+        });
+
+        // Marque la page comme épuisée : le prochain ensureSpace() (titre de
+        // la maquette suivante, ou reprise du texte) ouvrira naturellement
+        // une nouvelle page plutôt que de dessiner sous l'image.
+        y = MARGIN;
+      }
     });
   } else {
     drawField("Articles", "aucun");
