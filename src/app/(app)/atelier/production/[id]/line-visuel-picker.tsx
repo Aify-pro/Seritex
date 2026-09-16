@@ -2,7 +2,6 @@
 
 import { useTransition } from "react";
 import { toast } from "sonner";
-import { Card, CardHeader, CardBody } from "@/components/ui/card";
 import { Paperclip, X, Plus } from "lucide-react";
 import { attachVisuelToLine, detachVisuelFromLine } from "../actions";
 import type { AttachableMediaFile } from "./production-order-media-files";
@@ -19,14 +18,12 @@ import type { AttachableMediaFile } from "./production-order-media-files";
  */
 export function LineVisuelPicker({
   lineId,
-  lineLabel,
   productionOrderId,
   attached,
   available,
   required,
 }: {
   lineId: string;
-  lineLabel: string;
   productionOrderId: string;
   attached: AttachableMediaFile[];
   available: AttachableMediaFile[];
@@ -53,13 +50,14 @@ export function LineVisuelPicker({
   }
 
   return (
-    <Card>
-      <CardHeader
-        title={`Visuel / maquette — ${lineLabel}`}
-        description="Maquette réalisée par les infographes, jointe à cet article depuis la médiathèque du client."
-      />
-      <CardBody className="space-y-1.5">
-        {missingVisuel && (
+    <div className="space-y-1.5">
+      <div>
+        <p className="text-xs font-medium text-foreground-muted">Visuel / maquette</p>
+        <p className="text-[11px] text-foreground-muted">
+          Maquette réalisée par les infographes, jointe à cet article depuis la médiathèque du client.
+        </p>
+      </div>
+      {missingVisuel && (
           <p className="text-xs text-warning">
             ⚠ La validation de l&apos;ODF sera refusée tant qu&apos;aucun visuel n&apos;est joint à cet article.
           </p>
@@ -107,7 +105,6 @@ export function LineVisuelPicker({
             </select>
           </div>
         )}
-      </CardBody>
-    </Card>
+    </div>
   );
 }

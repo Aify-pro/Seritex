@@ -4,7 +4,6 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Search, Lock, ExternalLink, Sparkles } from "lucide-react";
-import { Card, CardHeader, CardBody } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
@@ -47,14 +46,11 @@ interface FicheOption {
  */
 export function FichePatronnageLink({
   lineId,
-  lineLabel,
   editable,
   fiche,
   productModelId,
 }: {
   lineId: string;
-  /** Description de l'article, affichée dans le titre de la carte. */
-  lineLabel: string;
   editable: boolean;
   fiche: { id: string; numeroOt: string; statut: StatutFiche } | null;
   /** Modèle de l'article — la génération automatique en a besoin (lot C2). */
@@ -111,13 +107,14 @@ export function FichePatronnageLink({
   const needsAttention = fiche && fiche.statut !== "bon_pour_coupe";
 
   return (
-    <Card>
-      <CardHeader
-        title={`Fiche Patronnage liée — ${lineLabel}`}
-        description="Obligatoire pour valider l'ODF tant qu'une section Coupe est retenue sur cet article."
-      />
-      <CardBody className="space-y-3">
-        {fiche ? (
+    <div className="space-y-3">
+      <div>
+        <p className="text-xs font-medium text-foreground-muted">Fiche Patronnage liée</p>
+        <p className="text-[11px] text-foreground-muted">
+          Obligatoire pour valider l&apos;ODF tant qu&apos;une section Coupe est retenue sur cet article.
+        </p>
+      </div>
+      {fiche ? (
           <div className="flex items-center justify-between gap-3">
             <div>
               <Link
@@ -196,7 +193,6 @@ export function FichePatronnageLink({
             )}
           </div>
         )}
-      </CardBody>
-    </Card>
+    </div>
   );
 }

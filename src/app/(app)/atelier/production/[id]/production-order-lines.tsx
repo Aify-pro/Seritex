@@ -13,6 +13,11 @@ import {
   setProductionOrderColorNote,
 } from "../actions";
 import type { Size } from "@/lib/sizes";
+import { LineSectionsPicker } from "./line-sections-picker";
+import { FichePatronnageLink } from "./fiche-patronnage-link";
+import { LineVisuelPicker } from "./line-visuel-picker";
+import type { AttachableMediaFile } from "./production-order-media-files";
+import type { StatutFiche } from "@/lib/patronnage/types";
 
 interface ZoneTemplate {
   zone_key: string;
@@ -54,6 +59,14 @@ export interface LineData {
   zoneTemplate: ZoneTemplate[];
   referentielTailles: Size[];
   initialSizes: { taille: string; quantite_demandee: number }[];
+  /** Sections d'atelier retenues sur cet article (migration 0037), dans l'ordre de passage. */
+  sectionIds: string[];
+  /** Une section de catégorie Coupe est-elle retenue ? Conditionne l'affichage de la fiche Patronnage. */
+  coupeSelected: boolean;
+  fiche: { id: string; numeroOt: string; statut: StatutFiche } | null;
+  /** Une section exigeant un visuel (ex. Impression) est-elle retenue ? */
+  visuelRequired: boolean;
+  visuelAttached: AttachableMediaFile[];
 }
 
 /**
@@ -69,6 +82,8 @@ export function ProductionOrderLines({
   lines,
   productModels,
   colors,
+  allSections,
+  availableMediaFiles,
   initialNote,
 }: {
   productionOrderId: string;
@@ -76,6 +91,10 @@ export function ProductionOrderLines({
   lines: LineData[];
   productModels: { id: string; name: string }[];
   colors: ColorOption[];
+  /** Toutes les sections d'atelier actives, pour le sélecteur de sections retenues de chaque article. */
+  allSections: { id: string; name: string }[];
+  /** Médiathèque du client, pour le sélecteur de visuel de chaque article. */
+  availableMediaFiles: AttachableMediaFile[];
   /** Disponibilité couleurs, commentaire libre — jamais validé par le logiciel (section 9), reste au niveau de l'ODF entier. */
   initialNote: string | null;
 }) {
@@ -83,7 +102,7 @@ export function ProductionOrderLines({
     <Card>
       <CardHeader
         title="Configuration produit"
-        description="Un article par ligne du devis accepté — modèle, tissu et couleur hérités et non modifiables (déjà validés par le client), sauf ligne de devis sans modèle. Dispatching des tailles propre à chaque article."
+        description="Un article par ligne du devis accepté — modèle, tissu, couleur, sections d'atelier, fiche Patronnage et visuel, tout au même endroit."
       />
       <CardBody className="space-y-4">
         {lines.length === 0 ? (
@@ -97,6 +116,8 @@ export function ProductionOrderLines({
               line={line}
               productModels={productModels}
               colors={colors}
+              allSections={allSections}
+              availableMediaFiles={availableMediaFiles}
             />
           ))
         )}
@@ -157,12 +178,16 @@ function LineCard({
   line,
   productModels,
   colors,
+  allSections,
+  availableMediaFiles,
 }: {
   productionOrderId: string;
   editable: boolean;
   line: LineData;
   productModels: { id: string; name: string }[];
   colors: ColorOption[];
+  allSections: { id: string; name: string }[];
+  availableMediaFiles: AttachableMediaFile[];
 }) {
   const [pending, startTransition] = useTransition();
   const [draft, setDraft] = useState<ZoneColorDraft>({
@@ -359,6 +384,36 @@ function LineCard({
           </div>
         </>
       )}
+
+      <div className="space-y-3 border-t border-border pt-3">
+        {editable && (
+          <LineSectionsPicker
+            lineId={line.id}
+            productionOrderId={productionOrderId}
+            allSections={allSections}
+            initialSectionIds={line.sectionIds}
+          />
+        )}
+
+        {(line.coupeSelected || line.fiche) && (
+          <FichePatronnageLink
+            lineId={line.id}
+            editable={editable}
+            fiche={line.fiche}
+            productModelId={line.productModelId}
+          />
+        )}
+
+        {(line.visuelRequired || line.visuelAttached.length > 0) && (
+          <LineVisuelPicker
+            lineId={line.id}
+            productionOrderId={productionOrderId}
+            attached={line.visuelAttached}
+            available={availableMediaFiles}
+            required={line.visuelRequired}
+          />
+        )}
+      </div>
     </div>
   );
 }
