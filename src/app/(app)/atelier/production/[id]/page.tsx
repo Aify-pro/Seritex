@@ -567,7 +567,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
         <p className="text-xs text-foreground-muted">
           Mouvements de stock consultables ci-dessous — pour en enregistrer un nouveau, direction{" "}
           <Link href={`/atelier/stock?odf=${order.id}`} className="font-medium text-brand hover:underline">
-            Mouvements de stock
+            Gestion de stock
           </Link>
           .
         </p>
