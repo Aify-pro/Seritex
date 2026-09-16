@@ -3,7 +3,6 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Card, CardHeader, CardBody } from "@/components/ui/card";
 import { Trash2, ChevronUp, ChevronDown } from "lucide-react";
 import { setProductionOrderLineSections } from "../actions";
 
@@ -22,13 +21,11 @@ import { setProductionOrderLineSections } from "../actions";
 export function LineSectionsPicker({
   lineId,
   productionOrderId,
-  lineLabel,
   allSections,
   initialSectionIds,
 }: {
   lineId: string;
   productionOrderId: string;
-  lineLabel: string;
   allSections: { id: string; name: string }[];
   initialSectionIds: string[];
 }) {
@@ -67,10 +64,12 @@ export function LineSectionsPicker({
   }
 
   return (
-    <Card>
-      <CardHeader title={`Sections retenues — ${lineLabel}`} description="Dans l'ordre de passage de cet article." />
-      <CardBody className="space-y-2">
-        {sectionIds.length === 0 ? (
+    <div className="space-y-2">
+      <div>
+        <p className="text-xs font-medium text-foreground-muted">Sections retenues</p>
+        <p className="text-[11px] text-foreground-muted">Dans l&apos;ordre de passage de cet article.</p>
+      </div>
+      {sectionIds.length === 0 ? (
           <p className="rounded-md border border-dashed border-border bg-surface-muted px-3 py-2 text-xs text-foreground-muted">
             Aucune section retenue pour l&apos;instant.
           </p>
@@ -137,7 +136,6 @@ export function LineSectionsPicker({
             ))}
           </select>
         )}
-      </CardBody>
-    </Card>
+    </div>
   );
 }

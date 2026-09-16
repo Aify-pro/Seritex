@@ -11,10 +11,7 @@ import { ArchiveButton } from "./archive-button";
 import { LifecycleActions } from "./lifecycle-actions";
 import { ReplacementOrderPicker } from "./replacement-order-picker";
 import { getSizesForProductModel } from "@/lib/sizes";
-import { LineSectionsPicker } from "./line-sections-picker";
 import { SubmitOdfPanel } from "./submit-odf-panel";
-import { FichePatronnageLink } from "./fiche-patronnage-link";
-import { LineVisuelPicker } from "./line-visuel-picker";
 import { AnomaliesPanel } from "./anomalies-panel";
 import { ProductionOrderLines, type LineData } from "./production-order-lines";
 import { ProductionOrderMediaFiles, type AttachableMediaFile } from "./production-order-media-files";
@@ -239,7 +236,8 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
   // toutes les lignes), et si son modèle/sa couleur viennent du devis
   // (sourceHadModel) donc non modifiables ici.
   type RawLine = NonNullable<typeof productionOrderLines>[number];
-  const lines: LineData[] = await Promise.all(
+  type LineConfig = Omit<LineData, "sectionIds" | "coupeSelected" | "fiche" | "visuelRequired" | "visuelAttached">;
+  const lines: LineConfig[] = await Promise.all(
     (productionOrderLines ?? []).map(async (l: RawLine) => {
       const productModel = l.product_models as unknown as {
         id: string;
@@ -332,6 +330,19 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     fichesByLine[f.production_order_line_id] = { id: f.id, numeroOt: f.numero_ot, statut: f.statut };
   }
 
+  // Sections retenues, fiche Patronnage et visuel intégrés à la carte de
+  // chaque article (« Configuration produit ») plutôt qu'en cartes séparées
+  // en bas de page (demande Ayman, 15/09) — regroupe ici les données
+  // calculées ci-dessus par article.
+  const linesWithConfig: LineData[] = lines.map((line) => ({
+    ...line,
+    sectionIds: sectionIdsByLine[line.id] ?? [],
+    coupeSelected: !!coupeSelectedByLine[line.id],
+    fiche: fichesByLine[line.id] ?? null,
+    visuelRequired: !!visuelRequiredByLine[line.id],
+    visuelAttached: visuelByLine[line.id] ?? [],
+  }));
+
   const canArchive = await can("ordres_fabrication", "archive");
   const canValidate = await can("ordres_fabrication", "validate");
   const canRequestClosure = profile.role === "responsable_production" || profile.role === "administrateur";
@@ -416,51 +427,13 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
       <ProductionOrderLines
         productionOrderId={order.id}
         editable={modifiable}
-        lines={lines}
+        lines={linesWithConfig}
         productModels={productModels ?? []}
         colors={activeColors ?? []}
+        allSections={allSections ?? []}
+        availableMediaFiles={availableMediaFiles}
         initialNote={order.note_disponibilite_couleurs}
       />
-
-      {lines.map((line) => {
-        const lineLabel = `${line.description} (${line.quantity} pièces)`;
-        const lineFiche = fichesByLine[line.id] ?? null;
-        const lineVisuel = visuelByLine[line.id] ?? [];
-        return (
-          <div key={line.id} className="space-y-6">
-            {modifiable && (
-              <LineSectionsPicker
-                lineId={line.id}
-                productionOrderId={order.id}
-                lineLabel={lineLabel}
-                allSections={allSections ?? []}
-                initialSectionIds={sectionIdsByLine[line.id] ?? []}
-              />
-            )}
-
-            {(coupeSelectedByLine[line.id] || lineFiche) && (
-              <FichePatronnageLink
-                lineId={line.id}
-                lineLabel={lineLabel}
-                editable={modifiable}
-                fiche={lineFiche}
-                productModelId={line.productModelId}
-              />
-            )}
-
-            {(visuelRequiredByLine[line.id] || lineVisuel.length > 0) && (
-              <LineVisuelPicker
-                lineId={line.id}
-                lineLabel={lineLabel}
-                productionOrderId={order.id}
-                attached={lineVisuel}
-                available={availableMediaFiles}
-                required={!!visuelRequiredByLine[line.id]}
-              />
-            )}
-          </div>
-        );
-      })}
 
       {modifiable && (
         <SubmitOdfPanel productionOrderId={order.id} anySectionChosen={anySectionChosen} linesConfigured={linesConfigured} />
