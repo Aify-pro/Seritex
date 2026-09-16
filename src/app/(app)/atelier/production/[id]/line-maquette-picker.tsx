@@ -2,7 +2,7 @@
 
 import { useTransition } from "react";
 import { toast } from "sonner";
-import { ImageOff, X, Plus } from "lucide-react";
+import { ImageOff, X, Plus, RefreshCw } from "lucide-react";
 import { Dialog } from "@/components/ui/dialog";
 import { attachMediaFileToLine, detachMediaFileFromLine } from "../actions";
 import type { AttachableMediaFile } from "./production-order-media-files";
@@ -14,11 +14,14 @@ export interface MaquetteFile extends AttachableMediaFile {
 
 /**
  * Maquette (simulation/rendu) jointe à un article précis (migration 0040) —
- * distincte du visuel (fichier d'exploitation, voir LineVisuelPicker) : la
- * maquette se consulte comme une image, ouverte en fenêtre interne pour un
- * aperçu en grand, plutôt qu'affichée seulement par son nom de fichier.
- * Même mécanique de rattachement (production_order_media_files scopé par
- * article) que le visuel, seule la catégorie de média proposée diffère.
+ * distincte du visuel (fichier d'exploitation, multiple, voir
+ * LineVisuelPicker) : la maquette, elle, est unique par article (demande
+ * Ayman, 16/09) — en choisir une nouvelle remplace l'ancienne, la logique de
+ * remplacement vit dans attachMediaFileToLine. Se consulte comme une image,
+ * ouverte en fenêtre interne pour un aperçu en grand, plutôt qu'affichée
+ * seulement par son nom de fichier — sur l'écran comme dans le PDF, jamais
+ * affichée au-delà de la zone qui lui est réservée (vignette recadrée ici,
+ * page dédiée mise à l'échelle sans dépassement dans le PDF).
  */
 export function LineMaquettePicker({
   lineId,
@@ -107,7 +110,11 @@ export function LineMaquettePicker({
       )}
       {selectable.length > 0 && (
         <div className="flex items-center gap-1.5">
-          <Plus className="h-3.5 w-3.5 text-foreground-muted" />
+          {attached.length > 0 ? (
+            <RefreshCw className="h-3.5 w-3.5 text-foreground-muted" />
+          ) : (
+            <Plus className="h-3.5 w-3.5 text-foreground-muted" />
+          )}
           <select
             disabled={pending}
             defaultValue=""
@@ -117,7 +124,9 @@ export function LineMaquettePicker({
             }}
             className="h-7 rounded-md border border-border bg-surface px-2 text-xs disabled:opacity-60"
           >
-            <option value="">Joindre une maquette de la médiathèque…</option>
+            <option value="">
+              {attached.length > 0 ? "Remplacer par…" : "Joindre une maquette de la médiathèque…"}
+            </option>
             {selectable.map((f) => (
               <option key={f.id} value={f.id}>
                 {f.file_name}
