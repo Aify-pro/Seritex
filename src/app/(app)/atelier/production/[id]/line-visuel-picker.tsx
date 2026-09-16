@@ -25,10 +25,16 @@ import type { AttachableMediaFile, DownloadableMediaFile } from "@/lib/types/dom
  * validate_production_order() tant qu'aucun visuel (devis ou ODF) n'est
  * joint. Avertissement doux ici, comme pour la fiche Patronnage : le
  * contrôle qui fait autorité reste le RPC.
+ *
+ * `editable` : figé dès que l'ODF est validé (migration 0042) — au-delà,
+ * plus de détachement ni de nouveau dépôt, RLS y veille en dernier ressort
+ * (production_order_media_files_write/_delete). Les visuels du devis
+ * restent de toute façon en lecture seule ici, quel que soit ce statut.
  */
 export function LineVisuelPicker({
   lineId,
   productionOrderId,
+  editable,
   fromDevis,
   attached,
   available,
@@ -36,6 +42,7 @@ export function LineVisuelPicker({
 }: {
   lineId: string;
   productionOrderId: string;
+  editable: boolean;
   fromDevis: DownloadableMediaFile[];
   attached: DownloadableMediaFile[];
   available: AttachableMediaFile[];
@@ -43,7 +50,7 @@ export function LineVisuelPicker({
 }) {
   const [pending, startTransition] = useTransition();
   const attachedIds = new Set([...fromDevis, ...attached].map((f) => f.id));
-  const selectable = available.filter((f) => !attachedIds.has(f.id) && f.category === "visuel");
+  const selectable = editable ? available.filter((f) => !attachedIds.has(f.id) && f.category === "visuel") : [];
   const missingVisuel = required && fromDevis.length === 0 && attached.length === 0;
 
   function attach(mediaFileId: string) {
@@ -112,7 +119,7 @@ export function LineVisuelPicker({
             <Chip key={f.id} f={f} detachable={false} />
           ))}
           {attached.map((f) => (
-            <Chip key={f.id} f={f} detachable />
+            <Chip key={f.id} f={f} detachable={editable} />
           ))}
           {fromDevis.length === 0 && attached.length === 0 && (
             <li className="text-xs text-foreground-muted">Aucun visuel joint pour l&apos;instant.</li>

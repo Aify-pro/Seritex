@@ -243,6 +243,16 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
   // (submit_production_order accepte les deux statuts depuis 0028).
   const modifiable = order.status === "brouillon" || order.status === "refuse";
 
+  // Verrouillage visuel/maquette (migration 0042, demande Ayman 16/09) : un
+  // point plus tardif que `modifiable` — reste modifiable pendant
+  // en_attente_validation, pas seulement brouillon/refusé, car
+  // validate_production_order() exige un visuel pour toute section
+  // Impression retenue : le verrouiller dès la soumission interdirait de
+  // corriger un visuel manquant avant la validation. Figé à partir de
+  // en_production, comme fiches_placement/traces_placement (0037).
+  const mediaEditable =
+    order.status === "brouillon" || order.status === "en_attente_validation" || order.status === "refuse";
+
   // ODF multi-lignes (une ligne par article du devis) : construit les
   // données d'affichage de chaque ligne — tailles proposables restreintes
   // au modèle de CETTE ligne (getSizesForProductModel, convention 0029),
@@ -522,6 +532,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
       <ProductionOrderLines
         productionOrderId={order.id}
         editable={modifiable}
+        mediaEditable={mediaEditable}
         lines={linesWithConfig}
         productModels={productModels ?? []}
         colors={activeColors ?? []}

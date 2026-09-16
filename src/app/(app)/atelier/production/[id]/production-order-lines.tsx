@@ -97,6 +97,7 @@ export interface LineData {
 export function ProductionOrderLines({
   productionOrderId,
   editable,
+  mediaEditable,
   lines,
   productModels,
   colors,
@@ -106,6 +107,8 @@ export function ProductionOrderLines({
 }: {
   productionOrderId: string;
   editable: boolean;
+  /** Visuel/maquette restent modifiables un peu plus longtemps que le reste (migration 0042) — voir page.tsx. */
+  mediaEditable: boolean;
   lines: LineData[];
   productModels: { id: string; name: string }[];
   colors: ColorOption[];
@@ -131,6 +134,7 @@ export function ProductionOrderLines({
               key={line.id}
               productionOrderId={productionOrderId}
               editable={editable}
+              mediaEditable={mediaEditable}
               line={line}
               productModels={productModels}
               colors={colors}
@@ -193,6 +197,7 @@ function ColorNote({
 function LineCard({
   productionOrderId,
   editable,
+  mediaEditable,
   line,
   productModels,
   colors,
@@ -201,6 +206,7 @@ function LineCard({
 }: {
   productionOrderId: string;
   editable: boolean;
+  mediaEditable: boolean;
   line: LineData;
   productModels: { id: string; name: string }[];
   colors: ColorOption[];
@@ -426,6 +432,7 @@ function LineCard({
           <LineVisuelPicker
             lineId={line.id}
             productionOrderId={productionOrderId}
+            editable={mediaEditable}
             fromDevis={line.visuelsFromDevis}
             attached={line.visuelAttached}
             available={availableMediaFiles}
@@ -437,6 +444,7 @@ function LineCard({
           <LineMaquettePicker
             lineId={line.id}
             productionOrderId={productionOrderId}
+            editable={mediaEditable}
             fromDevis={line.maquetteFromDevis}
             attached={line.maquetteAttached}
             available={availableMediaFiles}

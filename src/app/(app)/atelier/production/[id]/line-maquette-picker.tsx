@@ -21,23 +21,28 @@ export type { MaquetteFile } from "@/lib/types/domain";
  * reçu aucune maquette (`fromDevis` nul) propose ici son propre dépôt
  * (`attached`, éditable) — rattrapage explicitement voulu, jamais un
  * deuxième emplacement concurrent.
+ *
+ * `editable` : figé dès que l'ODF est validé (migration 0042) — RLS y
+ * veille en dernier ressort (production_order_media_files_write/_delete).
  */
 export function LineMaquettePicker({
   lineId,
   productionOrderId,
+  editable,
   fromDevis,
   attached,
   available,
 }: {
   lineId: string;
   productionOrderId: string;
+  editable: boolean;
   fromDevis: MaquetteFile | null;
   attached: MaquetteFile[];
   available: AttachableMediaFile[];
 }) {
   const [pending, startTransition] = useTransition();
   const attachedIds = new Set(attached.map((f) => f.id));
-  const selectable = available.filter((f) => !attachedIds.has(f.id) && f.category === "maquette");
+  const selectable = editable ? available.filter((f) => !attachedIds.has(f.id) && f.category === "maquette") : [];
 
   function attach(mediaFileId: string) {
     if (!mediaFileId) return;
@@ -82,14 +87,16 @@ export function LineMaquettePicker({
           {attached.map((f) => (
             <li key={f.id} className="group relative">
               <Thumbnail f={f} />
-              <button
-                disabled={pending}
-                onClick={() => detach(f.id)}
-                aria-label="Détacher"
-                className="absolute -right-1.5 -top-1.5 rounded-full bg-surface p-0.5 text-foreground-muted shadow ring-1 ring-border hover:bg-danger-soft hover:text-danger disabled:opacity-50"
-              >
-                <X className="h-3 w-3" />
-              </button>
+              {editable && (
+                <button
+                  disabled={pending}
+                  onClick={() => detach(f.id)}
+                  aria-label="Détacher"
+                  className="absolute -right-1.5 -top-1.5 rounded-full bg-surface p-0.5 text-foreground-muted shadow ring-1 ring-border hover:bg-danger-soft hover:text-danger disabled:opacity-50"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
             </li>
           ))}
         </ul>
