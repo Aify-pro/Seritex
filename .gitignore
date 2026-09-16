@@ -36,3 +36,6 @@ npm-debug.log*
 
 # préférences Claude Code personnelles (non partagées avec l'équipe)
 /.claude/settings.local.json
+
+# Aperçu local du PDF ODF (npm run preview:pdf-odf)
+odf-preview.pdf

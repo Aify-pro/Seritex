@@ -1,0 +1,132 @@
+/**
+ * Aperçu local du bon imprimable de l'ordre de fabrication.
+ *
+ * `npm run preview:pdf-odf [chemin/de/sortie.pdf]`
+ *
+ * Génère le PDF avec un jeu de données volontairement pénible (adresse
+ * longue, huit tailles, plusieurs articles, six sous-ODF) pour vérifier la
+ * mise en page — coupures de page, filets, chevauchements — sans avoir
+ * besoin d'une base Supabase ni d'une session authentifiée.
+ */
+import { writeFile } from "node:fs/promises";
+import path from "node:path";
+import { buildOdfPdf, type OdfPdfData } from "../src/lib/pdf/odf-pdf";
+
+const BASE = "https://seritex.example.com";
+
+const sizes = (entries: [string, number][]) => entries.map(([taille, quantite]) => ({ taille, quantite }));
+
+const data: OdfPdfData = {
+  reference: "ODF-2026-0148",
+  statusLabel: "En production",
+  sheetUrl: `${BASE}/atelier/production/11111111-2222-3333-4444-555555555555`,
+  generatedAt: "16 sept. 2026",
+  client: {
+    name: "Groupe Textile Atlantique & Compagnie",
+    address: "Zone industrielle des Hauts Fourneaux, bâtiment C, 12 rue de la Manufacture, 59200 Tourcoing",
+    phone: "+33 3 20 45 88 12",
+    email: "commandes@textile-atlantique.example",
+    siret: "812 456 733 00027",
+  },
+  devis: "DEV-2026-0311",
+  totalQuantity: 1450,
+  plannedStart: "21 sept. 2026",
+  plannedEnd: "14 oct. 2026",
+  articles: [
+    {
+      description: "Polo piqué manches courtes col chemise, broderie poitrine gauche",
+      quantity: 800,
+      modele: "PL-320 Polo piqué homme",
+      tissu: "Piqué de coton peigné 220 g",
+      composition: "100 % coton peigné",
+      grammageLaize: "220 g/m2 - laize 180 cm",
+      couleurLabel: "Couleurs par zone",
+      couleur: "Corps : Bleu marine (NAV-12) - Col : Blanc optique (WHT-01) - Poignets : Blanc optique (WHT-01)",
+      sections: "Coupe, Piquage, Broderie, Finition, Emballage",
+      fiche: "OT-2026-0091 (Bon pour coupe)",
+      visuels: "logo-poitrine-v3.pdf, placement-broderie.png",
+      sizes: sizes([
+        ["XS", 40],
+        ["S", 120],
+        ["M", 220],
+        ["L", 230],
+        ["XL", 130],
+        ["2XL", 40],
+        ["3XL", 20],
+      ]),
+    },
+    {
+      description: "Pantalon de travail multipoches renforcé genoux",
+      quantity: 450,
+      modele: "PT-880 Pantalon technique",
+      tissu: "Sergé polycoton 245 g",
+      composition: "65 % polyester / 35 % coton",
+      grammageLaize: "245 g/m2 - laize 150 cm",
+      couleurLabel: "Couleur",
+      couleur: "Gris anthracite (GRY-44)",
+      sections: "Coupe, Piquage, Finition, Contrôle qualité, Emballage",
+      fiche: "OT-2026-0092 (En cours)",
+      visuels: null,
+      sizes: sizes([
+        ["38", 30],
+        ["40", 60],
+        ["42", 90],
+        ["44", 95],
+        ["46", 80],
+        ["48", 50],
+        ["50", 30],
+        ["52", 15],
+      ]),
+    },
+    {
+      description: "Veste softshell coupe-vent doublée, capuche amovible",
+      quantity: 200,
+      modele: "VS-410 Softshell",
+      tissu: null,
+      composition: null,
+      grammageLaize: null,
+      couleurLabel: "Couleur",
+      couleur: "Noir (BLK-00)",
+      sections: "Coupe, Piquage, Finition",
+      fiche: null,
+      visuels: "dossier-technique-softshell.pdf",
+      sizes: sizes([
+        ["S", 30],
+        ["M", 70],
+        ["L", 60],
+        ["XL", 40],
+      ]),
+    },
+  ],
+  sousOdf: [
+    { reference: "OT-2026-0501", section: "Coupe", planned: 1450, done: 1450, url: `${BASE}/ot/1` },
+    { reference: "OT-2026-0502", section: "Piquage", planned: 1450, done: 940, url: `${BASE}/ot/2` },
+    { reference: "OT-2026-0503", section: "Broderie", planned: 800, done: 610, url: `${BASE}/ot/3` },
+    { reference: "OT-2026-0504", section: "Finition", planned: 1450, done: 320, url: `${BASE}/ot/4` },
+    { reference: "OT-2026-0505", section: "Contrôle qualité", planned: 450, done: 0, url: `${BASE}/ot/5` },
+    { reference: "OT-2026-0506", section: "Emballage et expédition", planned: 1450, done: 0, url: `${BASE}/ot/6` },
+  ],
+  surplusTraces: [
+    ["M", 6],
+    ["L", 4],
+  ],
+  lifecycle: [
+    { event: "Soumis à validation", date: "18 sept. 2026", by: "Sofia Bennani" },
+    { event: "Lancé en production", date: "21 sept. 2026", by: "Karim Elyazidi" },
+    { event: "Clôture demandée", date: "13 oct. 2026", by: "Karim Elyazidi" },
+  ],
+  clotureNote:
+    "Reliquat de 12 pièces en taille L a reporter sur le prochain ODF du meme modele : le tissu recu sur le dernier rouleau presentait un defaut de teinture sur environ 4 metres.",
+};
+
+async function main() {
+  const out = path.resolve(process.argv[2] ?? "odf-preview.pdf");
+  const bytes = await buildOdfPdf(data);
+  await writeFile(out, bytes);
+  console.log(`PDF d'aperçu écrit : ${out}`);
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

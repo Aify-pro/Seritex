@@ -1,25 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
-import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFImage } from "pdf-lib";
-import QRCode from "qrcode";
 import { createClient } from "@/lib/supabase/server";
 import { getBaseUrl } from "@/lib/url";
+import { buildOdfPdf, type OdfPdfArticle, type OdfPdfData, type OdfPdfSousOdf } from "@/lib/pdf/odf-pdf";
 import { PRODUCTION_ORDER_STATUS_LABELS, type ProductionOrderStatus } from "@/lib/types/domain";
+import type { StatutFiche } from "@/lib/patronnage/types";
 
 /**
- * Génération du bon imprimable de l'ordre de fabrication — même principe
- * que la fiche échantillon (api/echantillons/[id]/pdf) : construit à la
- * demande, jamais mis en cache, reflète toujours l'état courant de l'ODF.
+ * Bon imprimable de l'ordre de fabrication — construit à la demande, jamais
+ * mis en cache, reflète toujours l'état courant de l'ODF.
  *
- * Refonte (demande Ayman, 16/09) : en-tête client/commande structuré en
- * deux colonnes, un bloc par article reprenant toute sa « Configuration
- * produit » (modèle, tissu, couleur, sections, fiche Patronnage, visuels —
- * même détail que /atelier/production/[id] depuis les migrations
- * 0035/0037), et un QR code par sous-ODF pour ouvrir directement son détail
- * depuis un téléphone en atelier (au même titre que le QR de la fiche
- * échantillon) — le point explicitement demandé pour la saisie terminal.
+ * Cette route ne fait que lire Supabase et aplatir le résultat : toute la
+ * mise en page vit dans `@/lib/pdf/odf-pdf` (voir le commentaire d'en-tête
+ * de ce module pour la structure du document et pourquoi elle en est
+ * séparée).
  *
- * Porte toujours les mentions du document de logique consolidée (section
- * 4) : le nom de la personne qui a validé le lancement et celui qui a
+ * Le document porte toujours les mentions du document de logique
+ * consolidée (section 4) : qui a validé le lancement, qui a demandé puis
  * validé la clôture définitive.
  *
  * L'authentification suit le même client Supabase (cookies de session) que
@@ -74,7 +70,10 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const lineIds = (lines ?? []).map((l) => l.id);
   const { data: fiches } =
     lineIds.length > 0
-      ? await supabase.from("fiches_placement").select("numero_ot,statut,production_order_line_id").in("production_order_line_id", lineIds)
+      ? await supabase
+          .from("fiches_placement")
+          .select("numero_ot,statut,production_order_line_id")
+          .in("production_order_line_id", lineIds)
       : { data: [] as { numero_ot: string; statut: string; production_order_line_id: string }[] };
 
   const visuelsByLine = new Map<string, string[]>();
@@ -103,325 +102,103 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   } | null;
   const quote = order.quotes as unknown as { reference: string } | null;
   const baseUrl = await getBaseUrl();
-  const sheetUrl = `${baseUrl}/atelier/production/${order.id}`;
 
-  const pdfDoc = await PDFDocument.create();
-  pdfDoc.setTitle(`Ordre de fabrication ${order.reference}`);
-  pdfDoc.setProducer("Seritex");
+  const articles: OdfPdfArticle[] = (lines ?? []).map((line) => {
+    const productModel = line.product_models as unknown as {
+      name: string;
+      textiles: { nom: string; composition: string | null; grammage: number | null; laize_cm: number | null } | null;
+    } | null;
+    const textile = productModel?.textiles ?? null;
 
-  const PAGE_WIDTH = 595.28; // A4 portrait, points
-  const PAGE_HEIGHT = 841.89;
-  const MARGIN = 50;
-  const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
-  const COL_WIDTH = (CONTENT_WIDTH - 20) / 2;
-  const COL2_X = MARGIN + COL_WIDTH + 20;
-
-  let page = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
-  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-
-  // QR d'en-tête (ODF entier) + un par sous-ODF (saisie terminal, demande
-  // explicite) — tous embarqués avant le rendu pour ne pas mélanger await
-  // et dessin au fil de l'eau.
-  const headerQrPng = await QRCode.toBuffer(sheetUrl, { type: "png", width: 260, margin: 1 });
-  const headerQrImage = await pdfDoc.embedPng(headerQrPng);
-  const workOrderQrImages = new Map<string, PDFImage>();
-  for (const wo of workOrders ?? []) {
-    const woUrl = `${baseUrl}/atelier/production/${order.id}/ot/${wo.id}`;
-    const png = await QRCode.toBuffer(woUrl, { type: "png", width: 160, margin: 1 });
-    workOrderQrImages.set(wo.id, await pdfDoc.embedPng(png));
-  }
-
-  const brand = rgb(0.059, 0.298, 0.361); // #0f4c5c
-  const ink = rgb(0.11, 0.09, 0.09);
-  const muted = rgb(0.42, 0.4, 0.38);
-  const rule = rgb(0.9, 0.88, 0.85);
-  const boxFill = rgb(0.97, 0.965, 0.955);
-
-  let y = PAGE_HEIGHT - MARGIN;
-
-  function ensureSpace(needed: number) {
-    if (y - needed < MARGIN) {
-      page = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
-      y = PAGE_HEIGHT - MARGIN;
+    // Couleur unique de la ligne, sinon déclinaison par zone du modèle.
+    const couleurUnique = line.couleur_unique as unknown as { name: string; code: string } | null;
+    let couleurLabel = "Couleur";
+    let couleur: string | null = null;
+    if (couleurUnique) {
+      couleur = `${couleurUnique.name} (${couleurUnique.code})`;
+    } else if (line.zone_colors && line.zone_colors.length > 0) {
+      const zoneLabelByKey = new Map(
+        (zoneTemplatesAll ?? [])
+          .filter((z) => z.product_model_id === line.product_model_id)
+          .map((z) => [z.zone_key, z.zone_label])
+      );
+      couleurLabel = "Couleurs par zone";
+      couleur = line.zone_colors
+        .map((zc) => {
+          const color = zc.colors as unknown as { name: string; code: string } | null;
+          const label = zoneLabelByKey.get(zc.zone_key) ?? zc.zone_key;
+          return color ? `${label} : ${color.name} (${color.code})` : `${label} : —`;
+        })
+        .join(" · ");
     }
-  }
 
-  function wrap(str: string, maxWidth: number, size: number, useFont: PDFFont): string[] {
-    const words = str.split(/\s+/).filter(Boolean);
-    const lines: string[] = [];
-    let current = "";
-    for (const word of words) {
-      const attempt = current ? `${current} ${word}` : word;
-      if (useFont.widthOfTextAtSize(attempt, size) > maxWidth && current) {
-        lines.push(current);
-        current = word;
-      } else {
-        current = attempt;
-      }
-    }
-    if (current) lines.push(current);
-    return lines;
-  }
+    const ficheForLine = (fiches ?? []).find((f) => f.production_order_line_id === line.id);
+    const visuels = visuelsByLine.get(line.id);
 
-  function drawField(label: string, value: string, opts: { x?: number; width?: number } = {}) {
-    const x = opts.x ?? MARGIN;
-    const width = opts.width ?? CONTENT_WIDTH;
-    ensureSpace(30);
-    page.drawText(label.toUpperCase(), { x, y, size: 8, font: fontBold, color: muted });
-    y -= 12;
-    for (const line of wrap(value || "—", width, 11, font)) {
-      ensureSpace(15);
-      page.drawText(line, { x, y, size: 11, font, color: ink });
-      y -= 15;
-    }
-    y -= 6;
-  }
-
-  function drawSectionTitle(str: string) {
-    ensureSpace(30);
-    y -= 6;
-    page.drawText(str, { x: MARGIN, y, size: 12, font: fontBold, color: brand });
-    y -= 8;
-    page.drawLine({ start: { x: MARGIN, y }, end: { x: PAGE_WIDTH - MARGIN, y }, thickness: 0.75, color: rule });
-    y -= 16;
-  }
-
-  /** Hauteur qu'occupera drawField pour cette valeur, sans rien dessiner. */
-  function fieldHeight(value: string, width: number): number {
-    return 12 + wrap(value || "—", width, 11, font).length * 15 + 6;
-  }
-
-  /**
-   * Deux colonnes de champs (client à gauche, commande à droite) sur un
-   * cadre dessiné une seule fois : la hauteur du bloc est calculée AVANT de
-   * tracer quoi que ce soit (pdf-lib ne permet pas d'intercaler un
-   * rectangle derrière du texte déjà posé), puis chaque colonne est
-   * dessinée avec son propre curseur — les deux listes n'ont pas besoin du
-   * même nombre de lignes, le cadre couvre la plus haute des deux.
-   */
-  function drawTwoColumnBox(left: [string, string][], right: [string, string][]) {
-    const colWidth = COL_WIDTH - 24;
-    const leftHeight = left.reduce((sum, [, value]) => sum + fieldHeight(value, colWidth), 0);
-    const rightHeight = right.reduce((sum, [, value]) => sum + fieldHeight(value, colWidth), 0);
-    const padding = 12;
-    const boxHeight = Math.max(leftHeight, rightHeight) + padding * 2;
-
-    ensureSpace(boxHeight + 10);
-    const boxTop = y;
-    const boxBottom = boxTop - boxHeight;
-    page.drawRectangle({
-      x: MARGIN,
-      y: boxBottom,
-      width: CONTENT_WIDTH,
-      height: boxHeight,
-      color: boxFill,
-      borderColor: rule,
-      borderWidth: 1,
-    });
-
-    y = boxTop - padding;
-    for (const [label, value] of left) drawField(label, value, { x: MARGIN + 12, width: colWidth });
-    const leftEndY = y;
-
-    y = boxTop - padding;
-    for (const [label, value] of right) drawField(label, value, { x: COL2_X, width: colWidth });
-    const rightEndY = y;
-
-    y = Math.min(leftEndY, rightEndY, boxBottom) - 20;
-  }
-
-  // En-tête
-  page.drawText("SERITEX", { x: MARGIN, y, size: 20, font: fontBold, color: brand });
-  y -= 22;
-  page.drawText("Ordre de fabrication", { x: MARGIN, y, size: 12, font, color: muted });
-  y -= 14;
-  page.drawText(PRODUCTION_ORDER_STATUS_LABELS[order.status as ProductionOrderStatus], {
-    x: MARGIN,
-    y,
-    size: 12,
-    font: fontBold,
-    color: ink,
-  });
-
-  // QR d'en-tête en haut à droite, aligné sur le bloc "SERITEX".
-  const headerQrTop = PAGE_HEIGHT - MARGIN;
-  const headerQrSize = 78;
-  page.drawImage(headerQrImage, {
-    x: PAGE_WIDTH - MARGIN - headerQrSize,
-    y: headerQrTop - headerQrSize,
-    width: headerQrSize,
-    height: headerQrSize,
-  });
-  page.drawText(order.reference, {
-    x: PAGE_WIDTH - MARGIN - headerQrSize,
-    y: headerQrTop - headerQrSize - 11,
-    size: 8,
-    font: fontBold,
-    color: ink,
-  });
-
-  y -= 20;
-  page.drawLine({ start: { x: MARGIN, y }, end: { x: PAGE_WIDTH - MARGIN, y }, thickness: 1, color: rule });
-  y -= 20;
-
-  // Bloc client (gauche) / commande (droite), sur fond légèrement teinté —
-  // "infos du client, en passant par le devis, jusqu'à la commande" en un
-  // seul coup d'œil plutôt qu'empilées.
-  const clientRows: [string, string][] = [
-    ["Client", company?.name ?? "—"],
-    ["Adresse", company?.address ?? "—"],
-    ["Téléphone · Email", [company?.phone, company?.email].filter(Boolean).join(" · ") || "—"],
-  ];
-  const commandeRows: [string, string][] = [
-    ["Référence ODF", order.reference],
-    ["Devis d'origine", quote?.reference ?? "—"],
-    ["Quantité totale", `${order.total_quantity} pièces`],
-    ["Début - fin planifiés", `${order.planned_start_date ? formatFr(order.planned_start_date) : "—"} - ${order.planned_end_date ? formatFr(order.planned_end_date) : "—"}`],
-  ];
-  drawTwoColumnBox(clientRows, commandeRows);
-
-  // Articles — reprend le détail de "Configuration produit" (écran ODF) :
-  // modèle/tissu/couleur/sections/tailles/fiche/visuels, article par
-  // article plutôt qu'une ligne "Composition" globale.
-  drawSectionTitle(`Articles (${(lines ?? []).length})`);
-  if (lines && lines.length > 0) {
-    lines.forEach((l, index) => {
-      ensureSpace(40);
-      page.drawText(`Article ${index + 1} — ${l.description} (${l.quantity} pièces)`, {
-        x: MARGIN,
-        y,
-        size: 11,
-        font: fontBold,
-        color: brand,
-      });
-      y -= 18;
-
-      const productModel = l.product_models as unknown as {
-        name: string;
-        textiles: { nom: string; composition: string | null; grammage: number | null; laize_cm: number | null } | null;
-      } | null;
-      if (productModel) {
-        const textile = productModel.textiles;
-        drawField(
-          "Modèle · Tissu",
-          `${productModel.name}${textile ? ` — ${textile.nom}${textile.composition ? ` (${textile.composition})` : ""}${textile.grammage ? ` · ${textile.grammage} g/m²` : ""}${textile.laize_cm ? ` · laize ${textile.laize_cm} cm` : ""}` : ""}`
-        );
-      } else {
-        drawField("Modèle", "non renseigné");
-      }
-
-      const couleurUnique = l.couleur_unique as unknown as { name: string; code: string } | null;
-      if (couleurUnique) {
-        drawField("Couleur", `${couleurUnique.name} (${couleurUnique.code})`);
-      } else if (l.zone_colors && l.zone_colors.length > 0) {
-        const zoneLabelByKey = new Map(
-          (zoneTemplatesAll ?? [])
-            .filter((z) => z.product_model_id === l.product_model_id)
-            .map((z) => [z.zone_key, z.zone_label])
-        );
-        drawField(
-          "Couleurs par zone",
-          l.zone_colors
-            .map((zc) => {
-              const color = zc.colors as unknown as { name: string; code: string } | null;
-              const label = zoneLabelByKey.get(zc.zone_key) ?? zc.zone_key;
-              return color ? `${label} : ${color.name} (${color.code})` : `${label} : —`;
-            })
-            .join(" · ")
-        );
-      } else {
-        drawField("Couleur", "non renseignée");
-      }
-
-      const sectionNames =
-        (l.line_sections ?? [])
+    return {
+      description: line.description,
+      quantity: line.quantity,
+      modele: productModel?.name ?? null,
+      tissu: textile?.nom ?? null,
+      composition: textile?.composition ?? null,
+      grammageLaize:
+        [textile?.grammage ? `${textile.grammage} g/m²` : null, textile?.laize_cm ? `laize ${textile.laize_cm} cm` : null]
+          .filter(Boolean)
+          .join(" · ") || null,
+      couleurLabel,
+      couleur,
+      sections:
+        (line.line_sections ?? [])
           .slice()
           .sort((a, b) => a.ordre - b.ordre)
           .map((s) => (s.sections as unknown as { name: string } | null)?.name)
           .filter(Boolean)
-          .join(", ") || "aucune";
-      drawField("Sections retenues", sectionNames);
-
-      drawField(
-        "Dispatching des tailles",
-        (l.sizes ?? []).map((s) => `${s.taille} : ${s.quantite_demandee}`).join(" · ") || "non renseigné"
-      );
-
-      const ficheForLine = (fiches ?? []).find((f) => f.production_order_line_id === l.id);
-      if (ficheForLine) {
-        drawField("Fiche Patronnage liée", `${ficheForLine.numero_ot} (${ficheForLine.statut})`);
-      }
-
-      const visuels = visuelsByLine.get(l.id);
-      if (visuels && visuels.length > 0) {
-        drawField("Visuel(s) joint(s)", visuels.join(", "));
-      }
-
-      y -= 6;
-      ensureSpace(1);
-      page.drawLine({ start: { x: MARGIN, y }, end: { x: PAGE_WIDTH - MARGIN, y }, thickness: 0.5, color: rule });
-      y -= 16;
-    });
-  } else {
-    drawField("Articles", "aucun");
-  }
-
-  if (order.mention_surplus_traces) {
-    drawField(
-      "Surplus tracé vs quantité demandée",
-      Object.entries(order.mention_surplus_traces as Record<string, number>)
-        .map(([taille, surplus]) => `${taille} : +${surplus}`)
-        .join(" · ")
-    );
-  }
-
-  // Sous-ODF — un QR par ligne (demande explicite, "important pour la
-  // saisie par terminal") : scanné depuis un téléphone en atelier, ouvre
-  // directement le détail de CE sous-ODF plutôt que de le chercher dans la
-  // file de la section.
-  if (workOrders && workOrders.length > 0) {
-    drawSectionTitle("Avancement des sous-ODF");
-    for (const wo of workOrders) {
-      const rowHeight = 46;
-      ensureSpace(rowHeight);
-      const sectionName = (wo.sections as unknown as { name: string } | null)?.name ?? "—";
-      const qrSize = 40;
-      const qrImage = workOrderQrImages.get(wo.id);
-      if (qrImage) {
-        page.drawImage(qrImage, { x: MARGIN, y: y - qrSize + 10, width: qrSize, height: qrSize });
-      }
-      const textX = MARGIN + qrSize + 12;
-      page.drawText(`${sectionName} — ${wo.reference}`, { x: textX, y, size: 10, font: fontBold, color: ink });
-      y -= 14;
-      page.drawText(`${wo.quantity_done} / ${wo.quantity_planned} pièces`, { x: textX, y, size: 9, font, color: muted });
-      y -= rowHeight - 14;
-    }
-  }
-
-  drawSectionTitle("Cycle de vie");
-  if (order.launched_at) {
-    drawField("Lancé le", `${formatFr(order.launched_at)} par ${nameOf(order.launched_by)}`);
-  }
-  if (order.cloture_demandee_at) {
-    drawField("Clôture demandée le", `${formatFr(order.cloture_demandee_at)} par ${nameOf(order.cloture_demandee_par)}`);
-  }
-  if (order.closed_at) {
-    drawField("Clôturé le", `${formatFr(order.closed_at)} par ${nameOf(order.closed_by)}`);
-  }
-  if (order.cloture_note) {
-    drawField("Note de clôture", order.cloture_note);
-  }
-
-  page.drawText(`Document généré le ${formatFr(new Date().toISOString())} — ${sheetUrl}`, {
-    x: MARGIN,
-    y: MARGIN / 2,
-    size: 7,
-    font,
-    color: muted,
+          .join(", ") || null,
+      fiche: ficheForLine
+        ? `${ficheForLine.numero_ot} (${FICHE_STATUT_LABELS[ficheForLine.statut as StatutFiche] ?? ficheForLine.statut})`
+        : null,
+      visuels: visuels && visuels.length > 0 ? visuels.join(", ") : null,
+      sizes: (line.sizes ?? []).map((s) => ({ taille: s.taille, quantite: s.quantite_demandee })),
+    };
   });
 
-  const pdfBytes = await pdfDoc.save();
+  // Sous-ODF générés à la validation de l'ODF : un QR par ligne, qui ouvre
+  // le détail de CE sous-ODF (saisie au terminal depuis l'atelier).
+  const sousOdf: OdfPdfSousOdf[] = (workOrders ?? []).map((wo) => ({
+    reference: wo.reference,
+    section: (wo.sections as unknown as { name: string } | null)?.name ?? "—",
+    planned: wo.quantity_planned,
+    done: wo.quantity_done,
+    url: `${baseUrl}/atelier/production/${order.id}/ot/${wo.id}`,
+  }));
+
+  const lifecycle: OdfPdfData["lifecycle"] = [];
+  if (order.launched_at) lifecycle.push({ event: "Lancé en production", date: formatFr(order.launched_at), by: nameOf(order.launched_by) });
+  if (order.refuse_le) lifecycle.push({ event: "Validation refusée", date: formatFr(order.refuse_le), by: nameOf(order.refuse_par) });
+  if (order.cloture_demandee_at)
+    lifecycle.push({ event: "Clôture demandée", date: formatFr(order.cloture_demandee_at), by: nameOf(order.cloture_demandee_par) });
+  if (order.closed_at) lifecycle.push({ event: "Clôturé", date: formatFr(order.closed_at), by: nameOf(order.closed_by) });
+
+  const data: OdfPdfData = {
+    reference: order.reference,
+    statusLabel: PRODUCTION_ORDER_STATUS_LABELS[order.status as ProductionOrderStatus],
+    sheetUrl: `${baseUrl}/atelier/production/${order.id}`,
+    generatedAt: formatFr(new Date().toISOString()),
+    client: company,
+    devis: quote?.reference ?? null,
+    totalQuantity: order.total_quantity,
+    plannedStart: order.planned_start_date ? formatFr(order.planned_start_date) : null,
+    plannedEnd: order.planned_end_date ? formatFr(order.planned_end_date) : null,
+    articles,
+    sousOdf,
+    surplusTraces: order.mention_surplus_traces
+      ? Object.entries(order.mention_surplus_traces as Record<string, number>)
+      : [],
+    lifecycle,
+    clotureNote: order.cloture_note ?? null,
+  };
+
+  const pdfBytes = await buildOdfPdf(data);
 
   return new NextResponse(Buffer.from(pdfBytes), {
     headers: {
@@ -431,6 +208,14 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     },
   });
 }
+
+/** Mêmes libellés que la pastille de statut de la fiche (fiche-patronnage-link.tsx). */
+const FICHE_STATUT_LABELS: Record<StatutFiche, string> = {
+  demande: "Demande",
+  traces_deposes: "Tracés déposés",
+  bon_pour_coupe: "Bon pour coupe",
+  archive: "Archivé",
+};
 
 function formatFr(value: string) {
   return new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(value));
