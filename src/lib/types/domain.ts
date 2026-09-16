@@ -80,7 +80,7 @@ export type MediaSyncStatus = "en_attente" | "synchronise" | "erreur";
 
 export type MediaEventType = "ajout" | "mise_a_jour" | "suppression";
 
-export type MediaFileCategory = "visuel" | "image_de_marque" | "fiche_technique" | "nuancier" | "autre";
+export type MediaFileCategory = "visuel" | "image_de_marque" | "fiche_technique" | "nuancier" | "maquette" | "autre";
 
 export interface AppUser {
   id: string;
@@ -639,6 +639,7 @@ export const MEDIA_CATEGORY_LABELS: Record<MediaFileCategory, string> = {
   image_de_marque: "Image de marque",
   fiche_technique: "Fiche technique",
   nuancier: "Nuancier",
+  maquette: "Maquette",
   autre: "Autre",
 };
 

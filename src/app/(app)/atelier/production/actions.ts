@@ -499,12 +499,14 @@ export async function detachMediaFileFromProductionOrder(productionOrderId: stri
 }
 
 /**
- * Visuel/maquette joint à un article précis (migration 0037, plus seulement
- * à l'ODF entier) : c'est ce rattachement, pas celui ci-dessus, que vérifie
- * validate_production_order() pour une section de catégorie Impression
- * retenue sur CET article.
+ * Fichier (visuel OU maquette, migration 0040 — même rattachement pour les
+ * deux, seule leur catégorie diffère) joint à un article précis (migration
+ * 0037, plus seulement à l'ODF entier) : c'est ce rattachement, pas celui
+ * ci-dessus, que vérifie validate_production_order() pour une section de
+ * catégorie Impression retenue sur CET article (visuel uniquement — la
+ * maquette n'est pas aujourd'hui une condition bloquante).
  */
-export async function attachVisuelToLine(lineId: string, productionOrderId: string, mediaFileId: string) {
+export async function attachMediaFileToLine(lineId: string, productionOrderId: string, mediaFileId: string) {
   const { authId } = await requireRole(["administrateur", "responsable_production"]);
   const supabase = await createClient();
   const { error } = await supabase.from("production_order_media_files").insert({
@@ -518,7 +520,7 @@ export async function attachVisuelToLine(lineId: string, productionOrderId: stri
   return {};
 }
 
-export async function detachVisuelFromLine(lineId: string, productionOrderId: string, mediaFileId: string) {
+export async function detachMediaFileFromLine(lineId: string, productionOrderId: string, mediaFileId: string) {
   await requireRole(["administrateur", "responsable_production"]);
   const supabase = await createClient();
   const { error } = await supabase
@@ -527,6 +529,40 @@ export async function detachVisuelFromLine(lineId: string, productionOrderId: st
     .eq("production_order_line_id", lineId)
     .eq("media_file_id", mediaFileId);
   if (error) return { error: error.message };
+  revalidateOdf(productionOrderId);
+  return {};
+}
+
+/**
+ * Zones imprimables cochées pour UN article de l'ODF (migration 0040), parmi
+ * celles définies pour son modèle de produit (product_printable_zones,
+ * migration 0039). Même pattern que `setProductionOrderLineSections` —
+ * remplace tout à chaque appel, pas d'ordre à préserver ici.
+ */
+export async function setProductionOrderLinePrintableZones(
+  lineId: string,
+  productionOrderId: string,
+  printableZoneIds: string[]
+) {
+  await requireRole(["administrateur", "responsable_production"]);
+  const supabase = await createClient();
+
+  const { error: delError } = await supabase
+    .from("production_order_line_printable_zones")
+    .delete()
+    .eq("production_order_line_id", lineId);
+  if (delError) return { error: delError.message };
+
+  if (printableZoneIds.length > 0) {
+    const { error: insError } = await supabase.from("production_order_line_printable_zones").insert(
+      printableZoneIds.map((printableZoneId) => ({
+        production_order_line_id: lineId,
+        printable_zone_id: printableZoneId,
+      }))
+    );
+    if (insError) return { error: insError.message };
+  }
+
   revalidateOdf(productionOrderId);
   return {};
 }

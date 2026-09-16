@@ -12,7 +12,7 @@ const MAX_SIZE_BYTES = 25 * 1024 * 1024; // 25 Mo — cohérent avec une limite 
 
 const uploadSchema = z.object({
   company_id: z.string().uuid(),
-  category: z.enum(["visuel", "image_de_marque", "fiche_technique", "nuancier", "autre"]),
+  category: z.enum(["visuel", "image_de_marque", "fiche_technique", "nuancier", "maquette", "autre"]),
   reason: z.string().trim().min(4, "La raison doit contenir au moins 4 caractères"),
 });
 
