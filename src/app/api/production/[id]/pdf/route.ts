@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { PDFDocument, StandardFonts, rgb, type PDFFont } from "pdf-lib";
+import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFImage } from "pdf-lib";
+import QRCode from "qrcode";
 import { createClient } from "@/lib/supabase/server";
 import { getBaseUrl } from "@/lib/url";
 import { PRODUCTION_ORDER_STATUS_LABELS, type ProductionOrderStatus } from "@/lib/types/domain";
@@ -9,10 +10,17 @@ import { PRODUCTION_ORDER_STATUS_LABELS, type ProductionOrderStatus } from "@/li
  * que la fiche échantillon (api/echantillons/[id]/pdf) : construit à la
  * demande, jamais mis en cache, reflète toujours l'état courant de l'ODF.
  *
- * Porte les mentions demandées par le document de logique consolidée
- * (section 4) : le nom de la personne qui a validé le lancement et celui
- * qui a validé la clôture définitive doivent apparaître sur le PDF, au même
- * titre qu'à l'écran.
+ * Refonte (demande Ayman, 16/09) : en-tête client/commande structuré en
+ * deux colonnes, un bloc par article reprenant toute sa « Configuration
+ * produit » (modèle, tissu, couleur, sections, fiche Patronnage, visuels —
+ * même détail que /atelier/production/[id] depuis les migrations
+ * 0035/0037), et un QR code par sous-ODF pour ouvrir directement son détail
+ * depuis un téléphone en atelier (au même titre que le QR de la fiche
+ * échantillon) — le point explicitement demandé pour la saisie terminal.
+ *
+ * Porte toujours les mentions du document de logique consolidée (section
+ * 4) : le nom de la personne qui a validé le lancement et celui qui a
+ * validé la clôture définitive.
  *
  * L'authentification suit le même client Supabase (cookies de session) que
  * le reste de l'application — la RLS s'applique identiquement.
@@ -28,23 +36,37 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   const { data: order } = await supabase
     .from("production_orders")
-    .select("*,companies(name),quotes(reference)")
+    .select("*,companies(name,address,phone,email,siret),quotes(reference)")
     .eq("id", id)
     .maybeSingle();
 
   if (!order) return NextResponse.json({ error: "Ordre de fabrication introuvable" }, { status: 404 });
 
-  const [{ data: lines }, { data: workOrders }] = await Promise.all([
-    // ODF multi-lignes : dispatching des tailles ET sections retenues par
-    // article, plus par ODF entier (migrations 0035/0037).
+  const [{ data: lines }, { data: workOrders }, { data: zoneTemplatesAll }, { data: mediaFiles }] = await Promise.all([
+    // ODF multi-lignes : modèle/tissu/couleur/tailles/sections par article
+    // (migrations 0035/0037) — même jointure que la Configuration produit
+    // écran (/atelier/production/[id]/page.tsx).
     supabase
       .from("production_order_lines")
       .select(
-        "id,description,quantity,sizes:production_order_sizes(taille,quantite_demandee),line_sections:production_order_line_sections(ordre,sections(name))"
+        "id,description,quantity,product_model_id,couleur_unique_id,product_models(name,textiles(nom,composition,grammage,laize_cm)),couleur_unique:couleur_unique_id(name,code),zone_colors:production_order_line_zone_colors(zone_key,colors:color_id(name,code)),sizes:production_order_sizes(taille,quantite_demandee),line_sections:production_order_line_sections(ordre,sections(name))"
       )
       .eq("production_order_id", id)
       .order("created_at"),
-    supabase.from("work_orders").select("reference,quantity_planned,quantity_done,sections(name)").eq("production_order_id", id),
+    supabase
+      .from("work_orders")
+      .select("id,reference,quantity_planned,quantity_done,sections(name)")
+      .eq("production_order_id", id)
+      .order("planned_start", { ascending: true }),
+    supabase.from("product_zone_templates").select("product_model_id,zone_key,zone_label"),
+    // Visuels joints par article (migration 0037) — LineVisuelPicker ne
+    // propose jamais que des fichiers de catégorie "visuel" à l'attache,
+    // donc tout ce qui a un production_order_line_id ici EST un visuel.
+    supabase
+      .from("production_order_media_files")
+      .select("production_order_line_id,media_files(file_name)")
+      .eq("production_order_id", id)
+      .not("production_order_line_id", "is", null),
   ]);
 
   // Une fiche par article passant en Coupe (migration 0037, plus une seule
@@ -55,6 +77,16 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       ? await supabase.from("fiches_placement").select("numero_ot,statut,production_order_line_id").in("production_order_line_id", lineIds)
       : { data: [] as { numero_ot: string; statut: string; production_order_line_id: string }[] };
 
+  const visuelsByLine = new Map<string, string[]>();
+  for (const m of mediaFiles ?? []) {
+    const lineId = m.production_order_line_id as string;
+    const fileName = (m.media_files as unknown as { file_name: string } | null)?.file_name;
+    if (!fileName) continue;
+    const list = visuelsByLine.get(lineId) ?? [];
+    list.push(fileName);
+    visuelsByLine.set(lineId, list);
+  }
+
   const userIds = [order.launched_by, order.cloture_demandee_par, order.closed_by].filter(
     (v): v is string => !!v
   );
@@ -62,7 +94,13 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     userIds.length > 0 ? await supabase.from("app_users").select("id,full_name").in("id", userIds) : { data: [] };
   const nameOf = (userId: string | null) => users?.find((u) => u.id === userId)?.full_name ?? "—";
 
-  const company = order.companies as unknown as { name: string } | null;
+  const company = order.companies as unknown as {
+    name: string;
+    address: string | null;
+    phone: string | null;
+    email: string | null;
+    siret: string | null;
+  } | null;
   const quote = order.quotes as unknown as { reference: string } | null;
   const baseUrl = await getBaseUrl();
   const sheetUrl = `${baseUrl}/atelier/production/${order.id}`;
@@ -75,15 +113,30 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const PAGE_HEIGHT = 841.89;
   const MARGIN = 50;
   const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
+  const COL_WIDTH = (CONTENT_WIDTH - 20) / 2;
+  const COL2_X = MARGIN + COL_WIDTH + 20;
 
   let page = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
 
+  // QR d'en-tête (ODF entier) + un par sous-ODF (saisie terminal, demande
+  // explicite) — tous embarqués avant le rendu pour ne pas mélanger await
+  // et dessin au fil de l'eau.
+  const headerQrPng = await QRCode.toBuffer(sheetUrl, { type: "png", width: 260, margin: 1 });
+  const headerQrImage = await pdfDoc.embedPng(headerQrPng);
+  const workOrderQrImages = new Map<string, PDFImage>();
+  for (const wo of workOrders ?? []) {
+    const woUrl = `${baseUrl}/atelier/production/${order.id}/ot/${wo.id}`;
+    const png = await QRCode.toBuffer(woUrl, { type: "png", width: 160, margin: 1 });
+    workOrderQrImages.set(wo.id, await pdfDoc.embedPng(png));
+  }
+
   const brand = rgb(0.059, 0.298, 0.361); // #0f4c5c
   const ink = rgb(0.11, 0.09, 0.09);
   const muted = rgb(0.42, 0.4, 0.38);
   const rule = rgb(0.9, 0.88, 0.85);
+  const boxFill = rgb(0.97, 0.965, 0.955);
 
   let y = PAGE_HEIGHT - MARGIN;
 
@@ -111,13 +164,15 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     return lines;
   }
 
-  function drawField(label: string, value: string) {
+  function drawField(label: string, value: string, opts: { x?: number; width?: number } = {}) {
+    const x = opts.x ?? MARGIN;
+    const width = opts.width ?? CONTENT_WIDTH;
     ensureSpace(30);
-    page.drawText(label.toUpperCase(), { x: MARGIN, y, size: 8, font: fontBold, color: muted });
+    page.drawText(label.toUpperCase(), { x, y, size: 8, font: fontBold, color: muted });
     y -= 12;
-    for (const line of wrap(value || "—", CONTENT_WIDTH, 11, font)) {
+    for (const line of wrap(value || "—", width, 11, font)) {
       ensureSpace(15);
-      page.drawText(line, { x: MARGIN, y, size: 11, font, color: ink });
+      page.drawText(line, { x, y, size: 11, font, color: ink });
       y -= 15;
     }
     y -= 6;
@@ -132,6 +187,50 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     y -= 16;
   }
 
+  /** Hauteur qu'occupera drawField pour cette valeur, sans rien dessiner. */
+  function fieldHeight(value: string, width: number): number {
+    return 12 + wrap(value || "—", width, 11, font).length * 15 + 6;
+  }
+
+  /**
+   * Deux colonnes de champs (client à gauche, commande à droite) sur un
+   * cadre dessiné une seule fois : la hauteur du bloc est calculée AVANT de
+   * tracer quoi que ce soit (pdf-lib ne permet pas d'intercaler un
+   * rectangle derrière du texte déjà posé), puis chaque colonne est
+   * dessinée avec son propre curseur — les deux listes n'ont pas besoin du
+   * même nombre de lignes, le cadre couvre la plus haute des deux.
+   */
+  function drawTwoColumnBox(left: [string, string][], right: [string, string][]) {
+    const colWidth = COL_WIDTH - 24;
+    const leftHeight = left.reduce((sum, [, value]) => sum + fieldHeight(value, colWidth), 0);
+    const rightHeight = right.reduce((sum, [, value]) => sum + fieldHeight(value, colWidth), 0);
+    const padding = 12;
+    const boxHeight = Math.max(leftHeight, rightHeight) + padding * 2;
+
+    ensureSpace(boxHeight + 10);
+    const boxTop = y;
+    const boxBottom = boxTop - boxHeight;
+    page.drawRectangle({
+      x: MARGIN,
+      y: boxBottom,
+      width: CONTENT_WIDTH,
+      height: boxHeight,
+      color: boxFill,
+      borderColor: rule,
+      borderWidth: 1,
+    });
+
+    y = boxTop - padding;
+    for (const [label, value] of left) drawField(label, value, { x: MARGIN + 12, width: colWidth });
+    const leftEndY = y;
+
+    y = boxTop - padding;
+    for (const [label, value] of right) drawField(label, value, { x: COL2_X, width: colWidth });
+    const rightEndY = y;
+
+    y = Math.min(leftEndY, rightEndY, boxBottom) - 20;
+  }
+
   // En-tête
   page.drawText("SERITEX", { x: MARGIN, y, size: 20, font: fontBold, color: brand });
   y -= 22;
@@ -144,39 +243,130 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     font: fontBold,
     color: ink,
   });
+
+  // QR d'en-tête en haut à droite, aligné sur le bloc "SERITEX".
+  const headerQrTop = PAGE_HEIGHT - MARGIN;
+  const headerQrSize = 78;
+  page.drawImage(headerQrImage, {
+    x: PAGE_WIDTH - MARGIN - headerQrSize,
+    y: headerQrTop - headerQrSize,
+    width: headerQrSize,
+    height: headerQrSize,
+  });
+  page.drawText(order.reference, {
+    x: PAGE_WIDTH - MARGIN - headerQrSize,
+    y: headerQrTop - headerQrSize - 11,
+    size: 8,
+    font: fontBold,
+    color: ink,
+  });
+
+  y -= 20;
+  page.drawLine({ start: { x: MARGIN, y }, end: { x: PAGE_WIDTH - MARGIN, y }, thickness: 1, color: rule });
   y -= 20;
 
-  page.drawLine({ start: { x: MARGIN, y }, end: { x: PAGE_WIDTH - MARGIN, y }, thickness: 1, color: rule });
-  y -= 24;
+  // Bloc client (gauche) / commande (droite), sur fond légèrement teinté —
+  // "infos du client, en passant par le devis, jusqu'à la commande" en un
+  // seul coup d'œil plutôt qu'empilées.
+  const clientRows: [string, string][] = [
+    ["Client", company?.name ?? "—"],
+    ["Adresse", company?.address ?? "—"],
+    ["Téléphone · Email", [company?.phone, company?.email].filter(Boolean).join(" · ") || "—"],
+  ];
+  const commandeRows: [string, string][] = [
+    ["Référence ODF", order.reference],
+    ["Devis d'origine", quote?.reference ?? "—"],
+    ["Quantité totale", `${order.total_quantity} pièces`],
+    ["Début - fin planifiés", `${order.planned_start_date ? formatFr(order.planned_start_date) : "—"} - ${order.planned_end_date ? formatFr(order.planned_end_date) : "—"}`],
+  ];
+  drawTwoColumnBox(clientRows, commandeRows);
 
-  drawField("Référence", order.reference);
-  drawField("Client", company?.name ?? "—");
-  drawField("Devis d'origine", quote?.reference ?? "—");
-  drawField("Quantité totale", `${order.total_quantity} pièces`);
-  drawField("Début planifié", order.planned_start_date ? formatFr(order.planned_start_date) : "—");
-  drawField("Fin planifiée", order.planned_end_date ? formatFr(order.planned_end_date) : "—");
-
-  drawSectionTitle("Composition");
+  // Articles — reprend le détail de "Configuration produit" (écran ODF) :
+  // modèle/tissu/couleur/sections/tailles/fiche/visuels, article par
+  // article plutôt qu'une ligne "Composition" globale.
+  drawSectionTitle(`Articles (${(lines ?? []).length})`);
   if (lines && lines.length > 0) {
-    for (const l of lines) {
-      const sectionNames = (l.line_sections ?? [])
-        .slice()
-        .sort((a, b) => a.ordre - b.ordre)
-        .map((s) => (s.sections as unknown as { name: string } | null)?.name)
-        .filter(Boolean)
-        .join(", ") || "aucune";
+    lines.forEach((l, index) => {
+      ensureSpace(40);
+      page.drawText(`Article ${index + 1} — ${l.description} (${l.quantity} pièces)`, {
+        x: MARGIN,
+        y,
+        size: 11,
+        font: fontBold,
+        color: brand,
+      });
+      y -= 18;
+
+      const productModel = l.product_models as unknown as {
+        name: string;
+        textiles: { nom: string; composition: string | null; grammage: number | null; laize_cm: number | null } | null;
+      } | null;
+      if (productModel) {
+        const textile = productModel.textiles;
+        drawField(
+          "Modèle · Tissu",
+          `${productModel.name}${textile ? ` — ${textile.nom}${textile.composition ? ` (${textile.composition})` : ""}${textile.grammage ? ` · ${textile.grammage} g/m²` : ""}${textile.laize_cm ? ` · laize ${textile.laize_cm} cm` : ""}` : ""}`
+        );
+      } else {
+        drawField("Modèle", "non renseigné");
+      }
+
+      const couleurUnique = l.couleur_unique as unknown as { name: string; code: string } | null;
+      if (couleurUnique) {
+        drawField("Couleur", `${couleurUnique.name} (${couleurUnique.code})`);
+      } else if (l.zone_colors && l.zone_colors.length > 0) {
+        const zoneLabelByKey = new Map(
+          (zoneTemplatesAll ?? [])
+            .filter((z) => z.product_model_id === l.product_model_id)
+            .map((z) => [z.zone_key, z.zone_label])
+        );
+        drawField(
+          "Couleurs par zone",
+          l.zone_colors
+            .map((zc) => {
+              const color = zc.colors as unknown as { name: string; code: string } | null;
+              const label = zoneLabelByKey.get(zc.zone_key) ?? zc.zone_key;
+              return color ? `${label} : ${color.name} (${color.code})` : `${label} : —`;
+            })
+            .join(" · ")
+        );
+      } else {
+        drawField("Couleur", "non renseignée");
+      }
+
+      const sectionNames =
+        (l.line_sections ?? [])
+          .slice()
+          .sort((a, b) => a.ordre - b.ordre)
+          .map((s) => (s.sections as unknown as { name: string } | null)?.name)
+          .filter(Boolean)
+          .join(", ") || "aucune";
+      drawField("Sections retenues", sectionNames);
+
       drawField(
-        `${l.description} (${l.quantity} pièces)`,
-        `Sections : ${sectionNames} — ${(l.sizes ?? []).map((s) => `${s.taille} : ${s.quantite_demandee}`).join(" · ") || "dispatching non renseigné"}`
+        "Dispatching des tailles",
+        (l.sizes ?? []).map((s) => `${s.taille} : ${s.quantite_demandee}`).join(" · ") || "non renseigné"
       );
+
       const ficheForLine = (fiches ?? []).find((f) => f.production_order_line_id === l.id);
       if (ficheForLine) {
-        drawField(`Fiche Patronnage liée — ${l.description}`, `${ficheForLine.numero_ot} (${ficheForLine.statut})`);
+        drawField("Fiche Patronnage liée", `${ficheForLine.numero_ot} (${ficheForLine.statut})`);
       }
-    }
+
+      const visuels = visuelsByLine.get(l.id);
+      if (visuels && visuels.length > 0) {
+        drawField("Visuel(s) joint(s)", visuels.join(", "));
+      }
+
+      y -= 6;
+      ensureSpace(1);
+      page.drawLine({ start: { x: MARGIN, y }, end: { x: PAGE_WIDTH - MARGIN, y }, thickness: 0.5, color: rule });
+      y -= 16;
+    });
   } else {
     drawField("Articles", "aucun");
   }
+
   if (order.mention_surplus_traces) {
     drawField(
       "Surplus tracé vs quantité demandée",
@@ -186,11 +376,26 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     );
   }
 
+  // Sous-ODF — un QR par ligne (demande explicite, "important pour la
+  // saisie par terminal") : scanné depuis un téléphone en atelier, ouvre
+  // directement le détail de CE sous-ODF plutôt que de le chercher dans la
+  // file de la section.
   if (workOrders && workOrders.length > 0) {
     drawSectionTitle("Avancement des sous-ODF");
     for (const wo of workOrders) {
+      const rowHeight = 46;
+      ensureSpace(rowHeight);
       const sectionName = (wo.sections as unknown as { name: string } | null)?.name ?? "—";
-      drawField(`${sectionName} — ${wo.reference}`, `${wo.quantity_done} / ${wo.quantity_planned} pièces`);
+      const qrSize = 40;
+      const qrImage = workOrderQrImages.get(wo.id);
+      if (qrImage) {
+        page.drawImage(qrImage, { x: MARGIN, y: y - qrSize + 10, width: qrSize, height: qrSize });
+      }
+      const textX = MARGIN + qrSize + 12;
+      page.drawText(`${sectionName} — ${wo.reference}`, { x: textX, y, size: 10, font: fontBold, color: ink });
+      y -= 14;
+      page.drawText(`${wo.quantity_done} / ${wo.quantity_planned} pièces`, { x: textX, y, size: 9, font, color: muted });
+      y -= rowHeight - 14;
     }
   }
 
