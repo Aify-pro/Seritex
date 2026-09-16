@@ -5,13 +5,9 @@ import { toast } from "sonner";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
 import { Paperclip, X, Plus } from "lucide-react";
 import { attachMediaFileToProductionOrder, detachMediaFileFromProductionOrder } from "../actions";
-import { MEDIA_CATEGORY_LABELS, type MediaFileCategory } from "@/lib/types/domain";
+import { MEDIA_CATEGORY_LABELS, type AttachableMediaFile } from "@/lib/types/domain";
 
-export interface AttachableMediaFile {
-  id: string;
-  file_name: string;
-  category: MediaFileCategory;
-}
+export type { AttachableMediaFile } from "@/lib/types/domain";
 
 /**
  * Documents généraux joints à l'ODF entier (nuancier, image de marque, fiche

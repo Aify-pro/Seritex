@@ -1,20 +1,28 @@
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
 import { StatusBadge } from "@/components/ui/badge";
-import { QUOTE_STATUS_LABELS, type Quote, type QuoteLine } from "@/lib/types/domain";
+import { QUOTE_STATUS_LABELS, type AttachableMediaFile, type Quote, type QuoteLine } from "@/lib/types/domain";
 import { formatAmount, formatDate } from "@/lib/utils";
 import { AcceptQuoteButton } from "./accept-quote-button";
 import { ZoneColorSummary } from "@/components/product/zone-color-picker";
+import { QuoteLineVisuelPicker } from "./quote-line-visuel-picker";
+import { QuoteLineMaquettePicker } from "./quote-line-maquette-picker";
 
 export function QuoteDetail({
   quote,
   lines,
   companyName,
   canAccept,
+  editable = false,
+  availableMediaFiles = [],
 }: {
   quote: Quote;
   lines: QuoteLine[];
   companyName?: string;
   canAccept: boolean;
+  /** Vue commercial (dépose/remplace visuel et maquette) vs vue client (consultation seule). */
+  editable?: boolean;
+  /** Médiathèque du client du devis, pour les sélecteurs d'ajout — vide côté client (lecture seule). */
+  availableMediaFiles?: AttachableMediaFile[];
 }) {
   return (
     <div className="space-y-6">
@@ -51,6 +59,22 @@ export function QuoteDetail({
                         />
                       </div>
                     )}
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                      <QuoteLineMaquettePicker
+                        quoteLineId={l.id}
+                        quoteId={quote.id}
+                        editable={editable}
+                        attached={l.maquette ?? null}
+                        available={availableMediaFiles}
+                      />
+                      <QuoteLineVisuelPicker
+                        quoteLineId={l.id}
+                        quoteId={quote.id}
+                        editable={editable}
+                        attached={l.visuels ?? []}
+                        available={availableMediaFiles}
+                      />
+                    </div>
                   </td>
                   <td className="px-5 py-3 text-foreground-muted">{l.quantity}</td>
                   <td className="px-5 py-3 text-foreground-muted">{formatAmount(l.unit_price)}</td>

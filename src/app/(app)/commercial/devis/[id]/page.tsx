@@ -12,7 +12,10 @@ export default async function CommercialQuoteDetailPage({ params }: { params: Pr
   const { data: quote } = await supabase.from("quotes").select("*,companies(name)").eq("id", id).single();
   if (!quote) notFound();
 
-  const lines = await getQuoteLinesWithColorConfig(id);
+  const [lines, { data: availableMediaFiles }] = await Promise.all([
+    getQuoteLinesWithColorConfig(id),
+    supabase.from("media_files").select("id,file_name,category").eq("company_id", quote.company_id),
+  ]);
 
   return (
     <QuoteDetail
@@ -20,6 +23,8 @@ export default async function CommercialQuoteDetailPage({ params }: { params: Pr
       lines={lines}
       companyName={(quote.companies as unknown as { name: string } | null)?.name}
       canAccept
+      editable
+      availableMediaFiles={availableMediaFiles ?? []}
     />
   );
 }

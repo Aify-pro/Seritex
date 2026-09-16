@@ -16,9 +16,9 @@ import type { Size } from "@/lib/sizes";
 import { LineSectionsPicker } from "./line-sections-picker";
 import { FichePatronnageLink } from "./fiche-patronnage-link";
 import { LineVisuelPicker } from "./line-visuel-picker";
-import { LineMaquettePicker, type MaquetteFile } from "./line-maquette-picker";
+import { LineMaquettePicker } from "./line-maquette-picker";
 import { LinePrintableZonesPicker, type PrintableZoneOption } from "./line-printable-zones-picker";
-import type { AttachableMediaFile } from "./production-order-media-files";
+import type { AttachableMediaFile, DownloadableMediaFile, MaquetteFile } from "@/lib/types/domain";
 import type { StatutFiche } from "@/lib/patronnage/types";
 
 interface ZoneTemplate {
@@ -73,8 +73,13 @@ export interface LineData {
    * passe par l'Impression.
    */
   impressionSectionSelected: boolean;
-  visuelAttached: AttachableMediaFile[];
-  /** Maquettes jointes à cet article (migration 0040), avec leur URL d'aperçu déjà résolue côté serveur. */
+  /** Visuel(s) déposés au devis pour la ligne d'origine (migration 0041) — lecture seule sur l'ODF, seul le devis les retire. */
+  visuelsFromDevis: DownloadableMediaFile[];
+  /** Visuel(s) déposés directement sur cet article d'ODF — détachables ici. */
+  visuelAttached: DownloadableMediaFile[];
+  /** Maquette déposée au devis pour la ligne d'origine (migration 0041) — fait foi, lecture seule sur l'ODF ; null si le devis n'en avait pas. */
+  maquetteFromDevis: MaquetteFile | null;
+  /** Maquette déposée directement sur cet article d'ODF — rattrapage, seulement pertinent si maquetteFromDevis est null. */
   maquetteAttached: MaquetteFile[];
   /** Zones imprimables définies pour le modèle de cet article (product_printable_zones). */
   printableZoneOptions: PrintableZoneOption[];
@@ -417,20 +422,22 @@ function LineCard({
           />
         )}
 
-        {(line.impressionSectionSelected || line.visuelAttached.length > 0) && (
+        {(line.impressionSectionSelected || line.visuelsFromDevis.length > 0 || line.visuelAttached.length > 0) && (
           <LineVisuelPicker
             lineId={line.id}
             productionOrderId={productionOrderId}
+            fromDevis={line.visuelsFromDevis}
             attached={line.visuelAttached}
             available={availableMediaFiles}
             required={line.impressionSectionSelected}
           />
         )}
 
-        {(line.impressionSectionSelected || line.maquetteAttached.length > 0) && (
+        {(line.impressionSectionSelected || !!line.maquetteFromDevis || line.maquetteAttached.length > 0) && (
           <LineMaquettePicker
             lineId={line.id}
             productionOrderId={productionOrderId}
+            fromDevis={line.maquetteFromDevis}
             attached={line.maquetteAttached}
             available={availableMediaFiles}
           />

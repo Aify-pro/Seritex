@@ -15,11 +15,10 @@ import { SubmitOdfPanel } from "./submit-odf-panel";
 import { AnomaliesPanel } from "./anomalies-panel";
 import { ProductionOrderLines, type LineData } from "./production-order-lines";
 import { ProductionOrderMediaFiles, type AttachableMediaFile } from "./production-order-media-files";
-import type { MaquetteFile } from "./line-maquette-picker";
 import { getMediaFilePreviewUrls } from "@/lib/media/preview";
 import { StockMovementsPanel } from "./stock-movements-panel";
 import type { StatutFiche } from "@/lib/patronnage/types";
-import type { StockMovement, StockExportFiche } from "@/lib/types/domain";
+import type { DownloadableMediaFile, MaquetteFile, StockMovement, StockExportFiche } from "@/lib/types/domain";
 import { CheckCircle2, ChevronRight, Package, QrCode } from "lucide-react";
 import Link from "next/link";
 
@@ -80,7 +79,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     supabase
       .from("production_order_lines")
       .select(
-        "id,description,quantity,product_model_id,couleur_unique_id,product_models(id,name,textile_id,textiles(nom,composition,grammage,laize_cm)),couleur_unique:couleur_unique_id(id,name,code),zone_colors:production_order_line_zone_colors(zone_key,colors:color_id(id,name,code)),sizes:production_order_sizes(taille,quantite_demandee),quote_lines(product_model_id)"
+        "id,description,quantity,product_model_id,quote_line_id,couleur_unique_id,product_models(id,name,textile_id,textiles(nom,composition,grammage,laize_cm)),couleur_unique:couleur_unique_id(id,name,code),zone_colors:production_order_line_zone_colors(zone_key,colors:color_id(id,name,code)),sizes:production_order_sizes(taille,quantite_demandee),quote_lines(product_model_id)"
       )
       .eq("production_order_id", id)
       .order("created_at"),
@@ -257,7 +256,9 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     | "coupeSelected"
     | "fiche"
     | "impressionSectionSelected"
+    | "visuelsFromDevis"
     | "visuelAttached"
+    | "maquetteFromDevis"
     | "maquetteAttached"
     | "printableZoneOptions"
     | "printableZoneIdsSelected"
@@ -354,12 +355,54 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     else (visuelByLine[m.production_order_line_id] ??= []).push(m.media_files);
   }
 
-  // Aperçu (migration 0040) : une URL signée par maquette, résolue une seule
-  // fois pour tout l'ODF plutôt qu'un aller-retour par article.
-  const maquettePreviewUrls = await getMediaFilePreviewUrls(Object.values(maquetteByLine).flat().map((f) => f.id));
+  // Visuel(s) et maquette hérités du devis (migration 0041) : la maquette
+  // fait foi dès qu'elle existe côté devis (l'ODF ne propose la sienne que
+  // pour rattraper une absence), le visuel s'y ajoute simplement (union).
+  // Un seul aller-retour pour tous les articles plutôt qu'un par ligne.
+  const quoteLineIds = (productionOrderLines ?? []).map((l) => l.quote_line_id).filter((v): v is string => !!v);
+  const { data: quoteLineMedia } =
+    quoteLineIds.length > 0
+      ? await supabase
+          .from("quote_line_media_files")
+          .select("quote_line_id,media_file_id,media_files(file_name,category)")
+          .in("quote_line_id", quoteLineIds)
+      : { data: [] as { quote_line_id: string; media_file_id: string; media_files: { file_name: string; category: string } | null }[] };
+
+  const visuelsByQuoteLine: Record<string, AttachableMediaFile[]> = {};
+  const maquetteByQuoteLine: Record<string, AttachableMediaFile> = {};
+  for (const m of quoteLineMedia ?? []) {
+    const media = m.media_files as unknown as { file_name: string; category: string } | null;
+    if (!media) continue;
+    const file: AttachableMediaFile = { id: m.media_file_id, file_name: media.file_name, category: media.category as AttachableMediaFile["category"] };
+    if (media.category === "maquette") {
+      maquetteByQuoteLine[m.quote_line_id] ??= file;
+    } else if (media.category === "visuel") {
+      (visuelsByQuoteLine[m.quote_line_id] ??= []).push(file);
+    }
+  }
+  const quoteLineIdByLine: Record<string, string> = {};
+  for (const l of productionOrderLines ?? []) {
+    if (l.quote_line_id) quoteLineIdByLine[l.id] = l.quote_line_id;
+  }
+
+  // Aperçu/téléchargement : une URL signée par fichier, résolue une seule
+  // fois pour tout l'ODF (devis + ODF confondus) plutôt qu'un aller-retour
+  // par article.
+  const maquettePreviewUrls = await getMediaFilePreviewUrls([
+    ...Object.values(maquetteByLine).flat().map((f) => f.id),
+    ...Object.values(maquetteByQuoteLine).map((f) => f.id),
+  ]);
+  const visuelDownloadUrls = await getMediaFilePreviewUrls([
+    ...Object.values(visuelByLine).flat().map((f) => f.id),
+    ...Object.values(visuelsByQuoteLine).flat().map((f) => f.id),
+  ]);
   const maquetteWithUrlByLine: Record<string, MaquetteFile[]> = {};
   for (const [lineId, files] of Object.entries(maquetteByLine)) {
     maquetteWithUrlByLine[lineId] = files.map((f) => ({ ...f, previewUrl: maquettePreviewUrls.get(f.id) ?? null }));
+  }
+  const visuelWithUrlByLine: Record<string, DownloadableMediaFile[]> = {};
+  for (const [lineId, files] of Object.entries(visuelByLine)) {
+    visuelWithUrlByLine[lineId] = files.map((f) => ({ ...f, downloadUrl: visuelDownloadUrls.get(f.id) ?? null }));
   }
 
   const fichesByLine: Record<string, { id: string; numeroOt: string; statut: StatutFiche }> = {};
@@ -372,19 +415,30 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
   // produit ») plutôt qu'en cartes séparées en bas de page (demande Ayman,
   // 15/09, étendue 16/09) — regroupe ici les données calculées ci-dessus
   // par article.
-  const linesWithConfig: LineData[] = lines.map((line) => ({
-    ...line,
-    sectionIds: sectionIdsByLine[line.id] ?? [],
-    coupeSelected: !!coupeSelectedByLine[line.id],
-    fiche: fichesByLine[line.id] ?? null,
-    impressionSectionSelected: !!impressionSectionSelectedByLine[line.id],
-    visuelAttached: visuelByLine[line.id] ?? [],
-    maquetteAttached: maquetteWithUrlByLine[line.id] ?? [],
-    printableZoneOptions: (printableZonesAll ?? [])
-      .filter((z) => z.product_model_id === line.productModelId)
-      .map((z) => ({ id: z.id, zone_key: z.zone_key, zone_label: z.zone_label, display_order: z.display_order })),
-    printableZoneIdsSelected: printableZoneIdsByLine[line.id] ?? [],
-  }));
+  const linesWithConfig: LineData[] = lines.map((line) => {
+    const quoteLineId = quoteLineIdByLine[line.id];
+    const maquetteFromDevisFile = quoteLineId ? maquetteByQuoteLine[quoteLineId] : undefined;
+    return {
+      ...line,
+      sectionIds: sectionIdsByLine[line.id] ?? [],
+      coupeSelected: !!coupeSelectedByLine[line.id],
+      fiche: fichesByLine[line.id] ?? null,
+      impressionSectionSelected: !!impressionSectionSelectedByLine[line.id],
+      visuelsFromDevis: (quoteLineId ? visuelsByQuoteLine[quoteLineId] : undefined)?.map((f) => ({
+        ...f,
+        downloadUrl: visuelDownloadUrls.get(f.id) ?? null,
+      })) ?? [],
+      visuelAttached: visuelWithUrlByLine[line.id] ?? [],
+      maquetteFromDevis: maquetteFromDevisFile
+        ? { ...maquetteFromDevisFile, previewUrl: maquettePreviewUrls.get(maquetteFromDevisFile.id) ?? null }
+        : null,
+      maquetteAttached: maquetteWithUrlByLine[line.id] ?? [],
+      printableZoneOptions: (printableZonesAll ?? [])
+        .filter((z) => z.product_model_id === line.productModelId)
+        .map((z) => ({ id: z.id, zone_key: z.zone_key, zone_label: z.zone_label, display_order: z.display_order })),
+      printableZoneIdsSelected: printableZoneIdsByLine[line.id] ?? [],
+    };
+  });
 
   const canArchive = await can("ordres_fabrication", "archive");
   const canValidate = await can("ordres_fabrication", "validate");

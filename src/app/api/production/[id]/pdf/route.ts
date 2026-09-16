@@ -51,7 +51,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     supabase
       .from("production_order_lines")
       .select(
-        "id,description,quantity,product_model_id,couleur_unique_id,product_models(name,textiles(nom,composition,grammage,laize_cm)),couleur_unique:couleur_unique_id(name,code),zone_colors:production_order_line_zone_colors(zone_key,colors:color_id(name,code)),sizes:production_order_sizes(taille,quantite_demandee),line_sections:production_order_line_sections(ordre,sections(name))"
+        "id,description,quantity,product_model_id,quote_line_id,couleur_unique_id,product_models(name,textiles(nom,composition,grammage,laize_cm)),couleur_unique:couleur_unique_id(name,code),zone_colors:production_order_line_zone_colors(zone_key,colors:color_id(name,code)),sizes:production_order_sizes(taille,quantite_demandee),line_sections:production_order_line_sections(ordre,sections(name))"
       )
       .eq("production_order_id", id)
       .order("created_at"),
@@ -99,10 +99,45 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     }
   }
 
+  // Visuel(s) et maquette hérités du devis (migration 0041) : la maquette du
+  // devis fait foi dès qu'elle existe (l'ODF ne propose la sienne, ci-dessus,
+  // que pour rattraper une absence) ; le visuel s'y ajoute (union).
+  const quoteLineIds = (lines ?? []).map((l) => l.quote_line_id).filter((v): v is string => !!v);
+  const { data: quoteLineMedia } =
+    quoteLineIds.length > 0
+      ? await supabase
+          .from("quote_line_media_files")
+          .select("quote_line_id,media_file_id,media_files(file_name,category)")
+          .in("quote_line_id", quoteLineIds)
+      : { data: [] as { quote_line_id: string; media_file_id: string; media_files: { file_name: string; category: string } | null }[] };
+
+  const visuelsByQuoteLine = new Map<string, string[]>();
+  const maquetteByQuoteLine = new Map<string, { id: string; file_name: string }>();
+  for (const m of quoteLineMedia ?? []) {
+    const media = m.media_files as unknown as { file_name: string; category: string } | null;
+    if (!media) continue;
+    if (media.category === "maquette") {
+      if (!maquetteByQuoteLine.has(m.quote_line_id)) maquetteByQuoteLine.set(m.quote_line_id, { id: m.media_file_id, file_name: media.file_name });
+    } else if (media.category === "visuel") {
+      const list = visuelsByQuoteLine.get(m.quote_line_id) ?? [];
+      list.push(media.file_name);
+      visuelsByQuoteLine.set(m.quote_line_id, list);
+    }
+  }
+
+  // Résolution finale par article — la maquette côté devis prend le pas sur
+  // celle éventuellement déposée directement sur l'ODF.
+  const resolvedMaquetteByLine = new Map<string, { id: string; file_name: string }>();
+  for (const line of lines ?? []) {
+    const fromDevis = line.quote_line_id ? maquetteByQuoteLine.get(line.quote_line_id) : undefined;
+    const resolved = fromDevis ?? maquetteByLine.get(line.id);
+    if (resolved) resolvedMaquetteByLine.set(line.id, resolved);
+  }
+
   // Octets des maquettes (migration 0040), une par article au plus — voir
   // src/lib/media/preview.ts. Récupérés ici (indépendants de la mise en
   // page), embarqués dans le PDF par odf-pdf.ts.
-  const maquetteBuffers = await getMediaFileBuffers(Array.from(maquetteByLine.values()).map((m) => m.id));
+  const maquetteBuffers = await getMediaFileBuffers(Array.from(resolvedMaquetteByLine.values()).map((m) => m.id));
 
   const userIds = [order.launched_by, order.cloture_demandee_par, order.closed_by].filter(
     (v): v is string => !!v
@@ -158,8 +193,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     }
 
     const ficheForLine = (fiches ?? []).find((f) => f.production_order_line_id === line.id);
-    const visuels = visuelsByLine.get(line.id);
-    const maquette = maquetteByLine.get(line.id);
+    const visuels = [
+      ...(line.quote_line_id ? visuelsByQuoteLine.get(line.quote_line_id) ?? [] : []),
+      ...(visuelsByLine.get(line.id) ?? []),
+    ];
+    const maquette = resolvedMaquetteByLine.get(line.id);
     const maquetteBuffer = maquette ? maquetteBuffers.get(maquette.id) : undefined;
     const maquetteFormat: "png" | "jpg" | null =
       maquetteBuffer?.mimeType === "image/png"
@@ -190,7 +228,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       fiche: ficheForLine
         ? `${ficheForLine.numero_ot} (${FICHE_STATUT_LABELS[ficheForLine.statut as StatutFiche] ?? ficheForLine.statut})`
         : null,
-      visuels: visuels && visuels.length > 0 ? visuels.join(", ") : null,
+      visuels: visuels.length > 0 ? visuels.join(", ") : null,
       maquette:
         maquette && maquetteBuffer && maquetteFormat
           ? { fileName: maquette.file_name, bytes: maquetteBuffer.buffer, format: maquetteFormat }

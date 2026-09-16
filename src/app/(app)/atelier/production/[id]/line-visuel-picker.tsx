@@ -2,40 +2,49 @@
 
 import { useTransition } from "react";
 import { toast } from "sonner";
-import { Paperclip, X, Plus } from "lucide-react";
+import { Paperclip, X, Plus, Download } from "lucide-react";
 import { attachMediaFileToLine, detachMediaFileFromLine } from "../actions";
-import type { AttachableMediaFile } from "./production-order-media-files";
+import type { AttachableMediaFile, DownloadableMediaFile } from "@/lib/types/domain";
 
 /**
  * Visuel joint à un article précis (migration 0037, plus à l'ODF entier —
- * section 8 du document de logique) : le fichier d'exploitation à utiliser
- * tel quel à l'impression — distinct de la maquette (simulation/rendu,
- * migration 0040, voir LineMaquettePicker), affiché ici par son seul nom de
- * fichier, sans aperçu. Un ODF mêlant un article à imprimer et un autre non
- * ne peut plus avoir un visuel ambigu "pour tout l'ODF". `required` : vrai
- * si une section de catégorie Impression est retenue sur CET article — la
- * validation de l'ODF sera refusée par validate_production_order() tant
- * qu'aucun visuel n'est joint à cet article précis. Avertissement doux ici,
- * comme pour la fiche Patronnage : le contrôle qui fait autorité reste le
- * RPC.
+ * section 8 du document de logique) : le ou les fichiers d'exploitation à
+ * utiliser tels quels à l'impression — distincts de la maquette
+ * (simulation/rendu, migration 0040, voir LineMaquettePicker). Cliquer sur
+ * un visuel le télécharge (c'est un fichier de travail, pas une image à
+ * prévisualiser).
+ *
+ * Peuvent être déposés à n'importe quelle phase, du devis à l'ODF (migration
+ * 0041) : `fromDevis` (lecture seule ici — seul l'écran du devis les
+ * détache) et `attached` (déposés directement sur cet article d'ODF,
+ * détachables ici) s'affichent tous les deux, sans distinction visuelle
+ * autre que la présence du bouton de détachement.
+ *
+ * `required` : vrai si une section de catégorie Impression est retenue sur
+ * CET article — la validation de l'ODF sera refusée par
+ * validate_production_order() tant qu'aucun visuel (devis ou ODF) n'est
+ * joint. Avertissement doux ici, comme pour la fiche Patronnage : le
+ * contrôle qui fait autorité reste le RPC.
  */
 export function LineVisuelPicker({
   lineId,
   productionOrderId,
+  fromDevis,
   attached,
   available,
   required,
 }: {
   lineId: string;
   productionOrderId: string;
-  attached: AttachableMediaFile[];
+  fromDevis: DownloadableMediaFile[];
+  attached: DownloadableMediaFile[];
   available: AttachableMediaFile[];
   required: boolean;
 }) {
   const [pending, startTransition] = useTransition();
-  const attachedIds = new Set(attached.map((f) => f.id));
+  const attachedIds = new Set([...fromDevis, ...attached].map((f) => f.id));
   const selectable = available.filter((f) => !attachedIds.has(f.id) && f.category === "visuel");
-  const missingVisuel = required && attached.length === 0;
+  const missingVisuel = required && fromDevis.length === 0 && attached.length === 0;
 
   function attach(mediaFileId: string) {
     if (!mediaFileId) return;
@@ -52,12 +61,42 @@ export function LineVisuelPicker({
     });
   }
 
+  function Chip({ f, detachable }: { f: DownloadableMediaFile; detachable: boolean }) {
+    return (
+      <li className="flex items-center gap-1 rounded-full bg-surface-muted px-2.5 py-1 text-xs text-foreground">
+        {f.downloadUrl ? (
+          <a
+            href={f.downloadUrl}
+            download={f.file_name}
+            className="flex items-center gap-1 hover:underline"
+            title="Télécharger"
+          >
+            <Download className="h-3 w-3 text-foreground-muted" />
+            {f.file_name}
+          </a>
+        ) : (
+          f.file_name
+        )}
+        {detachable && (
+          <button
+            disabled={pending}
+            onClick={() => detach(f.id)}
+            className="ml-1 rounded-full p-0.5 hover:bg-danger-soft hover:text-danger disabled:opacity-50"
+            aria-label="Détacher"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        )}
+      </li>
+    );
+  }
+
   return (
     <div className="space-y-1.5">
       <div>
-        <p className="text-xs font-medium text-foreground-muted">Visuel</p>
+        <p className="text-xs font-medium text-foreground-muted">Visuel(s)</p>
         <p className="text-[11px] text-foreground-muted">
-          Fichier d&apos;exploitation à utiliser tel quel à l&apos;impression, joint à cet article depuis la médiathèque du client.
+          Fichier(s) d&apos;exploitation à utiliser tels quels à l&apos;impression — cliquez pour télécharger.
         </p>
       </div>
       {missingVisuel && (
@@ -69,23 +108,15 @@ export function LineVisuelPicker({
           <Paperclip className="h-3.5 w-3.5" /> Fichiers liés
         </p>
         <ul className="flex flex-wrap gap-1.5">
-          {attached.map((f) => (
-            <li
-              key={f.id}
-              className="flex items-center gap-1 rounded-full bg-surface-muted px-2.5 py-1 text-xs text-foreground"
-            >
-              {f.file_name}
-              <button
-                disabled={pending}
-                onClick={() => detach(f.id)}
-                className="ml-1 rounded-full p-0.5 hover:bg-danger-soft hover:text-danger disabled:opacity-50"
-                aria-label="Détacher"
-              >
-                <X className="h-3 w-3" />
-              </button>
-            </li>
+          {fromDevis.map((f) => (
+            <Chip key={f.id} f={f} detachable={false} />
           ))}
-          {attached.length === 0 && <li className="text-xs text-foreground-muted">Aucun visuel joint pour l&apos;instant.</li>}
+          {attached.map((f) => (
+            <Chip key={f.id} f={f} detachable />
+          ))}
+          {fromDevis.length === 0 && attached.length === 0 && (
+            <li className="text-xs text-foreground-muted">Aucun visuel joint pour l&apos;instant.</li>
+          )}
         </ul>
         {selectable.length > 0 && (
           <div className="flex items-center gap-1.5">
