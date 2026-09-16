@@ -56,7 +56,16 @@ export type OdfPdfArticle = {
   couleurs: OdfPdfColor[];
   sections: string | null;
   fiche: string | null;
+  /** Fichiers d'exploitation à l'impression, tels quels (nom de fichier) — plusieurs possibles par article, contrairement à la maquette. */
   visuels: string | null;
+  /**
+   * Maquette (simulation) jointe à l'article (migration 0040) — une seule
+   * par article. Contient les octets bruts (pas une URL : pdf-lib embarque
+   * l'image dans son propre document) et son format déjà résolu par la
+   * route depuis le type MIME ; absente si aucune maquette jointe ou si son
+   * format n'est ni PNG ni JPEG.
+   */
+  maquette: { fileName: string; bytes: Uint8Array; format: "png" | "jpg" } | null;
   sizes: { taille: string; quantite: number }[];
 };
 
@@ -166,6 +175,22 @@ export async function buildOdfPdf(data: OdfPdfData): Promise<Uint8Array> {
   const sousOdfQr = new Map<string, PDFImage>();
   for (const wo of data.sousOdf) {
     sousOdfQr.set(wo.reference, await embedQr(pdfDoc, wo.url, 180));
+  }
+
+  // Maquettes (migration 0040) : embarquées elles aussi d'avance, indexées
+  // par article. Un format déclaré PNG/JPEG mais illisible par pdf-lib
+  // (fichier corrompu) laisse simplement cet article sans image — géré
+  // plus bas par une mention texte, jamais par un échec du PDF entier.
+  const maquetteImages = new Map<number, PDFImage>();
+  for (let i = 0; i < data.articles.length; i += 1) {
+    const maquette = data.articles[i].maquette;
+    if (!maquette) continue;
+    try {
+      const image = maquette.format === "png" ? await pdfDoc.embedPng(maquette.bytes) : await pdfDoc.embedJpg(maquette.bytes);
+      maquetteImages.set(i, image);
+    } catch {
+      // format non pris en charge par pdf-lib — l'article reste sans image de maquette
+    }
   }
 
   let page: PDFPage = pdfDoc.addPage([PAGE_W, PAGE_H]);
@@ -1049,6 +1074,41 @@ export async function buildOdfPdf(data: OdfPdfData): Promise<Uint8Array> {
     y -= 16;
     drawSizeTable(article.sizes);
     continuation = null;
+
+    // Maquette (migration 0040) : sur sa propre page pour l'imprimer au
+    // format le plus grand possible — jamais compressée dans la grille de
+    // caractéristiques ci-dessus. Mise à l'échelle "contain" (jamais
+    // déformée, jamais au-delà de la zone qui lui est réservée) plutôt que
+    // dessinée à sa taille native, qui n'a aucun rapport avec le format
+    // utile d'une page A4.
+    const maquetteImage = maquetteImages.get(index);
+    if (maquetteImage && article.maquette) {
+      startPage();
+      text(`ARTICLE ${index + 1} / ${data.articles.length}   Maquette`, {
+        x: LEFT,
+        baseline: y - 10,
+        size: 10.5,
+        font: bold,
+        color: BRAND,
+      });
+      text(article.maquette.fileName, {
+        x: LEFT,
+        baseline: y - 10,
+        size: 8,
+        color: MUTED,
+        width: CONTENT_W,
+        align: "right",
+      });
+      hLine(y - 16, LEFT, RIGHT, 0.9, BRAND);
+      y -= 36;
+
+      const maxWidth = CONTENT_W;
+      const maxHeight = y - (M_BOTTOM + 16);
+      const ratio = Math.min(maxWidth / maquetteImage.width, maxHeight / maquetteImage.height);
+      const imgWidth = maquetteImage.width * ratio;
+      const imgHeight = maquetteImage.height * ratio;
+      page.drawImage(maquetteImage, { x: LEFT + (maxWidth - imgWidth) / 2, y: y - imgHeight, width: imgWidth, height: imgHeight });
+    }
   });
 
   // Renvois « page du détail » du récapitulatif, maintenant que chaque

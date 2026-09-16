@@ -15,6 +15,8 @@ import { SubmitOdfPanel } from "./submit-odf-panel";
 import { AnomaliesPanel } from "./anomalies-panel";
 import { ProductionOrderLines, type LineData } from "./production-order-lines";
 import { ProductionOrderMediaFiles, type AttachableMediaFile } from "./production-order-media-files";
+import type { MaquetteFile } from "./line-maquette-picker";
+import { getMediaFilePreviewUrls } from "@/lib/media/preview";
 import { StockMovementsPanel } from "./stock-movements-panel";
 import type { StatutFiche } from "@/lib/patronnage/types";
 import type { StockMovement, StockExportFiche } from "@/lib/types/domain";
@@ -50,6 +52,8 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     { data: productModels },
     { data: activeColors },
     { data: zoneTemplatesAll },
+    { data: printableZonesAll },
+    { data: chosenLinePrintableZones },
     { data: attachedGeneralMedia },
     { data: attachedLineMedia },
     { data: availableMedia },
@@ -117,12 +121,22 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     // modèle différent (ODF multi-lignes), un seul aller-retour plutôt
     // qu'une requête par ligne.
     supabase.from("product_zone_templates").select("product_model_id,zone_key,zone_label,display_order"),
+    // Zones imprimables de tous les modèles (migration 0039), même
+    // principe que le gabarit de zones couleur ci-dessus — un aller-retour
+    // pour toutes les lignes plutôt qu'un par ligne.
+    supabase.from("product_printable_zones").select("id,product_model_id,zone_key,zone_label,display_order"),
+    // Zones imprimables cochées par article (migration 0040) — même
+    // jointure que chosenLineSections pour filtrer par ODF.
+    supabase
+      .from("production_order_line_printable_zones")
+      .select("production_order_line_id,printable_zone_id,production_order_lines!inner(production_order_id)")
+      .eq("production_order_lines.production_order_id", id),
     supabase
       .from("production_order_media_files")
       .select("media_file_id,media_files(id,file_name,category)")
       .eq("production_order_id", id)
       .is("production_order_line_id", null),
-    // Visuel/maquette par article (migration 0037, plus par ODF entier).
+    // Visuel + maquette par article (migrations 0037/0040, plus par ODF entier).
     supabase
       .from("production_order_media_files")
       .select("production_order_line_id,media_file_id,media_files(id,file_name,category)")
@@ -150,14 +164,16 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
   // pour valider (section 10 du document de logique) — ou si une fiche est
   // déjà liée alors que Coupe a depuis été décochée, pour ne pas faire
   // disparaître un lien existant sans prévenir. Même principe pour le
-  // visuel/maquette (migration 0036), symétrique, contrôlé côté serveur par
-  // validate_production_order().
+  // visuel (migration 0036), symétrique, contrôlé côté serveur par
+  // validate_production_order() — et, depuis la migration 0040, pour la
+  // maquette et les zones imprimables (non bloquantes, mais pertinentes
+  // pour le même article Impression).
   const coupeSectionIds = new Set(
     (allSections ?? [])
       .filter((s) => (s.atelier_categories as unknown as { cle: string } | null)?.cle === "coupe")
       .map((s) => s.id)
   );
-  const visuelRequiredSectionIds = new Set(
+  const impressionSectionIds = new Set(
     (allSections ?? [])
       .filter((s) => (s.atelier_categories as unknown as { requiert_visuel: boolean } | null)?.requiert_visuel)
       .map((s) => s.id)
@@ -165,13 +181,19 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
   type ChosenLineSection = { production_order_line_id: string; section_id: string; ordre: number };
   const sectionIdsByLine: Record<string, string[]> = {};
   const coupeSelectedByLine: Record<string, boolean> = {};
-  const visuelRequiredByLine: Record<string, boolean> = {};
+  const impressionSectionSelectedByLine: Record<string, boolean> = {};
   for (const s of (chosenLineSections ?? []) as unknown as ChosenLineSection[]) {
     (sectionIdsByLine[s.production_order_line_id] ??= []).push(s.section_id);
     if (coupeSectionIds.has(s.section_id)) coupeSelectedByLine[s.production_order_line_id] = true;
-    if (visuelRequiredSectionIds.has(s.section_id)) visuelRequiredByLine[s.production_order_line_id] = true;
+    if (impressionSectionIds.has(s.section_id)) impressionSectionSelectedByLine[s.production_order_line_id] = true;
   }
   const anySectionChosen = Object.values(sectionIdsByLine).some((ids) => ids.length > 0);
+
+  type ChosenLinePrintableZone = { production_order_line_id: string; printable_zone_id: string };
+  const printableZoneIdsByLine: Record<string, string[]> = {};
+  for (const z of (chosenLinePrintableZones ?? []) as unknown as ChosenLinePrintableZone[]) {
+    (printableZoneIdsByLine[z.production_order_line_id] ??= []).push(z.printable_zone_id);
+  }
 
   // Noms des personnes ayant validé le lancement / demandé ou confirmé la
   // clôture — doivent apparaître à l'écran (et sur le PDF, hors périmètre de
@@ -229,7 +251,17 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
   // toutes les lignes), et si son modèle/sa couleur viennent du devis
   // (sourceHadModel) donc non modifiables ici.
   type RawLine = NonNullable<typeof productionOrderLines>[number];
-  type LineConfig = Omit<LineData, "sectionIds" | "coupeSelected" | "fiche" | "visuelRequired" | "visuelAttached">;
+  type LineConfig = Omit<
+    LineData,
+    | "sectionIds"
+    | "coupeSelected"
+    | "fiche"
+    | "impressionSectionSelected"
+    | "visuelAttached"
+    | "maquetteAttached"
+    | "printableZoneOptions"
+    | "printableZoneIdsSelected"
+  >;
   const lines: LineConfig[] = await Promise.all(
     (productionOrderLines ?? []).map(async (l: RawLine) => {
       const productModel = l.product_models as unknown as {
@@ -307,33 +339,51 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
   const quote = order.quotes as unknown as { reference: string } | null;
 
   // Lot 9, par article depuis la migration 0037 pour le visuel : documents
-  // généraux de l'ODF entier + visuels déjà joints à chaque article, en plus
-  // de ceux encore disponibles dans la médiathèque du client pour le
-  // sélecteur d'ajout.
+  // généraux de l'ODF entier + visuels/maquettes déjà joints à chaque
+  // article, en plus de ceux encore disponibles dans la médiathèque du
+  // client pour le sélecteur d'ajout.
   const attachedGeneralMediaFiles = (attachedGeneralMedia ?? [])
     .map((m) => m.media_files as unknown as AttachableMediaFile | null)
     .filter((f): f is AttachableMediaFile => !!f);
   const availableMediaFiles = (availableMedia ?? []) as AttachableMediaFile[];
   const visuelByLine: Record<string, AttachableMediaFile[]> = {};
+  const maquetteByLine: Record<string, AttachableMediaFile[]> = {};
   for (const m of (attachedLineMedia ?? []) as unknown as { production_order_line_id: string; media_files: AttachableMediaFile | null }[]) {
-    if (m.media_files) (visuelByLine[m.production_order_line_id] ??= []).push(m.media_files);
+    if (!m.media_files) continue;
+    if (m.media_files.category === "maquette") (maquetteByLine[m.production_order_line_id] ??= []).push(m.media_files);
+    else (visuelByLine[m.production_order_line_id] ??= []).push(m.media_files);
   }
+
+  // Aperçu (migration 0040) : une URL signée par maquette, résolue une seule
+  // fois pour tout l'ODF plutôt qu'un aller-retour par article.
+  const maquettePreviewUrls = await getMediaFilePreviewUrls(Object.values(maquetteByLine).flat().map((f) => f.id));
+  const maquetteWithUrlByLine: Record<string, MaquetteFile[]> = {};
+  for (const [lineId, files] of Object.entries(maquetteByLine)) {
+    maquetteWithUrlByLine[lineId] = files.map((f) => ({ ...f, previewUrl: maquettePreviewUrls.get(f.id) ?? null }));
+  }
+
   const fichesByLine: Record<string, { id: string; numeroOt: string; statut: StatutFiche }> = {};
   for (const f of (fiches ?? []) as unknown as { id: string; numero_ot: string; statut: StatutFiche; production_order_line_id: string }[]) {
     fichesByLine[f.production_order_line_id] = { id: f.id, numeroOt: f.numero_ot, statut: f.statut };
   }
 
-  // Sections retenues, fiche Patronnage et visuel intégrés à la carte de
-  // chaque article (« Configuration produit ») plutôt qu'en cartes séparées
-  // en bas de page (demande Ayman, 15/09) — regroupe ici les données
-  // calculées ci-dessus par article.
+  // Sections retenues, fiche Patronnage, visuel, maquette et zones
+  // imprimables intégrés à la carte de chaque article (« Configuration
+  // produit ») plutôt qu'en cartes séparées en bas de page (demande Ayman,
+  // 15/09, étendue 16/09) — regroupe ici les données calculées ci-dessus
+  // par article.
   const linesWithConfig: LineData[] = lines.map((line) => ({
     ...line,
     sectionIds: sectionIdsByLine[line.id] ?? [],
     coupeSelected: !!coupeSelectedByLine[line.id],
     fiche: fichesByLine[line.id] ?? null,
-    visuelRequired: !!visuelRequiredByLine[line.id],
+    impressionSectionSelected: !!impressionSectionSelectedByLine[line.id],
     visuelAttached: visuelByLine[line.id] ?? [],
+    maquetteAttached: maquetteWithUrlByLine[line.id] ?? [],
+    printableZoneOptions: (printableZonesAll ?? [])
+      .filter((z) => z.product_model_id === line.productModelId)
+      .map((z) => ({ id: z.id, zone_key: z.zone_key, zone_label: z.zone_label, display_order: z.display_order })),
+    printableZoneIdsSelected: printableZoneIdsByLine[line.id] ?? [],
   }));
 
   const canArchive = await can("ordres_fabrication", "archive");

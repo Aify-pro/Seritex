@@ -10,6 +10,7 @@
  */
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
+import QRCode from "qrcode";
 import { buildOdfPdf, type OdfPdfData } from "../src/lib/pdf/odf-pdf";
 
 const BASE = "https://seritex.example.com";
@@ -54,6 +55,8 @@ const data: OdfPdfData = {
       sections: "Coupe, Piquage, Broderie, Finition, Emballage",
       fiche: "OT-2026-0091 (Bon pour coupe)",
       visuels: "logo-poitrine-v3.pdf, placement-broderie.png",
+      // Renseigné dans main() : générer l'image tient à un await, impossible ici au niveau module en sortie CJS (tsx).
+      maquette: null,
       sizes: sizes([
         ["XS", 40],
         ["S", 120],
@@ -76,6 +79,7 @@ const data: OdfPdfData = {
       sections: "Coupe, Piquage, Finition, Contrôle qualité, Emballage",
       fiche: "OT-2026-0092 (En cours)",
       visuels: null,
+      maquette: null,
       sizes: sizes([
         ["38", 30],
         ["40", 60],
@@ -99,6 +103,7 @@ const data: OdfPdfData = {
       sections: "Coupe, Piquage, Finition",
       fiche: null,
       visuels: "dossier-technique-softshell.pdf",
+      maquette: null,
       sizes: sizes([
         ["S", 30],
         ["M", 70],
@@ -129,6 +134,13 @@ const data: OdfPdfData = {
 };
 
 async function main() {
+  // Tient lieu de vraie maquette (simulation, migration 0040) : un carré
+  // généré à la volée, seulement pour vérifier ici que l'image s'embarque et
+  // se met à l'échelle sans jamais dépasser sa page ni se déformer — aucun
+  // asset réel n'est nécessaire pour ce script.
+  const sampleMaquette = await QRCode.toBuffer(`${BASE}/exemple-maquette`, { type: "png", width: 900, margin: 2 });
+  data.articles[0].maquette = { fileName: "simulation-poitrine.png", bytes: sampleMaquette, format: "png" };
+
   const out = path.resolve(process.argv[2] ?? "odf-preview.pdf");
   const bytes = await buildOdfPdf(data);
   await writeFile(out, bytes);

@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getBaseUrl } from "@/lib/url";
+import { getMediaFileBuffers } from "@/lib/media/preview";
 import {
   buildOdfPdf,
   type OdfPdfArticle,
   type OdfPdfColor,
   type OdfPdfData,
-  type OdfPdfSousOdf,
 } from "@/lib/pdf/odf-pdf";
 import { PRODUCTION_ORDER_STATUS_LABELS, type ProductionOrderStatus } from "@/lib/types/domain";
 import type { StatutFiche } from "@/lib/patronnage/types";
@@ -61,12 +61,12 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       .eq("production_order_id", id)
       .order("planned_start", { ascending: true }),
     supabase.from("product_zone_templates").select("product_model_id,zone_key,zone_label,display_order"),
-    // Visuels joints par article (migration 0037) — LineVisuelPicker ne
-    // propose jamais que des fichiers de catégorie "visuel" à l'attache,
-    // donc tout ce qui a un production_order_line_id ici EST un visuel.
+    // Visuels ET maquettes joints par article (migrations 0037/0040) —
+    // distingués par catégorie, contrairement à avant la migration 0040 où
+    // seul le visuel pouvait être scopé par article.
     supabase
       .from("production_order_media_files")
-      .select("production_order_line_id,media_files(file_name)")
+      .select("production_order_line_id,media_file_id,media_files(file_name,category,mime_type)")
       .eq("production_order_id", id)
       .not("production_order_line_id", "is", null),
   ]);
@@ -83,14 +83,26 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       : { data: [] as { numero_ot: string; statut: string; production_order_line_id: string }[] };
 
   const visuelsByLine = new Map<string, string[]>();
+  // Une seule maquette par article (migration 0040, voir attachMediaFileToLine) —
+  // le premier trouvé suffit, défensif si jamais plusieurs traînaient.
+  const maquetteByLine = new Map<string, { id: string; file_name: string }>();
   for (const m of mediaFiles ?? []) {
     const lineId = m.production_order_line_id as string;
-    const fileName = (m.media_files as unknown as { file_name: string } | null)?.file_name;
-    if (!fileName) continue;
-    const list = visuelsByLine.get(lineId) ?? [];
-    list.push(fileName);
-    visuelsByLine.set(lineId, list);
+    const media = m.media_files as unknown as { file_name: string; category: string; mime_type: string | null } | null;
+    if (!media) continue;
+    if (media.category === "maquette") {
+      if (!maquetteByLine.has(lineId)) maquetteByLine.set(lineId, { id: m.media_file_id as string, file_name: media.file_name });
+    } else if (media.category === "visuel") {
+      const list = visuelsByLine.get(lineId) ?? [];
+      list.push(media.file_name);
+      visuelsByLine.set(lineId, list);
+    }
   }
+
+  // Octets des maquettes (migration 0040), une par article au plus — voir
+  // src/lib/media/preview.ts. Récupérés ici (indépendants de la mise en
+  // page), embarqués dans le PDF par odf-pdf.ts.
+  const maquetteBuffers = await getMediaFileBuffers(Array.from(maquetteByLine.values()).map((m) => m.id));
 
   const userIds = [order.launched_by, order.cloture_demandee_par, order.closed_by].filter(
     (v): v is string => !!v
@@ -147,6 +159,14 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
     const ficheForLine = (fiches ?? []).find((f) => f.production_order_line_id === line.id);
     const visuels = visuelsByLine.get(line.id);
+    const maquette = maquetteByLine.get(line.id);
+    const maquetteBuffer = maquette ? maquetteBuffers.get(maquette.id) : undefined;
+    const maquetteFormat: "png" | "jpg" | null =
+      maquetteBuffer?.mimeType === "image/png"
+        ? "png"
+        : maquetteBuffer?.mimeType === "image/jpeg" || maquetteBuffer?.mimeType === "image/jpg"
+          ? "jpg"
+          : null;
 
     return {
       description: line.description,
@@ -171,13 +191,17 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         ? `${ficheForLine.numero_ot} (${FICHE_STATUT_LABELS[ficheForLine.statut as StatutFiche] ?? ficheForLine.statut})`
         : null,
       visuels: visuels && visuels.length > 0 ? visuels.join(", ") : null,
+      maquette:
+        maquette && maquetteBuffer && maquetteFormat
+          ? { fileName: maquette.file_name, bytes: maquetteBuffer.buffer, format: maquetteFormat }
+          : null,
       sizes: (line.sizes ?? []).map((s) => ({ taille: s.taille, quantite: s.quantite_demandee })),
     };
   });
 
   // Sous-ODF générés à la validation de l'ODF : un QR par ligne, qui ouvre
   // le détail de CE sous-ODF (saisie au terminal depuis l'atelier).
-  const sousOdf: OdfPdfSousOdf[] = (workOrders ?? []).map((wo) => ({
+  const sousOdf: OdfPdfData["sousOdf"] = (workOrders ?? []).map((wo) => ({
     reference: wo.reference,
     section: (wo.sections as unknown as { name: string } | null)?.name ?? "—",
     planned: wo.quantity_planned,

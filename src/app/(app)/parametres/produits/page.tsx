@@ -5,6 +5,7 @@ import { Card, CardHeader, CardBody } from "@/components/ui/card";
 import { NewProductModelForm } from "./new-product-model-form";
 import { ProductModelActiveToggle } from "./product-model-active-toggle";
 import { ZoneTemplateEditor } from "./zone-template-editor";
+import { PrintableZoneEditor } from "./printable-zone-editor";
 import { ProductModelSageReference } from "./product-model-sage-reference";
 import { NomenclatureEditor } from "./nomenclature-editor";
 import { AvailabilityEditor } from "./availability-editor";
@@ -17,6 +18,7 @@ export default async function ProductModelsPage() {
   const [
     { data: models },
     { data: zones },
+    { data: printableZones },
     { data: nomenclatureLines },
     { data: sizes },
     { data: colors },
@@ -26,6 +28,7 @@ export default async function ProductModelsPage() {
   ] = await Promise.all([
     supabase.from("product_models").select("id,name,category,active,sage_reference,textile_id").order("name"),
     supabase.from("product_zone_templates").select("*").order("display_order"),
+    supabase.from("product_printable_zones").select("*").order("display_order"),
     supabase.from("nomenclature_lines").select("*").order("created_at"),
     supabase.from("sizes").select("id,groupe,libelle").eq("active", true).order("groupe").order("display_order"),
     supabase.from("colors").select("id,name").eq("active", true).order("name"),
@@ -41,7 +44,7 @@ export default async function ProductModelsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Modèles de produits"
-        description="Chaque modèle a son propre gabarit de zones (section 8) : la liste de zones nommées proposée sur l'écran ODF pour choisir une couleur par zone, ainsi que sa nomenclature (lot 12) : les composants constants hors tissu (boutons, fil, colle, col...) et leur quantité par pièce. C'est aussi ici que se déclare sa disponibilité — dans quelles tailles et quelles couleurs il existe. Un devis, une gamme opératoire ou un article Sage s'y rattachent aussi."
+        description="Chaque modèle a son propre gabarit de zones (section 8) : la liste de zones nommées proposée sur l'écran ODF pour choisir une couleur par zone, ses zones imprimables — les surfaces où une impression peut être réalisée, pour les sections de catégorie Impression — ainsi que sa nomenclature (lot 12) : les composants constants hors tissu (boutons, fil, colle, col...) et leur quantité par pièce. C'est aussi ici que se déclare sa disponibilité — dans quelles tailles et quelles couleurs il existe. Un devis, une gamme opératoire ou un article Sage s'y rattachent aussi."
       />
 
       <NewProductModelForm />
@@ -49,6 +52,7 @@ export default async function ProductModelsPage() {
       <div className="space-y-4">
         {models?.map((m) => {
           const modelZones = (zones ?? []).filter((z) => z.product_model_id === m.id);
+          const modelPrintableZones = (printableZones ?? []).filter((z) => z.product_model_id === m.id);
           const modelNomenclatureLines = (nomenclatureLines ?? []).filter((l) => l.product_model_id === m.id);
           return (
             <Card key={m.id}>
@@ -65,6 +69,7 @@ export default async function ProductModelsPage() {
                   textiles={textiles ?? []}
                 />
                 <ZoneTemplateEditor productModelId={m.id} zones={modelZones} />
+                <PrintableZoneEditor productModelId={m.id} zones={modelPrintableZones} />
                 <NomenclatureEditor productModelId={m.id} lines={modelNomenclatureLines} />
                 <AvailabilityEditor
                   productModelId={m.id}
