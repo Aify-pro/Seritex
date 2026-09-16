@@ -307,6 +307,12 @@ export interface QuoteLine {
   couleur_unique_id: string | null;
   couleur_unique?: Pick<Color, "id" | "name" | "code"> | null;
   zone_colors?: QuoteLineZoneColor[];
+  // Visuel(s) et maquette (migration 0041) — déposables dès le devis, avant
+  // même l'échantillon. Le visuel reste multiple ; la maquette, unique par
+  // ligne, hérite ensuite dans la ligne d'ODF correspondante tant qu'elle
+  // n'est pas re-déposée là-bas (voir production-order-lines.tsx).
+  visuels?: DownloadableMediaFile[];
+  maquette?: MaquetteFile | null;
 }
 
 /** Couleur choisie pour une zone donnée, sur une ligne de devis donnée. */
@@ -475,6 +481,20 @@ export interface MediaFile {
   companies?: Pick<Company, "id" | "name">;
   media_file_versions?: MediaFileVersion[];
 }
+
+/**
+ * Fichier de médiathèque attachable à une ligne (article d'ODF ou de devis,
+ * visuel ou maquette) — juste ce qu'il faut pour l'afficher et le
+ * (dés)attacher. Partagé entre les pickers ODF (production_order_media_files,
+ * migration 0037/0040) et devis (quote_line_media_files, migration 0041).
+ */
+export type AttachableMediaFile = Pick<MediaFile, "id" | "file_name" | "category">;
+
+/** Maquette résolue pour l'affichage : le fichier, plus son URL d'aperçu signée (voir src/lib/media/preview.ts) — null si aucune copie exploitable. */
+export type MaquetteFile = AttachableMediaFile & { previewUrl: string | null };
+
+/** Visuel résolu pour l'affichage : le fichier, plus son URL de téléchargement signée — cliquer dessus télécharge (contrairement à la maquette, qui s'ouvre en aperçu). Null si aucune copie exploitable. */
+export type DownloadableMediaFile = AttachableMediaFile & { downloadUrl: string | null };
 
 export interface MediaFileVersion {
   id: string;
