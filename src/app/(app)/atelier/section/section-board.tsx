@@ -83,6 +83,7 @@ export function SectionBoard({
   initialOpenWasteBags = [],
   stockItemOptions = [],
   sizes = [],
+  stockManagerOnly = false,
 }: {
   sectionId: string;
   initialWorkOrders: WorkOrderRow[];
@@ -97,6 +98,12 @@ export function SectionBoard({
   initialOpenWasteBags?: WasteBagRow[];
   /** Lot 10 : miroir Sage — peut être vide si jamais synchronisé (Paramètres > Stock). */
   stockItemOptions?: StockItemOption[];
+  /**
+   * Gestionnaire de stock (demande Ayman 16/09) : ne voit que le bloc pesées
+   * & sacs de déchets, pas la file de travail (clôturer un matelas, générer
+   * un lot...) qui reste le travail du chef de section.
+   */
+  stockManagerOnly?: boolean;
 }) {
   // `initialWorkOrders` change (nouvelle section, ou re-rendu serveur après
   // revalidation) : le composant est remonté via `key={sectionId}` côté page
@@ -150,49 +157,59 @@ export function SectionBoard({
           </div>
         )}
 
-        <div>
-          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-foreground-muted">
-            À produire ({enCours.length})
-          </h3>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <AnimatePresence initial={false}>
-              {enCours.map((wo) => (
-                <WorkOrderCard
-                  key={wo.id}
-                  wo={wo}
-                  setOrders={setOrders}
-                  matelas={matelasByWorkOrderId[wo.id]}
-                  traceOptions={traceOptionsByWorkOrderId[wo.id] ?? []}
-                  sectionId={sectionId}
-                />
-              ))}
-            </AnimatePresence>
-            {enCours.length === 0 && (
-              <div className="rounded-md border border-dashed border-border p-4 text-center text-xs text-foreground-muted sm:col-span-2 lg:col-span-3">
-                Aucun ordre en cours
+        {stockManagerOnly ? (
+          !isCoupe && (
+            <div className="rounded-md border border-dashed border-border p-4 text-center text-xs text-foreground-muted">
+              Les pesées (sortie lot, retour stock) se saisissent depuis la section Coupe — changez de section ci-dessus.
+            </div>
+          )
+        ) : (
+          <>
+            <div>
+              <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-foreground-muted">
+                À produire ({enCours.length})
+              </h3>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <AnimatePresence initial={false}>
+                  {enCours.map((wo) => (
+                    <WorkOrderCard
+                      key={wo.id}
+                      wo={wo}
+                      setOrders={setOrders}
+                      matelas={matelasByWorkOrderId[wo.id]}
+                      traceOptions={traceOptionsByWorkOrderId[wo.id] ?? []}
+                      sectionId={sectionId}
+                    />
+                  ))}
+                </AnimatePresence>
+                {enCours.length === 0 && (
+                  <div className="rounded-md border border-dashed border-border p-4 text-center text-xs text-foreground-muted sm:col-span-2 lg:col-span-3">
+                    Aucun ordre en cours
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {termines.length > 0 && (
+              <div>
+                <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-foreground-muted">
+                  Quantité atteinte ({termines.length})
+                </h3>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {termines.map((wo) => (
+                    <WorkOrderCard
+                      key={wo.id}
+                      wo={wo}
+                      setOrders={setOrders}
+                      matelas={matelasByWorkOrderId[wo.id]}
+                      traceOptions={traceOptionsByWorkOrderId[wo.id] ?? []}
+                      sectionId={sectionId}
+                    />
+                  ))}
+                </div>
               </div>
             )}
-          </div>
-        </div>
-
-        {termines.length > 0 && (
-          <div>
-            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-foreground-muted">
-              Quantité atteinte ({termines.length})
-            </h3>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {termines.map((wo) => (
-                <WorkOrderCard
-                  key={wo.id}
-                  wo={wo}
-                  setOrders={setOrders}
-                  matelas={matelasByWorkOrderId[wo.id]}
-                  traceOptions={traceOptionsByWorkOrderId[wo.id] ?? []}
-                  sectionId={sectionId}
-                />
-              ))}
-            </div>
-          </div>
+          </>
         )}
       </div>
     </SizesContext.Provider>
