@@ -299,9 +299,23 @@ const SizesContext = createContext<Size[]>([]);
  * Quantités par taille. Les champs sont nommés d'après la CLÉ du référentiel
  * (« Homme/M »), lue telle quelle côté serveur : c'est cette clé qui relie la
  * répartition d'un tracé aux quantités demandées de l'ODF, rapprochement dont
- * dépend la validation (lot 2).
+ * dépend la validation (lot 2). Même gabarit de champ (boîte `w-20`) que le
+ * dispatching des tailles de l'ODF (production-order-lines.tsx), pour que les
+ * deux écrans se lisent de la même façon.
+ *
+ * `readOnly` bascule vers un simple affichage (pas de `<input>`, rien à
+ * soumettre) : sert au dispatching total de la fiche, calculé depuis les
+ * tracés plutôt que saisi (voir `repartitionDepuisTraces`).
  */
-function RepartitionFields({ prefix, initial }: { prefix: string; initial?: RepartitionTailles }) {
+function RepartitionFields({
+  prefix,
+  initial,
+  readOnly,
+}: {
+  prefix: string;
+  initial?: RepartitionTailles;
+  readOnly?: boolean;
+}) {
   const sizes = useContext(SizesContext);
   const groupes = [...new Set(sizes.map((t) => t.groupe))];
 
@@ -314,30 +328,60 @@ function RepartitionFields({ prefix, initial }: { prefix: string; initial?: Repa
   }
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
       {groupes.map((groupe) => (
         <div key={groupe}>
-          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-foreground-muted">{groupe}</p>
-          <div className="grid grid-cols-4 gap-2 sm:grid-cols-8">
+          <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-foreground-muted">{groupe}</p>
+          <div className="flex flex-wrap gap-2">
             {sizes
               .filter((t) => t.groupe === groupe)
-              .map((t) => (
-                <div key={t.cle}>
-                  <label className="mb-1 block text-[11px] text-foreground-muted">{t.libelle}</label>
-                  <input
-                    type="number"
-                    min={0}
-                    name={`${prefix}_${t.cle}`}
-                    defaultValue={initial?.[t.cle] ?? ""}
-                    className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground"
-                  />
-                </div>
-              ))}
+              .map((t) => {
+                const valeur = initial?.[t.cle] ?? 0;
+                return (
+                  <div
+                    key={t.cle}
+                    className={`flex w-20 flex-col gap-1 rounded-md border p-1.5 ${
+                      valeur > 0 ? "border-brand bg-brand-soft/40" : "border-border"
+                    }`}
+                  >
+                    <span className="text-center text-[11px] font-medium text-foreground">{t.libelle}</span>
+                    {readOnly ? (
+                      <p className="w-full p-1 text-center text-xs text-foreground">{valeur || 0}</p>
+                    ) : (
+                      <input
+                        type="number"
+                        min={0}
+                        name={`${prefix}_${t.cle}`}
+                        defaultValue={initial?.[t.cle] ?? ""}
+                        className="w-full rounded border border-border bg-surface p-1 text-center text-xs outline-none focus:ring-2 focus:ring-brand/30"
+                      />
+                    )}
+                  </div>
+                );
+              })}
           </div>
         </div>
       ))}
     </div>
   );
+}
+
+/**
+ * Dispatching total de l'ordre de tracé : plus une saisie manuelle
+ * dupliquant celle de l'ODF, mais la somme de ce qui est effectivement posé
+ * sur les tracés (répartition par couche × nombre de plis de chaque tracé,
+ * lot 8 même convention que `totalTrace` dans TraceDetailBody).
+ */
+function repartitionDepuisTraces(traces: TracePlacement[]): RepartitionTailles {
+  const out: RepartitionTailles = {};
+  for (const trace of traces) {
+    const plis = trace.nbPlis ?? 0;
+    if (plis <= 0) continue;
+    for (const [cle, quantite] of Object.entries(trace.repartitionParCouche)) {
+      out[cle] = (out[cle] ?? 0) + quantite * plis;
+    }
+  }
+  return out;
 }
 
 /**
@@ -481,8 +525,6 @@ function CreateFicheForm({
   const [error, setError] = useState<string | null>(null);
   const [lineId, setLineId] = useState<string | null>(null);
   const [clientCode, setClientCode] = useState<string | null>(null);
-  const pageSizes = useContext(SizesContext);
-  const [sizes, setSizes] = useState<Size[]>(pageSizes);
   const formRef = useRef<HTMLFormElement>(null);
 
   function handleSubmit(e: React.FormEvent) {
@@ -544,17 +586,14 @@ function CreateFicheForm({
         </Field>
       </div>
 
-      <ProductModelFields productModels={productModels} initialModelId={null} onSizesChange={setSizes} />
+      <ProductModelFields productModels={productModels} initialModelId={null} onSizesChange={() => {}} />
 
       <Field label="Quantité totale à produire">
         <input type="number" min={0} name="quantite_totale" className="w-40 rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground" />
       </Field>
-
-      <Field label="Répartition des tailles">
-        <SizesContext.Provider value={sizes}>
-          <RepartitionFields prefix="taille" />
-        </SizesContext.Provider>
-      </Field>
+      <p className="text-xs text-foreground-muted">
+        Le dispatching des tailles se calcule automatiquement à partir des tracés, une fois la fiche créée.
+      </p>
 
       <Field label="Couleur">
         <input name="couleur" className="w-64 rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground" />
@@ -604,21 +643,15 @@ export function FicheDetailContent({
   const locked = fiche.statut === "bon_pour_coupe" || fiche.statut === "archive";
   const cadreFormRef = useRef<HTMLFormElement>(null);
   const [cadreSizes, setCadreSizes] = useState<Size[]>(sizes);
+  const [openTraceId, setOpenTraceId] = useState<string | null>(highlightTraceId ?? null);
+  const dispatchingParTaille = repartitionDepuisTraces(fiche.traces);
+  const dispatchingTotal = repartitionTotal(dispatchingParTaille);
+  const dispatchingEcart = dispatchingTotal - (fiche.quantiteTotale ?? 0);
+  const openTrace = fiche.traces.find((t) => t.id === openTraceId) ?? null;
 
   function refresh() {
     router.refresh();
   }
-
-  // Lien direct depuis l'ODF : une fois le tracé visé rendu, on l'amène à
-  // l'écran — délai court pour laisser la Dialog (portail + animation
-  // d'entrée) se poser avant de calculer sa position.
-  useEffect(() => {
-    if (!highlightTraceId) return;
-    const t = setTimeout(() => {
-      document.getElementById(`trace-${highlightTraceId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
-    }, 150);
-    return () => clearTimeout(t);
-  }, [highlightTraceId]);
 
   function runAction(action: () => Promise<{ error?: string } | undefined>) {
     setError(null);
@@ -652,8 +685,12 @@ export function FicheDetailContent({
     });
   }
 
+  // La grille de tailles se restreint à celles du modèle choisi (cadreSizes)
+  // partout dans la fiche — cadre "Demande" ET tracés : sans ça, ajouter un
+  // tracé proposait les huit tailles du référentiel entier au lieu des
+  // seules tailles du modèle (product_model_sizes), comme sur l'ODF.
   return (
-    <SizesContext.Provider value={sizes}>
+    <SizesContext.Provider value={cadreSizes}>
       <div className="space-y-5">
         {error && (
           <div className="flex items-center gap-2 rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger">
@@ -779,13 +816,37 @@ export function FicheDetailContent({
                 />
               </Field>
 
-              <Field label={`Répartition des tailles (total ${repartitionTotal(fiche.repartitionTailles)})`}>
-                <fieldset disabled={locked || !permissions.canModify}>
-                  <SizesContext.Provider value={cadreSizes}>
-                    <RepartitionFields prefix="taille" initial={fiche.repartitionTailles} />
-                  </SizesContext.Provider>
-                </fieldset>
-              </Field>
+              <div>
+                <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+                  <p className="text-xs font-medium text-foreground-muted">
+                    Dispatching total (calculé depuis les tracés)
+                  </p>
+                  <p className="text-xs">
+                    <span className="text-foreground-muted">Réparti </span>
+                    <span
+                      className={
+                        fiche.quantiteTotale == null || dispatchingTotal === fiche.quantiteTotale
+                          ? "font-semibold text-success"
+                          : "font-semibold text-warning"
+                      }
+                    >
+                      {dispatchingTotal}
+                    </span>
+                    {fiche.quantiteTotale != null && (
+                      <>
+                        <span className="text-foreground-muted"> / {fiche.quantiteTotale}</span>
+                        {dispatchingEcart !== 0 && (
+                          <span className="text-warning">
+                            {" "}
+                            — {dispatchingEcart > 0 ? `${dispatchingEcart} en trop` : `il manque ${-dispatchingEcart}`}
+                          </span>
+                        )}
+                      </>
+                    )}
+                  </p>
+                </div>
+                <RepartitionFields prefix="taille" initial={dispatchingParTaille} readOnly />
+              </div>
 
               <Field label="Couleur">
                 <input name="couleur" defaultValue={fiche.couleur ?? ""} disabled={locked || !permissions.canModify} className="w-64 rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground disabled:opacity-60" />
@@ -809,7 +870,7 @@ export function FicheDetailContent({
           </CardBody>
         </Card>
 
-        {/* Tracés */}
+        {/* Tracés — liste, détail en fenêtre interne au clic sur la ligne */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-medium text-foreground">Tracés ({fiche.traces.length})</h3>
@@ -830,27 +891,54 @@ export function FicheDetailContent({
             </div>
           </div>
 
-          {fiche.traces.length === 0 && (
-            <Card>
-              <CardBody className="text-sm text-foreground-muted">Aucun tracé déposé pour l&apos;instant.</CardBody>
-            </Card>
-          )}
-
-          {fiche.traces.map((trace) => (
-            <TraceCard
-              key={trace.id}
-              fiche={fiche}
-              trace={trace}
-              locked={locked}
-              canModify={permissions.canModifyTrace}
-              canValidate={permissions.canValidate}
-              referenceOptions={referenceOptions}
-              onChanged={refresh}
-              highlighted={trace.id === highlightTraceId}
-            />
-          ))}
+          <Card>
+            <CardBody className="p-0">
+              <Table>
+                <Thead>
+                  <Tr>
+                    <Th>Référence</Th>
+                    <Th>Statut</Th>
+                    <Th align="center">Plis</Th>
+                    <Th align="center">Total pièces</Th>
+                    <Th>Fichier</Th>
+                    <Th align="right">Actions</Th>
+                  </Tr>
+                </Thead>
+                <Tbody>
+                  {fiche.traces.map((trace) => (
+                    <TraceRow
+                      key={trace.id}
+                      trace={trace}
+                      highlighted={trace.id === highlightTraceId}
+                      onOpen={() => setOpenTraceId(trace.id)}
+                    />
+                  ))}
+                  {fiche.traces.length === 0 && <EmptyRow colSpan={6}>Aucun tracé déposé pour l&apos;instant.</EmptyRow>}
+                </Tbody>
+              </Table>
+            </CardBody>
+          </Card>
         </div>
       </div>
+
+      <Dialog
+        open={!!openTrace}
+        onOpenChange={(v) => !v && setOpenTraceId(null)}
+        title={openTrace?.reference}
+        size="lg"
+      >
+        {openTrace && (
+          <TraceDetailBody
+            fiche={fiche}
+            trace={openTrace}
+            locked={locked}
+            canModify={permissions.canModifyTrace}
+            canValidate={permissions.canValidate}
+            referenceOptions={referenceOptions}
+            onChanged={refresh}
+          />
+        )}
+      </Dialog>
     </SizesContext.Provider>
   );
 }
@@ -918,17 +1006,69 @@ function RequestCorrectiveTraceButton({ ficheId, onRequested }: { ficheId: strin
 }
 
 /* ============================================================
-   Carte d'un tracé
+   Tracés — ligne de tableau (liste), détail en fenêtre interne
 ============================================================ */
 
-function TraceCard({
+/** Résumé d'une ligne — l'essentiel visible sans ouvrir le détail. */
+function TraceRow({
+  trace,
+  highlighted,
+  onOpen,
+}: {
+  trace: TracePlacement;
+  highlighted?: boolean;
+  onOpen: () => void;
+}) {
+  const totalCouche = repartitionTotal(trace.repartitionParCouche);
+  const totalTrace = trace.nbPlis ? totalCouche * trace.nbPlis : null;
+  const pendingApproval = trace.estCorrectif && !trace.approuveLe;
+  const a = trace.analyse;
+
+  return (
+    <tr
+      id={`trace-${trace.id}`}
+      onClick={onOpen}
+      className={cn("cursor-pointer transition-colors hover:bg-surface-muted/40", highlighted && "bg-brand-soft/40")}
+    >
+      <Td className="font-medium text-foreground">
+        {trace.reference}
+        {trace.estCorrectif && <span className="ml-1.5 text-xs text-warning">(rattrapage)</span>}
+      </Td>
+      <Td>
+        {pendingApproval ? (
+          <Badge tone="warning">En attente d&apos;approbation</Badge>
+        ) : trace.rendement ? (
+          <Badge tone="success">Clôturé</Badge>
+        ) : a ? (
+          a.reconnaissanceComplete ? (
+            <Badge tone="success">Reconnu</Badge>
+          ) : (
+            <Badge tone="danger">À vérifier</Badge>
+          )
+        ) : trace.fichierNom ? (
+          <Badge tone="info">Déposé</Badge>
+        ) : (
+          <Badge tone="neutral">En attente de dépôt</Badge>
+        )}
+      </Td>
+      <Td align="center">{trace.nbPlis ?? "—"}</Td>
+      <Td align="center">{totalTrace ?? "—"}</Td>
+      <Td>{trace.fichierNom ?? <span className="text-foreground-muted">—</span>}</Td>
+      <Td align="right">
+        <Eye className="ml-auto h-3.5 w-3.5 text-foreground-muted" />
+      </Td>
+    </tr>
+  );
+}
+
+/** Détail complet d'un tracé, ouvert dans la fenêtre interne (Dialog) déclenchée par sa ligne. */
+function TraceDetailBody({
   fiche,
   trace,
   locked,
   canModify,
   canValidate,
   onChanged,
-  highlighted,
 }: {
   fiche: FichePlacement;
   trace: TracePlacement;
@@ -937,7 +1077,6 @@ function TraceCard({
   canValidate: boolean;
   referenceOptions: ReferenceOption[];
   onChanged: () => void;
-  highlighted?: boolean;
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -979,61 +1118,53 @@ function TraceCard({
 
   if (pendingApproval) {
     return (
-      <Card
-        id={`trace-${trace.id}`}
-        className={cn("border-warning/30 bg-warning-soft/30", highlighted && "ring-2 ring-brand ring-offset-2 ring-offset-background")}
-      >
-        <CardHeader
-          title={trace.reference}
-          action={<Badge tone="warning">Rattrapage — en attente d&apos;approbation</Badge>}
-        />
-        <CardBody className="space-y-3">
-          {error && (
-            <div className="flex items-center gap-2 rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger">
-              <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> {error}
-            </div>
-          )}
-          <p className="text-sm text-foreground">{trace.justification}</p>
-          {canValidate && (
-            <div className="space-y-2">
-              {!showReject ? (
+      <div className="space-y-3">
+        <Badge tone="warning">Rattrapage — en attente d&apos;approbation</Badge>
+        {error && (
+          <div className="flex items-center gap-2 rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> {error}
+          </div>
+        )}
+        <p className="text-sm text-foreground">{trace.justification}</p>
+        {canValidate && (
+          <div className="space-y-2">
+            {!showReject ? (
+              <div className="flex gap-1.5">
+                <Button size="sm" loading={pending} onClick={() => run(() => approveCorrectiveTrace(trace.id))}>
+                  <CheckCircle2 className="h-3.5 w-3.5" /> Approuver
+                </Button>
+                <Button size="sm" variant="danger" onClick={() => setShowReject(true)} disabled={pending}>
+                  <XCircle className="h-3.5 w-3.5" /> Refuser
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <textarea
+                  autoFocus
+                  value={rejectMotif}
+                  onChange={(e) => setRejectMotif(e.target.value)}
+                  placeholder="Motif du refus"
+                  rows={2}
+                  className="w-full rounded-md border border-border bg-surface p-2 text-xs text-foreground outline-none focus:ring-2 focus:ring-brand/30"
+                />
                 <div className="flex gap-1.5">
-                  <Button size="sm" loading={pending} onClick={() => run(() => approveCorrectiveTrace(trace.id))}>
-                    <CheckCircle2 className="h-3.5 w-3.5" /> Approuver
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    loading={pending}
+                    onClick={() => run(() => rejectCorrectiveTrace(trace.id, rejectMotif))}
+                  >
+                    Confirmer le refus
                   </Button>
-                  <Button size="sm" variant="danger" onClick={() => setShowReject(true)} disabled={pending}>
-                    <XCircle className="h-3.5 w-3.5" /> Refuser
+                  <Button size="sm" variant="ghost" onClick={() => setShowReject(false)}>
+                    Annuler
                   </Button>
                 </div>
-              ) : (
-                <div className="space-y-2">
-                  <textarea
-                    autoFocus
-                    value={rejectMotif}
-                    onChange={(e) => setRejectMotif(e.target.value)}
-                    placeholder="Motif du refus"
-                    rows={2}
-                    className="w-full rounded-md border border-border bg-surface p-2 text-xs text-foreground outline-none focus:ring-2 focus:ring-brand/30"
-                  />
-                  <div className="flex gap-1.5">
-                    <Button
-                      size="sm"
-                      variant="danger"
-                      loading={pending}
-                      onClick={() => run(() => rejectCorrectiveTrace(trace.id, rejectMotif))}
-                    >
-                      Confirmer le refus
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setShowReject(false)}>
-                      Annuler
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </CardBody>
-      </Card>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     );
   }
 
@@ -1057,38 +1188,34 @@ function TraceCard({
   const a = trace.analyse;
 
   return (
-    <Card id={`trace-${trace.id}`} className={cn(highlighted && "ring-2 ring-brand ring-offset-2 ring-offset-background")}>
-      <CardHeader
-        title={trace.reference}
-        description={
-          trace.estCorrectif ? (
-            <span className="inline-flex items-center gap-1.5">
-              <Badge tone="warning">Rattrapage approuvé le {formatDateTime(trace.approuveLe)}</Badge>
-              {trace.justification}
-            </span>
-          ) : undefined
-        }
-        action={
-          <div className="flex items-center gap-2">
-            {a && (
-              <Button size="sm" variant="secondary" onClick={openDetail}>
-                <ScanSearch className="h-3.5 w-3.5" /> Détail
-              </Button>
-            )}
-            {!effectiveLocked && canModify && (
-              <button
-                onClick={() => {
-                  if (confirm("Retirer ce tracé de la fiche ?")) run(() => deleteTrace(trace.id, fiche.id));
-                }}
-                className="text-foreground-muted hover:text-danger"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
-            )}
-          </div>
-        }
-      />
-      <CardBody className="space-y-4">
+    <div className="space-y-4">
+      <div className="flex items-start justify-between gap-3">
+        {trace.estCorrectif ? (
+          <span className="inline-flex flex-wrap items-center gap-1.5 text-sm">
+            <Badge tone="warning">Rattrapage approuvé le {formatDateTime(trace.approuveLe)}</Badge>
+            <span className="text-foreground-muted">{trace.justification}</span>
+          </span>
+        ) : (
+          <span />
+        )}
+        <div className="flex shrink-0 items-center gap-2">
+          {a && (
+            <Button size="sm" variant="secondary" onClick={openDetail}>
+              <ScanSearch className="h-3.5 w-3.5" /> Détail
+            </Button>
+          )}
+          {!effectiveLocked && canModify && (
+            <button
+              onClick={() => {
+                if (confirm("Retirer ce tracé de la fiche ?")) run(() => deleteTrace(trace.id, fiche.id));
+              }}
+              className="text-foreground-muted hover:text-danger"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+      </div>
         {error && (
           <div className="flex items-center gap-2 rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger">
             <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> {error}
@@ -1245,7 +1372,6 @@ function TraceCard({
             </div>
           </div>
         )}
-      </CardBody>
 
       {a && (
         <TraceDetailDialog
@@ -1257,6 +1383,6 @@ function TraceCard({
           detail={detail}
         />
       )}
-    </Card>
+    </div>
   );
 }

@@ -243,7 +243,6 @@ export async function createFiche(formData: FormData) {
   const lineId = String(formData.get("production_order_line_id") ?? "").trim() || null;
   const productModelId = String(formData.get("product_model_id") ?? "").trim() || null;
   const resolved = await resolveProductModel(productModelId);
-  const allowedSizes = await getSizesForProductModel(productModelId);
 
   const { data, error } = await supabase
     .from("fiches_placement")
@@ -258,7 +257,6 @@ export async function createFiche(formData: FormData) {
         ? resolved.designation_article
         : String(formData.get("designation_article") ?? "").trim() || null,
       quantite_totale: formData.get("quantite_totale") ? Number(formData.get("quantite_totale")) : null,
-      repartition_tailles: await repartitionJson(formData, "taille", allowedSizes),
       tissu_type: productModelId ? resolved.tissu_type : String(formData.get("tissu_type") ?? "").trim() || null,
       grammage: productModelId ? resolved.grammage : formData.get("grammage") ? Number(formData.get("grammage")) : null,
       couleur: String(formData.get("couleur") ?? "").trim() || null,
@@ -334,7 +332,6 @@ export async function updateFiche(ficheId: string, formData: FormData) {
   const supabase = await createClient();
   const productModelId = String(formData.get("product_model_id") ?? "").trim() || null;
   const resolved = await resolveProductModel(productModelId);
-  const allowedSizes = await getSizesForProductModel(productModelId);
 
   const { error } = await supabase
     .from("fiches_placement")
@@ -347,7 +344,6 @@ export async function updateFiche(ficheId: string, formData: FormData) {
         ? resolved.designation_article
         : String(formData.get("designation_article") ?? "").trim() || null,
       quantite_totale: formData.get("quantite_totale") ? Number(formData.get("quantite_totale")) : null,
-      repartition_tailles: await repartitionJson(formData, "taille", allowedSizes),
       tissu_type: productModelId ? resolved.tissu_type : String(formData.get("tissu_type") ?? "").trim() || null,
       grammage: productModelId ? resolved.grammage : formData.get("grammage") ? Number(formData.get("grammage")) : null,
       couleur: String(formData.get("couleur") ?? "").trim() || null,
