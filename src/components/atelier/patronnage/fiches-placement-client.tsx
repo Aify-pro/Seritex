@@ -756,7 +756,7 @@ export function FicheDetailContent({
         {/* Lien ODF (article précis, migration 0037) */}
         <Card>
           <CardHeader title="Article d'ODF lié" description={fiche.premiereLiaisonLe ? `Première liaison le ${formatDate(fiche.premiereLiaisonLe)}` : "Optionnel"} />
-          <CardBody>
+          <CardBody className="space-y-3">
             {!locked && permissions.canModify ? (
               fiche.lineId ? (
                 // Liée : on ne laisse plus rechercher un autre article
@@ -790,6 +790,21 @@ export function FicheDetailContent({
               )
             ) : (
               <p className="text-sm text-foreground">{fiche.odfReference ?? "Aucun ODF lié"}</p>
+            )}
+
+            {/*
+              Dispatching demandé par l'ODF, pour que l'infographiste/PAO l'ait
+              sous les yeux sans ouvrir l'ODF à côté — donnée déjà copiée
+              depuis production_order_sizes au moment de la liaison
+              (applyLineToFiche, fiches-actions.ts), affichée ici pour la
+              première fois. Visible même verrouillée/lecture seule : c'est
+              justement là que ça sert le plus (tracé en cours, fiche figée).
+            */}
+            {fiche.lineId && Object.keys(fiche.repartitionTailles ?? {}).length > 0 && (
+              <div>
+                <p className="mb-2 text-xs font-medium text-foreground-muted">Dispatching demandé par l&apos;ODF</p>
+                <RepartitionFields prefix="odf_demande" initial={fiche.repartitionTailles} readOnly />
+              </div>
             )}
           </CardBody>
         </Card>
