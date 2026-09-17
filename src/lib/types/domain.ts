@@ -769,6 +769,63 @@ export interface FabricationSettings {
   updated_by: string | null;
 }
 
+// ----------------------------------------------------------------------------
+// Paramètres — Notifications email (migration 0046)
+// ----------------------------------------------------------------------------
+
+export type NotificationLogStatus = "envoye" | "simule" | "echec" | "desactive" | "ignore_pas_de_destinataire";
+
+/** Un événement email déclenchable — une ligne = un point câblé dans le code via sendNotification(). */
+export interface NotificationEvent {
+  id: string;
+  event_key: string;
+  label: string;
+  description: string | null;
+  category: string;
+  enabled: boolean;
+  subject_template: string;
+  body_template: string;
+  available_variables: string;
+  updated_at: string;
+  updated_by: string | null;
+}
+
+/** Image de marque des emails de notification — une seule ligne, même pattern que FabricationSettings. */
+export interface NotificationStyleSettings {
+  id: string;
+  sender_name: string;
+  sender_email: string | null;
+  brand_color: string;
+  logo_url: string | null;
+  footer_text: string | null;
+  app_base_url: string | null;
+  updated_at: string;
+  updated_by: string | null;
+}
+
+/** Une ligne de l'historique d'envoi (notification_log), append-only. */
+export interface NotificationLogEntry {
+  id: string;
+  event_key: string;
+  recipient_email: string;
+  recipient_label: string | null;
+  subject: string;
+  status: NotificationLogStatus;
+  is_test: boolean;
+  provider_message_id: string | null;
+  error_message: string | null;
+  related_entity_type: string | null;
+  related_entity_id: string | null;
+  triggered_by: string | null;
+  created_at: string;
+}
+
+/** Un destinataire résolu pour sendNotification() — jamais construit par l'appelant lui-même à la main. */
+export interface NotificationRecipient {
+  email: string;
+  label?: string;
+}
+
 export interface SageCustomer {
   sage_code: string;
   name: string;

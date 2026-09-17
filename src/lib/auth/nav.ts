@@ -25,6 +25,7 @@ import {
   Layers,
   ArrowLeftRight,
   Gauge,
+  Mail,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { createElement, type ReactNode } from "react";
@@ -168,5 +169,6 @@ export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
     },
     { href: "/parametres/articles-sage", label: "Articles Sage (lecture)", icon: navIcon(Package), section: PARAMETRES, module: "articles_sage" },
     { href: "/parametres/audit", label: "Journal d'audit", icon: navIcon(ScrollText), section: PARAMETRES, module: "audit" },
+    { href: "/parametres/notifications", label: "Notifications", icon: navIcon(Mail), section: PARAMETRES, module: "notifications" },
   ],
 };
