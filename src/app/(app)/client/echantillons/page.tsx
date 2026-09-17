@@ -12,6 +12,7 @@ import { SAMPLE_STATUS_LABELS, SAMPLE_PRIORITY_LABELS } from "@/lib/types/domain
 import type { SamplePriority, ProductionOrderStatus } from "@/lib/types/domain";
 import { CreateSampleDialog } from "@/components/samples/create-sample-dialog";
 import { SampleDetailContent } from "@/components/samples/sample-detail-content";
+import type { ProductionOrderLineOption } from "@/components/samples/sample-production-order-link";
 
 export default async function ClientSamplesPage() {
   const { profile } = await requireRole(["client"]);
@@ -22,7 +23,7 @@ export default async function ClientSamplesPage() {
     supabase
       .from("sample_requests")
       .select(
-        "id,reference,sample_number,need_description,quantity_requested,status,priority,request_date,due_date,extra_info,company_id,production_order_id,production_orders(id,reference,status)"
+        "id,reference,sample_number,need_description,quantity_requested,status,priority,request_date,due_date,extra_info,company_id,production_order_line_id,production_order_lines(id,description,production_orders(reference,status))"
       )
       .eq("company_id", profile.company_id!)
       .order("created_at", { ascending: false }),
@@ -62,7 +63,19 @@ export default async function ClientSamplesPage() {
             </Thead>
             <Tbody>
               {samples?.map((s) => {
-                const productionOrder = s.production_orders as unknown as { id: string; reference: string; status: ProductionOrderStatus } | null;
+                const rawLine = s.production_order_lines as unknown as {
+                  id: string;
+                  description: string;
+                  production_orders: { reference: string; status: ProductionOrderStatus } | null;
+                } | null;
+                const linkedLine: ProductionOrderLineOption | null = rawLine?.production_orders
+                  ? {
+                      id: rawLine.id,
+                      description: rawLine.description,
+                      orderReference: rawLine.production_orders.reference,
+                      status: rawLine.production_orders.status,
+                    }
+                  : null;
                 const attachedIds = new Set(attachedBySample.get(s.id) ?? []);
                 const attached = companyMedia.filter((m) => attachedIds.has(m.id));
 
@@ -84,7 +97,7 @@ export default async function ClientSamplesPage() {
                     <Td>
                       <StatusBadge status={s.status} labels={SAMPLE_STATUS_LABELS} kind="sample" />
                     </Td>
-                    <Td>{productionOrder ? productionOrder.reference : "—"}</Td>
+                    <Td>{linkedLine ? `${linkedLine.orderReference} — ${linkedLine.description}` : "—"}</Td>
                     <Td align="right">
                       <div className="flex items-center justify-end gap-1.5">
                         <Dialog
@@ -99,7 +112,7 @@ export default async function ClientSamplesPage() {
                           <SampleDetailContent
                             sample={s}
                             baseUrl={baseUrl}
-                            companyProductionOrders={productionOrder ? [productionOrder] : []}
+                            companyProductionOrderLines={linkedLine ? [linkedLine] : []}
                             attachedMedia={attached}
                             availableMedia={companyMedia}
                             permissions={{

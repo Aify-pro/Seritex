@@ -441,7 +441,9 @@ export interface SampleRequestRecord {
   company_id: string;
   contact_id: string | null;
   request_id: string | null;
-  production_order_id: string | null;
+  // Par article plutôt que par ODF entier (migration 0044) — un ODF
+  // multi-articles peut avoir un échantillon différent par article.
+  production_order_line_id: string | null;
   created_by_user_id: string | null;
   need_description: string;
   quantity_requested: number;
@@ -452,7 +454,6 @@ export interface SampleRequestRecord {
   extra_info: string | null;
   created_at: string;
   companies?: Pick<Company, "id" | "name">;
-  production_orders?: Pick<ProductionOrder, "id" | "reference" | "status"> | null;
 }
 
 export interface StorageTarget {

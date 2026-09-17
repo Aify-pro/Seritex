@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardBody } from "@/components/ui/card";
 import { SampleDetailContent } from "@/components/samples/sample-detail-content";
 import type { ProductionOrderStatus, MediaFileCategory } from "@/lib/types/domain";
+import type { ProductionOrderLineOption } from "@/components/samples/sample-production-order-link";
 
 const STAFF_MANAGERS = ["commercial", "administrateur", "responsable_production"] as const;
 
@@ -30,7 +31,7 @@ export default async function SampleSheetPage({ params }: { params: Promise<{ sa
   const { data: sample } = await supabase
     .from("sample_requests")
     .select(
-      "id,reference,sample_number,need_description,quantity_requested,status,priority,request_date,due_date,extra_info,company_id,production_order_id,companies(name)"
+      "id,reference,sample_number,need_description,quantity_requested,status,priority,request_date,due_date,extra_info,company_id,production_order_line_id,companies(name)"
     )
     .eq("sample_number", sampleNumber)
     .maybeSingle();
@@ -40,14 +41,20 @@ export default async function SampleSheetPage({ params }: { params: Promise<{ sa
 
   const isStaffManager = (STAFF_MANAGERS as readonly string[]).includes(profile.role);
 
-  const [{ data: productionOrders }, { data: mediaFiles }, { data: sampleMedia }] = await Promise.all([
+  const [{ data: productionOrderLines }, { data: mediaFiles }, { data: sampleMedia }] = await Promise.all([
+    // Par article plutôt que par ODF entier (migration 0044).
     supabase
-      .from("production_orders")
-      .select("id,reference,status")
-      .eq("company_id", sample.company_id),
+      .from("production_order_lines")
+      .select("id,description,production_orders!inner(reference,status,company_id)")
+      .eq("production_orders.company_id", sample.company_id),
     supabase.from("media_files").select("id,file_name,category").eq("company_id", sample.company_id),
     supabase.from("sample_request_media_files").select("media_file_id").eq("sample_request_id", sample.id),
   ]);
+
+  const companyProductionOrderLines: ProductionOrderLineOption[] = (productionOrderLines ?? []).map((pol) => {
+    const po = pol.production_orders as unknown as { reference: string; status: ProductionOrderStatus };
+    return { id: pol.id, description: pol.description, orderReference: po.reference, status: po.status };
+  });
 
   const attachedIds = new Set((sampleMedia ?? []).map((m) => m.media_file_id));
   const allMedia = (mediaFiles ?? []) as { id: string; file_name: string; category: MediaFileCategory }[];
@@ -64,7 +71,7 @@ export default async function SampleSheetPage({ params }: { params: Promise<{ sa
           <SampleDetailContent
             sample={{ ...sample, companyName }}
             baseUrl={baseUrl}
-            companyProductionOrders={(productionOrders ?? []) as { id: string; reference: string; status: ProductionOrderStatus }[]}
+            companyProductionOrderLines={companyProductionOrderLines}
             attachedMedia={attachedMedia}
             availableMedia={allMedia}
             permissions={{

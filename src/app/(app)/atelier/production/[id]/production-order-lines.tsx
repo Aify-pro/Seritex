@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
@@ -85,6 +86,8 @@ export interface LineData {
   printableZoneOptions: PrintableZoneOption[];
   /** Zones imprimables déjà cochées pour cet article. */
   printableZoneIdsSelected: string[];
+  /** Échantillon lié à cet article précis (migration 0044), s'il y en a un — lien libre posé depuis l'écran Échantillonnage. */
+  linkedSample: { id: string; sampleNumber: string } | null;
 }
 
 /**
@@ -287,6 +290,15 @@ function LineCard({
         <p className="text-sm font-medium text-foreground">{line.description}</p>
         <p className="text-xs text-foreground-muted">{line.quantity} pièces</p>
       </div>
+
+      {line.linkedSample && (
+        <p className="text-xs text-foreground-muted">
+          Échantillon :{" "}
+          <Link href={`/echantillons/${line.linkedSample.sampleNumber}`} className="font-medium text-brand hover:underline">
+            {line.linkedSample.sampleNumber}
+          </Link>
+        </p>
+      )}
 
       {!line.productModelId ? (
         modelEditable ? (

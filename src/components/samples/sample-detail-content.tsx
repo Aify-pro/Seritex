@@ -7,12 +7,11 @@ import {
   PRODUCTION_ORDER_STATUS_LABELS,
   type SampleRequestStatus,
   type SamplePriority,
-  type ProductionOrderStatus,
 } from "@/lib/types/domain";
 import { formatDate } from "@/lib/utils";
 import { SampleQrCode } from "@/components/samples/sample-qr-code";
 import { SampleStatusSelect } from "@/components/samples/sample-status-select";
-import { SampleProductionOrderLink } from "@/components/samples/sample-production-order-link";
+import { SampleProductionOrderLink, type ProductionOrderLineOption } from "@/components/samples/sample-production-order-link";
 import { SampleMediaFiles, type AttachableMediaFile } from "@/components/samples/sample-media-files";
 import { SampleEditDialog } from "@/components/samples/sample-edit-dialog";
 import { SampleDecisionForm } from "@/components/samples/sample-decision-form";
@@ -30,7 +29,7 @@ export interface SampleDetailData {
   due_date: string | null;
   extra_info: string | null;
   company_id: string;
-  production_order_id: string | null;
+  production_order_line_id: string | null;
   companyName?: string;
 }
 
@@ -44,14 +43,14 @@ export interface SampleDetailData {
 export function SampleDetailContent({
   sample,
   baseUrl,
-  companyProductionOrders,
+  companyProductionOrderLines,
   attachedMedia,
   availableMedia,
   permissions,
 }: {
   sample: SampleDetailData;
   baseUrl: string;
-  companyProductionOrders: { id: string; reference: string; status: ProductionOrderStatus }[];
+  companyProductionOrderLines: ProductionOrderLineOption[];
   attachedMedia: AttachableMediaFile[];
   availableMedia: AttachableMediaFile[];
   permissions: {
@@ -64,7 +63,7 @@ export function SampleDetailContent({
 }) {
   const fullUrl = `${baseUrl}/echantillons/${sample.sample_number}`;
   const pdfUrl = `${baseUrl}/api/echantillons/${sample.id}/pdf`;
-  const linkedOrder = companyProductionOrders.find((po) => po.id === sample.production_order_id);
+  const linkedLine = companyProductionOrderLines.find((l) => l.id === sample.production_order_line_id);
 
   return (
     <div className="space-y-5">
@@ -113,14 +112,14 @@ export function SampleDetailContent({
           {permissions.canLinkProductionOrder ? (
             <SampleProductionOrderLink
               sampleId={sample.id}
-              currentProductionOrderId={sample.production_order_id}
-              companyProductionOrders={companyProductionOrders}
+              currentProductionOrderLineId={sample.production_order_line_id}
+              companyProductionOrderLines={companyProductionOrderLines}
             />
           ) : (
             <div className="flex items-center gap-1.5 text-xs text-foreground-muted">
-              {sample.production_order_id ? <Link2 className="h-3.5 w-3.5" /> : <Unlink className="h-3.5 w-3.5" />}
-              Ordre de fabrication :{" "}
-              {linkedOrder ? `${linkedOrder.reference} · ${PRODUCTION_ORDER_STATUS_LABELS[linkedOrder.status]}` : "aucun"}
+              {sample.production_order_line_id ? <Link2 className="h-3.5 w-3.5" /> : <Unlink className="h-3.5 w-3.5" />}
+              Article d&apos;ordre de fabrication :{" "}
+              {linkedLine ? `${linkedLine.orderReference} — ${linkedLine.description} · ${PRODUCTION_ORDER_STATUS_LABELS[linkedLine.status]}` : "aucun"}
             </div>
           )}
 
@@ -164,12 +163,12 @@ export function SampleDetailContent({
               extraInfo={sample.extra_info}
             />
           )}
-          {permissions.canDelete && sample.production_order_id === null && (
+          {permissions.canDelete && sample.production_order_line_id === null && (
             <DeleteSampleButton sampleId={sample.id} />
           )}
-          {permissions.canDelete && sample.production_order_id !== null && (
+          {permissions.canDelete && sample.production_order_line_id !== null && (
             <p className="text-xs text-foreground-muted">
-              Suppression indisponible : cette fiche est attribuée à un ordre de fabrication.
+              Suppression indisponible : cette fiche est attribuée à un article d&apos;ordre de fabrication.
             </p>
           )}
         </div>
