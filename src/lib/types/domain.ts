@@ -141,6 +141,11 @@ export interface AtelierCategorie {
   requiert_visuel: boolean;
   display_order: number;
   active: boolean;
+  // Taux de surplus tracé (%) propre à cette catégorie, prioritaire sur
+  // FabricationSettings.taux_acceptation_surplus_defaut — null si elle suit
+  // le taux par défaut. Pertinent seulement si requiert_fiche_trace = true
+  // (migration 0045, Paramètres > Fabrication).
+  taux_acceptation_surplus_trace: number | null;
 }
 
 export interface Section {
@@ -748,6 +753,20 @@ export interface SageConnectionConfig {
   last_test_status: string | null;
   last_test_at: string | null;
   updated_at: string;
+}
+
+// ----------------------------------------------------------------------------
+// Paramètres — Fabrication (migration 0045)
+// ----------------------------------------------------------------------------
+// Réglage à une seule ligne, même pattern que SageConnectionConfig. Taux
+// d'acceptation par défaut du surplus tracé (section 11 du document de
+// logique) — appliqué à toute catégorie d'atelier requérant une fiche de
+// tracé sans taux propre (AtelierCategorie.taux_acceptation_surplus_trace).
+export interface FabricationSettings {
+  id: string;
+  taux_acceptation_surplus_defaut: number;
+  updated_at: string;
+  updated_by: string | null;
 }
 
 export interface SageCustomer {
