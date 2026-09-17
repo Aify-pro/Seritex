@@ -13,6 +13,7 @@ import type { ProductionOrderStatus, MediaFileCategory, SamplePriority } from "@
 import { formatDate } from "@/lib/utils";
 import { CreateSampleDialog } from "@/components/samples/create-sample-dialog";
 import { SampleDetailContent } from "@/components/samples/sample-detail-content";
+import type { ProductionOrderLineOption } from "@/components/samples/sample-production-order-link";
 
 /**
  * Liste du module Échantillonnage, refondue pour l'équipe commerciale/atelier :
@@ -36,25 +37,29 @@ export default async function CommercialSamplesPage() {
   const canManage = true;
   const canCreate = profile.role === "commercial" || profile.role === "administrateur";
 
-  const [{ data: samples }, { data: companies }, { data: productionOrders }, { data: mediaFiles }, { data: sampleMedia }] =
+  const [{ data: samples }, { data: companies }, { data: productionOrderLines }, { data: mediaFiles }, { data: sampleMedia }] =
     await Promise.all([
       supabase
         .from("sample_requests")
         .select(
-          "id,reference,sample_number,need_description,quantity_requested,status,priority,request_date,due_date,extra_info,company_id,production_order_id,companies(name)"
+          "id,reference,sample_number,need_description,quantity_requested,status,priority,request_date,due_date,extra_info,company_id,production_order_line_id,companies(name)"
         )
         .order("created_at", { ascending: false }),
       supabase.from("companies").select("id,name").order("name"),
-      supabase.from("production_orders").select("id,reference,status,company_id"),
+      // Par article plutôt que par ODF entier (migration 0044) : un ODF
+      // multi-articles peut avoir un échantillon différent par article.
+      supabase.from("production_order_lines").select("id,description,production_orders(id,reference,status,company_id)"),
       supabase.from("media_files").select("id,file_name,category,company_id"),
       supabase.from("sample_request_media_files").select("sample_request_id,media_file_id"),
     ]);
 
-  const productionOrdersByCompany = new Map<string, { id: string; reference: string; status: ProductionOrderStatus }[]>();
-  for (const po of productionOrders ?? []) {
-    const list = productionOrdersByCompany.get(po.company_id) ?? [];
-    list.push({ id: po.id, reference: po.reference, status: po.status });
-    productionOrdersByCompany.set(po.company_id, list);
+  const productionOrderLinesByCompany = new Map<string, ProductionOrderLineOption[]>();
+  for (const pol of productionOrderLines ?? []) {
+    const po = pol.production_orders as unknown as { id: string; reference: string; status: ProductionOrderStatus; company_id: string } | null;
+    if (!po) continue;
+    const list = productionOrderLinesByCompany.get(po.company_id) ?? [];
+    list.push({ id: pol.id, orderReference: po.reference, description: pol.description, status: po.status });
+    productionOrderLinesByCompany.set(po.company_id, list);
   }
 
   const mediaByCompany = new Map<string, { id: string; file_name: string; category: MediaFileCategory }[]>();
@@ -98,8 +103,8 @@ export default async function CommercialSamplesPage() {
             <Tbody>
               {samples?.map((s) => {
                 const companyName = (s.companies as unknown as { name: string } | null)?.name;
-                const companyProductionOrders = productionOrdersByCompany.get(s.company_id) ?? [];
-                const linkedOrder = companyProductionOrders.find((po) => po.id === s.production_order_id);
+                const companyProductionOrderLines = productionOrderLinesByCompany.get(s.company_id) ?? [];
+                const linkedLine = companyProductionOrderLines.find((l) => l.id === s.production_order_line_id);
                 const companyMedia = mediaByCompany.get(s.company_id) ?? [];
                 const attachedIds = new Set(attachedBySample.get(s.id) ?? []);
                 const attached = companyMedia.filter((m) => attachedIds.has(m.id));
@@ -125,8 +130,10 @@ export default async function CommercialSamplesPage() {
                     </Td>
                     <Td>{formatDate(s.due_date)}</Td>
                     <Td>
-                      {linkedOrder ? (
-                        <span className="text-xs text-foreground">{linkedOrder.reference}</span>
+                      {linkedLine ? (
+                        <span className="text-xs text-foreground">
+                          {linkedLine.orderReference} — {linkedLine.description}
+                        </span>
                       ) : (
                         <span className="text-xs text-foreground-muted">—</span>
                       )}
@@ -145,7 +152,7 @@ export default async function CommercialSamplesPage() {
                           <SampleDetailContent
                             sample={{ ...s, companyName }}
                             baseUrl={baseUrl}
-                            companyProductionOrders={companyProductionOrders}
+                            companyProductionOrderLines={companyProductionOrderLines}
                             attachedMedia={attached}
                             availableMedia={companyMedia}
                             permissions={{

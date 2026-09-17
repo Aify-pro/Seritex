@@ -31,7 +31,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
 
   const { data: order } = await supabase
     .from("production_orders")
-    .select("*,companies(name),quotes(reference,request_id)")
+    .select("*,companies(name),quotes(id,reference,request_id,requests(reference))")
     .eq("id", id)
     .single();
 
@@ -40,8 +40,16 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
   // Demande d'origine (ODF → devis → demande, migration 0043) — null si cet
   // ODF n'a pas de devis d'origine (ex. données de démo insérées
   // directement par scripts/seed.ts). Détermine quels fichiers de la
-  // médiathèque sont proposables comme visuel/maquette pour ses articles.
-  const requestId = (order.quotes as unknown as { request_id: string | null } | null)?.request_id ?? null;
+  // médiathèque sont proposables comme visuel/maquette pour ses articles, et
+  // alimente le renvoi devis/demande de l'en-tête (voir plus bas).
+  const quoteInfo = order.quotes as unknown as {
+    id: string;
+    reference: string;
+    request_id: string | null;
+    requests: { reference: string } | null;
+  } | null;
+  const requestId = quoteInfo?.request_id ?? null;
+  const requestReference = quoteInfo?.requests?.reference ?? null;
 
   const [
     { data: workOrders },
@@ -285,6 +293,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     | "maquetteAttached"
     | "printableZoneOptions"
     | "printableZoneIdsSelected"
+    | "linkedSample"
   >;
   const lines: LineConfig[] = await Promise.all(
     (productionOrderLines ?? []).map(async (l: RawLine) => {
@@ -360,7 +369,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
   } | null;
 
   const company = order.companies as unknown as { name: string } | null;
-  const quote = order.quotes as unknown as { reference: string } | null;
+  const quote = quoteInfo;
 
   // Lot 9, par article depuis la migration 0037 pour le visuel : documents
   // généraux de l'ODF entier + visuels/maquettes déjà joints à chaque
@@ -408,6 +417,19 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
   const quoteLineIdByLine: Record<string, string> = {};
   for (const l of productionOrderLines ?? []) {
     if (l.quote_line_id) quoteLineIdByLine[l.id] = l.quote_line_id;
+  }
+
+  // Échantillon lié par article (migration 0044, plus tout l'ODF) — lien
+  // libre posé depuis l'écran Échantillonnage (SampleProductionOrderLink),
+  // affiché ici en lecture seule avec un renvoi vers sa fiche.
+  const lineIds = (productionOrderLines ?? []).map((l) => l.id);
+  const { data: linkedSamples } =
+    lineIds.length > 0
+      ? await supabase.from("sample_requests").select("id,sample_number,production_order_line_id").in("production_order_line_id", lineIds)
+      : { data: [] as { id: string; sample_number: string; production_order_line_id: string | null }[] };
+  const sampleByLine = new Map<string, { id: string; sampleNumber: string }>();
+  for (const s of linkedSamples ?? []) {
+    if (s.production_order_line_id) sampleByLine.set(s.production_order_line_id, { id: s.id, sampleNumber: s.sample_number });
   }
 
   // Aperçu/téléchargement : une URL signée par fichier, résolue une seule
@@ -462,6 +484,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
         .filter((z) => z.product_model_id === line.productModelId)
         .map((z) => ({ id: z.id, zone_key: z.zone_key, zone_label: z.zone_label, display_order: z.display_order })),
       printableZoneIdsSelected: printableZoneIdsByLine[line.id] ?? [],
+      linkedSample: sampleByLine.get(line.id) ?? null,
     };
   });
 
@@ -473,12 +496,54 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
   // consultation des mouvements (saisie déplacée vers /atelier/stock,
   // demande Ayman 16/09 : mouvements visibles sur l'ODF, gérés ailleurs).
   const canManageStock = isAdmin || profile.role === "responsable_production" || profile.role === "gestionnaire_stock";
+  // Devis/demande : la table quotes/requests n'est lisible par RLS que par
+  // commercial/administrateur (jamais les marges pour la production, voir
+  // 0002_rls.sql) — le renvoi n'est donc un lien cliquable que pour ces
+  // rôles-là, un simple texte sinon (responsable_production/gestionnaire_
+  // stock verraient une redirection "accès refusé" en cliquant).
+  const canViewCommercial = isAdmin || profile.role === "commercial";
 
   return (
     <div className="space-y-6">
       <PageHeader
         title={order.reference}
-        description={`${company?.name ?? ""} · ${order.total_quantity} pièces · devis ${quote?.reference ?? "—"}`}
+        description={
+          <span className="flex flex-wrap items-center gap-x-1.5">
+            <span>
+              {company?.name ?? ""} · {order.total_quantity} pièces
+            </span>
+            <span>·</span>
+            <span>
+              Devis{" "}
+              {quote ? (
+                canViewCommercial ? (
+                  <Link href={`/commercial/devis/${quote.id}`} className="font-medium text-brand hover:underline">
+                    {quote.reference}
+                  </Link>
+                ) : (
+                  <span className="font-medium text-foreground">{quote.reference}</span>
+                )
+              ) : (
+                "—"
+              )}
+            </span>
+            {requestReference && (
+              <>
+                <span>·</span>
+                <span>
+                  Demande{" "}
+                  {canViewCommercial ? (
+                    <Link href={`/commercial/demandes/${requestId}`} className="font-medium text-brand hover:underline">
+                      {requestReference}
+                    </Link>
+                  ) : (
+                    <span className="font-medium text-foreground">{requestReference}</span>
+                  )}
+                </span>
+              </>
+            )}
+          </span>
+        }
         action={
           <div className="flex items-center gap-2">
             {order.archived_at && <Badge tone="neutral">Archivé le {formatDate(order.archived_at)}</Badge>}

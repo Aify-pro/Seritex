@@ -156,16 +156,19 @@ export async function submitSampleDecision(sampleId: string, decision: SampleDec
 }
 
 /**
- * Lie ou délie (p_production_order_id = null) un échantillon à un ordre de
- * fabrication — référence libre, modifiable à tout moment (section 3.6 de
- * l'analyse), distincte d'une génération d'ordres de travail.
+ * Lie ou délie (production_order_line_id = null) un échantillon à un
+ * article précis d'un ordre de fabrication (migration 0044, plus tout l'ODF
+ * — nécessaire pour distinguer, dans un ODF multi-articles, quel article
+ * l'échantillon concerne) — référence libre, modifiable à tout moment
+ * (section 3.6 de l'analyse), distincte d'une génération d'ordres de
+ * travail.
  */
-export async function linkSampleToProductionOrder(sampleId: string, productionOrderId: string | null) {
+export async function linkSampleToProductionOrderLine(sampleId: string, productionOrderLineId: string | null) {
   await requireRole(["commercial", "administrateur", "responsable_production"]);
   const supabase = await createClient();
-  const { error } = await supabase.rpc("link_sample_to_production_order", {
+  const { error } = await supabase.rpc("link_sample_to_production_order_line", {
     p_sample_request_id: sampleId,
-    p_production_order_id: productionOrderId,
+    p_production_order_line_id: productionOrderLineId,
   });
   if (error) return { error: error.message };
   revalidateSamplePaths();
