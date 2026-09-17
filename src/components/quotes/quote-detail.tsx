@@ -64,6 +64,7 @@ export function QuoteDetail({
                         quoteLineId={l.id}
                         quoteId={quote.id}
                         companyId={quote.company_id}
+                        requestId={quote.request_id}
                         editable={editable}
                         attached={l.maquette ?? null}
                         available={availableMediaFiles}
@@ -72,6 +73,7 @@ export function QuoteDetail({
                         quoteLineId={l.id}
                         quoteId={quote.id}
                         companyId={quote.company_id}
+                        requestId={quote.request_id}
                         editable={editable}
                         attached={l.visuels ?? []}
                         available={availableMediaFiles}

@@ -2,9 +2,9 @@
 
 import { useTransition } from "react";
 import { toast } from "sonner";
-import { Paperclip, X, Plus, Download } from "lucide-react";
+import { Paperclip, X, Download } from "lucide-react";
 import { attachMediaFileToLine, detachMediaFileFromLine } from "../actions";
-import { InlineMediaUpload } from "@/components/media/inline-media-upload";
+import { MediaPickerDialog } from "@/components/media/media-picker-dialog";
 import type { AttachableMediaFile, DownloadableMediaFile } from "@/lib/types/domain";
 
 /**
@@ -36,6 +36,7 @@ export function LineVisuelPicker({
   lineId,
   productionOrderId,
   companyId,
+  requestId,
   editable,
   fromDevis,
   attached,
@@ -45,6 +46,8 @@ export function LineVisuelPicker({
   lineId: string;
   productionOrderId: string;
   companyId: string;
+  /** Demande d'origine de cet ODF (ODF → devis → demande) — les fichiers proposés dans la fenêtre "Ajouter" y sont déjà affiliés (migration 0043). */
+  requestId: string | null;
   editable: boolean;
   fromDevis: DownloadableMediaFile[];
   attached: DownloadableMediaFile[];
@@ -129,30 +132,15 @@ export function LineVisuelPicker({
           )}
         </ul>
         {editable && (
-          <div className="space-y-1.5">
-            {selectable.length > 0 && (
-              <div className="flex items-center gap-1.5">
-                <Plus className="h-3.5 w-3.5 text-foreground-muted" />
-                <select
-                  disabled={pending}
-                  defaultValue=""
-                  onChange={(e) => {
-                    attach(e.target.value);
-                    e.target.value = "";
-                  }}
-                  className="h-7 rounded-md border border-border bg-surface px-2 text-xs disabled:opacity-60"
-                >
-                  <option value="">Joindre un visuel de la médiathèque…</option>
-                  {selectable.map((f) => (
-                    <option key={f.id} value={f.id}>
-                      {f.file_name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-            <InlineMediaUpload companyId={companyId} category="visuel" label="Déposer un visuel" onUploaded={attach} />
-          </div>
+          <MediaPickerDialog
+            triggerLabel="Ajouter un visuel"
+            dialogTitle="Joindre un visuel"
+            companyId={companyId}
+            requestId={requestId}
+            category="visuel"
+            files={selectable}
+            onPick={attach}
+          />
         )}
     </div>
   );
