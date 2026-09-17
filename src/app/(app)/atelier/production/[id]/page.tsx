@@ -15,11 +15,10 @@ import { SubmitOdfPanel } from "./submit-odf-panel";
 import { AnomaliesPanel } from "./anomalies-panel";
 import { ProductionOrderLines, type LineData } from "./production-order-lines";
 import { ProductionOrderMediaFiles, type AttachableMediaFile } from "./production-order-media-files";
-import type { MaquetteFile } from "./line-maquette-picker";
 import { getMediaFilePreviewUrls } from "@/lib/media/preview";
 import { StockMovementsPanel } from "./stock-movements-panel";
 import type { StatutFiche } from "@/lib/patronnage/types";
-import type { StockMovement, StockExportFiche } from "@/lib/types/domain";
+import type { DownloadableMediaFile, MaquetteFile, StockMovement, StockExportFiche } from "@/lib/types/domain";
 import { CheckCircle2, ChevronRight, Package, QrCode } from "lucide-react";
 import Link from "next/link";
 
@@ -32,11 +31,25 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
 
   const { data: order } = await supabase
     .from("production_orders")
-    .select("*,companies(name),quotes(reference)")
+    .select("*,companies(name),quotes(id,reference,request_id,requests(reference))")
     .eq("id", id)
     .single();
 
   if (!order) notFound();
+
+  // Demande d'origine (ODF → devis → demande, migration 0043) — null si cet
+  // ODF n'a pas de devis d'origine (ex. données de démo insérées
+  // directement par scripts/seed.ts). Détermine quels fichiers de la
+  // médiathèque sont proposables comme visuel/maquette pour ses articles, et
+  // alimente le renvoi devis/demande de l'en-tête (voir plus bas).
+  const quoteInfo = order.quotes as unknown as {
+    id: string;
+    reference: string;
+    request_id: string | null;
+    requests: { reference: string } | null;
+  } | null;
+  const requestId = quoteInfo?.request_id ?? null;
+  const requestReference = quoteInfo?.requests?.reference ?? null;
 
   const [
     { data: workOrders },
@@ -60,7 +73,11 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     { data: stockMovements },
     { data: stockExportFiches },
   ] = await Promise.all([
-    supabase.from("work_orders").select("*,sections(name)").eq("production_order_id", id).order("planned_start", { ascending: true }),
+    supabase
+      .from("work_orders")
+      .select("*,sections(name,display_order)")
+      .eq("production_order_id", id)
+      .order("planned_start", { ascending: true }),
     supabase
       .from("sections")
       .select("id,name,atelier_categories(cle,requiert_fiche_trace,requiert_visuel)")
@@ -80,7 +97,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     supabase
       .from("production_order_lines")
       .select(
-        "id,description,quantity,product_model_id,couleur_unique_id,product_models(id,name,textile_id,textiles(nom,composition,grammage,laize_cm)),couleur_unique:couleur_unique_id(id,name,code),zone_colors:production_order_line_zone_colors(zone_key,colors:color_id(id,name,code)),sizes:production_order_sizes(taille,quantite_demandee),quote_lines(product_model_id)"
+        "id,description,quantity,product_model_id,quote_line_id,couleur_unique_id,product_models(id,name,textile_id,textiles(nom,composition,grammage,laize_cm)),couleur_unique:couleur_unique_id(id,name,code),zone_colors:production_order_line_zone_colors(zone_key,colors:color_id(id,name,code)),sizes:production_order_sizes(taille,quantite_demandee),quote_lines(product_model_id)"
       )
       .eq("production_order_id", id)
       .order("created_at"),
@@ -142,7 +159,14 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
       .select("production_order_line_id,media_file_id,media_files(id,file_name,category)")
       .eq("production_order_id", id)
       .not("production_order_line_id", "is", null),
-    supabase.from("media_files").select("id,file_name,category").eq("company_id", order.company_id),
+    // Médiathèque proposable pour visuel/maquette/documents généraux
+    // (migration 0043) : plus toute la médiathèque du client, seulement ce
+    // qui est déjà affilié à la demande d'origine de cet ODF — un fichier
+    // affilié à une autre demande n'apparaît ici que si on l'y affilie
+    // explicitement depuis la médiathèque.
+    requestId
+      ? supabase.from("request_media_files").select("media_files(id,file_name,category)").eq("request_id", requestId)
+      : Promise.resolve({ data: [] as { media_files: { id: string; file_name: string; category: string } | null }[] }),
     // Lot 10 : mouvements de stock & fiches d'import Sage (section 19 du
     // document de logique) — dérivés de record_pesee/create_article_lot,
     // jamais saisis directement (migration 0020).
@@ -244,6 +268,16 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
   // (submit_production_order accepte les deux statuts depuis 0028).
   const modifiable = order.status === "brouillon" || order.status === "refuse";
 
+  // Verrouillage visuel/maquette (migration 0042, demande Ayman 16/09) : un
+  // point plus tardif que `modifiable` — reste modifiable pendant
+  // en_attente_validation, pas seulement brouillon/refusé, car
+  // validate_production_order() exige un visuel pour toute section
+  // Impression retenue : le verrouiller dès la soumission interdirait de
+  // corriger un visuel manquant avant la validation. Figé à partir de
+  // en_production, comme fiches_placement/traces_placement (0037).
+  const mediaEditable =
+    order.status === "brouillon" || order.status === "en_attente_validation" || order.status === "refuse";
+
   // ODF multi-lignes (une ligne par article du devis) : construit les
   // données d'affichage de chaque ligne — tailles proposables restreintes
   // au modèle de CETTE ligne (getSizesForProductModel, convention 0029),
@@ -257,10 +291,13 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     | "coupeSelected"
     | "fiche"
     | "impressionSectionSelected"
+    | "visuelsFromDevis"
     | "visuelAttached"
+    | "maquetteFromDevis"
     | "maquetteAttached"
     | "printableZoneOptions"
     | "printableZoneIdsSelected"
+    | "linkedSample"
   >;
   const lines: LineConfig[] = await Promise.all(
     (productionOrderLines ?? []).map(async (l: RawLine) => {
@@ -336,7 +373,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
   } | null;
 
   const company = order.companies as unknown as { name: string } | null;
-  const quote = order.quotes as unknown as { reference: string } | null;
+  const quote = quoteInfo;
 
   // Lot 9, par article depuis la migration 0037 pour le visuel : documents
   // généraux de l'ODF entier + visuels/maquettes déjà joints à chaque
@@ -345,7 +382,9 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
   const attachedGeneralMediaFiles = (attachedGeneralMedia ?? [])
     .map((m) => m.media_files as unknown as AttachableMediaFile | null)
     .filter((f): f is AttachableMediaFile => !!f);
-  const availableMediaFiles = (availableMedia ?? []) as AttachableMediaFile[];
+  const availableMediaFiles = (availableMedia ?? [])
+    .map((m) => m.media_files as unknown as AttachableMediaFile | null)
+    .filter((f): f is AttachableMediaFile => !!f);
   const visuelByLine: Record<string, AttachableMediaFile[]> = {};
   const maquetteByLine: Record<string, AttachableMediaFile[]> = {};
   for (const m of (attachedLineMedia ?? []) as unknown as { production_order_line_id: string; media_files: AttachableMediaFile | null }[]) {
@@ -354,12 +393,67 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     else (visuelByLine[m.production_order_line_id] ??= []).push(m.media_files);
   }
 
-  // Aperçu (migration 0040) : une URL signée par maquette, résolue une seule
-  // fois pour tout l'ODF plutôt qu'un aller-retour par article.
-  const maquettePreviewUrls = await getMediaFilePreviewUrls(Object.values(maquetteByLine).flat().map((f) => f.id));
+  // Visuel(s) et maquette hérités du devis (migration 0041) : la maquette
+  // fait foi dès qu'elle existe côté devis (l'ODF ne propose la sienne que
+  // pour rattraper une absence), le visuel s'y ajoute simplement (union).
+  // Un seul aller-retour pour tous les articles plutôt qu'un par ligne.
+  const quoteLineIds = (productionOrderLines ?? []).map((l) => l.quote_line_id).filter((v): v is string => !!v);
+  const { data: quoteLineMedia } =
+    quoteLineIds.length > 0
+      ? await supabase
+          .from("quote_line_media_files")
+          .select("quote_line_id,media_file_id,media_files(file_name,category)")
+          .in("quote_line_id", quoteLineIds)
+      : { data: [] as { quote_line_id: string; media_file_id: string; media_files: { file_name: string; category: string } | null }[] };
+
+  const visuelsByQuoteLine: Record<string, AttachableMediaFile[]> = {};
+  const maquetteByQuoteLine: Record<string, AttachableMediaFile> = {};
+  for (const m of quoteLineMedia ?? []) {
+    const media = m.media_files as unknown as { file_name: string; category: string } | null;
+    if (!media) continue;
+    const file: AttachableMediaFile = { id: m.media_file_id, file_name: media.file_name, category: media.category as AttachableMediaFile["category"] };
+    if (media.category === "maquette") {
+      maquetteByQuoteLine[m.quote_line_id] ??= file;
+    } else if (media.category === "visuel") {
+      (visuelsByQuoteLine[m.quote_line_id] ??= []).push(file);
+    }
+  }
+  const quoteLineIdByLine: Record<string, string> = {};
+  for (const l of productionOrderLines ?? []) {
+    if (l.quote_line_id) quoteLineIdByLine[l.id] = l.quote_line_id;
+  }
+
+  // Échantillon lié par article (migration 0044, plus tout l'ODF) — lien
+  // libre posé depuis l'écran Échantillonnage (SampleProductionOrderLink),
+  // affiché ici en lecture seule avec un renvoi vers sa fiche.
+  const lineIds = (productionOrderLines ?? []).map((l) => l.id);
+  const { data: linkedSamples } =
+    lineIds.length > 0
+      ? await supabase.from("sample_requests").select("id,sample_number,production_order_line_id").in("production_order_line_id", lineIds)
+      : { data: [] as { id: string; sample_number: string; production_order_line_id: string | null }[] };
+  const sampleByLine = new Map<string, { id: string; sampleNumber: string }>();
+  for (const s of linkedSamples ?? []) {
+    if (s.production_order_line_id) sampleByLine.set(s.production_order_line_id, { id: s.id, sampleNumber: s.sample_number });
+  }
+
+  // Aperçu/téléchargement : une URL signée par fichier, résolue une seule
+  // fois pour tout l'ODF (devis + ODF confondus) plutôt qu'un aller-retour
+  // par article.
+  const maquettePreviewUrls = await getMediaFilePreviewUrls([
+    ...Object.values(maquetteByLine).flat().map((f) => f.id),
+    ...Object.values(maquetteByQuoteLine).map((f) => f.id),
+  ]);
+  const visuelDownloadUrls = await getMediaFilePreviewUrls([
+    ...Object.values(visuelByLine).flat().map((f) => f.id),
+    ...Object.values(visuelsByQuoteLine).flat().map((f) => f.id),
+  ]);
   const maquetteWithUrlByLine: Record<string, MaquetteFile[]> = {};
   for (const [lineId, files] of Object.entries(maquetteByLine)) {
     maquetteWithUrlByLine[lineId] = files.map((f) => ({ ...f, previewUrl: maquettePreviewUrls.get(f.id) ?? null }));
+  }
+  const visuelWithUrlByLine: Record<string, DownloadableMediaFile[]> = {};
+  for (const [lineId, files] of Object.entries(visuelByLine)) {
+    visuelWithUrlByLine[lineId] = files.map((f) => ({ ...f, downloadUrl: visuelDownloadUrls.get(f.id) ?? null }));
   }
 
   const fichesByLine: Record<string, { id: string; numeroOt: string; statut: StatutFiche }> = {};
@@ -372,19 +466,31 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
   // produit ») plutôt qu'en cartes séparées en bas de page (demande Ayman,
   // 15/09, étendue 16/09) — regroupe ici les données calculées ci-dessus
   // par article.
-  const linesWithConfig: LineData[] = lines.map((line) => ({
-    ...line,
-    sectionIds: sectionIdsByLine[line.id] ?? [],
-    coupeSelected: !!coupeSelectedByLine[line.id],
-    fiche: fichesByLine[line.id] ?? null,
-    impressionSectionSelected: !!impressionSectionSelectedByLine[line.id],
-    visuelAttached: visuelByLine[line.id] ?? [],
-    maquetteAttached: maquetteWithUrlByLine[line.id] ?? [],
-    printableZoneOptions: (printableZonesAll ?? [])
-      .filter((z) => z.product_model_id === line.productModelId)
-      .map((z) => ({ id: z.id, zone_key: z.zone_key, zone_label: z.zone_label, display_order: z.display_order })),
-    printableZoneIdsSelected: printableZoneIdsByLine[line.id] ?? [],
-  }));
+  const linesWithConfig: LineData[] = lines.map((line) => {
+    const quoteLineId = quoteLineIdByLine[line.id];
+    const maquetteFromDevisFile = quoteLineId ? maquetteByQuoteLine[quoteLineId] : undefined;
+    return {
+      ...line,
+      sectionIds: sectionIdsByLine[line.id] ?? [],
+      coupeSelected: !!coupeSelectedByLine[line.id],
+      fiche: fichesByLine[line.id] ?? null,
+      impressionSectionSelected: !!impressionSectionSelectedByLine[line.id],
+      visuelsFromDevis: (quoteLineId ? visuelsByQuoteLine[quoteLineId] : undefined)?.map((f) => ({
+        ...f,
+        downloadUrl: visuelDownloadUrls.get(f.id) ?? null,
+      })) ?? [],
+      visuelAttached: visuelWithUrlByLine[line.id] ?? [],
+      maquetteFromDevis: maquetteFromDevisFile
+        ? { ...maquetteFromDevisFile, previewUrl: maquettePreviewUrls.get(maquetteFromDevisFile.id) ?? null }
+        : null,
+      maquetteAttached: maquetteWithUrlByLine[line.id] ?? [],
+      printableZoneOptions: (printableZonesAll ?? [])
+        .filter((z) => z.product_model_id === line.productModelId)
+        .map((z) => ({ id: z.id, zone_key: z.zone_key, zone_label: z.zone_label, display_order: z.display_order })),
+      printableZoneIdsSelected: printableZoneIdsByLine[line.id] ?? [],
+      linkedSample: sampleByLine.get(line.id) ?? null,
+    };
+  });
 
   const canArchive = await can("ordres_fabrication", "archive");
   const canValidate = await can("ordres_fabrication", "validate");
@@ -394,12 +500,75 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
   // consultation des mouvements (saisie déplacée vers /atelier/stock,
   // demande Ayman 16/09 : mouvements visibles sur l'ODF, gérés ailleurs).
   const canManageStock = isAdmin || profile.role === "responsable_production" || profile.role === "gestionnaire_stock";
+  // Devis/demande : la table quotes/requests n'est lisible par RLS que par
+  // commercial/administrateur (jamais les marges pour la production, voir
+  // 0002_rls.sql) — le renvoi n'est donc un lien cliquable que pour ces
+  // rôles-là, un simple texte sinon (responsable_production/gestionnaire_
+  // stock verraient une redirection "accès refusé" en cliquant).
+  const canViewCommercial = isAdmin || profile.role === "commercial";
+
+  // Sous-ODF groupés par section (demande Ayman, 17/09) : un chef de section
+  // scanne le QR d'en-tête de l'ODF depuis /atelier/section et doit
+  // retrouver directement les sous-ODF de SA section — même regroupement
+  // affiché ici que sur le PDF (voir odf-pdf.ts). Ordonné par
+  // sections.display_order (l'ordre réel de passage en atelier), pas par
+  // planned_start qui mélangerait les sections entre elles.
+  type WorkOrderRow = NonNullable<typeof workOrders>[number];
+  const workOrderGroups: { sectionId: string; sectionName: string; workOrders: WorkOrderRow[] }[] = [];
+  {
+    const bySection = new Map<string, { sectionName: string; displayOrder: number; workOrders: WorkOrderRow[] }>();
+    for (const wo of workOrders ?? []) {
+      const section = wo.sections as unknown as { name: string; display_order: number } | null;
+      const group = bySection.get(wo.section_id) ?? { sectionName: section?.name ?? "—", displayOrder: section?.display_order ?? 0, workOrders: [] };
+      group.workOrders.push(wo);
+      bySection.set(wo.section_id, group);
+    }
+    for (const [sectionId, group] of [...bySection.entries()].sort((a, b) => a[1].displayOrder - b[1].displayOrder)) {
+      workOrderGroups.push({ sectionId, sectionName: group.sectionName, workOrders: group.workOrders });
+    }
+  }
 
   return (
     <div className="space-y-6">
       <PageHeader
         title={order.reference}
-        description={`${company?.name ?? ""} · ${order.total_quantity} pièces · devis ${quote?.reference ?? "—"}`}
+        description={
+          <span className="flex flex-wrap items-center gap-x-1.5">
+            <span>
+              {company?.name ?? ""} · {order.total_quantity} pièces
+            </span>
+            <span>·</span>
+            <span>
+              Devis{" "}
+              {quote ? (
+                canViewCommercial ? (
+                  <Link href={`/commercial/devis/${quote.id}`} className="font-medium text-brand hover:underline">
+                    {quote.reference}
+                  </Link>
+                ) : (
+                  <span className="font-medium text-foreground">{quote.reference}</span>
+                )
+              ) : (
+                "—"
+              )}
+            </span>
+            {requestReference && (
+              <>
+                <span>·</span>
+                <span>
+                  Demande{" "}
+                  {canViewCommercial ? (
+                    <Link href={`/commercial/demandes/${requestId}`} className="font-medium text-brand hover:underline">
+                      {requestReference}
+                    </Link>
+                  ) : (
+                    <span className="font-medium text-foreground">{requestReference}</span>
+                  )}
+                </span>
+              </>
+            )}
+          </span>
+        }
         action={
           <div className="flex items-center gap-2">
             {order.archived_at && <Badge tone="neutral">Archivé le {formatDate(order.archived_at)}</Badge>}
@@ -467,7 +636,10 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
 
       <ProductionOrderLines
         productionOrderId={order.id}
+        companyId={order.company_id}
+        requestId={requestId}
         editable={modifiable}
+        mediaEditable={mediaEditable}
         lines={linesWithConfig}
         productModels={productModels ?? []}
         colors={activeColors ?? []}
@@ -506,50 +678,57 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
       <Card>
         <CardHeader
           title="Ordres de travail"
-          description="Un sous-ODF par section retenue, généré à la validation de l'ODF. Cliquez sur un sous-ODF pour son détail."
+          description="Un sous-ODF par section retenue, généré à la validation de l'ODF, groupés par section. Cliquez sur un sous-ODF pour son détail."
         />
         <CardBody className="p-0">
-          {!workOrders || workOrders.length === 0 ? (
+          {workOrderGroups.length === 0 ? (
             <p className="px-5 py-6 text-sm text-foreground-muted">
               Aucun ordre de travail généré pour le moment — les sous-ODF sont créés à la validation de l&apos;ODF.
             </p>
           ) : (
-            <ol className="divide-y divide-border">
-              {workOrders.map((wo, i) => {
-                const atteinte = wo.quantity_done >= wo.quantity_planned;
-                return (
-                  <li key={wo.id}>
-                    <Link
-                      href={`/atelier/production/${order.id}/ot/${wo.id}`}
-                      className="flex items-center gap-4 px-5 py-4 hover:bg-surface-muted"
-                    >
-                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-surface-muted text-xs font-semibold text-foreground-muted">
-                        {i + 1}
-                      </span>
-                      <div className="flex-1">
-                        <p className="text-sm font-medium text-foreground">
-                          {(wo.sections as unknown as { name: string } | null)?.name} — {wo.reference}
-                        </p>
-                        <p className="text-xs text-foreground-muted">
-                          {wo.quantity_done}/{wo.quantity_planned} pièces
-                          {wo.actual_start ? ` · démarré le ${formatDateTime(wo.actual_start)}` : ""}
-                          {wo.actual_end ? ` · quantité atteinte le ${formatDateTime(wo.actual_end)}` : ""}
-                        </p>
-                        {wo.blocking_reason && (
-                          <p className="mt-1 text-xs text-danger">⚠ {wo.blocking_reason}</p>
-                        )}
-                      </div>
-                      {atteinte ? (
-                        <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
-                      ) : (
-                        <Package className="h-4 w-4 shrink-0 text-foreground-muted" />
-                      )}
-                      <ChevronRight className="h-4 w-4 shrink-0 text-foreground-muted" />
-                    </Link>
-                  </li>
-                );
-              })}
-            </ol>
+            <div className="divide-y divide-border">
+              {workOrderGroups.map((group) => (
+                <div key={group.sectionId}>
+                  <p className="bg-surface-muted px-5 py-2 text-xs font-semibold uppercase tracking-wide text-foreground-muted">
+                    {group.sectionName}
+                  </p>
+                  <ol className="divide-y divide-border">
+                    {group.workOrders.map((wo, i) => {
+                      const atteinte = wo.quantity_done >= wo.quantity_planned;
+                      return (
+                        <li key={wo.id}>
+                          <Link
+                            href={`/atelier/production/${order.id}/ot/${wo.id}`}
+                            className="flex items-center gap-4 px-5 py-4 hover:bg-surface-muted"
+                          >
+                            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-surface-muted text-xs font-semibold text-foreground-muted">
+                              {i + 1}
+                            </span>
+                            <div className="flex-1">
+                              <p className="text-sm font-medium text-foreground">{wo.reference}</p>
+                              <p className="text-xs text-foreground-muted">
+                                {wo.quantity_done}/{wo.quantity_planned} pièces
+                                {wo.actual_start ? ` · démarré le ${formatDateTime(wo.actual_start)}` : ""}
+                                {wo.actual_end ? ` · quantité atteinte le ${formatDateTime(wo.actual_end)}` : ""}
+                              </p>
+                              {wo.blocking_reason && (
+                                <p className="mt-1 text-xs text-danger">⚠ {wo.blocking_reason}</p>
+                              )}
+                            </div>
+                            {atteinte ? (
+                              <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
+                            ) : (
+                              <Package className="h-4 w-4 shrink-0 text-foreground-muted" />
+                            )}
+                            <ChevronRight className="h-4 w-4 shrink-0 text-foreground-muted" />
+                          </Link>
+                        </li>
+                      );
+                    })}
+                  </ol>
+                </div>
+              ))}
+            </div>
           )}
         </CardBody>
       </Card>

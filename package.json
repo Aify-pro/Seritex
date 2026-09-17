@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "seed": "tsx scripts/seed.ts",
+    "preview:pdf-odf": "tsx scripts/preview-pdf-odf.ts",
     "test:patronnage": "tsx --require ./scripts/allow-server-only.cjs scripts/test-moteur-patronnage.ts",
     "typecheck": "tsc --noEmit"
   },
@@ -20,6 +21,7 @@
     "dxf-parser": "^1.1.2",
     "framer-motion": "^13.1.1",
     "googleapis": "^144.0.0",
+    "jsqr": "^1.4.0",
     "lucide-react": "^1.37.0",
     "next": "16.3.3",
     "pdf-lib": "^1.17.1",

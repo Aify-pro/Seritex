@@ -13,16 +13,19 @@ import {
   type StockItemOption,
 } from "./section-board";
 import { SectionSwitcher } from "./section-switcher";
+import { QrScanButton } from "./qr-scan-button";
 import { Card, CardBody } from "@/components/ui/card";
+import Link from "next/link";
 
 export default async function SectionQueuePage({
   searchParams,
 }: {
-  searchParams: Promise<{ section?: string }>;
+  searchParams: Promise<{ section?: string; odf?: string }>;
 }) {
   const { profile } = await requireRole(["chef_section", "responsable_production", "administrateur", "gestionnaire_stock"]);
   const supabase = await createClient();
   const params = await searchParams;
+  const odfFilterId = params.odf ?? null;
 
   let sectionId = profile.section_id;
   let sections: { id: string; name: string }[] = [];
@@ -58,12 +61,24 @@ export default async function SectionQueuePage({
     .eq("id", sectionId)
     .single();
 
-  const { data: workOrders } = await supabase
+  // Filtre `?odf=` posé par le lecteur QR (QrScanButton) : le chef de
+  // section scanne le QR d'en-tête de l'ODF (qui pointe vers
+  // /atelier/production/[id], une page qui lui est interdite) et se
+  // retrouve ici avec uniquement les sous-ODF de SA section pour cet ODF.
+  let odfReference: string | null = null;
+  if (odfFilterId) {
+    const { data: odf } = await supabase.from("production_orders").select("reference").eq("id", odfFilterId).maybeSingle();
+    odfReference = odf?.reference ?? null;
+  }
+
+  let workOrdersQuery = supabase
     .from("work_orders")
     .select(
       "id,reference,quantity_planned,quantity_done,blocking_reason,planned_start,planned_end,actual_start,production_order_line_id,production_orders(id,reference,company_id,companies(name))"
     )
-    .eq("section_id", sectionId)
+    .eq("section_id", sectionId);
+  if (odfFilterId) workOrdersQuery = workOrdersQuery.eq("production_order_id", odfFilterId);
+  const { data: workOrders } = await workOrdersQuery
     .order("planned_start", { ascending: true });
 
   // Lot 4, généralisé migration 0036 : section de catégorie Coupe uniquement
@@ -224,9 +239,27 @@ export default async function SectionQueuePage({
               : "Ajoutez la quantité produite au fur et à mesure sur vos ordres de travail."
         }
         action={
-          sections.length > 0 ? <SectionSwitcher sections={sections} value={sectionId} /> : undefined
+          sections.length > 0 ? (
+            <SectionSwitcher sections={sections} value={sectionId} />
+          ) : profile.role === "chef_section" ? (
+            <QrScanButton />
+          ) : undefined
         }
       />
+
+      {odfFilterId && (
+        <Card>
+          <CardBody className="flex flex-wrap items-center justify-between gap-2 text-sm">
+            <span>
+              Filtré sur l&rsquo;ODF <strong>{odfReference ?? odfFilterId}</strong> — sous-ODF de votre section
+              uniquement.
+            </span>
+            <Link href={`/atelier/section?section=${sectionId}`} className="font-medium text-brand hover:underline">
+              Voir toute la file
+            </Link>
+          </CardBody>
+        </Card>
+      )}
 
       <SectionBoard
         key={sectionId}

@@ -145,6 +145,64 @@ export async function createRequest(formData: FormData) {
   return { requestId: data.id as string };
 }
 
+function revalidateQuote(quoteId: string) {
+  revalidatePath(`/commercial/devis/${quoteId}`);
+  revalidatePath(`/client/devis/${quoteId}`);
+}
+
+/**
+ * Fichier (visuel OU maquette, migration 0041) joint à une ligne de devis —
+ * pendant de attachMediaFileToLine côté ODF (migration 0040), même logique
+ * de remplacement : une maquette en remplace silencieusement une autre, un
+ * visuel s'ajoute aux précédents. C'est ici, au devis, que la maquette est
+ * censée être déposée en premier (validée par le client en acceptant) —
+ * l'ODF ne propose son propre dépôt que si celle-ci est restée vide.
+ */
+export async function attachMediaFileToQuoteLine(quoteLineId: string, quoteId: string, mediaFileId: string) {
+  const { authId } = await requireRole(["administrateur", "commercial"]);
+  const supabase = await createClient();
+
+  const { data: media } = await supabase.from("media_files").select("category").eq("id", mediaFileId).maybeSingle();
+  if (media?.category === "maquette") {
+    const { data: existing } = await supabase
+      .from("quote_line_media_files")
+      .select("media_file_id, media_files!inner(category)")
+      .eq("quote_line_id", quoteLineId)
+      .eq("media_files.category", "maquette");
+    const existingIds = (existing ?? []).map((e) => e.media_file_id);
+    if (existingIds.length > 0) {
+      const { error: delError } = await supabase
+        .from("quote_line_media_files")
+        .delete()
+        .eq("quote_line_id", quoteLineId)
+        .in("media_file_id", existingIds);
+      if (delError) return { error: delError.message };
+    }
+  }
+
+  const { error } = await supabase.from("quote_line_media_files").insert({
+    quote_line_id: quoteLineId,
+    media_file_id: mediaFileId,
+    added_by: authId,
+  });
+  if (error) return { error: error.message };
+  revalidateQuote(quoteId);
+  return {};
+}
+
+export async function detachMediaFileFromQuoteLine(quoteLineId: string, quoteId: string, mediaFileId: string) {
+  await requireRole(["administrateur", "commercial"]);
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("quote_line_media_files")
+    .delete()
+    .eq("quote_line_id", quoteLineId)
+    .eq("media_file_id", mediaFileId);
+  if (error) return { error: error.message };
+  revalidateQuote(quoteId);
+  return {};
+}
+
 export async function acceptQuote(quoteId: string) {
   await requireUser();
   const supabase = await createClient();
