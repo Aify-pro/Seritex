@@ -1,5 +1,6 @@
 import { requireRole } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server";
+import { getBaseUrl } from "@/lib/url";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
 import { Badge, StatusBadge } from "@/components/ui/badge";
@@ -19,7 +20,7 @@ import { getMediaFilePreviewUrls } from "@/lib/media/preview";
 import { StockMovementsPanel } from "./stock-movements-panel";
 import type { StatutFiche } from "@/lib/patronnage/types";
 import type { DownloadableMediaFile, MaquetteFile, StockMovement, StockExportFiche } from "@/lib/types/domain";
-import { CheckCircle2, ChevronRight, Package, QrCode } from "lucide-react";
+import { CheckCircle2, ChevronRight, Package, Printer, QrCode } from "lucide-react";
 import Link from "next/link";
 
 const LOT_CATEGORIE_LABELS: Record<string, string> = { semi_fini: "Semi-fini", fini: "Fini", dechet: "Déchet" };
@@ -28,6 +29,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
   const { profile } = await requireRole(["responsable_production", "administrateur", "gestionnaire_stock"]);
   const { id } = await params;
   const supabase = await createClient();
+  const baseUrl = await getBaseUrl();
 
   const { data: order } = await supabase
     .from("production_orders")
@@ -573,6 +575,14 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
           <div className="flex items-center gap-2">
             {order.archived_at && <Badge tone="neutral">Archivé le {formatDate(order.archived_at)}</Badge>}
             <StatusBadge status={order.status} labels={PRODUCTION_ORDER_STATUS_LABELS} kind="production" />
+            <a
+              href={`${baseUrl}/api/production/${order.id}/pdf`}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-xs font-medium text-foreground hover:bg-surface-muted"
+            >
+              <Printer className="h-3.5 w-3.5" /> PDF
+            </a>
             {canArchive && <ArchiveButton productionOrderId={order.id} archived={!!order.archived_at} />}
           </div>
         }
