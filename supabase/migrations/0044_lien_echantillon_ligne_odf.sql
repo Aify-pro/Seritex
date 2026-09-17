@@ -17,6 +17,13 @@ alter table sample_requests
 
 create index idx_sample_requests_production_order_line on sample_requests(production_order_line_id);
 
+-- Le trigger ci-dessous est posé `before ... of production_order_id` (0004) :
+-- Postgres refuse de dropper la colonne tant que cette dépendance existe
+-- (SQLSTATE 2BP01). Il faut donc le supprimer AVANT le drop column, pas
+-- seulement le remplacer plus loin dans ce fichier.
+drop trigger if exists trg_enforce_sample_production_order_link on sample_requests;
+drop function if exists enforce_sample_production_order_link();
+
 alter table sample_requests drop column production_order_id;
 
 -- ----------------------------------------------------------------------------
@@ -74,11 +81,9 @@ grant execute on function link_sample_to_production_order_line(uuid, uuid) to au
 -- Défense en profondeur (même principe que 0004) : l'article référencé doit
 -- appartenir à la même entreprise que l'échantillon — récupérée via l'ODF
 -- de l'article plutôt que directement, puisque l'ODF n'est plus référencé
--- en direct par sample_requests.
+-- en direct par sample_requests. L'ancien trigger/fonction a déjà été
+-- supprimé plus haut (avant le drop column) — il ne reste qu'à recréer.
 -- ----------------------------------------------------------------------------
-
-drop trigger if exists trg_enforce_sample_production_order_link on sample_requests;
-drop function if exists enforce_sample_production_order_link();
 
 create or replace function enforce_sample_production_order_line_link()
 returns trigger
