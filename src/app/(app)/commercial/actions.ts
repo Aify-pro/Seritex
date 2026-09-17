@@ -43,6 +43,9 @@ const quoteLineSchema = z.object({
 
 const createQuoteSchema = z.object({
   lines: z.array(quoteLineSchema).min(1, "Au moins un article est requis"),
+  // Date de livraison promise au client (migration 0048) — optionnelle,
+  // comme valid_until déjà sur cette table : aucune obligation de saisie.
+  date_livraison_prevue: z.string().date().nullable(),
 });
 
 export type QuoteLineInput = z.infer<typeof quoteLineSchema>;
@@ -54,9 +57,14 @@ export type QuoteLineInput = z.infer<typeof quoteLineSchema>;
  * `setProductionOrderZoneColors` (écriture directe, autorisée par la RLS
  * pour commercial/administrateur).
  */
-export async function createQuote(requestId: string, companyId: string, lines: QuoteLineInput[]) {
+export async function createQuote(
+  requestId: string,
+  companyId: string,
+  lines: QuoteLineInput[],
+  dateLivraisonPrevue: string | null
+) {
   await requireRole(["commercial", "administrateur"]);
-  const parsed = createQuoteSchema.safeParse({ lines });
+  const parsed = createQuoteSchema.safeParse({ lines, date_livraison_prevue: dateLivraisonPrevue });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Devis invalide" };
 
   const supabase = await createClient();
@@ -71,6 +79,7 @@ export async function createQuote(requestId: string, companyId: string, lines: Q
       company_id: companyId,
       status: "envoye",
       total_amount: totalAmount,
+      date_livraison_prevue: parsed.data.date_livraison_prevue,
     })
     .select()
     .single();

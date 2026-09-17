@@ -57,8 +57,14 @@ export type OdfPdfArticle = {
   /** « Couleur » ou « Couleurs par zone » selon la configuration de la ligne. */
   couleurLabel: string;
   couleurs: OdfPdfColor[];
+  /**
+   * Noms des sections retenues, dans leur ordre — chaque section porteuse
+   * d'une info complémentaire l'affiche entre parenthèses (demande Ayman
+   * 17/09) : le numéro d'OT pour Coupe, les zones imprimables pour
+   * Sérigraphie. Remplace le champ « Fiche patronnage (OT) » séparé
+   * ci-dessous, désormais redondant avec cette annotation.
+   */
   sections: string | null;
-  fiche: string | null;
   /** Fichiers d'exploitation à l'impression, tels quels (nom de fichier) — plusieurs possibles par article, contrairement à la maquette. */
   visuels: string | null;
   /**
@@ -89,10 +95,11 @@ export type OdfPdfData = {
   client: {
     name: string;
     address: string | null;
-    phone: string | null;
-    email: string | null;
-    siret: string | null;
   } | null;
+  /** Date de validation de l'ODF (production_orders.launched_at) — demande Ayman 17/09, remplace le contact client dans le cadre. */
+  dateValidation: string | null;
+  /** Date de livraison prévue, saisie dès le devis (quotes.date_livraison_prevue, migration 0048) — demande Ayman 17/09. */
+  dateLivraison: string | null;
   devis: string | null;
   totalQuantity: number;
   plannedStart: string | null;
@@ -353,17 +360,20 @@ export async function buildOdfPdf(data: OdfPdfData): Promise<Uint8Array> {
   // Cellule « étiquette au-dessus de la valeur », brique de toutes les
   // grilles du document : mesurée d'abord (cellHeight), dessinée ensuite.
   // ---------------------------------------------------------------------
-  type Cell = { label: string; value: string };
+  /** `size` : taille de police de la VALEUR, pour les grilles qui veulent un texte plus compact (page article, demande Ayman 17/09) sans toucher VALUE_SIZE — partagé avec le reste du document (page 1 notamment). */
+  type Cell = { label: string; value: string; size?: number };
 
   function cellHeight(cell: Cell, width: number): number {
-    return LABEL_LH + wrap(cell.value, width, VALUE_SIZE, font).length * VALUE_LH + CELL_PAD_BOTTOM;
+    const size = cell.size ?? VALUE_SIZE;
+    return LABEL_LH + wrap(cell.value, width, size, font).length * VALUE_LH + CELL_PAD_BOTTOM;
   }
 
   function drawCell(cell: Cell, x: number, top: number, width: number) {
+    const size = cell.size ?? VALUE_SIZE;
     text(cell.label.toUpperCase(), { x, baseline: top - LABEL_SIZE, size: LABEL_SIZE, font: bold, color: MUTED });
     let baseline = top - LABEL_LH - VALUE_SIZE;
-    for (const line of wrap(cell.value, width, VALUE_SIZE, font)) {
-      text(line, { x, baseline, size: VALUE_SIZE });
+    for (const line of wrap(cell.value, width, size, font)) {
+      text(line, { x, baseline, size });
       baseline -= VALUE_LH;
     }
   }
@@ -608,12 +618,16 @@ export async function buildOdfPdf(data: OdfPdfData): Promise<Uint8Array> {
     const gutter = 18;
     const colW = (fieldsW - gutter) / 2;
 
+    // Contact client (téléphone/e-mail/SIRET) retiré du cadre (demande Ayman
+    // 17/09) — remplacé par les deux dates qui comptent pour l'atelier :
+    // quand l'ODF a été validé, et quand le client attend sa commande.
+    // Colonnes rééquilibrées à 4 cellules chacune (5/4 avant) : le cadre en
+    // ressort plus court, pas plus long, malgré les deux dates ajoutées.
     const clientCells: Cell[] = [
       { label: "Client", value: data.client?.name ?? "-" },
       { label: "Adresse", value: data.client?.address ?? "-" },
-      { label: "Téléphone", value: data.client?.phone ?? "-" },
-      { label: "E-mail", value: data.client?.email ?? "-" },
-      { label: "SIRET", value: data.client?.siret ?? "-" },
+      { label: "Date", value: data.dateValidation ?? "-" },
+      { label: "Date de livraison", value: data.dateLivraison ?? "-" },
     ];
     const orderCells: Cell[] = [
       { label: "Devis d'origine", value: data.devis ?? "-" },
@@ -1013,20 +1027,20 @@ export async function buildOdfPdf(data: OdfPdfData): Promise<Uint8Array> {
   data.articles.forEach((article, index) => {
     /** Bandeau compact, re-dessiné en haut de page si l'article déborde. */
     const drawStrip = () => {
-      const stripH = 20;
+      const stripH = 17;
       page.drawRectangle({ x: LEFT, y: y - stripH, width: CONTENT_W, height: stripH, color: BRAND_SOFT });
       const qtyLabel = `${article.quantity} pièces`;
-      const qtyW = w(qtyLabel, 9.5, bold) + 20;
+      const qtyW = w(qtyLabel, 8.5, bold) + 18;
       const title = `ARTICLE ${index + 1} (suite)   ${article.description}`;
-      text(ellipsize(title, CONTENT_W - qtyW - 20, 9.5, bold), {
-        x: LEFT + 10,
-        baseline: y - 13.5,
-        size: 9.5,
+      text(ellipsize(title, CONTENT_W - qtyW - 18, 8.5, bold), {
+        x: LEFT + 9,
+        baseline: y - 11.5,
+        size: 8.5,
         font: bold,
         color: BRAND,
       });
-      text(qtyLabel, { x: RIGHT - qtyW, baseline: y - 13.5, size: 9.5, font: bold, color: BRAND, width: qtyW - 10, align: "right" });
-      y -= stripH + 10;
+      text(qtyLabel, { x: RIGHT - qtyW, baseline: y - 11.5, size: 8.5, font: bold, color: BRAND, width: qtyW - 9, align: "right" });
+      y -= stripH + 9;
     };
 
     // Chaque article ouvre SA page : la place est garantie, plus besoin de
@@ -1034,52 +1048,78 @@ export async function buildOdfPdf(data: OdfPdfData): Promise<Uint8Array> {
     startPage();
     articlePages[index] = page;
 
+    // Bandeau titre resserré (demande Ayman 17/09, comme le reste de la
+    // page article) : titre 11 au lieu de 13, badge quantité 9 au lieu de
+    // 10, moins de remplissage vertical — les deux cases entre l'en-tête et
+    // le premier cadre en profitent aussi, le tout raccourcit la page.
     {
       const qtyLabel = `${article.quantity} pièces`;
-      const qtyW = w(qtyLabel, 10, bold) + 22;
-      const titleLines = wrap(article.description, CONTENT_W - qtyW - 34, 13, bold).slice(0, 2);
-      const headH = 20 + titleLines.length * 16 + 10;
+      const qtyW = w(qtyLabel, 9, bold) + 20;
+      const titleLines = wrap(article.description, CONTENT_W - qtyW - 30, 11, bold).slice(0, 2);
+      const headH = 17 + titleLines.length * 14 + 8;
       const top = y;
 
       page.drawRectangle({ x: LEFT, y: top - headH, width: CONTENT_W, height: headH, color: BRAND_SOFT });
       text(`ARTICLE ${index + 1} / ${data.articles.length}`, {
         x: LEFT + 12,
-        baseline: top - 14,
-        size: 7.5,
+        baseline: top - 13,
+        size: 7,
         font: bold,
         color: MUTED,
       });
-      let baseline = top - 30;
+      let baseline = top - 27;
       for (const line of titleLines) {
-        text(line, { x: LEFT + 12, baseline, size: 13, font: bold, color: BRAND });
-        baseline -= 16;
+        text(line, { x: LEFT + 12, baseline, size: 11, font: bold, color: BRAND });
+        baseline -= 14;
       }
-      const badgeH = 20;
+      const badgeH = 18;
       const badgeY = top - headH / 2 - badgeH / 2;
       page.drawRectangle({ x: RIGHT - qtyW - 12, y: badgeY, width: qtyW, height: badgeH, color: BRAND });
       text(qtyLabel, {
         x: RIGHT - qtyW - 12,
-        baseline: badgeY + 6,
-        size: 10,
+        baseline: badgeY + 5.5,
+        size: 9,
         font: bold,
         color: WHITE,
         width: qtyW,
         align: "center",
       });
-      y = top - headH - 16;
+      y = top - headH - 12;
     }
 
     continuation = drawStrip;
 
+    // Police réduite (8.5 contre 9.5 par défaut) sur toute la grille de
+    // caractéristiques de l'article — demande Ayman 17/09, comme le
+    // bandeau ci-dessus. « Fiche patronnage (OT) » disparaît : son numéro
+    // s'affiche désormais entre parenthèses à côté de « Coupe », dans
+    // Sections retenues (construit côté route).
     const cells: Cell[] = [
-      { label: "Modèle", value: article.modele ?? "non renseigné" },
-      { label: "Tissu", value: article.tissu ?? "non renseigné" },
-      { label: "Composition", value: article.composition ?? "-" },
-      { label: "Grammage / laize", value: article.grammageLaize ?? "-" },
-      { label: "Sections retenues", value: article.sections ?? "aucune" },
-      { label: "Fiche patronnage (OT)", value: article.fiche ?? "-" },
+      { label: "Modèle", value: article.modele ?? "non renseigné", size: 8.5 },
+      { label: "Tissu", value: article.tissu ?? "non renseigné", size: 8.5 },
+      { label: "Composition", value: article.composition ?? "-", size: 8.5 },
+      { label: "Grammage / laize", value: article.grammageLaize ?? "-", size: 8.5 },
     ];
     drawCellGrid(cells, { x: LEFT + 10, width: CONTENT_W - 20, separators: true });
+
+    // Sections retenues : hors grille deux-colonnes, pleine largeur — les
+    // annotations entre parenthèses (numéro d'OT sur Coupe, zones
+    // imprimables sur Sérigraphie, demande Ayman 17/09) peuvent allonger la
+    // liste ; la confiner à une demi-largeur l'aurait fait déborder sur
+    // plusieurs lignes bien plus souvent qu'avant cet ajout.
+    {
+      const sx = LEFT + 10;
+      const sw = CONTENT_W - 20;
+      const sectionsLines = wrap(article.sections ?? "aucune", sw, 8.5, font);
+      ensure(LABEL_LH + sectionsLines.length * VALUE_LH + CELL_PAD_BOTTOM);
+      text("SECTIONS RETENUES", { x: sx, baseline: y - LABEL_SIZE, size: LABEL_SIZE, font: bold, color: MUTED });
+      let baseline = y - LABEL_LH - 8.5;
+      for (const line of sectionsLines) {
+        text(line, { x: sx, baseline, size: 8.5 });
+        baseline -= VALUE_LH;
+      }
+      y -= LABEL_LH + sectionsLines.length * VALUE_LH + CELL_PAD_BOTTOM;
+    }
 
     // Visuel(s) joint(s) : hors grille deux-colonnes (demande Ayman, 17/09)
     // — plusieurs fichiers possibles par article, listés sur UNE seule
