@@ -31,8 +31,11 @@ import QRCode from "qrcode";
  *                             au terminal.
  *            5. Traçabilité   surplus tracé, cycle de vie, note de clôture.
  *   Page n   une page par article : en-tête de l'article, grille de
- *            caractéristiques, tableau des couleurs (pastille + référence,
- *            une zone par ligne) et dispatching des tailles.
+ *            caractéristiques, visuels joints, tableau des couleurs
+ *            (pastille + référence, 3 zones par ligne), dispatching des
+ *            tailles puis la maquette (si jointe) — tout sur la même page
+ *            tant qu'il reste de la place (demande Ayman, 17/09), au lieu
+ *            de forcer systématiquement la maquette sur une page à part.
  */
 
 /** Une couleur posée sur l'article : soit la couleur unique (`zone` nul), soit une zone du modèle. */
@@ -392,9 +395,10 @@ export async function buildOdfPdf(data: OdfPdfData): Promise<Uint8Array> {
   /**
    * Couleurs de l'article — le point dur de la lecture en atelier : il faut
    * voir d'un coup d'oeil QUELLE zone porte QUEL ton. D'où un vrai tableau
-   * à deux colonnes de paires : à gauche la zone (« Corps avant »), à
-   * droite la couleur sous forme de bouton (pastille peinte au ton réel +
-   * nom) suivi de sa référence. Une couleur unique occupe une ligne pleine.
+   * à trois colonnes de paires (deux auparavant, demande Ayman 17/09) : à
+   * gauche la zone (« Corps avant »), à droite la couleur sous forme de
+   * bouton (pastille peinte au ton réel + nom) suivi de sa référence. Une
+   * couleur unique occupe une ligne pleine.
    */
   function drawColorTable(label: string, colors: OdfPdfColor[]) {
     const x = LEFT + 10;
@@ -410,19 +414,22 @@ export async function buildOdfPdf(data: OdfPdfData): Promise<Uint8Array> {
       return;
     }
 
-    // Une seule couleur : pleine largeur, sinon deux paires zone/couleur par
-    // ligne. Au-delà de deux zones on reste à deux colonnes pour garder les
-    // libellés alignés verticalement d'une ligne sur l'autre.
-    const perRow = colors.length === 1 ? 1 : 2;
+    // Une seule couleur : pleine largeur, sinon trois zones/couleurs par
+    // ligne (demande Ayman, 17/09 — deux colonnes auparavant) : plus de
+    // zones visibles d'un coup d'oeil, au prix d'une police réduite pour
+    // que chaque triplet zone/nom/référence tienne dans une cellule plus
+    // étroite.
+    const perRow = colors.length === 1 ? 1 : 3;
     const cellW = width / perRow;
-    const rowH = 30;
+    const rowH = 26;
 
     // La colonne des zones se cale sur le plus long libellé réel : chaque
     // point qu'elle ne prend pas revient au nom de la couleur, qui est ce
     // qu'on lit, pas ce qu'on devine.
     const zoneLabelOf = (color: OdfPdfColor) => color.zone ?? "Couleur unique";
-    const widestLabel = Math.max(...colors.map((color) => w(zoneLabelOf(color), 8.5, bold)));
-    const zoneW = Math.min(perRow === 1 ? 150 : cellW * 0.46, Math.max(72, widestLabel + 16));
+    const zoneSize = 7.5;
+    const widestLabel = Math.max(...colors.map((color) => w(zoneLabelOf(color), zoneSize, bold)));
+    const zoneW = Math.min(perRow === 1 ? 150 : cellW * 0.36, Math.max(52, widestLabel + 12));
 
     const drawColorCell = (color: OdfPdfColor, top: number, row: number, col: number) => {
       const cellX = x + cellW * col;
@@ -430,25 +437,27 @@ export async function buildOdfPdf(data: OdfPdfData): Promise<Uint8Array> {
 
       // Colonne de gauche : la zone. Sur une couleur unique la mention
       // reste explicite pour ne pas laisser croire à une zone manquante.
-      text(ellipsize(zoneLabelOf(color), zoneW - 14, 8.5, bold), {
-        x: cellX + 8,
-        baseline: middle - 3,
-        size: 8.5,
+      text(ellipsize(zoneLabelOf(color), zoneW - 12, zoneSize, bold), {
+        x: cellX + 7,
+        baseline: middle - 2.5,
+        size: zoneSize,
         font: bold,
         color: INK,
       });
 
       // Colonne de droite : le bouton de couleur, puis la référence. Le nom
-      // sert en premier, la référence se rogne avant lui.
+      // sert en premier (c'est lui qu'on lit pour teindre, la référence
+      // n'est qu'une confirmation) — la référence se rogne avant lui, plus
+      // fort qu'avant vu la place rendue plus rare par la 3e colonne.
       const swatch = parseColorCode(color.code);
-      const available = cellW - zoneW - 12;
-      const reference = ellipsize(safe(color.code).trim() || "sans référence", Math.min(84, available * 0.45), 7.5, font);
-      const refW = w(reference, 7.5, font) + 8;
+      const available = cellW - zoneW - 10;
+      const reference = ellipsize(safe(color.code).trim() || "sans référence", Math.min(46, available * 0.3), 6.5, font);
+      const refW = w(reference, 6.5, font) + 5;
       const buttonX = cellX + zoneW;
       const buttonMaxW = available - refW;
-      const name = ellipsize(color.name || "-", Math.max(22, buttonMaxW - 28), 9, bold);
-      const buttonW = Math.min(buttonMaxW, 27 + w(name, 9, bold));
-      const buttonH = 18;
+      const name = ellipsize(color.name || "-", Math.max(30, buttonMaxW - 20), 8, bold);
+      const buttonW = Math.min(buttonMaxW, 20 + w(name, 8, bold));
+      const buttonH = 16;
 
       page.drawRectangle({
         x: buttonX,
@@ -460,22 +469,22 @@ export async function buildOdfPdf(data: OdfPdfData): Promise<Uint8Array> {
         borderWidth: 0.7,
       });
       page.drawRectangle({
-        x: buttonX + 5,
-        y: middle - 5.5,
-        width: 11,
-        height: 11,
+        x: buttonX + 4,
+        y: middle - 5,
+        width: 10,
+        height: 10,
         color: swatch ?? SWATCH_FALLBACK,
         borderColor: RULE,
         borderWidth: 0.5,
       });
-      text(name, { x: buttonX + 21, baseline: middle - 3, size: 9, font: bold, color: INK });
+      text(name, { x: buttonX + 18, baseline: middle - 2.5, size: 8, font: bold, color: INK });
       // Référence hors palette (ni #RGB ni #RRGGBB) : la pastille est
       // neutre, la référence passe en alerte plutôt que de laisser croire
       // que le gris affiché est le ton à teindre.
       text(reference, {
-        x: buttonX + buttonW + 6,
-        baseline: middle - 2.5,
-        size: 7.5,
+        x: buttonX + buttonW + 5,
+        baseline: middle - 2.2,
+        size: 6.5,
         color: swatch ? MUTED : rgb(0.65, 0.35, 0.2),
       });
     };
@@ -493,16 +502,16 @@ export async function buildOdfPdf(data: OdfPdfData): Promise<Uint8Array> {
 
       block.forEach((color, i) => drawColorCell(color, top, Math.floor(i / perRow), i % perRow));
 
-      // Filets : contour du bloc, séparation des lignes, séparation des paires.
+      // Filets : contour du bloc, séparation des lignes, séparation des colonnes.
       const tableH = rowH * blockRows;
       page.drawRectangle({ x, y: top - tableH, width, height: tableH, borderColor: RULE, borderWidth: 0.6 });
       for (let row = 1; row < blockRows; row += 1) {
         hLine(top - rowH * row, x, x + width, 0.5, HAIRLINE);
       }
-      if (perRow === 2) {
+      for (let col = 1; col < perRow; col += 1) {
         page.drawLine({
-          start: { x: x + cellW, y: top },
-          end: { x: x + cellW, y: top - tableH },
+          start: { x: x + cellW * col, y: top },
+          end: { x: x + cellW * col, y: top - tableH },
           thickness: 0.5,
           color: RULE,
         });
@@ -515,8 +524,9 @@ export async function buildOdfPdf(data: OdfPdfData): Promise<Uint8Array> {
 
   /**
    * Dispatching des tailles : un vrai tableau à filets (une colonne par
-   * taille, une ligne « demandé », une colonne « total »), scindé en
-   * plusieurs blocs si les tailles ne tiennent pas sur une largeur.
+   * taille, une ligne « demandé », une colonne « total »), toujours sur une
+   * seule ligne — colonnes et police se resserrent avec le nombre de
+   * tailles plutôt que de scinder le tableau en plusieurs blocs.
    */
   function drawSizeTable(sizes: { taille: string; quantite: number }[]) {
     const x = LEFT + 10;
@@ -532,57 +542,54 @@ export async function buildOdfPdf(data: OdfPdfData): Promise<Uint8Array> {
       return;
     }
 
-    const headW = 62;
-    const minCol = 34;
-    const perChunk = Math.max(1, Math.floor((width - headW) / minCol) - 1);
+    // Toujours UNE seule ligne (demande Ayman, 17/09 — la table se scindait
+    // auparavant en plusieurs blocs empilés si les tailles ne tenaient pas
+    // sur la largeur) : les colonnes — et leur police, en dessous d'un
+    // certain seuil — se resserrent avec le nombre de tailles plutôt que de
+    // continuer sur une deuxième ligne.
+    const headW = 58;
+    const n = sizes.length + 1; // + colonne TOTAL
+    const colW = Math.max(15, Math.min(60, (width - headW) / n));
+    const tableW = headW + colW * n;
+    const tailleSize = colW >= 34 ? 8.5 : Math.max(5.5, colW / 4.2);
+    const qtySize = colW >= 34 ? 9.5 : Math.max(6, colW / 3.6);
     const rowH = 16;
 
-    for (let start = 0; start < sizes.length; start += perChunk) {
-      const chunk = sizes.slice(start, start + perChunk);
-      const isLast = start + perChunk >= sizes.length;
-      const totalCol = isLast ? 1 : 0;
-      const colW = Math.min(60, (width - headW) / (chunk.length + totalCol));
-      const tableW = headW + colW * (chunk.length + totalCol);
+    ensure(rowH * 2 + 8);
+    const top = y;
 
-      ensure(rowH * 2 + 8);
-      const top = y;
+    page.drawRectangle({ x, y: top - rowH, width: tableW, height: rowH, color: BRAND_SOFT });
+    text("TAILLE", { x: x + 6, baseline: top - 11, size: 7, font: bold, color: BRAND });
+    text("DEMANDÉ", { x: x + 6, baseline: top - rowH - 11, size: 7, font: bold, color: MUTED });
 
-      page.drawRectangle({ x, y: top - rowH, width: tableW, height: rowH, color: BRAND_SOFT });
-      text("TAILLE", { x: x + 6, baseline: top - 11, size: 7, font: bold, color: BRAND });
-      text("DEMANDÉ", { x: x + 6, baseline: top - rowH - 11, size: 7, font: bold, color: MUTED });
-
-      chunk.forEach((size, i) => {
-        const cx = x + headW + colW * i;
-        text(ellipsize(size.taille, colW - 6, 8.5, bold), {
-          x: cx,
-          baseline: top - 11,
-          size: 8.5,
-          font: bold,
-          width: colW,
-          align: "center",
-        });
-        text(String(size.quantite), { x: cx, baseline: top - rowH - 11, size: 9.5, width: colW, align: "center" });
+    sizes.forEach((size, i) => {
+      const cx = x + headW + colW * i;
+      text(ellipsize(size.taille, colW - 4, tailleSize, bold), {
+        x: cx,
+        baseline: top - 11,
+        size: tailleSize,
+        font: bold,
+        width: colW,
+        align: "center",
       });
+      text(String(size.quantite), { x: cx, baseline: top - rowH - 11, size: qtySize, width: colW, align: "center" });
+    });
 
-      if (totalCol) {
-        const cx = x + headW + colW * chunk.length;
-        const total = sizes.reduce((sum, size) => sum + size.quantite, 0);
-        page.drawRectangle({ x: cx, y: top - rowH * 2, width: colW, height: rowH, color: ZEBRA });
-        text("TOTAL", { x: cx, baseline: top - 11, size: 7, font: bold, color: BRAND, width: colW, align: "center" });
-        text(String(total), { x: cx, baseline: top - rowH - 11, size: 9.5, font: bold, width: colW, align: "center" });
-      }
+    const totalX = x + headW + colW * sizes.length;
+    const total = sizes.reduce((sum, size) => sum + size.quantite, 0);
+    page.drawRectangle({ x: totalX, y: top - rowH * 2, width: colW, height: rowH, color: ZEBRA });
+    text("TOTAL", { x: totalX, baseline: top - 11, size: 7, font: bold, color: BRAND, width: colW, align: "center" });
+    text(String(total), { x: totalX, baseline: top - rowH - 11, size: qtySize, font: bold, width: colW, align: "center" });
 
-      // Filets : contour, séparation des deux lignes, colonnes.
-      page.drawRectangle({ x, y: top - rowH * 2, width: tableW, height: rowH * 2, borderColor: RULE, borderWidth: 0.6 });
-      hLine(top - rowH, x, x + tableW, 0.6, RULE);
-      for (let i = 0; i <= chunk.length + totalCol; i += 1) {
-        const cx = x + headW + colW * i;
-        if (cx > x + tableW + 0.1) break;
-        page.drawLine({ start: { x: cx, y: top }, end: { x: cx, y: top - rowH * 2 }, thickness: 0.5, color: RULE });
-      }
-
-      y = top - rowH * 2 - (isLast ? 0 : 6);
+    // Filets : contour, séparation des deux lignes, colonnes.
+    page.drawRectangle({ x, y: top - rowH * 2, width: tableW, height: rowH * 2, borderColor: RULE, borderWidth: 0.6 });
+    hLine(top - rowH, x, x + tableW, 0.6, RULE);
+    for (let i = 0; i <= n; i += 1) {
+      const cx = x + headW + colW * i;
+      page.drawLine({ start: { x: cx, y: top }, end: { x: cx, y: top - rowH * 2 }, thickness: 0.5, color: RULE });
     }
+
+    y = top - rowH * 2;
   }
 
   // ---------------------------------------------------------------------
@@ -1071,50 +1078,56 @@ export async function buildOdfPdf(data: OdfPdfData): Promise<Uint8Array> {
       { label: "Grammage / laize", value: article.grammageLaize ?? "-" },
       { label: "Sections retenues", value: article.sections ?? "aucune" },
       { label: "Fiche patronnage (OT)", value: article.fiche ?? "-" },
-      { label: "Visuel(s) joint(s)", value: article.visuels ?? "-" },
     ];
     drawCellGrid(cells, { x: LEFT + 10, width: CONTENT_W - 20, separators: true });
+
+    // Visuel(s) joint(s) : hors grille deux-colonnes (demande Ayman, 17/09)
+    // — plusieurs fichiers possibles par article, listés sur UNE seule
+    // ligne séparés par une virgule (déjà fait côté route) plutôt
+    // qu'empilés/coupés par le retour à la ligne de la grille ; police
+    // réduite (7.5 contre 9.5 pour les autres cadres) puisque c'est une
+    // liste de noms de fichiers, pas une donnée à lire en premier.
+    {
+      const vx = LEFT + 10;
+      const vw = CONTENT_W - 20;
+      ensure(LABEL_LH + 9.5 + CELL_PAD_BOTTOM);
+      text("VISUEL(S) JOINT(S)", { x: vx, baseline: y - LABEL_SIZE, size: LABEL_SIZE, font: bold, color: MUTED });
+      text(ellipsize(article.visuels ?? "-", vw, 7.5, font), { x: vx, baseline: y - LABEL_LH - 7.5, size: 7.5, color: INK });
+      y -= LABEL_LH + 7.5 + CELL_PAD_BOTTOM;
+    }
 
     y -= 14;
     drawColorTable(article.couleurLabel, article.couleurs);
     y -= 16;
     drawSizeTable(article.sizes);
-    continuation = null;
 
-    // Maquette (migration 0040) : sur sa propre page pour l'imprimer au
-    // format le plus grand possible — jamais compressée dans la grille de
-    // caractéristiques ci-dessus. Mise à l'échelle "contain" (jamais
-    // déformée, jamais au-delà de la zone qui lui est réservée) plutôt que
-    // dessinée à sa taille native, qui n'a aucun rapport avec le format
-    // utile d'une page A4.
+    // Maquette (migration 0040) : sur LA MÊME page que les informations de
+    // l'article (demande Ayman, 17/09) — avant, `startPage()` ici forçait
+    // systématiquement une nouvelle page, même quand il restait largement
+    // la place. `continuation` reste posé sur `drawStrip` : si le
+    // dispatching a rempli la page jusqu'au bord et qu'`ensure` déclenche
+    // malgré tout un saut de page, le bandeau "(suite)" continue de
+    // s'afficher plutôt qu'une page nue. Mise à l'échelle "contain" dans
+    // l'espace vertical restant, jamais déformée, jamais au-delà de sa
+    // page.
     const maquetteImage = maquetteImages.get(index);
     if (maquetteImage && article.maquette) {
-      startPage();
-      text(`ARTICLE ${index + 1} / ${data.articles.length}   Maquette`, {
-        x: LEFT,
-        baseline: y - 10,
-        size: 10.5,
-        font: bold,
-        color: BRAND,
-      });
-      text(article.maquette.fileName, {
-        x: LEFT,
-        baseline: y - 10,
-        size: 8,
-        color: MUTED,
-        width: CONTENT_W,
-        align: "right",
-      });
-      hLine(y - 16, LEFT, RIGHT, 0.9, BRAND);
-      y -= 36;
+      y -= 14;
+      ensure(90);
+      const mx = LEFT + 10;
+      const mw = CONTENT_W - 20;
+      text("MAQUETTE", { x: mx, baseline: y - LABEL_SIZE, size: LABEL_SIZE, font: bold, color: MUTED });
+      text(article.maquette.fileName, { x: mx, baseline: y - LABEL_SIZE, size: 7.5, color: MUTED, width: mw, align: "right" });
+      y -= LABEL_LH + 8;
 
-      const maxWidth = CONTENT_W;
+      const maxWidth = mw;
       const maxHeight = y - (M_BOTTOM + 16);
       const ratio = Math.min(maxWidth / maquetteImage.width, maxHeight / maquetteImage.height);
       const imgWidth = maquetteImage.width * ratio;
       const imgHeight = maquetteImage.height * ratio;
-      page.drawImage(maquetteImage, { x: LEFT + (maxWidth - imgWidth) / 2, y: y - imgHeight, width: imgWidth, height: imgHeight });
+      page.drawImage(maquetteImage, { x: mx + (maxWidth - imgWidth) / 2, y: y - imgHeight, width: imgWidth, height: imgHeight });
     }
+    continuation = null;
   });
 
   // Renvois « page du détail » du récapitulatif, maintenant que chaque
