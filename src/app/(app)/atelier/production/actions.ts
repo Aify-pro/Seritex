@@ -116,6 +116,37 @@ export async function setProductionOrderLineSizes(
     if (insError) return { error: insError.message };
   }
 
+  // Resynchronise la fiche de tracé liée, si elle existe : son dispatching
+  // (repartition_tailles/quantite_totale) n'est qu'une COPIE prise au moment
+  // de la liaison (applyLineToFiche, fiches-actions.ts) — sans ce
+  // rattrapage, corriger le dispatching de l'ODF après la liaison laissait
+  // l'OT afficher des tailles obsolètes (constaté en prod : un 5XL retiré
+  // de l'ODF restait affiché sur l'OT). reparti === line.quantity ici
+  // (contrôle ci-dessus), donc quantite_totale peut reprendre l'un ou
+  // l'autre sans distinction.
+  const repartitionTailles: Record<string, number> = {};
+  for (const s of rows) {
+    const cle = s.taille.trim();
+    repartitionTailles[cle] = (repartitionTailles[cle] ?? 0) + s.quantite_demandee;
+  }
+  const { data: ficheLiee } = await supabase
+    .from("fiches_placement")
+    .select("id")
+    .eq("production_order_line_id", lineId)
+    .maybeSingle();
+  if (ficheLiee) {
+    await supabase
+      .from("fiches_placement")
+      .update({
+        quantite_totale: reparti,
+        repartition_tailles: repartitionTailles,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", ficheLiee.id);
+    revalidatePath("/atelier/patronnage");
+    revalidatePath(`/atelier/patronnage/${ficheLiee.id}`);
+  }
+
   // productionOrderId reçu de l'appelant plutôt que résolu ici (déjà
   // disponible côté page, évite un aller-retour) pour revalider les bonnes
   // routes.
