@@ -60,12 +60,6 @@ export async function setProductionOrderLineSizes(
   await requireRole(["administrateur", "responsable_production"]);
   const supabase = await createClient();
 
-  const { error: delError } = await supabase
-    .from("production_order_sizes")
-    .delete()
-    .eq("production_order_line_id", lineId);
-  if (delError) return { error: delError.message };
-
   const rows = sizes.filter((s) => s.taille.trim().length > 0 && s.quantite_demandee > 0);
 
   // Les tailles viennent du référentiel (Paramètres > Couleurs et tailles) et
@@ -79,6 +73,36 @@ export async function setProductionOrderLineSizes(
       error: `Taille inconnue du référentiel : « ${tailleInvalide.taille} ». Ajoutez-la dans Paramètres > Couleurs et tailles.`,
     };
   }
+
+  // Le dispatching doit tomber pile sur la quantité de l'article — ni
+  // surplus, ni manque, contrôlé côté serveur (source de vérité, l'écart
+  // affiché à l'écran n'est qu'un indicateur visuel) avant toute écriture,
+  // pour ne jamais laisser production_order_sizes vide si le contrôle
+  // échoue après une suppression déjà faite.
+  const { data: line, error: lineError } = await supabase
+    .from("production_order_lines")
+    .select("quantity")
+    .eq("id", lineId)
+    .single();
+  if (lineError) return { error: lineError.message };
+
+  const reparti = rows.reduce((somme, s) => somme + s.quantite_demandee, 0);
+  const ecart = reparti - line.quantity;
+  if (ecart !== 0) {
+    return {
+      error:
+        ecart > 0
+          ? `Dispatching supérieur à la quantité de l'article : ${reparti} réparti(s) pour ${line.quantity} demandé(s) (${ecart} en trop).`
+          : `Dispatching inférieur à la quantité de l'article : ${reparti} réparti(s) pour ${line.quantity} demandé(s) (il manque ${-ecart}).`,
+    };
+  }
+
+  const { error: delError } = await supabase
+    .from("production_order_sizes")
+    .delete()
+    .eq("production_order_line_id", lineId);
+  if (delError) return { error: delError.message };
+
   if (rows.length > 0) {
     const { error: insError } = await supabase.from("production_order_sizes").insert(
       rows.map((s) => ({
