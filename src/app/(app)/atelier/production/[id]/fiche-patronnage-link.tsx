@@ -89,13 +89,21 @@ export function FichePatronnageLink({
     setOpen(true);
   }
 
-  function linkTo(newFicheId: string) {
+  function linkTo(newFicheId: string, force = false) {
     startTransition(async () => {
-      const res: { error?: string } = await linkLine(newFicheId, lineId);
-      if (res.error) toast.error(res.error);
-      else toast.success("Fiche Patronnage liée");
+      const res = await linkLine(newFicheId, lineId, force);
+      if ("warning" in res && res.warning) {
+        toast.warning(res.warning, { action: { label: "Lier quand même", onClick: () => linkTo(newFicheId, true) } });
+        return;
+      }
+      if ("error" in res && res.error) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success("Fiche Patronnage liée");
       setQuery("");
       setOpen(false);
+      router.refresh();
     });
   }
 
