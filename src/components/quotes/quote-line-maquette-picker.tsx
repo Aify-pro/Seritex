@@ -2,9 +2,10 @@
 
 import { useTransition } from "react";
 import { toast } from "sonner";
-import { ImageOff, X, Plus, RefreshCw } from "lucide-react";
+import { ImageOff, X } from "lucide-react";
 import { Dialog } from "@/components/ui/dialog";
 import { attachMediaFileToQuoteLine, detachMediaFileFromQuoteLine } from "@/app/(app)/commercial/actions";
+import { MediaPickerDialog } from "@/components/media/media-picker-dialog";
 import type { AttachableMediaFile, MaquetteFile } from "@/lib/types/domain";
 
 /**
@@ -22,12 +23,17 @@ import type { AttachableMediaFile, MaquetteFile } from "@/lib/types/domain";
 export function QuoteLineMaquettePicker({
   quoteLineId,
   quoteId,
+  companyId,
+  requestId,
   editable,
   attached,
   available,
 }: {
   quoteLineId: string;
   quoteId: string;
+  companyId: string;
+  /** Demande d'origine de ce devis — les fichiers proposés dans la fenêtre "Ajouter" y sont déjà affiliés (migration 0043). */
+  requestId: string;
   editable: boolean;
   attached: MaquetteFile | null;
   available: AttachableMediaFile[];
@@ -74,30 +80,16 @@ export function QuoteLineMaquettePicker({
           {editable ? "Aucune maquette déposée pour l'instant." : "Aucune maquette déposée pour cet article."}
         </p>
       )}
-      {editable && selectable.length > 0 && (
-        <div className="flex items-center gap-1.5">
-          {attached ? (
-            <RefreshCw className="h-3.5 w-3.5 text-foreground-muted" />
-          ) : (
-            <Plus className="h-3.5 w-3.5 text-foreground-muted" />
-          )}
-          <select
-            disabled={pending}
-            defaultValue=""
-            onChange={(e) => {
-              attach(e.target.value);
-              e.target.value = "";
-            }}
-            className="h-7 rounded-md border border-border bg-surface px-2 text-xs disabled:opacity-60"
-          >
-            <option value="">{attached ? "Remplacer par…" : "Joindre une maquette de la médiathèque…"}</option>
-            {selectable.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.file_name}
-              </option>
-            ))}
-          </select>
-        </div>
+      {editable && (
+        <MediaPickerDialog
+          triggerLabel={attached ? "Remplacer" : "Ajouter une maquette"}
+          dialogTitle="Joindre une maquette"
+          companyId={companyId}
+          requestId={requestId}
+          category="maquette"
+          files={selectable}
+          onPick={attach}
+        />
       )}
     </div>
   );

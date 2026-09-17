@@ -4,6 +4,8 @@ import { UploadMediaForm } from "@/components/media/upload-media-form";
 import { AddVersionForm } from "@/components/media/add-version-form";
 import { DeleteMediaFileForm } from "@/components/media/delete-media-file-form";
 import { MediaFileHistory, type HistoryEvent } from "@/components/media/media-file-history";
+import { MediaFileRequests, type RequestOption } from "@/components/media/media-file-requests";
+import { MediaLibraryFilter } from "@/components/media/media-library-filter";
 import { MEDIA_CATEGORY_LABELS } from "@/lib/types/domain";
 import { formatDate, formatFileSize } from "@/lib/utils";
 import { can } from "@/lib/auth/permissions";
@@ -34,14 +36,19 @@ type MediaFileRow = {
     occurred_at: string;
     app_users: { full_name: string } | null;
   }[];
+  // Demandes auxquelles ce fichier est affilié (migration 0043).
+  request_media_files: { requests: RequestOption | null }[];
 };
 
 /**
  * Médiathèque d'un client : fichiers triés par date d'ajout (section 3.7 de
  * l'analyse), avec historique documenté (raison de chaque ajout/mise à
- * jour) et statut de réplication par cible de stockage.
+ * jour), statut de réplication par cible de stockage, et — depuis la
+ * migration 0043 — classée par demande : chaque fichier peut être affilié
+ * à plusieurs demandes (réutilisation), `requestId` filtre l'affichage sur
+ * le "dossier" d'une demande donnée sans jamais en cacher d'autres.
  */
-export async function MediaLibrary({ companyId }: { companyId: string }) {
+export async function MediaLibrary({ companyId, requestId = null }: { companyId: string; requestId?: string | null }) {
   const supabase = await createClient();
 
   // Note : `media_files` porte DEUX relations vers `media_file_versions`
@@ -50,29 +57,41 @@ export async function MediaLibrary({ companyId }: { companyId: string }) {
   // laquelle utiliser pour l'imbrication ci-dessous — sans le nom explicite
   // de la contrainte, la requête échoue avec une erreur d'ambiguïté
   // (PGRST201), silencieusement ignorée si on ne vérifie pas `error`.
-  const { data: files, error } = await supabase
-    .from("media_files")
-    .select(
-      `id, file_name, category, mime_type, size_bytes, created_at,
-       media_file_versions!media_file_versions_media_file_id_fkey ( id, version_number, created_at,
-         media_file_copies ( id, sync_status, error_message, storage_targets ( name, type ) )
-       ),
-       media_file_events ( id, event_type, reason, occurred_at, app_users ( full_name ) )`
-    )
-    .eq("company_id", companyId)
-    .is("deleted_at", null)
-    .order("created_at", { ascending: false });
+  const [{ data: files, error }, { data: companyRequests }] = await Promise.all([
+    supabase
+      .from("media_files")
+      .select(
+        `id, file_name, category, mime_type, size_bytes, created_at,
+         media_file_versions!media_file_versions_media_file_id_fkey ( id, version_number, created_at,
+           media_file_copies ( id, sync_status, error_message, storage_targets ( name, type ) )
+         ),
+         media_file_events ( id, event_type, reason, occurred_at, app_users ( full_name ) ),
+         request_media_files ( requests ( id, reference ) )`
+      )
+      .eq("company_id", companyId)
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false }),
+    supabase.from("requests").select("id,reference").eq("company_id", companyId).order("created_at", { ascending: false }),
+  ]);
 
   if (error) {
     console.error("MediaLibrary: échec du chargement des fichiers", error);
   }
 
-  const mediaFiles = (files ?? []) as unknown as MediaFileRow[];
+  const requestOptions = (companyRequests ?? []) as RequestOption[];
+  let mediaFiles = (files ?? []) as unknown as MediaFileRow[];
+  if (requestId) {
+    mediaFiles = mediaFiles.filter((f) => f.request_media_files.some((rl) => rl.requests?.id === requestId));
+  }
   const canDelete = await can("mediatheque", "delete");
 
   return (
     <div className="space-y-6">
-      <UploadMediaForm companyId={companyId} />
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <MediaLibraryFilter requests={requestOptions} currentRequestId={requestId} />
+      </div>
+
+      <UploadMediaForm companyId={companyId} requestId={requestId ?? undefined} />
 
       {error && (
         <p className="rounded-md border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger">
@@ -101,6 +120,9 @@ export async function MediaLibrary({ companyId }: { companyId: string }) {
                   occurred_at: e.occurred_at,
                   author_name: e.app_users?.full_name ?? null,
                 }));
+              const affiliatedRequests = f.request_media_files
+                .map((rl) => rl.requests)
+                .filter((r): r is RequestOption => !!r);
 
               return (
                 <li key={f.id} className="space-y-2 px-5 py-4">
@@ -116,6 +138,7 @@ export async function MediaLibrary({ companyId }: { companyId: string }) {
                       Ajouté le {formatDate(f.created_at)} · {formatFileSize(f.size_bytes)} · v{latestVersion?.version_number ?? 1}
                     </p>
                   </div>
+                  <MediaFileRequests mediaFileId={f.id} attached={affiliatedRequests} available={requestOptions} />
                   <MediaFileHistory events={events} copies={copies} />
                   <div className="flex flex-wrap items-center gap-4">
                     <AddVersionForm mediaFileId={f.id} />
@@ -125,7 +148,9 @@ export async function MediaLibrary({ companyId }: { companyId: string }) {
               );
             })}
             {mediaFiles.length === 0 && (
-              <li className="px-5 py-8 text-center text-sm text-foreground-muted">Aucun fichier pour ce client.</li>
+              <li className="px-5 py-8 text-center text-sm text-foreground-muted">
+                {requestId ? "Aucun fichier affilié à cette demande pour l'instant." : "Aucun fichier pour ce client."}
+              </li>
             )}
           </ul>
         </CardBody>

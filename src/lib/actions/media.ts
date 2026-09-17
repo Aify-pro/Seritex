@@ -14,6 +14,11 @@ const uploadSchema = z.object({
   company_id: z.string().uuid(),
   category: z.enum(["visuel", "image_de_marque", "fiche_technique", "nuancier", "maquette", "autre"]),
   reason: z.string().trim().min(4, "La raison doit contenir au moins 4 caractères"),
+  // Demande (requests.id, migration 0043) à laquelle affilier le fichier dès
+  // son dépôt — utilisé quand l'upload part de la fenêtre de sélection
+  // visuel/maquette d'un ODF/devis plutôt que de la médiathèque elle-même,
+  // pour qu'il apparaisse immédiatement dans le dossier de cette demande.
+  request_id: z.string().uuid().optional(),
 });
 
 /**
@@ -23,12 +28,13 @@ const uploadSchema = z.object({
  * support, Supabase Storage restant toujours actif par défaut.
  */
 export async function uploadMediaFile(formData: FormData) {
-  const { profile } = await requireUser();
+  const { authId, profile } = await requireUser();
 
   const parsed = uploadSchema.safeParse({
     company_id: formData.get("company_id") || profile.company_id,
     category: formData.get("category") || "autre",
     reason: formData.get("reason"),
+    request_id: formData.get("request_id") || undefined,
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message };
 
@@ -70,6 +76,15 @@ export async function uploadMediaFile(formData: FormData) {
     .single();
 
   if (!mediaFile) return { error: "Le fichier a été créé mais n'a pas pu être retrouvé pour la réplication" };
+
+  if (parsed.data.request_id) {
+    const { error: affiliationError } = await supabase.from("request_media_files").insert({
+      request_id: parsed.data.request_id,
+      media_file_id: mediaFile.id,
+      added_by: authId,
+    });
+    if (affiliationError) return { error: affiliationError.message };
+  }
 
   const buffer = Buffer.from(await file.arrayBuffer());
   await replicateVersion({

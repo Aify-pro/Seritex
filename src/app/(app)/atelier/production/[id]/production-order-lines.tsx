@@ -96,6 +96,8 @@ export interface LineData {
  */
 export function ProductionOrderLines({
   productionOrderId,
+  companyId,
+  requestId,
   editable,
   mediaEditable,
   lines,
@@ -106,6 +108,10 @@ export function ProductionOrderLines({
   initialNote,
 }: {
   productionOrderId: string;
+  /** Entreprise cliente de l'ODF — pour le dépôt d'un visuel/maquette depuis la fenêtre de sélection (MediaPickerDialog). */
+  companyId: string;
+  /** Demande d'origine (ODF → devis → demande, migration 0043) — les fichiers proposés dans "Ajouter" y sont déjà affiliés. Null si cet ODF n'a pas de devis d'origine (ex. données de démo). */
+  requestId: string | null;
   editable: boolean;
   /** Visuel/maquette restent modifiables un peu plus longtemps que le reste (migration 0042) — voir page.tsx. */
   mediaEditable: boolean;
@@ -114,7 +120,7 @@ export function ProductionOrderLines({
   colors: ColorOption[];
   /** Toutes les sections d'atelier actives, pour le sélecteur de sections retenues de chaque article. */
   allSections: { id: string; name: string }[];
-  /** Médiathèque du client, pour le sélecteur de visuel de chaque article. */
+  /** Fichiers de la médiathèque déjà affiliés à la demande de cet ODF, pour le sélecteur de visuel/maquette de chaque article. */
   availableMediaFiles: AttachableMediaFile[];
   /** Disponibilité couleurs, commentaire libre — jamais validé par le logiciel (section 9), reste au niveau de l'ODF entier. */
   initialNote: string | null;
@@ -133,6 +139,8 @@ export function ProductionOrderLines({
             <LineCard
               key={line.id}
               productionOrderId={productionOrderId}
+              companyId={companyId}
+              requestId={requestId}
               editable={editable}
               mediaEditable={mediaEditable}
               line={line}
@@ -196,6 +204,8 @@ function ColorNote({
 
 function LineCard({
   productionOrderId,
+  companyId,
+  requestId,
   editable,
   mediaEditable,
   line,
@@ -205,6 +215,8 @@ function LineCard({
   availableMediaFiles,
 }: {
   productionOrderId: string;
+  companyId: string;
+  requestId: string | null;
   editable: boolean;
   mediaEditable: boolean;
   line: LineData;
@@ -432,6 +444,8 @@ function LineCard({
           <LineVisuelPicker
             lineId={line.id}
             productionOrderId={productionOrderId}
+            companyId={companyId}
+            requestId={requestId}
             editable={mediaEditable}
             fromDevis={line.visuelsFromDevis}
             attached={line.visuelAttached}
@@ -444,6 +458,8 @@ function LineCard({
           <LineMaquettePicker
             lineId={line.id}
             productionOrderId={productionOrderId}
+            companyId={companyId}
+            requestId={requestId}
             editable={mediaEditable}
             fromDevis={line.maquetteFromDevis}
             attached={line.maquetteAttached}

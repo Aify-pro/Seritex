@@ -31,11 +31,17 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
 
   const { data: order } = await supabase
     .from("production_orders")
-    .select("*,companies(name),quotes(reference)")
+    .select("*,companies(name),quotes(reference,request_id)")
     .eq("id", id)
     .single();
 
   if (!order) notFound();
+
+  // Demande d'origine (ODF → devis → demande, migration 0043) — null si cet
+  // ODF n'a pas de devis d'origine (ex. données de démo insérées
+  // directement par scripts/seed.ts). Détermine quels fichiers de la
+  // médiathèque sont proposables comme visuel/maquette pour ses articles.
+  const requestId = (order.quotes as unknown as { request_id: string | null } | null)?.request_id ?? null;
 
   const [
     { data: workOrders },
@@ -141,7 +147,14 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
       .select("production_order_line_id,media_file_id,media_files(id,file_name,category)")
       .eq("production_order_id", id)
       .not("production_order_line_id", "is", null),
-    supabase.from("media_files").select("id,file_name,category").eq("company_id", order.company_id),
+    // Médiathèque proposable pour visuel/maquette/documents généraux
+    // (migration 0043) : plus toute la médiathèque du client, seulement ce
+    // qui est déjà affilié à la demande d'origine de cet ODF — un fichier
+    // affilié à une autre demande n'apparaît ici que si on l'y affilie
+    // explicitement depuis la médiathèque.
+    requestId
+      ? supabase.from("request_media_files").select("media_files(id,file_name,category)").eq("request_id", requestId)
+      : Promise.resolve({ data: [] as { media_files: { id: string; file_name: string; category: string } | null }[] }),
     // Lot 10 : mouvements de stock & fiches d'import Sage (section 19 du
     // document de logique) — dérivés de record_pesee/create_article_lot,
     // jamais saisis directement (migration 0020).
@@ -356,7 +369,9 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
   const attachedGeneralMediaFiles = (attachedGeneralMedia ?? [])
     .map((m) => m.media_files as unknown as AttachableMediaFile | null)
     .filter((f): f is AttachableMediaFile => !!f);
-  const availableMediaFiles = (availableMedia ?? []) as AttachableMediaFile[];
+  const availableMediaFiles = (availableMedia ?? [])
+    .map((m) => m.media_files as unknown as AttachableMediaFile | null)
+    .filter((f): f is AttachableMediaFile => !!f);
   const visuelByLine: Record<string, AttachableMediaFile[]> = {};
   const maquetteByLine: Record<string, AttachableMediaFile[]> = {};
   for (const m of (attachedLineMedia ?? []) as unknown as { production_order_line_id: string; media_files: AttachableMediaFile | null }[]) {
@@ -531,6 +546,8 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
 
       <ProductionOrderLines
         productionOrderId={order.id}
+        companyId={order.company_id}
+        requestId={requestId}
         editable={modifiable}
         mediaEditable={mediaEditable}
         lines={linesWithConfig}
