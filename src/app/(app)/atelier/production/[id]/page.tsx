@@ -73,7 +73,11 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     { data: stockMovements },
     { data: stockExportFiches },
   ] = await Promise.all([
-    supabase.from("work_orders").select("*,sections(name)").eq("production_order_id", id).order("planned_start", { ascending: true }),
+    supabase
+      .from("work_orders")
+      .select("*,sections(name,display_order)")
+      .eq("production_order_id", id)
+      .order("planned_start", { ascending: true }),
     supabase
       .from("sections")
       .select("id,name,atelier_categories(cle,requiert_fiche_trace,requiert_visuel)")
@@ -503,6 +507,27 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
   // stock verraient une redirection "accès refusé" en cliquant).
   const canViewCommercial = isAdmin || profile.role === "commercial";
 
+  // Sous-ODF groupés par section (demande Ayman, 17/09) : un chef de section
+  // scanne le QR d'en-tête de l'ODF depuis /atelier/section et doit
+  // retrouver directement les sous-ODF de SA section — même regroupement
+  // affiché ici que sur le PDF (voir odf-pdf.ts). Ordonné par
+  // sections.display_order (l'ordre réel de passage en atelier), pas par
+  // planned_start qui mélangerait les sections entre elles.
+  type WorkOrderRow = NonNullable<typeof workOrders>[number];
+  const workOrderGroups: { sectionId: string; sectionName: string; workOrders: WorkOrderRow[] }[] = [];
+  {
+    const bySection = new Map<string, { sectionName: string; displayOrder: number; workOrders: WorkOrderRow[] }>();
+    for (const wo of workOrders ?? []) {
+      const section = wo.sections as unknown as { name: string; display_order: number } | null;
+      const group = bySection.get(wo.section_id) ?? { sectionName: section?.name ?? "—", displayOrder: section?.display_order ?? 0, workOrders: [] };
+      group.workOrders.push(wo);
+      bySection.set(wo.section_id, group);
+    }
+    for (const [sectionId, group] of [...bySection.entries()].sort((a, b) => a[1].displayOrder - b[1].displayOrder)) {
+      workOrderGroups.push({ sectionId, sectionName: group.sectionName, workOrders: group.workOrders });
+    }
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -653,50 +678,57 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
       <Card>
         <CardHeader
           title="Ordres de travail"
-          description="Un sous-ODF par section retenue, généré à la validation de l'ODF. Cliquez sur un sous-ODF pour son détail."
+          description="Un sous-ODF par section retenue, généré à la validation de l'ODF, groupés par section. Cliquez sur un sous-ODF pour son détail."
         />
         <CardBody className="p-0">
-          {!workOrders || workOrders.length === 0 ? (
+          {workOrderGroups.length === 0 ? (
             <p className="px-5 py-6 text-sm text-foreground-muted">
               Aucun ordre de travail généré pour le moment — les sous-ODF sont créés à la validation de l&apos;ODF.
             </p>
           ) : (
-            <ol className="divide-y divide-border">
-              {workOrders.map((wo, i) => {
-                const atteinte = wo.quantity_done >= wo.quantity_planned;
-                return (
-                  <li key={wo.id}>
-                    <Link
-                      href={`/atelier/production/${order.id}/ot/${wo.id}`}
-                      className="flex items-center gap-4 px-5 py-4 hover:bg-surface-muted"
-                    >
-                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-surface-muted text-xs font-semibold text-foreground-muted">
-                        {i + 1}
-                      </span>
-                      <div className="flex-1">
-                        <p className="text-sm font-medium text-foreground">
-                          {(wo.sections as unknown as { name: string } | null)?.name} — {wo.reference}
-                        </p>
-                        <p className="text-xs text-foreground-muted">
-                          {wo.quantity_done}/{wo.quantity_planned} pièces
-                          {wo.actual_start ? ` · démarré le ${formatDateTime(wo.actual_start)}` : ""}
-                          {wo.actual_end ? ` · quantité atteinte le ${formatDateTime(wo.actual_end)}` : ""}
-                        </p>
-                        {wo.blocking_reason && (
-                          <p className="mt-1 text-xs text-danger">⚠ {wo.blocking_reason}</p>
-                        )}
-                      </div>
-                      {atteinte ? (
-                        <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
-                      ) : (
-                        <Package className="h-4 w-4 shrink-0 text-foreground-muted" />
-                      )}
-                      <ChevronRight className="h-4 w-4 shrink-0 text-foreground-muted" />
-                    </Link>
-                  </li>
-                );
-              })}
-            </ol>
+            <div className="divide-y divide-border">
+              {workOrderGroups.map((group) => (
+                <div key={group.sectionId}>
+                  <p className="bg-surface-muted px-5 py-2 text-xs font-semibold uppercase tracking-wide text-foreground-muted">
+                    {group.sectionName}
+                  </p>
+                  <ol className="divide-y divide-border">
+                    {group.workOrders.map((wo, i) => {
+                      const atteinte = wo.quantity_done >= wo.quantity_planned;
+                      return (
+                        <li key={wo.id}>
+                          <Link
+                            href={`/atelier/production/${order.id}/ot/${wo.id}`}
+                            className="flex items-center gap-4 px-5 py-4 hover:bg-surface-muted"
+                          >
+                            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-surface-muted text-xs font-semibold text-foreground-muted">
+                              {i + 1}
+                            </span>
+                            <div className="flex-1">
+                              <p className="text-sm font-medium text-foreground">{wo.reference}</p>
+                              <p className="text-xs text-foreground-muted">
+                                {wo.quantity_done}/{wo.quantity_planned} pièces
+                                {wo.actual_start ? ` · démarré le ${formatDateTime(wo.actual_start)}` : ""}
+                                {wo.actual_end ? ` · quantité atteinte le ${formatDateTime(wo.actual_end)}` : ""}
+                              </p>
+                              {wo.blocking_reason && (
+                                <p className="mt-1 text-xs text-danger">⚠ {wo.blocking_reason}</p>
+                              )}
+                            </div>
+                            {atteinte ? (
+                              <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
+                            ) : (
+                              <Package className="h-4 w-4 shrink-0 text-foreground-muted" />
+                            )}
+                            <ChevronRight className="h-4 w-4 shrink-0 text-foreground-muted" />
+                          </Link>
+                        </li>
+                      );
+                    })}
+                  </ol>
+                </div>
+              ))}
+            </div>
           )}
         </CardBody>
       </Card>

@@ -113,12 +113,12 @@ const data: OdfPdfData = {
     },
   ],
   sousOdf: [
-    { reference: "OT-2026-0501", section: "Coupe", planned: 1450, done: 1450, url: `${BASE}/ot/1` },
-    { reference: "OT-2026-0502", section: "Piquage", planned: 1450, done: 940, url: `${BASE}/ot/2` },
-    { reference: "OT-2026-0503", section: "Broderie", planned: 800, done: 610, url: `${BASE}/ot/3` },
-    { reference: "OT-2026-0504", section: "Finition", planned: 1450, done: 320, url: `${BASE}/ot/4` },
-    { reference: "OT-2026-0505", section: "Contrôle qualité", planned: 450, done: 0, url: `${BASE}/ot/5` },
-    { reference: "OT-2026-0506", section: "Emballage et expédition", planned: 1450, done: 0, url: `${BASE}/ot/6` },
+    { reference: "OT-2026-0501", section: "Coupe", sectionDisplayOrder: 1, planned: 1450, done: 1450 },
+    { reference: "OT-2026-0502", section: "Piquage", sectionDisplayOrder: 2, planned: 1450, done: 940 },
+    { reference: "OT-2026-0503", section: "Broderie", sectionDisplayOrder: 3, planned: 800, done: 610 },
+    { reference: "OT-2026-0504", section: "Finition", sectionDisplayOrder: 4, planned: 1450, done: 320 },
+    { reference: "OT-2026-0505", section: "Contrôle qualité", sectionDisplayOrder: 5, planned: 450, done: 0 },
+    { reference: "OT-2026-0506", section: "Emballage et expédition", sectionDisplayOrder: 6, planned: 1450, done: 0 },
   ],
   surplusTraces: [
     ["M", 6],
