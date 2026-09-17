@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { toast } from "sonner";
 import {
   Plus,
   Eye,
@@ -31,6 +32,7 @@ import type { FichePlacement, RepartitionTailles, StatutFiche, TracePlacement } 
 import { createContext, useContext } from "react";
 import type { Size } from "@/lib/sizes";
 import type { TraceAnalysisDetail } from "@/lib/patronnage/detail";
+import { repartitionDepuisTraces, repartitionTotal } from "@/lib/patronnage/dispatching";
 import {
   createFiche,
   updateFiche,
@@ -99,9 +101,6 @@ interface Permissions {
   canDelete: boolean;
 }
 
-function repartitionTotal(r: RepartitionTailles): number {
-  return Object.values(r).reduce((s, v) => s + (v ?? 0), 0);
-}
 
 /* ============================================================
    Écran liste
@@ -364,24 +363,6 @@ function RepartitionFields({
       ))}
     </div>
   );
-}
-
-/**
- * Dispatching total de l'ordre de tracé : plus une saisie manuelle
- * dupliquant celle de l'ODF, mais la somme de ce qui est effectivement posé
- * sur les tracés (répartition par couche × nombre de plis de chaque tracé,
- * lot 8 même convention que `totalTrace` dans TraceDetailBody).
- */
-function repartitionDepuisTraces(traces: TracePlacement[]): RepartitionTailles {
-  const out: RepartitionTailles = {};
-  for (const trace of traces) {
-    const plis = trace.nbPlis ?? 0;
-    if (plis <= 0) continue;
-    for (const [cle, quantite] of Object.entries(trace.repartitionParCouche)) {
-      out[cle] = (out[cle] ?? 0) + quantite * plis;
-    }
-  }
-  return out;
 }
 
 /**
@@ -662,6 +643,28 @@ export function FicheDetailContent({
     });
   }
 
+  /**
+   * Liaison à un article d'ODF : un écart de quantité/dispatching entre la
+   * fiche et l'article ne bloque pas la liaison (même convention que
+   * `generateFicheFromLine` côté ODF, décision Ayman 16/09) — juste un
+   * avertissement, avec confirmation explicite pour lier quand même.
+   */
+  function linkToLine(lineId: string, force = false) {
+    setError(null);
+    startTransition(async () => {
+      const res = await linkLine(fiche.id, lineId, force);
+      if ("warning" in res && res.warning) {
+        toast.warning(res.warning, { action: { label: "Lier quand même", onClick: () => linkToLine(lineId, true) } });
+        return;
+      }
+      if ("error" in res && res.error) {
+        setError(res.error);
+        return;
+      }
+      refresh();
+    });
+  }
+
   function handleSaveCadres(e: React.FormEvent) {
     e.preventDefault();
     if (!cadreFormRef.current) return;
@@ -774,13 +777,13 @@ export function FicheDetailContent({
                       placeholder="Rechercher une référence ODF…"
                       search={searchOdfLines}
                       renderOption={(o: { id: string; reference: string }) => o.reference}
-                      onSelect={(o) => runAction(() => linkLine(fiche.id, o.id ?? null))}
+                      onSelect={(o) => o.id && linkToLine(o.id)}
                     />
                   </div>
                   <QrScannerButton
                     onScanned={async (reference) => {
                       const results = await searchOdfLines(reference);
-                      if (results[0]) runAction(() => linkLine(fiche.id, results[0].id ?? null));
+                      if (results[0]?.id) linkToLine(results[0].id);
                     }}
                   />
                 </div>

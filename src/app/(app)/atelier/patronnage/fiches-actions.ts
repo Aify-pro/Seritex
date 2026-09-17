@@ -11,6 +11,7 @@ import { reconnaitreTrace } from "@/lib/patronnage/reconnaissance";
 import { construireAnalyseDetaillee, type TraceAnalysisDetail } from "@/lib/patronnage/detail";
 import { readDxfFile } from "@/lib/patronnage/upload";
 import type { StatutFiche, RepartitionTailles } from "@/lib/patronnage/types";
+import { repartitionDepuisTraces, repartitionTotal, sameRepartition } from "@/lib/patronnage/dispatching";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
@@ -364,7 +365,15 @@ export async function updateFiche(ficheId: string, formData: FormData) {
   return {};
 }
 
-export async function linkLine(ficheId: string, lineId: string | null) {
+/**
+ * Liaison à un article d'ODF — `force=true` passe outre l'avertissement de
+ * l'étape 3 (mais jamais les refus 1 et 2, ceux-là restent bloquants).
+ */
+export async function linkLine(
+  ficheId: string,
+  lineId: string | null,
+  force = false
+): Promise<{ error?: string; warning?: string }> {
   await requirePermission("modify");
   const gate = await assertFicheModifiable(ficheId);
   if ("error" in gate) return gate;
@@ -383,7 +392,7 @@ export async function linkLine(ficheId: string, lineId: string | null) {
   }
 
   // La fiche prend ses tailles/tissu/quantité de l'article lié
-  // (applyLineToFiche) — mais deux garde-fous avant, dans les deux sens du
+  // (applyLineToFiche) — mais des garde-fous avant, dans les deux sens du
   // lien 1:1 fiche <-> article (fiches_placement_production_order_line_id_
   // unique, migration 0037, garantit déjà qu'un article ne peut porter
   // qu'une fiche ; côté fiche, la colonne est scalaire donc ne peut déjà
@@ -391,12 +400,12 @@ export async function linkLine(ficheId: string, lineId: string | null) {
   // faire glisser d'un article à l'autre sans le dire) :
   const { data: fiche } = await supabase
     .from("fiches_placement")
-    .select("production_order_line_id,product_model_id")
+    .select("production_order_line_id,product_model_id,quantite_totale,traces_placement(repartition_par_couche,nb_plis)")
     .eq("id", ficheId)
     .single();
   const { data: line } = await supabase
     .from("production_order_lines")
-    .select("product_model_id,description,production_orders(reference)")
+    .select("product_model_id,description,quantity,production_orders(reference),production_order_sizes(taille,quantite_demandee)")
     .eq("id", lineId)
     .single();
   if (!line) return { error: "Article introuvable" };
@@ -415,6 +424,39 @@ export async function linkLine(ficheId: string, lineId: string | null) {
   //    celui de l'article ciblé (cadre 1 de la fiche vs. modèle réel produit).
   if (fiche?.product_model_id && line.product_model_id && fiche.product_model_id !== line.product_model_id) {
     return { error: `Cette fiche porte un autre modèle que celui de ${lineLabel} — liaison refusée.` };
+  }
+
+  // 3. Quantité/dispatching déjà renseignés sur la fiche (avant la liaison,
+  //    ex. demande commerciale antérieure à l'ODF, ou fiche reliée puis
+  //    déliée d'un autre article) mais différents de ceux de l'article : pas
+  //    un refus, juste un avertissement (même convention que le message
+  //    "fiche orpheline" de generateFicheFromLine, décision Ayman 16/09) —
+  //    l'article fait foi si on confirme quand même.
+  if (!force) {
+    const demandeArticle: RepartitionTailles = {};
+    for (const row of line.production_order_sizes ?? []) {
+      demandeArticle[row.taille as string] = (demandeArticle[row.taille as string] ?? 0) + (row.quantite_demandee as number);
+    }
+    const dispatchingFiche = repartitionDepuisTraces(
+      ((fiche?.traces_placement ?? []) as { repartition_par_couche: RepartitionTailles | null; nb_plis: number | null }[]).map((t) => ({
+        repartitionParCouche: t.repartition_par_couche ?? {},
+        nbPlis: t.nb_plis,
+      }))
+    );
+    const totalDispatchingFiche = repartitionTotal(dispatchingFiche);
+
+    const ecarts: string[] = [];
+    if (fiche?.quantite_totale != null && fiche.quantite_totale !== line.quantity) {
+      ecarts.push(`quantité totale ${fiche.quantite_totale} sur la fiche contre ${line.quantity} sur l'article`);
+    }
+    if (totalDispatchingFiche > 0 && !sameRepartition(dispatchingFiche, demandeArticle)) {
+      ecarts.push(`dispatching des tracés déjà déposés (${totalDispatchingFiche} pièces) différent de celui de l'article`);
+    }
+    if (ecarts.length > 0) {
+      return {
+        warning: `Écart avec ${lineLabel} — ${ecarts.join(" ; ")}. Confirmez pour lier quand même (la quantité et le dispatching de l'article feront foi).`,
+      };
+    }
   }
 
   const applied = await applyLineToFiche(ficheId, lineId);
