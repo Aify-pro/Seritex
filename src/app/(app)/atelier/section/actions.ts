@@ -3,6 +3,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { requireUser } from "@/lib/auth/current-user";
 import { revalidatePath } from "next/cache";
+import { sendNotification } from "@/lib/notifications/send";
+import { resolveContactEmailForProductionOrder } from "@/lib/notifications/recipients";
 
 export type RecordQuantityResult = { error?: string };
 
@@ -27,6 +29,16 @@ export async function recordWorkOrderQuantity(
   await requireUser();
   const supabase = await createClient();
 
+  // Capturé AVANT le RPC : c'est encore l'état d'avant cet appel, seul
+  // moyen de savoir si CETTE saisie est la toute première sur ce sous-ODF
+  // (actual_start passe de null à une date dans record_work_order_quantity,
+  // migration 0036 — un sous-ODF ne porte plus de statut distinct).
+  const { data: before } = await supabase
+    .from("work_orders")
+    .select("actual_start, production_order_id, sections(name, atelier_categories(cle)), production_orders(reference, companies(name))")
+    .eq("id", workOrderId)
+    .maybeSingle();
+
   const { error } = await supabase.rpc("record_work_order_quantity", {
     p_work_order_id: workOrderId,
     p_quantity: quantity,
@@ -35,6 +47,17 @@ export async function recordWorkOrderQuantity(
 
   if (error) {
     return { error: error.message };
+  }
+
+  const categorieCle = (before?.sections as unknown as { atelier_categories: { cle: string } | null } | null)?.atelier_categories?.cle;
+  if (before && !before.actual_start && categorieCle === "impression") {
+    const po = before.production_orders as unknown as { reference: string; companies: { name: string } | null } | null;
+    await sendNotification("commande_en_impression", {
+      to: await resolveContactEmailForProductionOrder(before.production_order_id),
+      variables: { numero_odf: po?.reference ?? "", nom_client: po?.companies?.name ?? "" },
+      relatedEntityType: "production_order",
+      relatedEntityId: before.production_order_id,
+    });
   }
 
   revalidatePath("/atelier/section");
