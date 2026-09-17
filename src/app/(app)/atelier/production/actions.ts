@@ -505,10 +505,36 @@ export async function detachMediaFileFromProductionOrder(productionOrderId: stri
  * ci-dessus, que vérifie validate_production_order() pour une section de
  * catégorie Impression retenue sur CET article (visuel uniquement — la
  * maquette n'est pas aujourd'hui une condition bloquante).
+ *
+ * Le visuel reste multiple (plusieurs fichiers d'exploitation par article,
+ * ex. recto/verso) — la maquette, elle, est unique par article (demande
+ * Ayman, 16/09) : en joindre une nouvelle remplace silencieusement
+ * l'ancienne plutôt que de s'y ajouter. Contrôle fait ici, pas en base
+ * (pas de contrainte d'unicité sur production_order_media_files) — le
+ * rattachement passe toujours par ce point d'entrée unique.
  */
 export async function attachMediaFileToLine(lineId: string, productionOrderId: string, mediaFileId: string) {
   const { authId } = await requireRole(["administrateur", "responsable_production"]);
   const supabase = await createClient();
+
+  const { data: media } = await supabase.from("media_files").select("category").eq("id", mediaFileId).maybeSingle();
+  if (media?.category === "maquette") {
+    const { data: existing } = await supabase
+      .from("production_order_media_files")
+      .select("media_file_id, media_files!inner(category)")
+      .eq("production_order_line_id", lineId)
+      .eq("media_files.category", "maquette");
+    const existingIds = (existing ?? []).map((e) => e.media_file_id);
+    if (existingIds.length > 0) {
+      const { error: delError } = await supabase
+        .from("production_order_media_files")
+        .delete()
+        .eq("production_order_line_id", lineId)
+        .in("media_file_id", existingIds);
+      if (delError) return { error: delError.message };
+    }
+  }
+
   const { error } = await supabase.from("production_order_media_files").insert({
     production_order_id: productionOrderId,
     production_order_line_id: lineId,
