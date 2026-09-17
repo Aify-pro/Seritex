@@ -5,7 +5,25 @@ import { requireRole } from "@/lib/auth/current-user";
 import { revalidatePath } from "next/cache";
 import { getSizes } from "@/lib/sizes";
 import { sendNotification } from "@/lib/notifications/send";
-import { resolveUserEmail } from "@/lib/notifications/recipients";
+import { resolveUserEmail, resolveContactEmailForProductionOrder } from "@/lib/notifications/recipients";
+
+async function notifyCommandeTerminee(productionOrderId: string) {
+  const supabase = await createClient();
+  const { data: po } = await supabase
+    .from("production_orders")
+    .select("reference, companies(name)")
+    .eq("id", productionOrderId)
+    .maybeSingle();
+  await sendNotification("commande_terminee", {
+    to: await resolveContactEmailForProductionOrder(productionOrderId),
+    variables: {
+      numero_odf: po?.reference ?? "",
+      nom_client: (po?.companies as unknown as { name: string } | null)?.name ?? "",
+    },
+    relatedEntityType: "production_order",
+    relatedEntityId: productionOrderId,
+  });
+}
 
 function revalidateOdf(productionOrderId: string) {
   revalidatePath(`/atelier/production/${productionOrderId}`);
@@ -227,6 +245,7 @@ export async function confirmClosure(productionOrderId: string, approve: boolean
     p_note: note || null,
   });
   if (error) return { error: error.message };
+  if (approve) await notifyCommandeTerminee(productionOrderId);
   revalidateOdf(productionOrderId);
   return {};
 }
@@ -240,6 +259,7 @@ export async function forceCloseProductionOrder(productionOrderId: string, reaso
     p_reason: reason,
   });
   if (error) return { error: error.message };
+  await notifyCommandeTerminee(productionOrderId);
   revalidateOdf(productionOrderId);
   return {};
 }
