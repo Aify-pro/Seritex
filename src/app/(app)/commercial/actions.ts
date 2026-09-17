@@ -5,6 +5,8 @@ import { requireRole, requireUser } from "@/lib/auth/current-user";
 import type { RequestStatus } from "@/lib/types/domain";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { sendNotification } from "@/lib/notifications/send";
+import { resolveContactEmailForRequest, resolveRoleEmails } from "@/lib/notifications/recipients";
 
 export async function updateRequestStatus(requestId: string, status: RequestStatus) {
   await requireRole(["commercial", "administrateur"]);
@@ -100,6 +102,19 @@ export async function createQuote(requestId: string, companyId: string, lines: Q
 
   await supabase.from("requests").update({ status: "devis_envoye" }).eq("id", requestId);
 
+  const { data: company } = await supabase.from("companies").select("name").eq("id", companyId).maybeSingle();
+  await sendNotification("devis_envoye", {
+    to: await resolveContactEmailForRequest(requestId, companyId),
+    variables: {
+      numero_devis: reference,
+      nom_client: company?.name ?? "",
+      montant_total: totalAmount.toFixed(2),
+      chemin_lien: `/client/devis/${quote.id}`,
+    },
+    relatedEntityType: "quote",
+    relatedEntityId: quote.id as string,
+  });
+
   revalidatePath(`/commercial/demandes/${requestId}`);
   revalidatePath("/commercial/devis");
   return { quoteId: quote.id as string };
@@ -141,6 +156,17 @@ export async function createRequest(formData: FormData) {
     .single();
 
   if (error) return { error: error.message };
+
+  if (parsed.data.needs_graphics) {
+    const { data: company } = await supabase.from("companies").select("name").eq("id", parsed.data.company_id).maybeSingle();
+    await sendNotification("demande_visuel_infographe", {
+      to: await resolveRoleEmails("infographiste"),
+      variables: { numero_demande: reference, nom_client: company?.name ?? "", description: parsed.data.description },
+      relatedEntityType: "request",
+      relatedEntityId: data.id as string,
+    });
+  }
+
   revalidatePath("/commercial/demandes");
   return { requestId: data.id as string };
 }
@@ -208,6 +234,21 @@ export async function acceptQuote(quoteId: string) {
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("accept_quote", { p_quote_id: quoteId });
   if (error) return { error: error.message };
+
+  const [{ data: quoteInfo }, { data: po }] = await Promise.all([
+    supabase.from("quotes").select("reference, companies(name)").eq("id", quoteId).maybeSingle(),
+    supabase.from("production_orders").select("reference").eq("id", data as string).maybeSingle(),
+  ]);
+  await sendNotification("devis_accepte", {
+    to: await resolveRoleEmails("responsable_production"),
+    variables: {
+      numero_devis: quoteInfo?.reference ?? "",
+      nom_client: (quoteInfo?.companies as unknown as { name: string } | null)?.name ?? "",
+      numero_odf: po?.reference ?? "",
+    },
+    relatedEntityType: "production_order",
+    relatedEntityId: data as string,
+  });
 
   revalidatePath("/commercial/devis");
   revalidatePath("/client/devis");

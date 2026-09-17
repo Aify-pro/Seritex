@@ -4,6 +4,8 @@ import { createClient } from "@/lib/supabase/server";
 import { requireRole } from "@/lib/auth/current-user";
 import { revalidatePath } from "next/cache";
 import { getSizes } from "@/lib/sizes";
+import { sendNotification } from "@/lib/notifications/send";
+import { resolveUserEmail } from "@/lib/notifications/recipients";
 
 function revalidateOdf(productionOrderId: string) {
   revalidatePath(`/atelier/production/${productionOrderId}`);
@@ -631,6 +633,25 @@ export async function reassignSectionChief(workOrderId: string, userId: string |
     .eq("id", workOrderId);
 
   if (error) return { error: error.message };
+
+  if (userId) {
+    const { data: wo } = await supabase
+      .from("work_orders")
+      .select("reference, production_orders(reference), sections(name)")
+      .eq("id", workOrderId)
+      .maybeSingle();
+    await sendNotification("ot_assigne_chef_section", {
+      to: await resolveUserEmail(userId),
+      variables: {
+        numero_ot: wo?.reference ?? "",
+        numero_odf: (wo?.production_orders as unknown as { reference: string } | null)?.reference ?? "",
+        section: (wo?.sections as unknown as { name: string } | null)?.name ?? "",
+      },
+      relatedEntityType: "work_order",
+      relatedEntityId: workOrderId,
+    });
+  }
+
   revalidatePath("/atelier/production");
   return {};
 }

@@ -4,6 +4,8 @@ import { createClient } from "@/lib/supabase/server";
 import { requireUser } from "@/lib/auth/current-user";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { sendNotification } from "@/lib/notifications/send";
+import { resolveRoleEmails } from "@/lib/notifications/recipients";
 
 const messageSchema = z.string().trim().min(1, "Le message ne peut pas être vide").max(4000);
 
@@ -56,6 +58,15 @@ export async function createClientRequest(formData: FormData) {
     .single();
 
   if (error) return { error: error.message };
+
+  const { data: company } = await supabase.from("companies").select("name").eq("id", profile.company_id).maybeSingle();
+  await sendNotification("nouvelle_demande_client_portail", {
+    to: await resolveRoleEmails("commercial"),
+    variables: { numero_demande: reference, nom_client: company?.name ?? "", description: parsed.data.description },
+    relatedEntityType: "request",
+    relatedEntityId: data.id as string,
+  });
+
   revalidatePath("/client/demandes");
   return { requestId: data.id as string };
 }
