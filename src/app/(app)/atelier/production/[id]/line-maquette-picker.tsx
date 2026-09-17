@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { ImageOff, X, Plus } from "lucide-react";
 import { Dialog } from "@/components/ui/dialog";
 import { attachMediaFileToLine, detachMediaFileFromLine } from "../actions";
+import { InlineMediaUpload } from "@/components/media/inline-media-upload";
 import type { AttachableMediaFile, MaquetteFile } from "@/lib/types/domain";
 
 export type { MaquetteFile } from "@/lib/types/domain";
@@ -28,6 +29,7 @@ export type { MaquetteFile } from "@/lib/types/domain";
 export function LineMaquettePicker({
   lineId,
   productionOrderId,
+  companyId,
   editable,
   fromDevis,
   attached,
@@ -35,6 +37,7 @@ export function LineMaquettePicker({
 }: {
   lineId: string;
   productionOrderId: string;
+  companyId: string;
   editable: boolean;
   fromDevis: MaquetteFile | null;
   attached: MaquetteFile[];
@@ -101,25 +104,30 @@ export function LineMaquettePicker({
           ))}
         </ul>
       )}
-      {selectable.length > 0 && (
-        <div className="flex items-center gap-1.5">
-          <Plus className="h-3.5 w-3.5 text-foreground-muted" />
-          <select
-            disabled={pending}
-            defaultValue=""
-            onChange={(e) => {
-              attach(e.target.value);
-              e.target.value = "";
-            }}
-            className="h-7 rounded-md border border-border bg-surface px-2 text-xs disabled:opacity-60"
-          >
-            <option value="">Joindre une maquette de la médiathèque…</option>
-            {selectable.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.file_name}
-              </option>
-            ))}
-          </select>
+      {editable && (
+        <div className="space-y-1.5">
+          {selectable.length > 0 && (
+            <div className="flex items-center gap-1.5">
+              <Plus className="h-3.5 w-3.5 text-foreground-muted" />
+              <select
+                disabled={pending}
+                defaultValue=""
+                onChange={(e) => {
+                  attach(e.target.value);
+                  e.target.value = "";
+                }}
+                className="h-7 rounded-md border border-border bg-surface px-2 text-xs disabled:opacity-60"
+              >
+                <option value="">Joindre une maquette de la médiathèque…</option>
+                {selectable.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.file_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          <InlineMediaUpload companyId={companyId} category="maquette" label="Déposer une maquette" onUploaded={attach} />
         </div>
       )}
     </div>

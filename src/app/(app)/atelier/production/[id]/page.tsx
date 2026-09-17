@@ -531,6 +531,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
 
       <ProductionOrderLines
         productionOrderId={order.id}
+        companyId={order.company_id}
         editable={modifiable}
         mediaEditable={mediaEditable}
         lines={linesWithConfig}

@@ -96,6 +96,7 @@ export interface LineData {
  */
 export function ProductionOrderLines({
   productionOrderId,
+  companyId,
   editable,
   mediaEditable,
   lines,
@@ -106,6 +107,8 @@ export function ProductionOrderLines({
   initialNote,
 }: {
   productionOrderId: string;
+  /** Entreprise cliente de l'ODF — pour le dépôt direct d'un visuel/maquette depuis l'écran (InlineMediaUpload). */
+  companyId: string;
   editable: boolean;
   /** Visuel/maquette restent modifiables un peu plus longtemps que le reste (migration 0042) — voir page.tsx. */
   mediaEditable: boolean;
@@ -133,6 +136,7 @@ export function ProductionOrderLines({
             <LineCard
               key={line.id}
               productionOrderId={productionOrderId}
+              companyId={companyId}
               editable={editable}
               mediaEditable={mediaEditable}
               line={line}
@@ -196,6 +200,7 @@ function ColorNote({
 
 function LineCard({
   productionOrderId,
+  companyId,
   editable,
   mediaEditable,
   line,
@@ -205,6 +210,7 @@ function LineCard({
   availableMediaFiles,
 }: {
   productionOrderId: string;
+  companyId: string;
   editable: boolean;
   mediaEditable: boolean;
   line: LineData;
@@ -432,6 +438,7 @@ function LineCard({
           <LineVisuelPicker
             lineId={line.id}
             productionOrderId={productionOrderId}
+            companyId={companyId}
             editable={mediaEditable}
             fromDevis={line.visuelsFromDevis}
             attached={line.visuelAttached}
@@ -444,6 +451,7 @@ function LineCard({
           <LineMaquettePicker
             lineId={line.id}
             productionOrderId={productionOrderId}
+            companyId={companyId}
             editable={mediaEditable}
             fromDevis={line.maquetteFromDevis}
             attached={line.maquetteAttached}
