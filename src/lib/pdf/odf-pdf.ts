@@ -72,10 +72,10 @@ export type OdfPdfArticle = {
 export type OdfPdfSousOdf = {
   reference: string;
   section: string;
+  /** Ordre d'atelier réel (sections.display_order) — regroupe et ordonne le tableau par section, pas par date planifiée. */
+  sectionDisplayOrder: number;
   planned: number;
   done: number;
-  /** Cible du QR code : le détail de CE sous-ODF. */
-  url: string;
 };
 
 export type OdfPdfData = {
@@ -169,13 +169,12 @@ export async function buildOdfPdf(data: OdfPdfData): Promise<Uint8Array> {
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const bold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
 
-  // Tous les QR sont embarqués d'avance : le dessin qui suit est
-  // entièrement synchrone, donc lisible de haut en bas.
+  // QR d'en-tête, embarqué d'avance : le dessin qui suit est entièrement
+  // synchrone, donc lisible de haut en bas. Plus qu'un seul QR par document
+  // (demande Ayman, 17/09) : un chef de section le scanne depuis
+  // /atelier/section, qui le redirige déjà vers les sous-ODF de SA section
+  // — un QR par sous-ODF n'a donc plus d'utilité.
   const sheetQr = await embedQr(pdfDoc, data.sheetUrl, 300);
-  const sousOdfQr = new Map<string, PDFImage>();
-  for (const wo of data.sousOdf) {
-    sousOdfQr.set(wo.reference, await embedQr(pdfDoc, wo.url, 180));
-  }
 
   // Maquettes (migration 0040) : embarquées elles aussi d'avance, indexées
   // par article. Un format déclaré PNG/JPEG mais illisible par pdf-lib
@@ -808,13 +807,14 @@ export async function buildOdfPdf(data: OdfPdfData): Promise<Uint8Array> {
   }
 
   // ---------------------------------------------------------------------
-  // 4. Sous-ODF générés par l'ODF
+  // 4. Sous-ODF générés par l'ODF, groupés par section (demande Ayman,
+  //    17/09) : un chef de section scanne le QR d'en-tête depuis
+  //    /atelier/section et retrouve directement les sous-ODF de SA
+  //    section — plus besoin d'un QR par ligne (retiré ci-dessus), ni
+  //    d'une colonne "Section" puisqu'elle titre désormais chaque bloc.
   // ---------------------------------------------------------------------
   {
-    sectionTitle(
-      `Sous-ODF générés (${data.sousOdf.length})`,
-      data.sousOdf.length > 0 ? "Scanner le QR pour saisir la production au terminal" : undefined
-    );
+    sectionTitle(`Sous-ODF générés (${data.sousOdf.length})`);
 
     if (data.sousOdf.length === 0) {
       text("Aucun sous-ODF : ils sont créés à la validation de l'ODF.", {
@@ -826,19 +826,17 @@ export async function buildOdfPdf(data: OdfPdfData): Promise<Uint8Array> {
       y -= 26;
     } else {
       const cols: { label: string; width: number; align: "left" | "right" | "center" }[] = [
-        { label: "N°", width: 26, align: "center" },
-        { label: "Section", width: 122, align: "left" },
-        { label: "Référence", width: 118, align: "left" },
-        { label: "Prévu", width: 48, align: "right" },
-        { label: "Réalisé", width: 50, align: "right" },
-        { label: "Reste", width: 48, align: "right" },
-        { label: "QR sous-ODF", width: CONTENT_W - 412, align: "center" },
+        { label: "N°", width: 30, align: "center" },
+        { label: "Référence", width: 180, align: "left" },
+        { label: "Prévu", width: (CONTENT_W - 30 - 180) / 3, align: "right" },
+        { label: "Réalisé", width: (CONTENT_W - 30 - 180) / 3, align: "right" },
+        { label: "Reste", width: (CONTENT_W - 30 - 180) / 3, align: "right" },
       ];
       const headerH = 18;
-      const rowH = 46;
+      const rowH = 22;
       const colX = (index: number) => LEFT + cols.slice(0, index).reduce((sum, col) => sum + col.width, 0);
 
-      const drawHeader = () => {
+      const drawColHeader = () => {
         page.drawRectangle({ x: LEFT, y: y - headerH, width: CONTENT_W, height: headerH, color: BRAND_SOFT });
         cols.forEach((col, i) => {
           text(col.label.toUpperCase(), {
@@ -855,53 +853,61 @@ export async function buildOdfPdf(data: OdfPdfData): Promise<Uint8Array> {
         y -= headerH;
       };
 
-      ensure(headerH + rowH + 4);
-      drawHeader();
-      continuation = () => drawHeader();
+      // Un groupe par section, dans l'ordre réel de passage en atelier
+      // (sections.display_order) — pas l'ordre de planned_start, qui
+      // mélangerait les sections entre elles.
+      const groups = new Map<string, { displayOrder: number; rows: OdfPdfSousOdf[] }>();
+      for (const wo of data.sousOdf) {
+        const group = groups.get(wo.section) ?? { displayOrder: wo.sectionDisplayOrder, rows: [] };
+        group.rows.push(wo);
+        groups.set(wo.section, group);
+      }
+      const orderedGroups = [...groups.entries()].sort((a, b) => a[1].displayOrder - b[1].displayOrder);
 
-      data.sousOdf.forEach((wo, index) => {
-        const pageBefore = page;
-        ensure(rowH);
-        const top = y;
-        if (index % 2 === 1 && page === pageBefore) {
-          page.drawRectangle({ x: LEFT, y: top - rowH, width: CONTENT_W, height: rowH, color: ZEBRA });
-        }
+      orderedGroups.forEach(([sectionName, group], groupIndex) => {
+        ensure(20 + headerH + rowH + 4);
+        text(sectionName.toUpperCase(), { x: LEFT, baseline: y - 9, size: 9.5, font: bold, color: BRAND });
+        y -= 14;
+        hLine(y, LEFT, RIGHT, 0.5, RULE);
+        y -= 10;
 
-        const reste = Math.max(0, wo.planned - wo.done);
-        const values = [String(index + 1), wo.section, wo.reference, String(wo.planned), String(wo.done), String(reste)];
-        values.forEach((value, i) => {
-          const col = cols[i];
-          const inner = col.width - 12;
-          const cellFont = i === 1 || i === 2 ? bold : font;
-          text(ellipsize(value, inner, 9.5, cellFont), {
-            x: colX(i) + 6,
-            baseline: top - rowH / 2 - 3,
-            size: 9.5,
-            font: cellFont,
-            color: i === 5 && reste > 0 ? BRAND : INK,
-            width: inner,
-            align: col.align,
+        drawColHeader();
+        continuation = drawColHeader;
+
+        group.rows.forEach((wo, index) => {
+          const pageBefore = page;
+          ensure(rowH);
+          const top = y;
+          if (index % 2 === 1 && page === pageBefore) {
+            page.drawRectangle({ x: LEFT, y: top - rowH, width: CONTENT_W, height: rowH, color: ZEBRA });
+          }
+
+          const reste = Math.max(0, wo.planned - wo.done);
+          const values = [String(index + 1), wo.reference, String(wo.planned), String(wo.done), String(reste)];
+          values.forEach((value, i) => {
+            const col = cols[i];
+            const inner = col.width - 12;
+            const cellFont = i === 1 ? bold : font;
+            text(ellipsize(value, inner, 9.5, cellFont), {
+              x: colX(i) + 6,
+              baseline: top - rowH / 2 - 3,
+              size: 9.5,
+              font: cellFont,
+              color: i === 4 && reste > 0 ? BRAND : INK,
+              width: inner,
+              align: col.align,
+            });
           });
+
+          for (let i = 1; i < cols.length; i += 1) {
+            page.drawLine({ start: { x: colX(i), y: top }, end: { x: colX(i), y: top - rowH }, thickness: 0.5, color: HAIRLINE });
+          }
+          hLine(top - rowH, LEFT, RIGHT, 0.5, RULE);
+          y = top - rowH;
         });
-
-        // QR dans la dernière colonne : la hauteur de ligne (46 pt) est
-        // dimensionnée pour lui, il ne peut pas déborder sur les voisines.
-        const qr = sousOdfQr.get(wo.reference);
-        if (qr) {
-          const qrSize = 32;
-          const lastCol = cols[cols.length - 1];
-          const qrX = colX(cols.length - 1) + (lastCol.width - qrSize) / 2;
-          page.drawImage(qr, { x: qrX, y: top - rowH / 2 - qrSize / 2, width: qrSize, height: qrSize });
-        }
-
-        // Filets verticaux de la ligne, puis filet de bas de ligne.
-        for (let i = 1; i < cols.length; i += 1) {
-          page.drawLine({ start: { x: colX(i), y: top }, end: { x: colX(i), y: top - rowH }, thickness: 0.5, color: HAIRLINE });
-        }
-        hLine(top - rowH, LEFT, RIGHT, 0.5, RULE);
-        y = top - rowH;
+        continuation = null;
+        if (groupIndex < orderedGroups.length - 1) y -= 16;
       });
-      continuation = null;
       y -= 22;
     }
   }

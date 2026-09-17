@@ -57,7 +57,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       .order("created_at"),
     supabase
       .from("work_orders")
-      .select("id,reference,quantity_planned,quantity_done,sections(name)")
+      .select("id,reference,quantity_planned,quantity_done,sections(name,display_order)")
       .eq("production_order_id", id)
       .order("planned_start", { ascending: true }),
     supabase.from("product_zone_templates").select("product_model_id,zone_key,zone_label,display_order"),
@@ -237,15 +237,20 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     };
   });
 
-  // Sous-ODF générés à la validation de l'ODF : un QR par ligne, qui ouvre
-  // le détail de CE sous-ODF (saisie au terminal depuis l'atelier).
-  const sousOdf: OdfPdfData["sousOdf"] = (workOrders ?? []).map((wo) => ({
-    reference: wo.reference,
-    section: (wo.sections as unknown as { name: string } | null)?.name ?? "—",
-    planned: wo.quantity_planned,
-    done: wo.quantity_done,
-    url: `${baseUrl}/atelier/production/${order.id}/ot/${wo.id}`,
-  }));
+  // Sous-ODF générés à la validation de l'ODF, groupés par section dans le
+  // PDF (demande Ayman, 17/09) — plus de QR par ligne : un chef de section
+  // scanne le QR d'en-tête depuis /atelier/section, qui le redirige déjà
+  // vers les sous-ODF de sa propre section.
+  const sousOdf: OdfPdfData["sousOdf"] = (workOrders ?? []).map((wo) => {
+    const section = wo.sections as unknown as { name: string; display_order: number } | null;
+    return {
+      reference: wo.reference,
+      section: section?.name ?? "—",
+      sectionDisplayOrder: section?.display_order ?? 0,
+      planned: wo.quantity_planned,
+      done: wo.quantity_done,
+    };
+  });
 
   const lifecycle: OdfPdfData["lifecycle"] = [];
   if (order.launched_at) lifecycle.push({ event: "Lancé en production", date: formatFr(order.launched_at), by: nameOf(order.launched_by) });
