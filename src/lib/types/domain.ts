@@ -292,6 +292,10 @@ export interface Quote {
   status: QuoteStatus;
   total_amount: number;
   valid_until: string | null;
+  // Date de livraison promise au client, saisie à l'établissement du devis
+  // (migration 0048) — affichée sur le PDF de l'ODF qui en hérite via
+  // production_orders.quote_id. Nullable, aucune obligation de saisie.
+  date_livraison_prevue: string | null;
   created_at: string;
   companies?: Pick<Company, "id" | "name">;
 }

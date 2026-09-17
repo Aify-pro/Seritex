@@ -60,6 +60,7 @@ export function QuoteForm({
   const [pending, startTransition] = useTransition();
   const [open, setOpen] = useState(false);
   const [lines, setLines] = useState<LineDraft[]>([newLine()]);
+  const [dateLivraisonPrevue, setDateLivraisonPrevue] = useState("");
   const router = useRouter();
 
   if (!open) {
@@ -69,6 +70,7 @@ export function QuoteForm({
         size="sm"
         onClick={() => {
           setLines([newLine()]);
+          setDateLivraisonPrevue("");
           setOpen(true);
         }}
       >
@@ -124,7 +126,7 @@ export function QuoteForm({
     });
 
     startTransition(async () => {
-      const res = await createQuote(requestId, companyId, payload);
+      const res = await createQuote(requestId, companyId, payload, dateLivraisonPrevue || null);
       if (res.error) toast.error(res.error);
       else {
         toast.success("Devis créé et envoyé au client");
@@ -136,6 +138,20 @@ export function QuoteForm({
 
   return (
     <div className="space-y-3 rounded-md border border-border bg-surface-muted/50 p-4">
+      <div className="max-w-xs">
+        <label className="mb-1 block text-xs font-medium text-foreground">Date de livraison prévue</label>
+        <input
+          type="date"
+          value={dateLivraisonPrevue}
+          onChange={(e) => setDateLivraisonPrevue(e.target.value)}
+          disabled={pending}
+          className="h-9 w-full rounded-md border border-border bg-surface px-2 text-sm disabled:opacity-60"
+        />
+        <p className="mt-1 text-xs text-foreground-muted">
+          Optionnelle — reprise sur le PDF de l&apos;ordre de fabrication qui héritera de ce devis.
+        </p>
+      </div>
+
       <div className="space-y-4">
         {lines.map((line, i) => (
           <div key={line.key} className="space-y-3 rounded-md border border-border bg-surface p-3">

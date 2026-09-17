@@ -9,7 +9,6 @@ import {
   type OdfPdfData,
 } from "@/lib/pdf/odf-pdf";
 import { PRODUCTION_ORDER_STATUS_LABELS, type ProductionOrderStatus } from "@/lib/types/domain";
-import type { StatutFiche } from "@/lib/patronnage/types";
 
 /**
  * Bon imprimable de l'ordre de fabrication — construit à la demande, jamais
@@ -38,7 +37,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   const { data: order } = await supabase
     .from("production_orders")
-    .select("*,companies(name,address,phone,email,siret),quotes(reference)")
+    .select("*,companies(name,address),quotes(reference,date_livraison_prevue)")
     .eq("id", id)
     .maybeSingle();
 
@@ -72,15 +71,17 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   ]);
 
   // Une fiche par article passant en Coupe (migration 0037, plus une seule
-  // par ODF entier) — récupérée après `lines` puisqu'elle s'y filtre.
+  // par ODF entier) — récupérée après `lines` puisqu'elle s'y filtre. Seul
+  // le numéro sert désormais (annoté à côté de « Coupe » dans Sections
+  // retenues) : le statut de la fiche n'a plus de champ dédié sur le PDF.
   const lineIds = (lines ?? []).map((l) => l.id);
   const { data: fiches } =
     lineIds.length > 0
       ? await supabase
           .from("fiches_placement")
-          .select("numero_ot,statut,production_order_line_id")
+          .select("numero_ot,production_order_line_id")
           .in("production_order_line_id", lineIds)
-      : { data: [] as { numero_ot: string; statut: string; production_order_line_id: string }[] };
+      : { data: [] as { numero_ot: string; production_order_line_id: string }[] };
 
   const visuelsByLine = new Map<string, string[]>();
   // Une seule maquette par article (migration 0040, voir attachMediaFileToLine) —
@@ -146,15 +147,35 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     userIds.length > 0 ? await supabase.from("app_users").select("id,full_name").in("id", userIds) : { data: [] };
   const nameOf = (userId: string | null) => users?.find((u) => u.id === userId)?.full_name ?? "—";
 
-  const company = order.companies as unknown as {
-    name: string;
-    address: string | null;
-    phone: string | null;
-    email: string | null;
-    siret: string | null;
-  } | null;
-  const quote = order.quotes as unknown as { reference: string } | null;
+  const company = order.companies as unknown as { name: string; address: string | null } | null;
+  const quote = order.quotes as unknown as { reference: string; date_livraison_prevue: string | null } | null;
   const baseUrl = await getBaseUrl();
+
+  // Zones imprimables retenues par article (migration 0040), pour
+  // l'annotation « Sérigraphie (zone1, zone2…) » dans Sections retenues
+  // ci-dessous — même principe que les fiches Patronnage juste au-dessus :
+  // récupérées après `lines` puisqu'elles s'y filtrent.
+  const { data: printableZonesRows } =
+    lineIds.length > 0
+      ? await supabase
+          .from("production_order_line_printable_zones")
+          .select("production_order_line_id,product_printable_zones(zone_label,display_order)")
+          .in("production_order_line_id", lineIds)
+      : { data: [] as { production_order_line_id: string; product_printable_zones: { zone_label: string; display_order: number } | null }[] };
+  const printableZonesByLine = new Map<string, string[]>();
+  for (const row of (printableZonesRows ?? [])
+    .slice()
+    .sort((a, b) => {
+      const za = a.product_printable_zones as unknown as { display_order: number } | null;
+      const zb = b.product_printable_zones as unknown as { display_order: number } | null;
+      return (za?.display_order ?? 0) - (zb?.display_order ?? 0);
+    })) {
+    const zone = row.product_printable_zones as unknown as { zone_label: string; display_order: number } | null;
+    if (!zone) continue;
+    const list = printableZonesByLine.get(row.production_order_line_id) ?? [];
+    list.push(zone.zone_label);
+    printableZonesByLine.set(row.production_order_line_id, list);
+  }
 
   const articles: OdfPdfArticle[] = (lines ?? []).map((line) => {
     const productModel = line.product_models as unknown as {
@@ -218,16 +239,27 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
           .join(" · ") || null,
       couleurLabel,
       couleurs,
+      // Coupe et Sérigraphie s'annotent entre parenthèses (demande Ayman
+      // 17/09) : le numéro d'OT pour l'une (remplace le champ « Fiche
+      // patronnage » séparé, désormais retiré), les zones imprimables
+      // retenues pour l'autre. Comparaison par nom exact, même convention
+      // que le reste du code (s.name = 'Coupe', migration 0010 et
+      // suivantes) — pas de clé stable sur `sections`.
       sections:
         (line.line_sections ?? [])
           .slice()
           .sort((a, b) => a.ordre - b.ordre)
           .map((s) => (s.sections as unknown as { name: string } | null)?.name)
-          .filter(Boolean)
+          .filter((name): name is string => !!name)
+          .map((name) => {
+            if (name === "Coupe" && ficheForLine) return `${name} (${ficheForLine.numero_ot})`;
+            if (name === "Sérigraphie") {
+              const zones = printableZonesByLine.get(line.id) ?? [];
+              return zones.length > 0 ? `${name} (${zones.join(", ")})` : name;
+            }
+            return name;
+          })
           .join(", ") || null,
-      fiche: ficheForLine
-        ? `${ficheForLine.numero_ot} (${FICHE_STATUT_LABELS[ficheForLine.statut as StatutFiche] ?? ficheForLine.statut})`
-        : null,
       visuels: visuels.length > 0 ? visuels.join(", ") : null,
       maquette:
         maquette && maquetteBuffer && maquetteFormat
@@ -265,6 +297,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     sheetUrl: `${baseUrl}/atelier/production/${order.id}`,
     generatedAt: formatFr(new Date().toISOString()),
     client: company,
+    dateValidation: order.launched_at ? formatFr(order.launched_at) : null,
+    dateLivraison: quote?.date_livraison_prevue ? formatFr(quote.date_livraison_prevue) : null,
     devis: quote?.reference ?? null,
     totalQuantity: order.total_quantity,
     plannedStart: order.planned_start_date ? formatFr(order.planned_start_date) : null,
@@ -288,14 +322,6 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     },
   });
 }
-
-/** Mêmes libellés que la pastille de statut de la fiche (fiche-patronnage-link.tsx). */
-const FICHE_STATUT_LABELS: Record<StatutFiche, string> = {
-  demande: "Demande",
-  traces_deposes: "Tracés déposés",
-  bon_pour_coupe: "Bon pour coupe",
-  archive: "Archivé",
-};
 
 function formatFr(value: string) {
   return new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(value));

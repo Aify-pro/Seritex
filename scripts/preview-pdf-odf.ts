@@ -25,10 +25,9 @@ const data: OdfPdfData = {
   client: {
     name: "Groupe Textile Atlantique & Compagnie",
     address: "Zone industrielle des Hauts Fourneaux, bâtiment C, 12 rue de la Manufacture, 59200 Tourcoing",
-    phone: "+33 3 20 45 88 12",
-    email: "commandes@textile-atlantique.example",
-    siret: "812 456 733 00027",
   },
+  dateValidation: "17 sept. 2026",
+  dateLivraison: "14 oct. 2026",
   devis: "DEV-2026-0311",
   totalQuantity: 1450,
   plannedStart: "21 sept. 2026",
@@ -52,8 +51,7 @@ const data: OdfPdfData = {
         // référence passe en alerte, elle ne ment pas sur le ton.
         { zone: "Broderie poitrine", name: "Or antique", code: "PANTONE 872 C" },
       ],
-      sections: "Coupe, Piquage, Broderie, Finition, Emballage",
-      fiche: "OT-2026-0091 (Bon pour coupe)",
+      sections: "Coupe (OT-2026-0091), Piquage, Sérigraphie (Corps avant, Manche gauche), Broderie, Finition, Emballage",
       visuels: "logo-poitrine-v3.pdf, placement-broderie.png",
       // Renseigné dans main() : générer l'image tient à un await, impossible ici au niveau module en sortie CJS (tsx).
       maquette: null,
@@ -76,8 +74,7 @@ const data: OdfPdfData = {
       grammageLaize: "245 g/m2 - laize 150 cm",
       couleurLabel: "Couleur",
       couleurs: [{ zone: null, name: "Gris anthracite", code: "#3A3F44" }],
-      sections: "Coupe, Piquage, Finition, Contrôle qualité, Emballage",
-      fiche: "OT-2026-0092 (En cours)",
+      sections: "Coupe (OT-2026-0092), Piquage, Finition, Contrôle qualité, Emballage",
       visuels: null,
       maquette: null,
       sizes: sizes([
@@ -101,7 +98,6 @@ const data: OdfPdfData = {
       couleurLabel: "Couleur",
       couleurs: [],
       sections: "Coupe, Piquage, Finition",
-      fiche: null,
       visuels: "dossier-technique-softshell.pdf",
       maquette: null,
       sizes: sizes([
