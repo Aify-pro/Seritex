@@ -8,6 +8,7 @@ import { formatDateTime } from "@/lib/utils";
 import type { NotificationEvent, NotificationLogEntry, NotificationStyleSettings } from "@/lib/types/domain";
 import { EventList } from "./event-list";
 import { StyleSettingsForm } from "./style-settings-form";
+import { AlertTriangle, CheckCircle2 } from "lucide-react";
 
 const STATUS_LABELS: Record<string, string> = {
   envoye: "Envoyé",
@@ -43,12 +44,65 @@ export default async function NotificationsSettingsPage() {
     supabase.from("notification_log").select("*").order("created_at", { ascending: false }).limit(50),
   ]);
 
+  // Statut de connexion Resend — jamais la clé elle-même, seulement sa
+  // présence. La clé reste une variable d'environnement Vercel (jamais en
+  // base) : même principe que les identifiants Sage (sage_connection_
+  // configs.config, jamais exposés dans un écran de réglage) — un secret
+  // technique se configure hors du web, pas dans un formulaire.
+  const resendConfigured = !!process.env.RESEND_API_KEY;
+  const senderConfigured = !!style?.sender_email;
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Notifications"
         description="Événements déclenchant un email, message de chacun, image de marque commune et historique d'envoi (Resend)."
       />
+
+      <Card>
+        <CardHeader title="Connexion Resend" description="La clé API se configure côté Vercel, jamais dans cet écran — c'est un secret technique." />
+        <CardBody className="space-y-3">
+          <div
+            className={`flex items-start gap-2 rounded-md px-3 py-2 text-sm ${
+              resendConfigured ? "bg-success-soft text-success" : "bg-warning-soft text-warning"
+            }`}
+          >
+            {resendConfigured ? (
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+            ) : (
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            )}
+            <div>
+              <p className="font-medium">
+                {resendConfigured ? "Clé API Resend détectée" : "Clé API Resend non configurée"}
+              </p>
+              {!resendConfigured && (
+                <p className="mt-0.5 text-xs">
+                  Tant qu&apos;elle n&apos;est pas posée, tous les envois sont simulés (journalisés dans l&apos;historique
+                  ci-dessous, jamais réellement envoyés). Ajoutez <code>RESEND_API_KEY</code> dans les variables
+                  d&apos;environnement Vercel (Production et Preview), puis redéployez.
+                </p>
+              )}
+            </div>
+          </div>
+          <div
+            className={`flex items-start gap-2 rounded-md px-3 py-2 text-sm ${
+              senderConfigured ? "bg-success-soft text-success" : "bg-warning-soft text-warning"
+            }`}
+          >
+            {senderConfigured ? (
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+            ) : (
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            )}
+            <p>
+              {senderConfigured
+                ? `Adresse expéditeur : ${style?.sender_email}`
+                : "Aucune adresse expéditeur — à renseigner ci-dessous (« Image de marque »), sur le domaine vérifié dans Resend."}
+            </p>
+          </div>
+        </CardBody>
+      </Card>
 
       <Card>
         <CardHeader
