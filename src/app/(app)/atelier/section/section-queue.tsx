@@ -10,6 +10,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   ChevronDown,
+  ChevronRight,
   Plus,
   QrCode,
   Scissors,
@@ -21,15 +22,13 @@ import { recordWorkOrderQuantity, closeMatelas, createArticleLot } from "./actio
 import { reportAnomaly } from "../production/actions";
 import { QrScanButton } from "./qr-scan-button";
 import { QueueSearch, normalizeSearch, type Suggestion } from "./queue-search";
-import { WasteBagsPanel, PeseeQuickForm } from "./coupe-tools";
+import { WasteBagsDialog, MatelasWastePesee, formatKg } from "./waste-bags";
 import {
   SizesContext,
   useSizes,
-  type ArticleLotOption,
+  type MatelasDechetRow,
   type MatelasRow,
-  type ProductionOrderOption,
   type QuantityEventRow,
-  type StockItemOption,
   type TraceOption,
   type WasteBagRow,
   type WorkOrderContext,
@@ -59,10 +58,7 @@ export function SectionQueue({
   traceOptionsByWorkOrderId,
   eventsByWorkOrderId,
   isCoupe,
-  lotsByProductionOrderId,
-  productionOrderOptions,
   initialOpenWasteBags,
-  stockItemOptions,
   sizes,
 }: {
   sectionId: string;
@@ -72,10 +68,7 @@ export function SectionQueue({
   traceOptionsByWorkOrderId: Record<string, TraceOption[]>;
   eventsByWorkOrderId: Record<string, QuantityEventRow[]>;
   isCoupe: boolean;
-  lotsByProductionOrderId: Record<string, ArticleLotOption[]>;
-  productionOrderOptions: ProductionOrderOption[];
   initialOpenWasteBags: WasteBagRow[];
-  stockItemOptions: StockItemOption[];
   sizes: Size[];
 }) {
   // `initialWorkOrders` change (nouvelle section, ou re-rendu serveur après
@@ -252,6 +245,11 @@ export function SectionQueue({
     [needle]
   );
 
+  /** Une pesée faite depuis un matelas met à jour le poids affiché dans la fenêtre des sacs. */
+  const onBagWeighed = useCallback((bagId: string, poidsReleveKg: number) => {
+    setWasteBags((prev) => prev.map((b) => (b.id === bagId ? { ...b, currentWeightKg: poidsReleveKg } : b)));
+  }, []);
+
   const toggle = useCallback(
     (id: string) => {
       setManualExpansion({ query: needle, workOrderId: expandedId === id ? null : id, matelasId: null });
@@ -323,6 +321,7 @@ export function SectionQueue({
                       events={eventsByWorkOrderId[wo.id] ?? []}
                       highlightMatelasId={highlightMatelasId}
                       sectionId={sectionId}
+                      onBagWeighed={onBagWeighed}
                     />
                   ))}
                 </AnimatePresence>
@@ -357,6 +356,7 @@ export function SectionQueue({
                         events={eventsByWorkOrderId[wo.id] ?? []}
                         highlightMatelasId={highlightMatelasId}
                         sectionId={sectionId}
+                        onBagWeighed={onBagWeighed}
                       />
                     ))}
                   </div>
@@ -366,27 +366,12 @@ export function SectionQueue({
           </>
         )}
 
-        {/* Lot 7 : sacs & pesées au niveau section, pas par sous-ODF — un sac
-            n'appartient à aucun ODF en propre (mélange de productions accepté,
-            section 17). Ils passent en fenêtre pour libérer le haut de l'écran,
-            que la file de travail doit occuper seule. */}
+        {/* Sacs au niveau section, pas par sous-ODF — un sac n'appartient à
+            aucun ODF en propre (mélange de productions accepté, section 17).
+            Les pesées « sortie lot / retour stock » ne sont plus proposées ici :
+            c'est l'outil du gestionnaire de stock (section-board-legacy). */}
         {isCoupe && (
-          <Dialog
-            open={bagsOpen}
-            onOpenChange={setBagsOpen}
-            title="Sacs de déchets et pesées"
-            description="Section Coupe — un sac peut mélanger plusieurs ordres de fabrication."
-            size="lg"
-          >
-            <div className="space-y-4">
-              <WasteBagsPanel bags={wasteBags} setBags={setWasteBags} productionOrderOptions={productionOrderOptions} />
-              <PeseeQuickForm
-                productionOrderOptions={productionOrderOptions}
-                lotsByProductionOrderId={lotsByProductionOrderId}
-                stockItemOptions={stockItemOptions}
-              />
-            </div>
-          </Dialog>
+          <WasteBagsDialog open={bagsOpen} onOpenChange={setBagsOpen} bags={wasteBags} setBags={setWasteBags} />
         )}
       </div>
     </SizesContext.Provider>
@@ -408,6 +393,7 @@ function WorkOrderAccordionRow({
   events,
   highlightMatelasId,
   sectionId,
+  onBagWeighed,
 }: {
   wo: WorkOrderRow;
   context?: WorkOrderContext;
@@ -420,11 +406,16 @@ function WorkOrderAccordionRow({
   events: QuantityEventRow[];
   highlightMatelasId: string | null;
   sectionId: string;
+  onBagWeighed: (bagId: string, poidsReleveKg: number) => void;
 }) {
   const [quantityOpen, setQuantityOpen] = useState(false);
   const [lotOpen, setLotOpen] = useState(false);
   const [anomalyOpen, setAnomalyOpen] = useState(false);
-  const [closingMatelas, setClosingMatelas] = useState<MatelasRow | null>(null);
+  // L'identifiant, pas l'objet : la fiche relit le matelas dans les props à
+  // chaque rendu, pour refléter une revalidation serveur (pesée, clôture) —
+  // un matelas clôturé disparaît des props, et sa fiche se referme d'elle-même.
+  const [openMatelasId, setOpenMatelasId] = useState<string | null>(null);
+  const openMatelas = matelas?.find((m) => m.id === openMatelasId) ?? null;
 
   const atteinte = wo.quantity_done >= wo.quantity_planned;
   const progress = wo.quantity_planned > 0 ? Math.min(100, (wo.quantity_done / wo.quantity_planned) * 100) : 0;
@@ -490,7 +481,7 @@ function WorkOrderAccordionRow({
                 <MatelasList
                   matelas={matelas}
                   highlightMatelasId={highlightMatelasId}
-                  onCloturer={(m) => setClosingMatelas(m)}
+                  onOpen={(m) => setOpenMatelasId(m.id)}
                 />
               ) : (
                 <>
@@ -517,11 +508,14 @@ function WorkOrderAccordionRow({
         )}
       </AnimatePresence>
 
-      {closingMatelas && (
-        <MatelasCloseDialog
+      {openMatelas && (
+        <MatelasDetailDialog
+          key={openMatelas.id}
           workOrderId={wo.id}
-          matelas={closingMatelas}
-          onDone={() => setClosingMatelas(null)}
+          productionOrderId={wo.production_orders?.id ?? null}
+          matelas={openMatelas}
+          onBagWeighed={onBagWeighed}
+          onDone={() => setOpenMatelasId(null)}
         />
       )}
       <QuantityDialog
@@ -556,100 +550,199 @@ function WorkOrderAccordionRow({
 function MatelasList({
   matelas,
   highlightMatelasId,
-  onCloturer,
+  onOpen,
 }: {
   matelas: MatelasRow[];
   highlightMatelasId: string | null;
-  onCloturer: (matelas: MatelasRow) => void;
+  onOpen: (matelas: MatelasRow) => void;
 }) {
   if (matelas.length === 0) {
     return <p className="text-xs text-foreground-muted">Aucun matelas en attente de clôture.</p>;
   }
 
   return (
-    <ul className="space-y-2">
-      {matelas.map((m) => (
-        <li
-          key={m.id}
-          className={cn(
-            "rounded-md border border-border bg-surface p-2.5",
-            highlightMatelasId === m.id && "border-brand ring-2 ring-brand/30"
-          )}
-        >
-          <div className="flex items-center gap-2">
-            <Scissors className="h-4 w-4 shrink-0 text-foreground-muted" />
-            <span className="min-w-0 flex-1 truncate text-sm text-foreground">{m.reference}</span>
-            {m.estCorrectif && (
-              <span className="shrink-0 rounded-sm bg-warning-soft px-1.5 py-0.5 text-[10px] font-medium text-warning">
-                rattrapage
+    <ul className="divide-y divide-border overflow-hidden rounded-md border border-border">
+      {matelas.map((m) => {
+        const dechetsKg = m.dechets.reduce((sum, d) => sum + d.deltaKg, 0);
+        return (
+          <li key={m.id}>
+            {/* La ligne entière ouvre la fiche du matelas : c'est là, tracé
+                sous les yeux, que se saisit le réel et que se clôture le
+                matelas — plus de bouton « Clôturer » à l'aveugle dans la liste. */}
+            <button
+              type="button"
+              onClick={() => onOpen(m)}
+              className={cn(
+                "flex min-h-12 w-full items-center gap-2.5 bg-surface px-3 py-2.5 text-left hover:bg-surface-muted",
+                highlightMatelasId === m.id && "bg-brand-soft/40 ring-2 ring-inset ring-brand/40"
+              )}
+            >
+              <Scissors className="h-4 w-4 shrink-0 text-foreground-muted" />
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center gap-2">
+                  <span className="truncate text-sm font-medium text-foreground">{m.reference}</span>
+                  {m.estCorrectif && (
+                    <span className="shrink-0 rounded-sm bg-warning-soft px-1.5 py-0.5 text-[10px] font-medium text-warning">
+                      rattrapage
+                    </span>
+                  )}
+                </span>
+                <span className="block truncate text-xs text-foreground-muted">
+                  {[
+                    m.nbPlis ? `${m.nbPlis} couches` : null,
+                    m.longueurM ? `${m.longueurM} m` : null,
+                    dechetsKg > 0 ? `déchets pesés ${formatKg(dechetsKg)}` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ") || "Voir le tracé"}
+                </span>
               </span>
-            )}
-          </div>
-          <Button size="md" className="mt-2 w-full" onClick={() => onCloturer(m)}>
-            Clôturer
-          </Button>
-        </li>
-      ))}
+              <ChevronRight className="h-4 w-4 shrink-0 text-foreground-muted" />
+            </button>
+          </li>
+        );
+      })}
     </ul>
   );
 }
 
+/** Saisie décimale tolérante à la virgule (clavier français). NaN si vide ou illisible. */
+function parseDecimal(value: string): number {
+  return value.trim() === "" ? NaN : Number(value.replace(",", "."));
+}
+
+const fmt = (n: number) => n.toLocaleString("fr-FR", { maximumFractionDigits: 2 });
+
 /**
- * Clôture d'un matelas — en modale plein écran plutôt qu'en accordéon
- * imbriqué : le formulaire compte déjà plusieurs champs, et l'imbriquer sous
- * une ligne déjà dépliée donnait trois niveaux illisibles sur un téléphone.
+ * Fiche d'un matelas (section Coupe) : le tracé en haut, le réel en dessous,
+ * puis la clôture — en modale plein écran, pas en accordéon imbriqué.
  *
- * Le contenu du formulaire (quantités par couche, poids déchet, justification)
- * est celui d'aujourd'hui, sans changement de mécanique : les totaux en
- * pièces, le nombre de couches réelles et les mesures du matelas arrivent
- * avec le lot C, en même temps que la nouvelle signature de `close_matelas`.
+ * Tout est exprimé en TOTAL de pièces : « pièces par couche × couches » est
+ * calculé ici et affiché, le chef de section n'a plus à raisonner par
+ * couche. Le nombre de couches réellement matelassées pilote le pré-rempli
+ * des totaux ; changer ce nombre recalcule tout.
+ *
+ * Les déchets ne se saisissent pas : on scanne le sac, on donne son nouveau
+ * poids, la base calcule la différence (voir `MatelasWastePesee`). La
+ * clôture additionne ces pesées côté serveur (migration 0053).
  */
-function MatelasCloseDialog({
+function MatelasDetailDialog({
   workOrderId,
+  productionOrderId,
   matelas,
+  onBagWeighed,
   onDone,
 }: {
   workOrderId: string;
+  productionOrderId: string | null;
   matelas: MatelasRow;
+  onBagWeighed: (bagId: string, poidsReleveKg: number) => void;
   onDone: () => void;
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  // Tailles réellement posées sur ce matelas, présentées dans l'ordre du
-  // référentiel plutôt que dans celui, arbitraire, des clés du JSON.
   const referentiel = useSizes();
-  const tailles = referentiel.filter((t) => (matelas.repartitionParCouche[t.cle] ?? 0) > 0).map((t) => t.cle);
-  const libelleDe = (cle: string) => referentiel.find((t) => t.cle === cle)?.libelle ?? cle;
-  const [quantites, setQuantites] = useState<Record<string, number>>(
-    Object.fromEntries(tailles.map((k) => [k, matelas.repartitionParCouche[k] ?? 0]))
-  );
-  const [poidsDechet, setPoidsDechet] = useState("");
-  const [justification, setJustification] = useState("");
 
-  const manque = tailles.some((k) => (quantites[k] ?? 0) < (matelas.repartitionParCouche[k] ?? 0));
-  const poidsManquant = poidsDechet.trim() === "" || Number(poidsDechet) < 0;
-  const justificationManquante = manque && !justification.trim();
+  // Tailles posées sur le tracé, dans l'ordre du référentiel — puis, par
+  // sécurité, toute clé du tracé que le référentiel ne connaîtrait plus
+  // (taille désactivée) : close_matelas les contrôle toutes, les omettre
+  // ferait passer une taille pour « 0 obtenue ».
+  const clesConnues = new Set(referentiel.map((t) => t.cle));
+  const tailles = [
+    ...referentiel.filter((t) => (matelas.repartitionParCouche[t.cle] ?? 0) > 0).map((t) => ({ cle: t.cle, libelle: t.libelle })),
+    ...Object.keys(matelas.repartitionParCouche)
+      .filter((cle) => !clesConnues.has(cle) && (matelas.repartitionParCouche[cle] ?? 0) > 0)
+      .map((cle) => ({ cle, libelle: cle })),
+  ];
+
+  const [couches, setCouches] = useState(matelas.nbPlis ? String(matelas.nbPlis) : "");
+  // Quantités retouchées à la main ; toute taille absente d'ici affiche le
+  // pré-rempli « par couche × couches réelles ».
+  const [retouches, setRetouches] = useState<Record<string, string>>({});
+  const [longueur, setLongueur] = useState("");
+  const [laize, setLaize] = useState("");
+  const [poidsTissu, setPoidsTissu] = useState("");
+  const [justification, setJustification] = useState("");
+  // Pesées faites pendant que la fiche est ouverte, en attendant que la
+  // revalidation serveur les ramène dans `matelas.dechets`.
+  const [pesesIci, setPesesIci] = useState<MatelasDechetRow[]>([]);
+  const dechets = [...matelas.dechets, ...pesesIci.filter((p) => !matelas.dechets.some((d) => d.id === p.id))];
+
+  const couchesReel = Number.parseInt(couches, 10);
+  const couchesValides = Number.isInteger(couchesReel) && couchesReel > 0;
+  const couchesTropNombreuses = couchesValides && matelas.nbPlis !== null && couchesReel > matelas.nbPlis;
+  const couchesTheoriques = matelas.nbPlis ?? (couchesValides ? couchesReel : 0);
+
+  const lignes = tailles.map((t) => {
+    const parCouche = matelas.repartitionParCouche[t.cle] ?? 0;
+    const attendu = couchesValides ? parCouche * couchesReel : 0;
+    const saisie = retouches[t.cle] ?? (couchesValides ? String(attendu) : "");
+    const obtenu = Number(saisie);
+    return {
+      ...t,
+      parCouche,
+      theorique: parCouche * couchesTheoriques,
+      attendu,
+      saisie,
+      obtenu,
+      invalide: saisie.trim() === "" || !Number.isInteger(obtenu) || obtenu < 0,
+      tropHaut: Number.isFinite(obtenu) && obtenu > attendu,
+    };
+  });
+  const parCoucheTotal = lignes.reduce((s, l) => s + l.parCouche, 0);
+  const totalTheorique = lignes.reduce((s, l) => s + l.theorique, 0);
+  const totalObtenu = lignes.reduce((s, l) => s + (Number.isFinite(l.obtenu) ? l.obtenu : 0), 0);
+  const manque = totalObtenu < totalTheorique;
+
+  const longueurReelle = parseDecimal(longueur);
+  const laizeReelle = parseDecimal(laize);
+  const poidsTissuKg = parseDecimal(poidsTissu);
+
   // Le bouton désactivé dit pourquoi il l'est : un bouton muet sur un écran
   // d'atelier, c'est un appel au chef de production.
-  const blocage = poidsManquant
-    ? "Renseignez le poids des déchets (kg, ≥ 0) pour clôturer."
-    : justificationManquante
-      ? "Justification obligatoire : au moins une quantité est inférieure au pré-rempli."
-      : null;
+  const blocage = !couchesValides
+    ? "Renseignez le nombre de couches réellement matelassées."
+    : couchesTropNombreuses
+      ? `Plus de couches que le tracé (${matelas.nbPlis}) : demandez un tracé de rattrapage.`
+      : !(longueurReelle > 0)
+        ? "Renseignez la longueur réelle du matelas."
+        : !(laizeReelle > 0)
+          ? "Renseignez la laize réelle du rouleau."
+          : lignes.some((l) => l.invalide)
+            ? "Chaque taille doit porter une quantité entière (0 ou plus)."
+            : lignes.some((l) => l.tropHaut)
+              ? "Une quantité dépasse l'attendu pour ce nombre de couches."
+              : !(poidsTissuKg > 0)
+                ? "Renseignez le poids du tissu utilisé."
+                : dechets.length === 0
+                  ? "Pesez les déchets du matelas (scan du sac)."
+                  : manque && !justification.trim()
+                    ? "Justification obligatoire : moins de pièces que le tracé."
+                    : null;
 
   function submit() {
     setError(null);
     if (blocage) return;
     startTransition(async () => {
-      const res = await closeMatelas(workOrderId, matelas.id, quantites, Number(poidsDechet), justification);
+      const res = await closeMatelas(workOrderId, matelas.id, {
+        quantitesObtenues: Object.fromEntries(lignes.map((l) => [l.cle, l.obtenu])),
+        nbCouchesReel: couchesReel,
+        longueurReelleM: longueurReelle,
+        laizeReelleCm: laizeReelle,
+        poidsTissuKg,
+        justification,
+      });
       if (res.error) {
         setError(res.error);
         return;
       }
-      toast.success(`${matelas.reference} clôturé`);
+      toast.success(`${matelas.reference} clôturé — ${totalObtenu} pièces`);
       onDone();
     });
   }
+
+  const inputClass =
+    "h-11 w-full rounded-md border border-border bg-surface px-2 text-base outline-none focus:ring-2 focus:ring-brand/30";
 
   return (
     <Dialog
@@ -657,79 +750,204 @@ function MatelasCloseDialog({
       onOpenChange={(open) => {
         if (!open) onDone();
       }}
-      title={`Clôturer ${matelas.reference}`}
-      description={matelas.estCorrectif ? "Tracé de rattrapage" : undefined}
+      title={matelas.reference}
+      description={matelas.estCorrectif ? "Tracé de rattrapage" : "Détail du tracé et saisie du réel"}
       size="lg"
     >
-      <div className="space-y-4">
+      <div className="space-y-5">
         {error && (
           <div className="flex items-start gap-1.5 rounded-md border border-danger/30 bg-danger-soft px-2.5 py-2 text-sm text-danger">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {error}
           </div>
         )}
 
-        <fieldset className="space-y-2">
-          <legend className="text-xs font-semibold uppercase tracking-wide text-foreground-muted">
-            Quantités obtenues par couche
-          </legend>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            {tailles.map((k) => (
-              <div key={k}>
-                <label htmlFor={`qte-${matelas.id}-${k}`} className="block text-xs text-foreground-muted">
-                  {libelleDe(k)}
-                </label>
-                <input
-                  id={`qte-${matelas.id}-${k}`}
-                  type="number"
-                  inputMode="numeric"
-                  min={0}
-                  max={matelas.repartitionParCouche[k] ?? 0}
-                  value={quantites[k] ?? 0}
-                  onChange={(e) => setQuantites((q) => ({ ...q, [k]: Number(e.target.value) }))}
-                  className="h-11 w-full rounded-md border border-border bg-surface px-2 text-base outline-none focus:ring-2 focus:ring-brand/30"
-                />
-                <p className="mt-0.5 text-[11px] text-foreground-muted">
-                  pré-rempli {matelas.repartitionParCouche[k] ?? 0}
-                </p>
-              </div>
-            ))}
-          </div>
-        </fieldset>
-
-        <div>
-          <label htmlFor={`dechet-${matelas.id}`} className="block text-xs text-foreground-muted">
-            Poids des déchets (kg)
-          </label>
-          <input
-            id={`dechet-${matelas.id}`}
-            type="number"
-            inputMode="decimal"
-            min={0}
-            step="0.01"
-            value={poidsDechet}
-            onChange={(e) => setPoidsDechet(e.target.value)}
-            className="h-11 w-full rounded-md border border-border bg-surface px-2 text-base outline-none focus:ring-2 focus:ring-brand/30"
-          />
-        </div>
-
-        {manque && (
-          <div>
-            <label htmlFor={`justif-${matelas.id}`} className="block text-xs text-foreground-muted">
-              Justification (obligatoire — quantité inférieure au pré-rempli)
-            </label>
-            <textarea
-              id={`justif-${matelas.id}`}
-              rows={3}
-              value={justification}
-              onChange={(e) => setJustification(e.target.value)}
-              placeholder="ex. erreur de ciseaux"
-              className="w-full rounded-md border border-border bg-surface p-2 text-base outline-none focus:ring-2 focus:ring-brand/30"
+        {/* ---------- Théorique : ce que dit le tracé ---------- */}
+        <section className="space-y-3">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground-muted">Tracé</h3>
+          <dl className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-md border border-border bg-surface p-3 text-sm sm:grid-cols-3">
+            <TraceFact label="Tissu" value={matelas.tissu} />
+            <TraceFact
+              label="Couleur"
+              value={matelas.couleur}
             />
-            <p className="mt-1 text-[11px] text-foreground-muted">
-              Un tracé de rattrapage sera demandé automatiquement.
-            </p>
+            <TraceFact label="Grammage" value={matelas.grammage ? `${fmt(matelas.grammage)} g/m²` : null} />
+            <TraceFact label="Laize du matelas" value={matelas.laizeCm ? `${fmt(matelas.laizeCm)} cm` : null} />
+            <TraceFact label="Longueur du matelas" value={matelas.longueurM ? `${fmt(matelas.longueurM)} m` : null} />
+            <TraceFact label="Nombre de couches" value={matelas.nbPlis ? String(matelas.nbPlis) : null} />
+            {matelas.referencePatron && <TraceFact label="Patron" value={matelas.referencePatron} />}
+          </dl>
+
+          <div className="overflow-hidden rounded-md border border-border">
+            <table className="w-full text-sm">
+              <thead className="bg-surface-muted text-xs text-foreground-muted">
+                <tr>
+                  <th className="px-3 py-2 text-left font-medium">Taille</th>
+                  <th className="px-3 py-2 text-right font-medium">Pièces / couche</th>
+                  <th className="px-3 py-2 text-right font-medium">
+                    Total{matelas.nbPlis ? ` (× ${matelas.nbPlis})` : ""}
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border bg-surface tabular-nums">
+                {lignes.map((l) => (
+                  <tr key={l.cle}>
+                    <td className="px-3 py-2">{l.libelle}</td>
+                    <td className="px-3 py-2 text-right">{l.parCouche}</td>
+                    <td className="px-3 py-2 text-right font-medium">{matelas.nbPlis ? l.theorique : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot className="bg-surface-muted font-semibold tabular-nums">
+                <tr>
+                  <td className="px-3 py-2">Total</td>
+                  <td className="px-3 py-2 text-right">{parCoucheTotal}</td>
+                  <td className="px-3 py-2 text-right">{matelas.nbPlis ? totalTheorique : "—"}</td>
+                </tr>
+              </tfoot>
+            </table>
           </div>
-        )}
+          {!matelas.nbPlis && (
+            <p className="text-xs text-warning">
+              Nombre de couches non renseigné sur le tracé : le total attendu suivra les couches saisies ci-dessous.
+            </p>
+          )}
+        </section>
+
+        {/* ---------- Réel : ce qui a été fait ---------- */}
+        <section className="space-y-3">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground-muted">Réel</h3>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <MesureReelle
+              id={`couches-${matelas.id}`}
+              label="Couches effectuées"
+              value={couches}
+              onChange={(v) => {
+                setCouches(v);
+                // Les totaux suivent le nombre de couches : une retouche faite
+                // pour l'ancien nombre n'aurait plus de sens.
+                setRetouches({});
+              }}
+              inputMode="numeric"
+              step="1"
+              theorique={matelas.nbPlis}
+              unite=""
+              className={inputClass}
+            />
+            <MesureReelle
+              id={`longueur-${matelas.id}`}
+              label="Longueur du matelas (m)"
+              value={longueur}
+              onChange={setLongueur}
+              inputMode="decimal"
+              step="0.01"
+              theorique={matelas.longueurM}
+              unite=" m"
+              className={inputClass}
+            />
+            <MesureReelle
+              id={`laize-${matelas.id}`}
+              label="Laize du matelas (cm)"
+              value={laize}
+              onChange={setLaize}
+              inputMode="decimal"
+              step="0.1"
+              theorique={matelas.laizeCm}
+              unite=" cm"
+              className={inputClass}
+            />
+          </div>
+          {couchesTropNombreuses && (
+            <p className="text-xs text-danger">
+              Le tracé prévoit {matelas.nbPlis} couches au plus — au-delà, il faut un tracé de rattrapage.
+            </p>
+          )}
+
+          <fieldset className="space-y-2">
+            <legend className="text-xs text-foreground-muted">Quantité totale obtenue par taille</legend>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {lignes.map((l) => (
+                <div key={l.cle}>
+                  <label htmlFor={`qte-${matelas.id}-${l.cle}`} className="block text-xs text-foreground-muted">
+                    {l.libelle}
+                  </label>
+                  <input
+                    id={`qte-${matelas.id}-${l.cle}`}
+                    type="number"
+                    inputMode="numeric"
+                    min={0}
+                    max={l.attendu}
+                    step="1"
+                    value={l.saisie}
+                    disabled={!couchesValides}
+                    onChange={(e) => setRetouches((r) => ({ ...r, [l.cle]: e.target.value }))}
+                    className={cn(inputClass, l.tropHaut && "border-danger")}
+                  />
+                  <p className={cn("mt-0.5 text-[11px]", l.tropHaut ? "text-danger" : "text-foreground-muted")}>
+                    {couchesValides ? `attendu ${l.attendu} (${l.parCouche} × ${couchesReel})` : "saisir les couches"}
+                  </p>
+                </div>
+              ))}
+            </div>
+            <p
+              className={cn(
+                "rounded-md px-3 py-2 text-sm font-medium tabular-nums",
+                manque ? "bg-warning-soft text-warning" : "bg-surface-muted text-foreground"
+              )}
+            >
+              {totalObtenu} pièces obtenues / {totalTheorique} au tracé
+            </p>
+          </fieldset>
+
+          <div>
+            <label htmlFor={`tissu-${matelas.id}`} className="block text-xs text-foreground-muted">
+              Quantité de tissu utilisée (kg)
+            </label>
+            <input
+              id={`tissu-${matelas.id}`}
+              type="number"
+              inputMode="decimal"
+              min={0}
+              step="0.01"
+              value={poidsTissu}
+              onChange={(e) => setPoidsTissu(e.target.value)}
+              className={inputClass}
+            />
+            <p className="mt-0.5 text-[11px] text-foreground-muted">Repris dans le rapport de fin de production.</p>
+          </div>
+
+          <div className="space-y-1.5">
+            <p className="text-xs text-foreground-muted">Déchets du matelas</p>
+            <MatelasWastePesee
+              productionOrderId={productionOrderId}
+              traceId={matelas.id}
+              dechets={dechets}
+              onWeighed={(row, bag) => {
+                setPesesIci((prev) => [...prev, row]);
+                onBagWeighed(bag.id, bag.poidsReleveKg);
+              }}
+            />
+          </div>
+
+          {manque && (
+            <div>
+              <label htmlFor={`justif-${matelas.id}`} className="block text-xs text-foreground-muted">
+                Justification (obligatoire — moins de pièces que le tracé)
+              </label>
+              <textarea
+                id={`justif-${matelas.id}`}
+                rows={3}
+                value={justification}
+                onChange={(e) => setJustification(e.target.value)}
+                placeholder="ex. fin de rouleau, défaut tissu, erreur de coupe"
+                className="w-full rounded-md border border-border bg-surface p-2 text-base outline-none focus:ring-2 focus:ring-brand/30"
+              />
+              <p className="mt-1 text-[11px] text-foreground-muted">
+                Un tracé de rattrapage sera demandé automatiquement.
+              </p>
+            </div>
+          )}
+        </section>
 
         {/* Barre d'action en bas de la modale : c'est là que le pouce tombe. */}
         <div className="sticky bottom-0 -mx-5 -mb-5 space-y-2 border-t border-border bg-surface px-5 py-3">
@@ -739,12 +957,73 @@ function MatelasCloseDialog({
               Clôturer le matelas
             </Button>
             <Button size="md" variant="ghost" className="w-full sm:w-auto" onClick={onDone}>
-              Annuler
+              Fermer
             </Button>
           </div>
         </div>
       </div>
     </Dialog>
+  );
+}
+
+function TraceFact({ label, value }: { label: string; value: string | null }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-xs text-foreground-muted">{label}</dt>
+      <dd className="truncate font-medium text-foreground">{value ?? "—"}</dd>
+    </div>
+  );
+}
+
+/**
+ * Champ de mesure réelle avec son théorique en regard, et l'écart dès qu'il
+ * est rempli — en avertissement au-delà de ±5 %, jamais bloquant : un écart
+ * se constate, il ne s'interdit pas (sauf les couches, contrôlées à part).
+ */
+function MesureReelle({
+  id,
+  label,
+  value,
+  onChange,
+  inputMode,
+  step,
+  theorique,
+  unite,
+  className,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  inputMode: "numeric" | "decimal";
+  step: string;
+  theorique: number | null;
+  unite: string;
+  className: string;
+}) {
+  const reel = parseDecimal(value);
+  const ecart = theorique && reel > 0 ? ((reel - theorique) / theorique) * 100 : null;
+
+  return (
+    <div>
+      <label htmlFor={id} className="block text-xs text-foreground-muted">
+        {label}
+      </label>
+      <input
+        id={id}
+        type="number"
+        inputMode={inputMode}
+        min={0}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={className}
+      />
+      <p className={cn("mt-0.5 text-[11px]", ecart !== null && Math.abs(ecart) > 5 ? "text-warning" : "text-foreground-muted")}>
+        {theorique ? `tracé ${fmt(theorique)}${unite}` : "non renseigné au tracé"}
+        {ecart !== null && ` · écart ${ecart > 0 ? "+" : ""}${fmt(ecart)} %`}
+      </p>
+    </div>
   );
 }
 

@@ -22,13 +22,30 @@ export type WorkOrderRow = {
   } | null;
 };
 
-/** Lot 4 : un matelas = un tracé Patronnage d'une fiche "Bon pour coupe", pas encore clôturé. */
+/** Pesée de sac déjà rattachée à un matelas — ses déchets, delta calculé par la base. */
+export type MatelasDechetRow = { id: string; bagCode: string; deltaKg: number; occurredAt: string };
+
+/**
+ * Lot 4 : un matelas = un tracé Patronnage d'une fiche "Bon pour coupe", pas
+ * encore clôturé. Porte le théorique du tracé (dimensions, plis) et de sa
+ * fiche (tissu, couleur) : c'est la référence en regard de laquelle le chef
+ * de section saisit le réel à la clôture (migration 0053).
+ */
 export type MatelasRow = {
   id: string;
   reference: string;
+  referencePatron: string | null;
   repartitionParCouche: RepartitionTailles;
+  nbPlis: number | null;
+  longueurM: number | null;
+  laizeCm: number | null;
+  tissu: string | null;
+  couleur: string | null;
+  grammage: number | null;
   estCorrectif: boolean;
   justification: string | null;
+  /** Pesées de sac déjà faites pour ce matelas, de la plus ancienne à la plus récente. */
+  dechets: MatelasDechetRow[];
 };
 
 /** Lot 6 : tracé d'origine optionnel d'un lot article — clôturé ou non. */
