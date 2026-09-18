@@ -10,7 +10,6 @@ import type { SamplePriority } from "@/lib/types/domain";
 export function SampleEditDialog({
   sampleId,
   needDescription,
-  quantityRequested,
   priority,
   requestDate,
   dueDate,
@@ -18,7 +17,6 @@ export function SampleEditDialog({
 }: {
   sampleId: string;
   needDescription: string;
-  quantityRequested: number;
   priority: SamplePriority;
   requestDate: string;
   dueDate: string | null;
@@ -35,7 +33,6 @@ export function SampleEditDialog({
         <SampleEditForm
           sampleId={sampleId}
           needDescription={needDescription}
-          quantityRequested={quantityRequested}
           priority={priority}
           requestDate={requestDate}
           dueDate={dueDate}

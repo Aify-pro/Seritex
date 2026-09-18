@@ -39,7 +39,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const { data: sample } = await supabase
     .from("sample_requests")
     .select(
-      "id,reference,sample_number,need_description,quantity_requested,status,priority,request_date,due_date,extra_info,production_orders(reference,status),companies(name)"
+      "id,reference,sample_number,need_description,status,priority,request_date,due_date,extra_info,companies(name),requests(reference),quote_lines(description,quotes(reference)),production_order_lines(description,production_orders(reference,status))"
     )
     .eq("id", id)
     .maybeSingle();
@@ -47,7 +47,14 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   if (!sample) return NextResponse.json({ error: "Fiche introuvable" }, { status: 404 });
 
   const company = sample.companies as unknown as { name: string } | null;
-  const productionOrder = sample.production_orders as unknown as { reference: string; status: ProductionOrderStatus } | null;
+  // Par article d'ODF depuis 0044 (l'ancienne jointure production_orders
+  // n'existe plus) ; demande et ligne de devis depuis 0051.
+  const request = sample.requests as unknown as { reference: string } | null;
+  const quoteLine = sample.quote_lines as unknown as { description: string; quotes: { reference: string } | null } | null;
+  const orderLine = sample.production_order_lines as unknown as {
+    description: string;
+    production_orders: { reference: string; status: ProductionOrderStatus } | null;
+  } | null;
 
   const baseUrl = await getBaseUrl();
   const sheetUrl = `${baseUrl}/echantillons/${sample.sample_number}`;
@@ -138,16 +145,19 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   drawField("Référence", sample.reference);
   drawField("Client", company?.name ?? "—");
+  drawField("Demande", request?.reference ?? "à rattacher");
   drawField("Besoin exprimé", sample.need_description);
-  drawField("Quantité demandée", String(sample.quantity_requested));
   drawField("Priorité", SAMPLE_PRIORITY_LABELS[sample.priority as SamplePriority]);
   drawField("Statut", SAMPLE_STATUS_LABELS[sample.status as SampleRequestStatus]);
   drawField("Date de la demande", formatFr(sample.request_date));
   drawField("Délai souhaité", sample.due_date ? formatFr(sample.due_date) : "—");
   if (sample.extra_info) drawField("Informations complémentaires", sample.extra_info);
+  drawField("Ligne de devis", quoteLine ? `${quoteLine.quotes?.reference ?? "Devis"} — ${quoteLine.description}` : "aucune");
   drawField(
-    "Ordre de fabrication lié",
-    productionOrder ? `${productionOrder.reference} · ${PRODUCTION_ORDER_STATUS_LABELS[productionOrder.status]}` : "aucun"
+    "Article d'ordre de fabrication",
+    orderLine?.production_orders
+      ? `${orderLine.production_orders.reference} — ${orderLine.description} · ${PRODUCTION_ORDER_STATUS_LABELS[orderLine.production_orders.status]}`
+      : "aucun"
   );
 
   page.drawText(`Document généré le ${formatFr(new Date().toISOString())} — ${sheetUrl}`, {

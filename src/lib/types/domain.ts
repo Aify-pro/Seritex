@@ -466,12 +466,17 @@ export interface SampleRequestRecord {
   sample_number: string;
   company_id: string;
   contact_id: string | null;
+  // Obligatoire à la création depuis 0051 ; null = ancienne fiche « à rattacher ».
   request_id: string | null;
   // Par article plutôt que par ODF entier (migration 0044) — un ODF
   // multi-articles peut avoir un échantillon différent par article.
   production_order_line_id: string | null;
+  // Ligne d'article du devis (migration 0051) — une fois passée en ODF,
+  // production_order_line_id en découle et le lien est verrouillé.
+  quote_line_id: string | null;
   created_by_user_id: string | null;
   need_description: string;
+  // Toujours 1 depuis 0051 (une fiche = un exemplaire) — plus saisi.
   quantity_requested: number;
   priority: SamplePriority;
   request_date: string;

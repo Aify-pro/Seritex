@@ -18,7 +18,12 @@ export default async function ClientQuoteDetailPage({ params }: { params: Promis
 
   if (!quote) notFound();
 
-  const lines = await getQuoteLinesWithColorConfig(id);
+  // Échantillons liés aux lignes (migration 0051), en consultation : le
+  // client voit sur quel échantillon repose chaque article avant d'accepter.
+  const [lines, { data: samples }] = await Promise.all([
+    getQuoteLinesWithColorConfig(id),
+    supabase.from("sample_requests").select("id,sample_number,status,quote_line_id").eq("request_id", quote.request_id),
+  ]);
 
-  return <QuoteDetail quote={quote} lines={lines} canAccept />;
+  return <QuoteDetail quote={quote} lines={lines} canAccept samples={samples ?? []} />;
 }

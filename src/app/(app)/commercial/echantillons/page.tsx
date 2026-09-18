@@ -14,6 +14,7 @@ import { formatDate } from "@/lib/utils";
 import { CreateSampleDialog } from "@/components/samples/create-sample-dialog";
 import { SampleDetailContent } from "@/components/samples/sample-detail-content";
 import type { ProductionOrderLineOption } from "@/components/samples/sample-production-order-link";
+import { getSampleRequestOptions, getSampleQuoteLineOptions, buildSampleLinks } from "@/lib/samples";
 
 /**
  * Liste du module Échantillonnage, refondue pour l'équipe commerciale/atelier :
@@ -21,8 +22,8 @@ import type { ProductionOrderLineOption } from "@/components/samples/sample-prod
  * et le PDF), la fiche complète et ses actions (modifier, lier un ordre de
  * fabrication, changer le statut, supprimer, imprimer) dans une fenêtre
  * interne ouverte au clic sur "Voir" — même principe pour la création,
- * désormais derrière le bouton "Nouvelle demande" plutôt qu'un formulaire
- * affiché en permanence en haut de la page.
+ * derrière le bouton "Nouvel échantillon" (demande de rattachement
+ * obligatoire, migration 0051).
  */
 export default async function CommercialSamplesPage() {
   const { profile } = await requireRole(["commercial", "administrateur", "responsable_production"]);
@@ -30,28 +31,32 @@ export default async function CommercialSamplesPage() {
   const baseUrl = await getBaseUrl();
 
   // Édition, statut, lien ODF et suppression : ouverts aux 3 rôles qui
-  // accèdent à cette page. La création reste réservée au commercial et à
-  // l'administrateur (section 2.7 de l'analyse : "le déclencheur peut être
-  // le client lui-même ou le commercial pour son compte") — la policy RLS
-  // d'insertion ne l'autorise pas non plus pour le responsable production.
+  // accèdent à cette page. La création, le rattachement à une demande et le
+  // lien à une ligne de devis sont réservés au commercial et à
+  // l'administrateur (migration 0051 : policy RLS d'insertion et
+  // link_sample_to_quote_line) — le responsable production ne gère pas les
+  // devis.
   const canManage = true;
-  const canCreate = profile.role === "commercial" || profile.role === "administrateur";
+  const isCommercial = profile.role === "commercial" || profile.role === "administrateur";
 
-  const [{ data: samples }, { data: companies }, { data: productionOrderLines }, { data: mediaFiles }, { data: sampleMedia }] =
+  const [{ data: samples }, requests, { data: productionOrderLines }, { data: mediaFiles }, { data: sampleMedia }] =
     await Promise.all([
       supabase
         .from("sample_requests")
         .select(
-          "id,reference,sample_number,need_description,quantity_requested,status,priority,request_date,due_date,extra_info,company_id,production_order_line_id,companies(name)"
+          "id,reference,sample_number,need_description,status,priority,request_date,due_date,extra_info,company_id,request_id,quote_line_id,production_order_line_id,companies(name)"
         )
         .order("created_at", { ascending: false }),
-      supabase.from("companies").select("id,name").order("name"),
+      getSampleRequestOptions(),
       // Par article plutôt que par ODF entier (migration 0044) : un ODF
       // multi-articles peut avoir un échantillon différent par article.
       supabase.from("production_order_lines").select("id,description,production_orders(id,reference,status,company_id)"),
       supabase.from("media_files").select("id,file_name,category,company_id"),
       supabase.from("sample_request_media_files").select("sample_request_id,media_file_id"),
     ]);
+
+  const quoteLines = await getSampleQuoteLineOptions(requests.map((r) => r.id));
+  const requestById = new Map(requests.map((r) => [r.id, r]));
 
   const productionOrderLinesByCompany = new Map<string, ProductionOrderLineOption[]>();
   for (const pol of productionOrderLines ?? []) {
@@ -81,7 +86,7 @@ export default async function CommercialSamplesPage() {
       <PageHeader
         title="Échantillonnage"
         description="Suivi léger, indépendant des ordres de travail — du besoin exprimé à la décision client."
-        action={canCreate ? <CreateSampleDialog companies={companies ?? []} canSetPriority /> : undefined}
+        action={isCommercial ? <CreateSampleDialog requests={requests} quoteLines={quoteLines} /> : undefined}
       />
 
       <Card>
@@ -91,8 +96,8 @@ export default async function CommercialSamplesPage() {
               <Tr>
                 <Th>N° / Référence</Th>
                 <Th>Entreprise</Th>
+                <Th>Demande</Th>
                 <Th>Besoin</Th>
-                <Th align="center">Qté</Th>
                 <Th>Priorité</Th>
                 <Th>Statut</Th>
                 <Th>Délai</Th>
@@ -116,12 +121,18 @@ export default async function CommercialSamplesPage() {
                       <p className="font-mono text-[11px] text-foreground-muted">{s.sample_number}</p>
                     </Td>
                     <Td>{companyName ?? "—"}</Td>
+                    <Td>
+                      {s.request_id ? (
+                        <span className="text-xs text-foreground">{requestById.get(s.request_id)?.reference ?? "—"}</span>
+                      ) : (
+                        <span className="text-xs font-medium text-warning">À rattacher</span>
+                      )}
+                    </Td>
                     <Td className="max-w-[220px]">
                       <p className="truncate text-foreground" title={s.need_description}>
                         {s.need_description}
                       </p>
                     </Td>
-                    <Td align="center">{s.quantity_requested}</Td>
                     <Td>
                       <PriorityBadge priority={s.priority} label={SAMPLE_PRIORITY_LABELS[s.priority as SamplePriority]} />
                     </Td>
@@ -151,6 +162,7 @@ export default async function CommercialSamplesPage() {
                         >
                           <SampleDetailContent
                             sample={{ ...s, companyName }}
+                            links={buildSampleLinks(s, requests, quoteLines)}
                             baseUrl={baseUrl}
                             companyProductionOrderLines={companyProductionOrderLines}
                             attachedMedia={attached}
@@ -160,6 +172,7 @@ export default async function CommercialSamplesPage() {
                               canDelete: canManage,
                               canManageStatus: canManage,
                               canLinkProductionOrder: canManage,
+                              canLinkRequestAndQuoteLine: isCommercial,
                               canDecide: false,
                             }}
                           />
