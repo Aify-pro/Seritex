@@ -88,7 +88,8 @@ export interface TracePlacement {
   ordre: number;
   reference: string;
   referencePatron: string | null;
-  longueurMatelasM: number | null;
+  /** Centimètres (migration 0054 — en mètres auparavant). */
+  longueurMatelasCm: number | null;
   largeurMatelasCm: number | null;
   nbPlis: number | null;
   repartitionParCouche: RepartitionTailles;

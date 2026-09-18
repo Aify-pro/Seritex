@@ -77,7 +77,7 @@ export default async function SectionQueuePage({
   let workOrdersQuery = supabase
     .from("work_orders")
     .select(
-      "id,reference,quantity_planned,quantity_done,blocking_reason,planned_start,planned_end,actual_start,production_order_line_id,production_orders(id,reference,company_id,companies(name))"
+      "id,reference,quantity_planned,quantity_done,blocking_reason,planned_start,planned_end,actual_start,production_order_id,production_order_line_id,production_orders(id,reference,company_id,companies(name))"
     )
     .eq("section_id", sectionId);
   if (odfFilterId) workOrdersQuery = workOrdersQuery.eq("production_order_id", odfFilterId);
@@ -151,7 +151,7 @@ export default async function SectionQueuePage({
     const { data: fiches } = await supabase
       .from("fiches_placement")
       .select(
-        "id,numero_ot,production_order_line_id,tissu_type,couleur,grammage,traces_placement(id,ordre,reference,reference_patron,longueur_matelas_m,largeur_matelas_cm,nb_plis,repartition_par_couche,est_correctif,approuve_par,justification)"
+        "id,numero_ot,production_order_line_id,tissu_type,couleur,grammage,traces_placement(id,ordre,reference,reference_patron,longueur_matelas_cm,largeur_matelas_cm,nb_plis,repartition_par_couche,est_correctif,approuve_par,justification)"
       )
       .in("production_order_line_id", lineIds)
       .eq("statut", "bon_pour_coupe");
@@ -201,7 +201,7 @@ export default async function SectionQueuePage({
         ordre: number;
         reference: string;
         reference_patron: string | null;
-        longueur_matelas_m: number | null;
+        longueur_matelas_cm: number | null;
         largeur_matelas_cm: number | null;
         nb_plis: number | null;
         repartition_par_couche: Record<string, number>;
@@ -219,7 +219,7 @@ export default async function SectionQueuePage({
           referencePatron: t.reference_patron,
           repartitionParCouche: t.repartition_par_couche ?? {},
           nbPlis: t.nb_plis,
-          longueurM: t.longueur_matelas_m,
+          longueurCm: t.longueur_matelas_cm,
           laizeCm: t.largeur_matelas_cm,
           tissu: (fiche.tissu_type as string | null) ?? null,
           couleur: (fiche.couleur as string | null) ?? null,

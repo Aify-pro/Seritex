@@ -7,7 +7,7 @@ const FICHE_SELECT = `id,numero_ot,statut,statut_precedent,production_order_line
    repartition_tailles,tissu_type,grammage,couleur,laize_utile_cm,contraintes,observations,
    valide_le,created_at,
    production_order_lines(description,production_orders(reference)),
-   traces_placement(id,ordre,reference,reference_patron,longueur_matelas_m,largeur_matelas_cm,nb_plis,
+   traces_placement(id,ordre,reference,reference_patron,longueur_matelas_cm,largeur_matelas_cm,nb_plis,
      repartition_par_couche,fichier_path,fichier_nom,charge_le,est_correctif,justification,approuve_le,
      analyses_trace(id,nb_pieces_detectees,facteur_echelle,patrons_reconnus,pieces_non_reconnues,
        taux_reconnaissance,reconnaissance_complete,alerte_miroir,alerte_echelle,analysee_le))`;
@@ -49,7 +49,7 @@ type FicheRow = {
     ordre: number;
     reference: string;
     reference_patron: string | null;
-    longueur_matelas_m: number | null;
+    longueur_matelas_cm: number | null;
     largeur_matelas_cm: number | null;
     nb_plis: number | null;
     repartition_par_couche: FichePlacement["repartitionTailles"] | null;
@@ -141,7 +141,7 @@ async function mapFiches(
           ordre: t.ordre,
           reference: t.reference,
           referencePatron: t.reference_patron,
-          longueurMatelasM: t.longueur_matelas_m,
+          longueurMatelasCm: t.longueur_matelas_cm,
           largeurMatelasCm: t.largeur_matelas_cm,
           nbPlis: t.nb_plis,
           repartitionParCouche: t.repartition_par_couche ?? {},
