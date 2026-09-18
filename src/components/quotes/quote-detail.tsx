@@ -6,6 +6,7 @@ import { AcceptQuoteButton } from "./accept-quote-button";
 import { ZoneColorSummary } from "@/components/product/zone-color-picker";
 import { QuoteLineVisuelPicker } from "./quote-line-visuel-picker";
 import { QuoteLineMaquettePicker } from "./quote-line-maquette-picker";
+import { QuoteLineSamplePicker, type QuoteSample } from "./quote-line-sample-picker";
 
 export function QuoteDetail({
   quote,
@@ -14,6 +15,7 @@ export function QuoteDetail({
   canAccept,
   editable = false,
   availableMediaFiles = [],
+  samples = [],
 }: {
   quote: Quote;
   lines: QuoteLine[];
@@ -23,6 +25,8 @@ export function QuoteDetail({
   editable?: boolean;
   /** Médiathèque du client du devis, pour les sélecteurs d'ajout — vide côté client (lecture seule). */
   availableMediaFiles?: AttachableMediaFile[];
+  /** Échantillons de la demande du devis (migration 0051), liables par ligne. */
+  samples?: QuoteSample[];
 }) {
   return (
     <div className="space-y-6">
@@ -79,6 +83,12 @@ export function QuoteDetail({
                         available={availableMediaFiles}
                       />
                     </div>
+                    <QuoteLineSamplePicker
+                      quoteLineId={l.id}
+                      samples={samples}
+                      editable={editable}
+                      locked={quote.status === "accepte"}
+                    />
                   </td>
                   <td className="px-5 py-3 text-foreground-muted">{l.quantity}</td>
                   <td className="px-5 py-3 text-foreground-muted">{formatAmount(l.unit_price)}</td>

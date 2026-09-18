@@ -2,31 +2,40 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { requireUser, requireRole } from "@/lib/auth/current-user";
-import type { SampleDecision, SampleRequestStatus, SamplePriority } from "@/lib/types/domain";
+import type { SampleDecision, SampleRequestStatus } from "@/lib/types/domain";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 const newSampleSchema = z.object({
+  request_id: z.string().uuid("Merci de choisir la demande à laquelle rattacher l'échantillon"),
+  quote_line_id: z.string().uuid().optional(),
   need_description: z.string().min(1, "Merci de décrire le besoin"),
-  quantity_requested: z.coerce.number().int().positive().default(1),
-  company_id: z.string().uuid(),
   priority: z.enum(["basse", "normale", "haute", "urgente"]).default("normale"),
   request_date: z.string().min(1).optional(),
   due_date: z.string().optional(),
   extra_info: z.string().optional(),
 });
 
-function revalidateSamplePaths() {
+function revalidateSamplePaths(requestId?: string | null) {
   revalidatePath("/client/echantillons");
   revalidatePath("/commercial/echantillons");
+  if (requestId) revalidatePath(`/commercial/demandes/${requestId}`);
 }
 
+/**
+ * Création d'une fiche échantillon (migration 0051) — réservée au staff
+ * commercial, toujours rattachée à une demande dont elle hérite
+ * l'entreprise, éventuellement déjà liée à une ligne d'article d'un devis
+ * de cette demande. Une fiche = un modèle d'échantillon fabriqué en un seul
+ * exemplaire : plus de quantité saisie. Le trigger enforce_sample_links
+ * revérifie demande/ligne de devis côté base.
+ */
 export async function createSampleRequest(formData: FormData) {
-  const { authId, profile } = await requireUser();
+  const { authId } = await requireRole(["commercial", "administrateur"]);
   const parsed = newSampleSchema.safeParse({
+    request_id: formData.get("request_id"),
+    quote_line_id: formData.get("quote_line_id") || undefined,
     need_description: formData.get("need_description"),
-    quantity_requested: formData.get("quantity_requested"),
-    company_id: formData.get("company_id") || profile.company_id,
     priority: formData.get("priority") || "normale",
     request_date: formData.get("request_date") || undefined,
     due_date: formData.get("due_date") || undefined,
@@ -34,41 +43,85 @@ export async function createSampleRequest(formData: FormData) {
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message };
 
-  // Un client ne peut créer une demande d'échantillon que pour sa propre
-  // entreprise — vérification redondante avec la RLS, mais explicite ici.
-  if (profile.role === "client" && parsed.data.company_id !== profile.company_id) {
-    return { error: "Accès refusé" };
-  }
-
-  // Un client ne fixe ni la priorité, ni le délai (réservés au staff qui
-  // arbitre la charge de l'atelier) — cohérent avec le fait qu'il ne peut
-  // pas non plus lier l'échantillon à un ordre de fabrication.
-  const priority: SamplePriority = profile.role === "client" ? "normale" : parsed.data.priority;
-
   const supabase = await createClient();
+  const { data: request } = await supabase
+    .from("requests")
+    .select("company_id,contact_id")
+    .eq("id", parsed.data.request_id)
+    .maybeSingle();
+  if (!request) return { error: "Demande introuvable" };
+
   const reference = "ECH-" + Date.now().toString(36).toUpperCase();
 
-  const { error } = await supabase.from("sample_requests").insert({
-    reference,
-    company_id: parsed.data.company_id,
-    need_description: parsed.data.need_description,
-    quantity_requested: parsed.data.quantity_requested,
-    created_by_user_id: authId,
-    status: "demande",
-    priority,
-    request_date: parsed.data.request_date || new Date().toISOString().slice(0, 10),
-    due_date: parsed.data.due_date || null,
-    extra_info: parsed.data.extra_info || null,
-  });
+  const { data: sample, error } = await supabase
+    .from("sample_requests")
+    .insert({
+      reference,
+      request_id: parsed.data.request_id,
+      quote_line_id: parsed.data.quote_line_id ?? null,
+      company_id: request.company_id,
+      contact_id: request.contact_id,
+      need_description: parsed.data.need_description,
+      quantity_requested: 1,
+      created_by_user_id: authId,
+      status: "demande",
+      priority: parsed.data.priority,
+      request_date: parsed.data.request_date || new Date().toISOString().slice(0, 10),
+      due_date: parsed.data.due_date || null,
+      extra_info: parsed.data.extra_info || null,
+    })
+    .select("sample_number")
+    .single();
 
   if (error) return { error: error.message };
+  revalidateSamplePaths(parsed.data.request_id);
+  revalidatePath("/commercial/devis");
+  return { sampleNumber: sample.sample_number as string };
+}
+
+/**
+ * Rattache à une demande une fiche créée avant que ce rattachement ne soit
+ * obligatoire (migration 0051) — seulement si elle n'en a pas encore : une
+ * fois posée, la demande d'une fiche ne change plus.
+ */
+export async function attachSampleToRequest(sampleId: string, requestId: string) {
+  await requireRole(["commercial", "administrateur"]);
+  if (!z.string().uuid().safeParse(requestId).success) return { error: "Demande invalide" };
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("sample_requests")
+    .update({ request_id: requestId })
+    .eq("id", sampleId)
+    .is("request_id", null)
+    .select("id");
+  if (error) return { error: error.message };
+  if (!data || data.length === 0) return { error: "Cette fiche est déjà rattachée à une demande" };
+  revalidateSamplePaths(requestId);
+  return {};
+}
+
+/**
+ * Lie ou délie (quoteLineId = null) un échantillon à une ligne d'article
+ * d'un devis de sa demande (migration 0051). Une fois la ligne passée en
+ * ODF, le lien suit l'article d'ODF et n'est plus modifiable — refusé par
+ * la base (enforce_sample_links), pas seulement masqué dans l'écran.
+ */
+export async function linkSampleToQuoteLine(sampleId: string, quoteLineId: string | null) {
+  await requireRole(["commercial", "administrateur"]);
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("link_sample_to_quote_line", {
+    p_sample_request_id: sampleId,
+    p_quote_line_id: quoteLineId,
+  });
+  if (error) return { error: error.message };
   revalidateSamplePaths();
+  revalidatePath("/commercial/devis");
+  revalidatePath("/commercial/demandes");
   return {};
 }
 
 const editSchema = z.object({
   need_description: z.string().min(1, "Merci de décrire le besoin"),
-  quantity_requested: z.coerce.number().int().positive().default(1),
   priority: z.enum(["basse", "normale", "haute", "urgente"]),
   request_date: z.string().min(1).optional(),
   due_date: z.string().optional(),
@@ -76,8 +129,8 @@ const editSchema = z.object({
 });
 
 /**
- * Modification complète de la fiche (besoin, quantité, priorité, dates,
- * infos complémentaires) — réservée au staff qui gère l'échantillonnage
+ * Modification complète de la fiche (besoin, priorité, dates, infos
+ * complémentaires) — réservée au staff qui gère l'échantillonnage
  * (commercial, responsable production, administrateur), quel que soit le
  * lien ou non à un ordre de fabrication : modifier une fiche ne remet rien
  * en cause pour un ordre de fabrication déjà référencé, contrairement à sa
@@ -88,7 +141,6 @@ export async function updateSampleRequest(sampleId: string, formData: FormData) 
 
   const parsed = editSchema.safeParse({
     need_description: formData.get("need_description"),
-    quantity_requested: formData.get("quantity_requested"),
     priority: formData.get("priority"),
     request_date: formData.get("request_date") || undefined,
     due_date: formData.get("due_date") || undefined,
@@ -101,7 +153,6 @@ export async function updateSampleRequest(sampleId: string, formData: FormData) 
     .from("sample_requests")
     .update({
       need_description: parsed.data.need_description,
-      quantity_requested: parsed.data.quantity_requested,
       priority: parsed.data.priority,
       request_date: parsed.data.request_date || undefined,
       due_date: parsed.data.due_date || null,

@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
 import { StatusBadge } from "@/components/ui/badge";
-import { QUOTE_STATUS_LABELS, REQUEST_STATUS_LABELS } from "@/lib/types/domain";
+import { QUOTE_STATUS_LABELS, REQUEST_STATUS_LABELS, SAMPLE_STATUS_LABELS } from "@/lib/types/domain";
 import { notFound } from "next/navigation";
 import { StatusSelect } from "./status-select";
 import { MessageThread, type Message } from "./message-thread";
@@ -11,6 +11,8 @@ import { QuoteForm } from "./quote-form";
 import { postMessage } from "@/lib/actions/requests";
 import Link from "next/link";
 import { formatDate } from "@/lib/utils";
+import { CreateSampleDialog } from "@/components/samples/create-sample-dialog";
+import { getSampleQuoteLineOptions } from "@/lib/samples";
 
 export default async function RequestDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { authId } = await requireRole(["commercial", "administrateur"]);
@@ -25,7 +27,7 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
 
   if (!request) notFound();
 
-  const [{ data: messages }, { data: quotes }, { data: products }, { data: zoneTemplates }, { data: colors }] =
+  const [{ data: messages }, { data: quotes }, { data: products }, { data: zoneTemplates }, { data: colors }, { data: samples }, quoteLines] =
     await Promise.all([
       supabase
         .from("messages")
@@ -39,6 +41,13 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
       // choisit un modèle, sans aller-retour supplémentaire par ligne.
       supabase.from("product_zone_templates").select("product_model_id,zone_key,zone_label,display_order"),
       supabase.from("colors").select("id,name,code").eq("active", true).order("name"),
+      // Fiches échantillon rattachées à cette demande (migration 0051).
+      supabase
+        .from("sample_requests")
+        .select("id,sample_number,need_description,status,quote_line_id")
+        .eq("request_id", id)
+        .order("created_at", { ascending: false }),
+      getSampleQuoteLineOptions([id]),
     ]);
 
   const zoneTemplatesByModel = (zoneTemplates ?? []).reduce<Record<string, { zone_key: string; zone_label: string; display_order: number }[]>>(
@@ -97,6 +106,49 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
                 zoneTemplatesByModel={zoneTemplatesByModel}
                 colors={colors ?? []}
               />
+            </CardBody>
+          </Card>
+
+          <Card>
+            <CardHeader
+              title="Échantillons"
+              description="Un modèle par fiche, fabriqué en un exemplaire — lien facultatif à une ligne de devis"
+              action={
+                <CreateSampleDialog
+                  fixedRequest={{ id: request.id, reference: request.reference, companyName: company?.name ?? "" }}
+                  quoteLines={quoteLines}
+                />
+              }
+            />
+            <CardBody>
+              {samples && samples.length > 0 ? (
+                <ul className="space-y-2">
+                  {samples.map((sr) => {
+                    const line = quoteLines.find((l) => l.id === sr.quote_line_id);
+                    return (
+                      <li key={sr.id} className="flex items-center justify-between gap-3 rounded-md border border-border p-3">
+                        <div className="min-w-0">
+                          <Link href={`/echantillons/${sr.sample_number}`} className="font-mono text-sm font-medium text-foreground hover:text-brand">
+                            {sr.sample_number}
+                          </Link>
+                          <p className="truncate text-xs text-foreground-muted" title={sr.need_description}>
+                            {sr.need_description}
+                          </p>
+                          {line && (
+                            <p className="text-xs text-foreground-muted">
+                              Ligne {line.quoteReference} — {line.description}
+                              {line.orderLine ? ` · ${line.orderLine.orderReference}` : ""}
+                            </p>
+                          )}
+                        </div>
+                        <StatusBadge status={sr.status} labels={SAMPLE_STATUS_LABELS} kind="sample" />
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : (
+                <p className="text-sm text-foreground-muted">Aucun échantillon rattaché à cette demande.</p>
+              )}
             </CardBody>
           </Card>
 

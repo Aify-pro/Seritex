@@ -10,26 +10,29 @@ import { Dialog } from "@/components/ui/dialog";
 import { Eye, Printer } from "lucide-react";
 import { SAMPLE_STATUS_LABELS, SAMPLE_PRIORITY_LABELS } from "@/lib/types/domain";
 import type { SamplePriority, ProductionOrderStatus } from "@/lib/types/domain";
-import { CreateSampleDialog } from "@/components/samples/create-sample-dialog";
 import { SampleDetailContent } from "@/components/samples/sample-detail-content";
 import type { ProductionOrderLineOption } from "@/components/samples/sample-production-order-link";
+import { getSampleRequestOptions, getSampleQuoteLineOptions, buildSampleLinks } from "@/lib/samples";
 
 export default async function ClientSamplesPage() {
   const { profile } = await requireRole(["client"]);
   const supabase = await createClient();
   const baseUrl = await getBaseUrl();
 
-  const [{ data: samples }, { data: mediaFiles }, { data: sampleMedia }] = await Promise.all([
+  const [{ data: samples }, { data: mediaFiles }, { data: sampleMedia }, requests] = await Promise.all([
     supabase
       .from("sample_requests")
       .select(
-        "id,reference,sample_number,need_description,quantity_requested,status,priority,request_date,due_date,extra_info,company_id,production_order_line_id,production_order_lines(id,description,production_orders(reference,status))"
+        "id,reference,sample_number,need_description,status,priority,request_date,due_date,extra_info,company_id,request_id,quote_line_id,production_order_line_id,production_order_lines(id,description,production_orders(reference,status))"
       )
       .eq("company_id", profile.company_id!)
       .order("created_at", { ascending: false }),
     supabase.from("media_files").select("id,file_name,category").eq("company_id", profile.company_id!),
     supabase.from("sample_request_media_files").select("sample_request_id,media_file_id"),
+    getSampleRequestOptions(),
   ]);
+  const quoteLines = await getSampleQuoteLineOptions(requests.map((r) => r.id));
+  const requestById = new Map(requests.map((r) => [r.id, r]));
 
   const attachedBySample = new Map<string, string[]>();
   for (const link of sampleMedia ?? []) {
@@ -43,8 +46,7 @@ export default async function ClientSamplesPage() {
     <div className="space-y-6">
       <PageHeader
         title="Mes échantillons"
-        description="Demandez un échantillon avant de vous engager sur une commande ferme."
-        action={<CreateSampleDialog fixedCompanyId={profile.company_id!} />}
+        description="Les échantillons préparés par votre commercial avant une commande ferme — à valider ici."
       />
 
       <Card>
@@ -53,8 +55,8 @@ export default async function ClientSamplesPage() {
             <Thead>
               <Tr>
                 <Th>N° / Référence</Th>
+                <Th>Demande</Th>
                 <Th>Besoin</Th>
-                <Th align="center">Qté</Th>
                 <Th>Priorité</Th>
                 <Th>Statut</Th>
                 <Th>Commande liée</Th>
@@ -85,12 +87,12 @@ export default async function ClientSamplesPage() {
                       <p className="font-medium text-foreground">{s.reference}</p>
                       <p className="font-mono text-[11px] text-foreground-muted">{s.sample_number}</p>
                     </Td>
+                    <Td>{(s.request_id && requestById.get(s.request_id)?.reference) ?? "—"}</Td>
                     <Td className="max-w-[260px]">
                       <p className="truncate text-foreground" title={s.need_description}>
                         {s.need_description}
                       </p>
                     </Td>
-                    <Td align="center">{s.quantity_requested}</Td>
                     <Td>
                       <PriorityBadge priority={s.priority} label={SAMPLE_PRIORITY_LABELS[s.priority as SamplePriority]} />
                     </Td>
@@ -111,6 +113,7 @@ export default async function ClientSamplesPage() {
                         >
                           <SampleDetailContent
                             sample={s}
+                            links={buildSampleLinks(s, requests, quoteLines)}
                             baseUrl={baseUrl}
                             companyProductionOrderLines={linkedLine ? [linkedLine] : []}
                             attachedMedia={attached}
@@ -120,6 +123,7 @@ export default async function ClientSamplesPage() {
                               canDelete: false,
                               canManageStatus: false,
                               canLinkProductionOrder: false,
+                              canLinkRequestAndQuoteLine: false,
                               canDecide: true,
                             }}
                           />
@@ -137,7 +141,7 @@ export default async function ClientSamplesPage() {
                   </Tr>
                 );
               })}
-              {(!samples || samples.length === 0) && <EmptyRow colSpan={7}>Aucune demande d&apos;échantillon.</EmptyRow>}
+              {(!samples || samples.length === 0) && <EmptyRow colSpan={7}>Aucun échantillon pour l&apos;instant.</EmptyRow>}
             </Tbody>
           </Table>
         </CardBody>

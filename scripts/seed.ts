@@ -375,9 +375,10 @@ async function main() {
     reference: "ECH-2026-0001",
     company_id: companyA!.id,
     contact_id: contactA!.id,
+    request_id: req1!.id,
     created_by_user_id: commercialId,
     need_description: "Échantillon T-shirt 180g avant commande ferme, coloris à valider.",
-    quantity_requested: 3,
+    quantity_requested: 1,
     status: "en_fabrication",
     due_date: "2026-09-03",
   });

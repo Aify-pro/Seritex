@@ -17,9 +17,15 @@ export default async function CommercialQuoteDetailPage({ params }: { params: Pr
   // toute la médiathèque du client, seulement ce qui est déjà affilié à
   // cette demande — voir src/app/(app)/atelier/production/[id]/page.tsx
   // pour le même principe côté ODF.
-  const [lines, { data: requestMedia }] = await Promise.all([
+  const [lines, { data: requestMedia }, { data: samples }] = await Promise.all([
     getQuoteLinesWithColorConfig(id),
     supabase.from("request_media_files").select("media_files(id,file_name,category)").eq("request_id", quote.request_id),
+    // Échantillons de la demande, liables à une ligne du devis (migration 0051).
+    supabase
+      .from("sample_requests")
+      .select("id,sample_number,status,quote_line_id")
+      .eq("request_id", quote.request_id)
+      .order("created_at", { ascending: false }),
   ]);
   const availableMediaFiles = (requestMedia ?? [])
     .map((m) => m.media_files as unknown as AttachableMediaFile | null)
@@ -33,6 +39,7 @@ export default async function CommercialQuoteDetailPage({ params }: { params: Pr
       canAccept
       editable
       availableMediaFiles={availableMediaFiles}
+      samples={samples ?? []}
     />
   );
 }

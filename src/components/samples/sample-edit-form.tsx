@@ -9,15 +9,15 @@ import { SAMPLE_PRIORITY_LABELS, type SamplePriority } from "@/lib/types/domain"
 const PRIORITIES: SamplePriority[] = ["basse", "normale", "haute", "urgente"];
 
 /**
- * Édition complète de la fiche (besoin, quantité, priorité, dates, infos
- * complémentaires) — ouverte depuis la fenêtre de prévisualisation, réservée
+ * Édition complète de la fiche (besoin, priorité, dates, infos
+ * complémentaires — plus de quantité : une fiche = un exemplaire, migration
+ * 0051) — ouverte depuis la fenêtre de prévisualisation, réservée
  * au staff qui en a le droit (le bouton qui ouvre ce formulaire n'est rendu
  * que pour ces rôles, cf. `sample-detail-content.tsx`).
  */
 export function SampleEditForm({
   sampleId,
   needDescription,
-  quantityRequested,
   priority,
   requestDate,
   dueDate,
@@ -26,7 +26,6 @@ export function SampleEditForm({
 }: {
   sampleId: string;
   needDescription: string;
-  quantityRequested: number;
   priority: SamplePriority;
   requestDate: string;
   dueDate: string | null;
@@ -68,16 +67,6 @@ export function SampleEditForm({
         />
       </div>
       <div className="flex flex-wrap items-end gap-2">
-        <div>
-          <label className="mb-1 block text-xs font-medium text-foreground">Quantité</label>
-          <input
-            name="quantity_requested"
-            type="number"
-            min={1}
-            defaultValue={quantityRequested}
-            className="h-9 w-24 rounded-md border border-border bg-surface px-2 text-sm"
-          />
-        </div>
         <div>
           <label className="mb-1 block text-xs font-medium text-foreground">Date de la demande</label>
           <input

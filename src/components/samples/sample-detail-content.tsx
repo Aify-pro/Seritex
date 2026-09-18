@@ -16,21 +16,36 @@ import { SampleMediaFiles, type AttachableMediaFile } from "@/components/samples
 import { SampleEditDialog } from "@/components/samples/sample-edit-dialog";
 import { SampleDecisionForm } from "@/components/samples/sample-decision-form";
 import { DeleteSampleButton } from "@/components/samples/delete-sample-button";
+import { SampleRequestLink } from "@/components/samples/sample-request-link";
+import { SampleQuoteLineLink } from "@/components/samples/sample-quote-line-link";
+import type { SampleRequestOption, SampleQuoteLineOption } from "@/lib/samples";
 
 export interface SampleDetailData {
   id: string;
   reference: string;
   sample_number: string;
   need_description: string;
-  quantity_requested: number;
   status: SampleRequestStatus;
   priority: SamplePriority;
   request_date: string;
   due_date: string | null;
   extra_info: string | null;
   company_id: string;
+  request_id: string | null;
+  quote_line_id: string | null;
   production_order_line_id: string | null;
   companyName?: string;
+}
+
+/**
+ * Rattachements de la fiche (migration 0051) : sa demande, les lignes des
+ * devis de cette demande, et — seulement si elle n'est pas encore
+ * rattachée — les demandes de son entreprise.
+ */
+export interface SampleLinksData {
+  request: { id: string; reference: string } | null;
+  quoteLines: SampleQuoteLineOption[];
+  attachableRequests: SampleRequestOption[];
 }
 
 /**
@@ -42,6 +57,7 @@ export interface SampleDetailData {
  */
 export function SampleDetailContent({
   sample,
+  links,
   baseUrl,
   companyProductionOrderLines,
   attachedMedia,
@@ -49,6 +65,7 @@ export function SampleDetailContent({
   permissions,
 }: {
   sample: SampleDetailData;
+  links: SampleLinksData;
   baseUrl: string;
   companyProductionOrderLines: ProductionOrderLineOption[];
   attachedMedia: AttachableMediaFile[];
@@ -58,6 +75,8 @@ export function SampleDetailContent({
     canDelete: boolean;
     canManageStatus: boolean;
     canLinkProductionOrder: boolean;
+    /** Demande et ligne de devis : commercial / administrateur uniquement. */
+    canLinkRequestAndQuoteLine: boolean;
     canDecide: boolean;
   };
 }) {
@@ -94,11 +113,7 @@ export function SampleDetailContent({
               <p className="text-sm italic text-foreground">{sample.extra_info}</p>
             </div>
           )}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            <div>
-              <p className="text-xs font-medium text-foreground-muted">Quantité</p>
-              <p className="text-sm text-foreground">{sample.quantity_requested}</p>
-            </div>
+          <div className="grid grid-cols-2 gap-3">
             <div>
               <p className="text-xs font-medium text-foreground-muted">Date de la demande</p>
               <p className="text-sm text-foreground">{formatDate(sample.request_date)}</p>
@@ -109,7 +124,26 @@ export function SampleDetailContent({
             </div>
           </div>
 
-          {permissions.canLinkProductionOrder ? (
+          <SampleRequestLink
+            sampleId={sample.id}
+            request={links.request}
+            attachableRequests={links.attachableRequests}
+            canAttach={permissions.canLinkRequestAndQuoteLine}
+            linkToRequest={permissions.canLinkRequestAndQuoteLine}
+          />
+
+          {links.request && (
+            <SampleQuoteLineLink
+              sampleId={sample.id}
+              currentQuoteLineId={sample.quote_line_id}
+              quoteLines={links.quoteLines}
+              canEdit={permissions.canLinkRequestAndQuoteLine}
+            />
+          )}
+
+          {/* Lié à une ligne de devis : l'article d'ODF en découle (0051),
+              plus de choix libre ici. */}
+          {permissions.canLinkProductionOrder && !sample.quote_line_id ? (
             <SampleProductionOrderLink
               sampleId={sample.id}
               currentProductionOrderLineId={sample.production_order_line_id}
@@ -119,7 +153,11 @@ export function SampleDetailContent({
             <div className="flex items-center gap-1.5 text-xs text-foreground-muted">
               {sample.production_order_line_id ? <Link2 className="h-3.5 w-3.5" /> : <Unlink className="h-3.5 w-3.5" />}
               Article d&apos;ordre de fabrication :{" "}
-              {linkedLine ? `${linkedLine.orderReference} — ${linkedLine.description} · ${PRODUCTION_ORDER_STATUS_LABELS[linkedLine.status]}` : "aucun"}
+              {linkedLine
+                ? `${linkedLine.orderReference} — ${linkedLine.description} · ${PRODUCTION_ORDER_STATUS_LABELS[linkedLine.status]}`
+                : sample.quote_line_id
+                  ? "rattaché automatiquement quand le devis passera en ODF"
+                  : "aucun"}
             </div>
           )}
 
@@ -156,7 +194,6 @@ export function SampleDetailContent({
             <SampleEditDialog
               sampleId={sample.id}
               needDescription={sample.need_description}
-              quantityRequested={sample.quantity_requested}
               priority={sample.priority}
               requestDate={sample.request_date}
               dueDate={sample.due_date}
