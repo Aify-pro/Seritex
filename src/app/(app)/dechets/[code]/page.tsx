@@ -6,8 +6,8 @@ import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { SampleQrCode } from "@/components/samples/sample-qr-code";
-import { formatDateTime } from "@/lib/utils";
-import { LabelPrintMenu } from "./label-print-menu";
+import { formatDate, formatDateTime } from "@/lib/utils";
+import { LabelPrintButton } from "./label-print-button";
 
 /**
  * Fiche sac de déchets autonome, à une URL stable — cible du QR imprimé sur
@@ -40,6 +40,10 @@ export default async function WasteBagPage({ params }: { params: Promise<{ code:
     .order("occurred_at", { ascending: false });
 
   const baseUrl = await getBaseUrl();
+  const sealedLine =
+    bag.statut === "charge" && bag.poids_total_kg !== null
+      ? `Scellé ${Number(bag.poids_total_kg).toLocaleString("fr-FR", { maximumFractionDigits: 2 })} kg`
+      : null;
 
   return (
     <div className="space-y-6">
@@ -63,7 +67,12 @@ export default async function WasteBagPage({ params }: { params: Promise<{ code:
           </div>
 
           <div className="flex flex-col items-center gap-2">
-            <LabelPrintMenu code={bag.code} />
+            <LabelPrintButton
+              code={bag.code}
+              url={`${baseUrl}/dechets/${bag.code}`}
+              createdAt={formatDate(bag.created_at)}
+              sealedLine={sealedLine}
+            />
             <SampleQrCode url={`${baseUrl}/dechets/${bag.code}`} label={bag.code} size={140} />
           </div>
         </CardBody>
