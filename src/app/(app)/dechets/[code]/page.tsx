@@ -7,6 +7,7 @@ import { Card, CardHeader, CardBody } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { SampleQrCode } from "@/components/samples/sample-qr-code";
 import { formatDateTime } from "@/lib/utils";
+import { LabelPrintMenu } from "./label-print-menu";
 
 /**
  * Fiche sac de déchets autonome, à une URL stable — cible du QR imprimé sur
@@ -61,7 +62,10 @@ export default async function WasteBagPage({ params }: { params: Promise<{ code:
             {bag.closed_at && <p className="text-xs text-foreground-muted">Chargé le {formatDateTime(bag.closed_at)}</p>}
           </div>
 
-          <SampleQrCode url={`${baseUrl}/dechets/${bag.code}`} label={bag.code} size={140} />
+          <div className="flex flex-col items-center gap-2">
+            <LabelPrintMenu code={bag.code} />
+            <SampleQrCode url={`${baseUrl}/dechets/${bag.code}`} label={bag.code} size={140} />
+          </div>
         </CardBody>
       </Card>
 
