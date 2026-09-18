@@ -1245,8 +1245,8 @@ function TraceDetailBody({
             <Field label="Référence patron">
               <input name="reference_patron" defaultValue={trace.referencePatron ?? ""} disabled={effectiveLocked || !canModify} className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground disabled:opacity-60" />
             </Field>
-            <Field label="Longueur matelas (m)">
-              <input type="number" name="longueur_matelas_m" defaultValue={trace.longueurMatelasM ?? ""} disabled={effectiveLocked || !canModify} className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground disabled:opacity-60" />
+            <Field label="Longueur matelas (cm)">
+              <input type="number" step="0.1" name="longueur_matelas_cm" defaultValue={trace.longueurMatelasCm ?? ""} disabled={effectiveLocked || !canModify} className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground disabled:opacity-60" />
             </Field>
             <Field label="Largeur matelas (cm)">
               <input type="number" name="largeur_matelas_cm" defaultValue={trace.largeurMatelasCm ?? ""} disabled={effectiveLocked || !canModify} className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground disabled:opacity-60" />

@@ -71,7 +71,7 @@ export type MatelasReel = {
   /** Pièces obtenues par taille — TOTAL du matelas, toutes couches confondues. */
   quantitesObtenues: Record<string, number>;
   nbCouchesReel: number;
-  longueurReelleM: number;
+  longueurReelleCm: number;
   laizeReelleCm: number;
   poidsTissuKg: number;
   justification?: string;
@@ -101,7 +101,7 @@ export async function closeMatelas(
     p_trace_id: traceId,
     p_quantites_obtenues: reel.quantitesObtenues,
     p_nb_couches_reel: reel.nbCouchesReel,
-    p_longueur_reelle_m: reel.longueurReelleM,
+    p_longueur_reelle_cm: reel.longueurReelleCm,
     p_laize_reelle_cm: reel.laizeReelleCm,
     p_poids_tissu_kg: reel.poidsTissuKg,
     p_justification: reel.justification?.trim() || null,

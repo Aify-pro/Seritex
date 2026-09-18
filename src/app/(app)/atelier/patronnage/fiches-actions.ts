@@ -761,7 +761,7 @@ export async function addTrace(ficheId: string, formData: FormData) {
     ordre: nextOrdre,
     reference: `${gate.numeroOt}-T${nextOrdre}`,
     reference_patron: String(formData.get("reference_patron") ?? "").trim() || null,
-    longueur_matelas_m: formData.get("longueur_matelas_m") ? Number(formData.get("longueur_matelas_m")) : null,
+    longueur_matelas_cm: formData.get("longueur_matelas_cm") ? Number(formData.get("longueur_matelas_cm")) : null,
     largeur_matelas_cm: formData.get("largeur_matelas_cm") ? Number(formData.get("largeur_matelas_cm")) : null,
     nb_plis: formData.get("nb_plis") ? Number(formData.get("nb_plis")) : null,
     repartition_par_couche: await repartitionJson(formData, "couche"),
@@ -783,7 +783,7 @@ export async function updateTrace(traceId: string, ficheId: string, formData: Fo
     .from("traces_placement")
     .update({
       reference_patron: String(formData.get("reference_patron") ?? "").trim() || null,
-      longueur_matelas_m: formData.get("longueur_matelas_m") ? Number(formData.get("longueur_matelas_m")) : null,
+      longueur_matelas_cm: formData.get("longueur_matelas_cm") ? Number(formData.get("longueur_matelas_cm")) : null,
       largeur_matelas_cm: formData.get("largeur_matelas_cm") ? Number(formData.get("largeur_matelas_cm")) : null,
       nb_plis: formData.get("nb_plis") ? Number(formData.get("nb_plis")) : null,
       repartition_par_couche: await repartitionJson(formData, "couche"),

@@ -493,7 +493,7 @@ function WorkOrderAccordionRow({
               )}
 
               <div className="flex flex-col gap-2 sm:flex-row">
-                {matelas !== undefined && wo.production_orders && (
+                {matelas !== undefined && (
                   <Button size="md" variant="secondary" className="w-full sm:w-auto" onClick={() => setLotOpen(true)}>
                     <QrCode className="h-4 w-4" /> Créer un lot
                   </Button>
@@ -512,7 +512,7 @@ function WorkOrderAccordionRow({
         <MatelasDetailDialog
           key={openMatelas.id}
           workOrderId={wo.id}
-          productionOrderId={wo.production_orders?.id ?? null}
+          productionOrderId={wo.production_order_id}
           matelas={openMatelas}
           onBagWeighed={onBagWeighed}
           onDone={() => setOpenMatelasId(null)}
@@ -524,18 +524,16 @@ function WorkOrderAccordionRow({
         wo={wo}
         setOrders={setOrders}
       />
-      {wo.production_orders && (
-        <CreateLotDialog
-          open={lotOpen}
-          onOpenChange={setLotOpen}
-          productionOrderId={wo.production_orders.id}
-          traceOptions={traceOptions}
-        />
-      )}
+      <CreateLotDialog
+        open={lotOpen}
+        onOpenChange={setLotOpen}
+        productionOrderId={wo.production_order_id}
+        traceOptions={traceOptions}
+      />
       <AnomalyDialog
         open={anomalyOpen}
         onOpenChange={setAnomalyOpen}
-        productionOrderId={wo.production_orders?.id ?? null}
+        productionOrderId={wo.production_order_id}
         workOrderId={wo.id}
         sectionId={sectionId}
       />
@@ -590,7 +588,7 @@ function MatelasList({
                 <span className="block truncate text-xs text-foreground-muted">
                   {[
                     m.nbPlis ? `${m.nbPlis} couches` : null,
-                    m.longueurM ? `${m.longueurM} m` : null,
+                    m.longueurCm ? `${fmt(m.longueurCm)} cm` : null,
                     dechetsKg > 0 ? `déchets pesés ${formatKg(dechetsKg)}` : null,
                   ]
                     .filter(Boolean)
@@ -727,7 +725,7 @@ function MatelasDetailDialog({
       const res = await closeMatelas(workOrderId, matelas.id, {
         quantitesObtenues: Object.fromEntries(lignes.map((l) => [l.cle, l.obtenu])),
         nbCouchesReel: couchesReel,
-        longueurReelleM: longueurReelle,
+        longueurReelleCm: longueurReelle,
         laizeReelleCm: laizeReelle,
         poidsTissuKg,
         justification,
@@ -772,7 +770,7 @@ function MatelasDetailDialog({
             />
             <TraceFact label="Grammage" value={matelas.grammage ? `${fmt(matelas.grammage)} g/m²` : null} />
             <TraceFact label="Laize du matelas" value={matelas.laizeCm ? `${fmt(matelas.laizeCm)} cm` : null} />
-            <TraceFact label="Longueur du matelas" value={matelas.longueurM ? `${fmt(matelas.longueurM)} m` : null} />
+            <TraceFact label="Longueur du matelas" value={matelas.longueurCm ? `${fmt(matelas.longueurCm)} cm` : null} />
             <TraceFact label="Nombre de couches" value={matelas.nbPlis ? String(matelas.nbPlis) : null} />
             {matelas.referencePatron && <TraceFact label="Patron" value={matelas.referencePatron} />}
           </dl>
@@ -836,13 +834,13 @@ function MatelasDetailDialog({
             />
             <MesureReelle
               id={`longueur-${matelas.id}`}
-              label="Longueur du matelas (m)"
+              label="Longueur du matelas (cm)"
               value={longueur}
               onChange={setLongueur}
               inputMode="decimal"
-              step="0.01"
-              theorique={matelas.longueurM}
-              unite=" m"
+              step="0.1"
+              theorique={matelas.longueurCm}
+              unite=" cm"
               className={inputClass}
             />
             <MesureReelle

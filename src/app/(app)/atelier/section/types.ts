@@ -14,6 +14,12 @@ export type WorkOrderRow = {
   planned_end: string | null;
   actual_start: string | null;
   production_order_line_id: string | null;
+  /**
+   * Toujours présent, contrairement à `production_orders` : la jointure revient
+   * vide si l'ODF n'est pas lisible par l'utilisateur (RLS). Les actions qui ont
+   * besoin de l'ODF (pesée, lot, anomalie) s'appuient sur cette colonne.
+   */
+  production_order_id: string;
   production_orders: {
     id: string;
     reference: string;
@@ -37,7 +43,8 @@ export type MatelasRow = {
   referencePatron: string | null;
   repartitionParCouche: RepartitionTailles;
   nbPlis: number | null;
-  longueurM: number | null;
+  /** Longueur théorique du matelas, en centimètres comme la laize (migration 0054). */
+  longueurCm: number | null;
   laizeCm: number | null;
   tissu: string | null;
   couleur: string | null;
