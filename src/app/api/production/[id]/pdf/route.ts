@@ -8,7 +8,12 @@ import {
   type OdfPdfColor,
   type OdfPdfData,
 } from "@/lib/pdf/odf-pdf";
-import { PRODUCTION_ORDER_STATUS_LABELS, type ProductionOrderStatus } from "@/lib/types/domain";
+import {
+  PRODUCTION_ORDER_STATUS_LABELS,
+  SAMPLE_STATUS_LABELS,
+  type ProductionOrderStatus,
+  type SampleRequestStatus,
+} from "@/lib/types/domain";
 
 /**
  * Bon imprimable de l'ordre de fabrication — construit à la demande, jamais
@@ -50,7 +55,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     supabase
       .from("production_order_lines")
       .select(
-        "id,description,quantity,product_model_id,quote_line_id,couleur_unique_id,product_models(name,textiles(nom,composition,grammage,laize_cm)),couleur_unique:couleur_unique_id(name,code),zone_colors:production_order_line_zone_colors(zone_key,colors:color_id(name,code)),sizes:production_order_sizes(taille,quantite_demandee),line_sections:production_order_line_sections(ordre,sections(name))"
+        "id,description,quantity,product_model_id,quote_line_id,couleur_unique_id,product_models(name,textiles(nom,composition,grammage,laize_cm)),couleur_unique:couleur_unique_id(name,code),zone_colors:production_order_line_zone_colors(zone_key,colors:color_id(name,code)),sizes:production_order_sizes(taille,quantite_demandee),line_sections:production_order_line_sections(ordre,sections(name,atelier_categories(requiert_visuel)))"
       )
       .eq("production_order_id", id)
       .order("created_at"),
@@ -140,9 +145,14 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   // page), embarqués dans le PDF par odf-pdf.ts.
   const maquetteBuffers = await getMediaFileBuffers(Array.from(resolvedMaquetteByLine.values()).map((m) => m.id));
 
-  const userIds = [order.launched_by, order.cloture_demandee_par, order.closed_by].filter(
-    (v): v is string => !!v
-  );
+  const userIds = [
+    order.launched_by,
+    order.cloture_demandee_par,
+    order.closed_by,
+    order.comptabilite_validee_par,
+    order.infographie_validee_par,
+    order.soumis_par,
+  ].filter((v): v is string => !!v);
   const { data: users } =
     userIds.length > 0 ? await supabase.from("app_users").select("id,full_name").in("id", userIds) : { data: [] };
   const nameOf = (userId: string | null) => users?.find((u) => u.id === userId)?.full_name ?? "—";
@@ -175,6 +185,31 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     const list = printableZonesByLine.get(row.production_order_line_id) ?? [];
     list.push(zone.zone_label);
     printableZonesByLine.set(row.production_order_line_id, list);
+  }
+
+  // Circuit de validation (migration 0050) : infographie requise seulement
+  // si une section retenue, sur n'importe quel article, appartient à une
+  // catégorie qui exige un visuel — même condition que submit_production_
+  // order() côté serveur (voir aussi /atelier/production/[id]/page.tsx).
+  const requiresInfographie = (lines ?? []).some((line) =>
+    (line.line_sections ?? []).some(
+      (s) => (s.sections as unknown as { atelier_categories: { requiert_visuel: boolean } | null } | null)?.atelier_categories?.requiert_visuel
+    )
+  );
+
+  // Échantillons liés, tous statuts (migration 0050) : au moins un
+  // 'valide' par article qui en porte un suffit — même règle que
+  // submit_production_order().
+  const { data: sampleRows } =
+    lineIds.length > 0
+      ? await supabase.from("sample_requests").select("production_order_line_id,status").in("production_order_line_id", lineIds)
+      : { data: [] as { production_order_line_id: string | null; status: string }[] };
+  const sampleStatusesByLine = new Map<string, string[]>();
+  for (const s of sampleRows ?? []) {
+    if (!s.production_order_line_id) continue;
+    const list = sampleStatusesByLine.get(s.production_order_line_id) ?? [];
+    list.push(s.status);
+    sampleStatusesByLine.set(s.production_order_line_id, list);
   }
 
   const articles: OdfPdfArticle[] = (lines ?? []).map((line) => {
@@ -249,7 +284,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         (line.line_sections ?? [])
           .slice()
           .sort((a, b) => a.ordre - b.ordre)
-          .map((s) => (s.sections as unknown as { name: string } | null)?.name)
+          .map((s) => (s.sections as unknown as { name: string; atelier_categories: { requiert_visuel: boolean } | null } | null)?.name)
           .filter((name): name is string => !!name)
           .map((name) => {
             if (name === "Coupe" && ficheForLine) return `${name} (${ficheForLine.numero_ot})`;
@@ -284,12 +319,40 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     };
   });
 
-  const lifecycle: OdfPdfData["lifecycle"] = [];
-  if (order.launched_at) lifecycle.push({ event: "Lancé en production", date: formatFr(order.launched_at), by: nameOf(order.launched_by) });
-  if (order.refuse_le) lifecycle.push({ event: "Validation refusée", date: formatFr(order.refuse_le), by: nameOf(order.refuse_par) });
-  if (order.cloture_demandee_at)
-    lifecycle.push({ event: "Clôture demandée", date: formatFr(order.cloture_demandee_at), by: nameOf(order.cloture_demandee_par) });
-  if (order.closed_at) lifecycle.push({ event: "Clôturé", date: formatFr(order.closed_at), by: nameOf(order.closed_by) });
+  // Circuit de validation avant soumission (migration 0050) — remplace la
+  // traçabilité du cycle de vie sur le PDF (demande Ayman 18/09) : ce
+  // document s'imprime avant le lancement en production, donc avant
+  // qu'aucun événement de cycle de vie n'existe encore. Même forme
+  // {event,date,by} que l'ancienne table lifecycle pour réutiliser le même
+  // dessin (drawEventTable ci-dessous).
+  const circuitValidation: OdfPdfData["circuitValidation"] = [
+    {
+      event: "Comptabilité — compte client",
+      date: order.comptabilite_validee_le ? formatFr(order.comptabilite_validee_le) : "En attente",
+      by: order.comptabilite_validee_par ? nameOf(order.comptabilite_validee_par) : "-",
+    },
+    {
+      event: requiresInfographie ? "Infographie — visuels" : "Infographie — non requis",
+      date: !requiresInfographie ? "-" : order.infographie_validee_le ? formatFr(order.infographie_validee_le) : "En attente",
+      by: !requiresInfographie ? "-" : order.infographie_validee_par ? nameOf(order.infographie_validee_par) : "-",
+    },
+    ...(lines ?? [])
+      .filter((line) => (sampleStatusesByLine.get(line.id) ?? []).length > 0)
+      .map((line) => {
+        const statuses = sampleStatusesByLine.get(line.id) ?? [];
+        const validated = statuses.includes("valide");
+        return {
+          event: `Échantillon — ${line.description}`,
+          date: validated ? "Validé" : statuses.map((s) => SAMPLE_STATUS_LABELS[s as SampleRequestStatus] ?? s).join(", "),
+          by: "-",
+        };
+      }),
+    {
+      event: "Chef de production — soumission",
+      date: order.soumis_le ? formatFr(order.soumis_le) : "En attente",
+      by: order.soumis_par ? nameOf(order.soumis_par) : "-",
+    },
+  ];
 
   const data: OdfPdfData = {
     reference: order.reference,
@@ -308,7 +371,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     surplusTraces: order.mention_surplus_traces
       ? Object.entries(order.mention_surplus_traces as Record<string, number>)
       : [],
-    lifecycle,
+    circuitValidation,
     clotureNote: order.cloture_note ?? null,
   };
 

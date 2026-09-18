@@ -185,6 +185,38 @@ export async function submitProductionOrder(productionOrderId: string) {
 }
 
 /**
+ * Circuit de validation avant soumission (migration 0050) : la comptabilité
+ * atteste que le compte du client est en règle — toujours requis, avant
+ * submit_production_order(). L'autorisation vient de
+ * `has_permission('validation_comptable', 'validate')` côté Postgres,
+ * réglable depuis Paramètres > Rôles & permissions.
+ */
+export async function attesterComptabiliteOdf(productionOrderId: string) {
+  await requireRole(["administrateur", "comptabilite"]);
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("attester_comptabilite_odf", { p_production_order_id: productionOrderId });
+  if (error) return { error: error.message };
+  revalidateOdf(productionOrderId);
+  return {};
+}
+
+/**
+ * Circuit de validation avant soumission (migration 0050) : l'infographie
+ * atteste que les visuels/maquette sont validés — requis seulement si au
+ * moins un article exige un visuel (submit_production_order() le
+ * revérifie). Autorisation via `has_permission('validation_visuels',
+ * 'validate')`.
+ */
+export async function attesterInfographieOdf(productionOrderId: string) {
+  await requireRole(["administrateur", "infographiste"]);
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("attester_infographie_odf", { p_production_order_id: productionOrderId });
+  if (error) return { error: error.message };
+  revalidateOdf(productionOrderId);
+  return {};
+}
+
+/**
  * en_attente_validation -> en_production (génère les sous-ODF) ou refuse.
  * L'autorisation vient de `has_permission('ordres_fabrication', 'validate')`
  * côté Postgres — droit unique de validation (section 3 du document de

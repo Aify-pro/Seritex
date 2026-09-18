@@ -19,14 +19,21 @@ import { ProductionOrderMediaFiles, type AttachableMediaFile } from "./productio
 import { getMediaFilePreviewUrls } from "@/lib/media/preview";
 import { StockMovementsPanel } from "./stock-movements-panel";
 import type { StatutFiche } from "@/lib/patronnage/types";
-import type { DownloadableMediaFile, MaquetteFile, StockMovement, StockExportFiche } from "@/lib/types/domain";
+import type { DownloadableMediaFile, MaquetteFile, StockMovement, StockExportFiche, SampleRequestStatus } from "@/lib/types/domain";
+import { ValidationCircuitPanel } from "./validation-circuit-panel";
 import { CheckCircle2, ChevronRight, Package, Printer, QrCode } from "lucide-react";
 import Link from "next/link";
 
 const LOT_CATEGORIE_LABELS: Record<string, string> = { semi_fini: "Semi-fini", fini: "Fini", dechet: "Déchet" };
 
 export default async function ProductionOrderDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { profile } = await requireRole(["responsable_production", "administrateur", "gestionnaire_stock"]);
+  const { profile } = await requireRole([
+    "responsable_production",
+    "administrateur",
+    "gestionnaire_stock",
+    "comptabilite",
+    "infographiste",
+  ]);
   const { id } = await params;
   const supabase = await createClient();
   const baseUrl = await getBaseUrl();
@@ -230,6 +237,9 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     order.cloture_demandee_par,
     order.closed_by,
     order.refuse_par,
+    order.comptabilite_validee_par,
+    order.infographie_validee_par,
+    order.soumis_par,
     ...(anomalies ?? []).map((a) => a.resolved_by),
   ].filter((v): v is string => !!v);
   const { data: users } =
@@ -431,11 +441,22 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
   const lineIds = (productionOrderLines ?? []).map((l) => l.id);
   const { data: linkedSamples } =
     lineIds.length > 0
-      ? await supabase.from("sample_requests").select("id,sample_number,production_order_line_id").in("production_order_line_id", lineIds)
-      : { data: [] as { id: string; sample_number: string; production_order_line_id: string | null }[] };
+      ? await supabase
+          .from("sample_requests")
+          .select("id,sample_number,production_order_line_id,status")
+          .in("production_order_line_id", lineIds)
+      : { data: [] as { id: string; sample_number: string; production_order_line_id: string | null; status: SampleRequestStatus }[] };
   const sampleByLine = new Map<string, { id: string; sampleNumber: string }>();
+  // Circuit de validation (migration 0050) : tous les statuts par article,
+  // pour le panneau ci-dessous — un article peut porter plusieurs
+  // échantillons (rounds successifs), un seul au statut "valide" suffit.
+  const sampleStatusesByLine = new Map<string, SampleRequestStatus[]>();
   for (const s of linkedSamples ?? []) {
-    if (s.production_order_line_id) sampleByLine.set(s.production_order_line_id, { id: s.id, sampleNumber: s.sample_number });
+    if (!s.production_order_line_id) continue;
+    sampleByLine.set(s.production_order_line_id, { id: s.id, sampleNumber: s.sample_number });
+    const list = sampleStatusesByLine.get(s.production_order_line_id) ?? [];
+    list.push(s.status);
+    sampleStatusesByLine.set(s.production_order_line_id, list);
   }
 
   // Aperçu/téléchargement : une URL signée par fichier, résolue une seule
@@ -493,6 +514,24 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
       linkedSample: sampleByLine.get(line.id) ?? null,
     };
   });
+
+  // Circuit de validation (migration 0050) : infographie requise seulement
+  // si une section retenue (n'importe quel article) appartient à une
+  // catégorie qui exige un visuel — même condition que la relit
+  // submit_production_order() côté serveur, pour que le bouton n'affiche
+  // jamais un état que le RPC contredirait à la soumission.
+  const sectionRequiertVisuel = new Map(
+    (allSections ?? []).map((s) => [
+      s.id,
+      (s.atelier_categories as unknown as { requiert_visuel: boolean } | null)?.requiert_visuel ?? false,
+    ])
+  );
+  const requiresInfographie = (chosenLineSections ?? []).some((cs) => sectionRequiertVisuel.get(cs.section_id));
+  const canAttesterComptabilite = await can("validation_comptable", "validate");
+  const canAttesterInfographie = await can("validation_visuels", "validate");
+  const echantillonsCircuit = linesWithConfig
+    .filter((l) => (sampleStatusesByLine.get(l.id) ?? []).length > 0)
+    .map((l) => ({ description: l.description, statuses: sampleStatusesByLine.get(l.id) ?? [] }));
 
   const canArchive = await can("ordres_fabrication", "archive");
   const canValidate = await can("ordres_fabrication", "validate");
@@ -658,8 +697,30 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
         initialNote={order.note_disponibilite_couleurs}
       />
 
+      <ValidationCircuitPanel
+        productionOrderId={order.id}
+        modifiable={modifiable}
+        comptabilite={{ valideLe: order.comptabilite_validee_le, validePar: order.comptabilite_validee_par ? nameOf(order.comptabilite_validee_par) : null }}
+        infographie={{
+          requise: requiresInfographie,
+          valideLe: order.infographie_validee_le,
+          validePar: order.infographie_validee_par ? nameOf(order.infographie_validee_par) : null,
+        }}
+        soumis={{ le: order.soumis_le, par: order.soumis_par ? nameOf(order.soumis_par) : null }}
+        canAttesterComptabilite={canAttesterComptabilite}
+        canAttesterInfographie={canAttesterInfographie}
+        echantillons={echantillonsCircuit}
+      />
+
       {modifiable && (
-        <SubmitOdfPanel productionOrderId={order.id} anySectionChosen={anySectionChosen} linesConfigured={linesConfigured} />
+        <SubmitOdfPanel
+          productionOrderId={order.id}
+          anySectionChosen={anySectionChosen}
+          linesConfigured={linesConfigured}
+          comptabiliteOk={!!order.comptabilite_validee_le}
+          infographieOk={!requiresInfographie || !!order.infographie_validee_le}
+          echantillonsOk={echantillonsCircuit.every((e) => e.statuses.includes("valide"))}
+        />
       )}
 
       <ProductionOrderMediaFiles

@@ -13,6 +13,7 @@ const BASE_ROLES: UserRole[] = [
   "responsable_production",
   "chef_section",
   "gestionnaire_stock",
+  "comptabilite",
   "administrateur",
 ];
 

@@ -29,7 +29,8 @@ import QRCode from "qrcode";
  *            4. Sous-ODF      tableau (section, référence, prévu/fait/
  *                             reste) avec un QR par ligne pour la saisie
  *                             au terminal.
- *            5. Traçabilité   surplus tracé, cycle de vie, note de clôture.
+ *            5. Traçabilité   surplus tracé, circuit de validation, note
+ *                              de clôture (migration 0050, 18/09).
  *   Page n   une page par article : en-tête de l'article, grille de
  *            caractéristiques, visuels joints, tableau des couleurs
  *            (pastille + référence, 3 zones par ligne), dispatching des
@@ -107,7 +108,16 @@ export type OdfPdfData = {
   articles: OdfPdfArticle[];
   sousOdf: OdfPdfSousOdf[];
   surplusTraces: [string, number][];
-  lifecycle: { event: string; date: string; by: string }[];
+  /**
+   * Circuit de validation avant soumission (migration 0050, demande Ayman
+   * 18/09) — remplace l'ancienne « Traçabilité du cycle de vie » : ce
+   * document s'imprime avant le lancement en production, donc avant
+   * qu'aucun événement de cycle de vie n'existe encore. Comptabilité,
+   * infographie, un échantillon par article qui en porte un, et la
+   * soumission par le chef de production — même forme {event,date,by} que
+   * l'ancien tableau, réutilisée telle quelle.
+   */
+  circuitValidation: { event: string; date: string; by: string }[];
   clotureNote: string | null;
 };
 
@@ -945,12 +955,12 @@ export async function buildOdfPdf(data: OdfPdfData): Promise<Uint8Array> {
     y -= 14;
   }
 
-  sectionTitle("Traçabilité du cycle de vie");
+  sectionTitle("Circuit de validation");
   {
     const cols = [
-      { label: "Événement", width: 180 },
-      { label: "Date", width: 150 },
-      { label: "Par", width: CONTENT_W - 330 },
+      { label: "Étape", width: 220 },
+      { label: "Date / statut", width: 150 },
+      { label: "Par", width: CONTENT_W - 370 },
     ];
     const headerH = 18;
     const rowH = 20;
@@ -969,8 +979,7 @@ export async function buildOdfPdf(data: OdfPdfData): Promise<Uint8Array> {
     drawHeader();
     continuation = () => drawHeader();
 
-    const rows =
-      data.lifecycle.length > 0 ? data.lifecycle : [{ event: "Aucun événement enregistré", date: "-", by: "-" }];
+    const rows = data.circuitValidation;
     rows.forEach((row, index) => {
       const pageBefore = page;
       ensure(rowH);

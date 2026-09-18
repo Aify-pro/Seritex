@@ -14,7 +14,12 @@ export type UserRole =
   // d'export Sage, depuis la partie Stock de la fiche ODF. Ajouté suite au
   // constat que la section Coupe ne devait pas saisir la réception de
   // marchandise (migrations 0022/0023).
-  | "gestionnaire_stock";
+  | "gestionnaire_stock"
+  // Circuit de validation de l'ODF (migrations 0049/0050) : atteste que le
+  // compte du client est en règle avant qu'un ODF puisse être soumis à
+  // validation — attestation manuelle, aucune donnée financière rattachée
+  // pour l'instant.
+  | "comptabilite";
 
 export type RequestStatus =
   | "nouvelle"
@@ -378,6 +383,18 @@ export interface ProductionOrder {
   // Commentaire libre de disponibilité des couleurs — jamais validé par le
   // logiciel, section 9 du document de logique.
   note_disponibilite_couleurs: string | null;
+  // Circuit de validation avant soumission (migration 0050) : comptabilité
+  // et infographie sont des attestations manuelles (posées par
+  // attester_comptabilite_odf()/attester_infographie_odf()) ; soumis_le/par
+  // est la part du circuit qui revient au chef de production — posée
+  // automatiquement par submit_production_order(). Les échantillons liés
+  // ne sont pas stockés ici : calculés à la volée depuis sample_requests.
+  comptabilite_validee_le: string | null;
+  comptabilite_validee_par: string | null;
+  infographie_validee_le: string | null;
+  infographie_validee_par: string | null;
+  soumis_le: string | null;
+  soumis_par: string | null;
   created_at: string;
   companies?: Pick<Company, "id" | "name">;
   product_models?: Pick<ProductModel, "id" | "name"> | null;
@@ -624,6 +641,7 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   chef_section: "Chef de section",
   administrateur: "Administrateur",
   gestionnaire_stock: "Gestionnaire de stock",
+  comptabilite: "Comptabilité",
 };
 
 export const REQUEST_STATUS_LABELS: Record<RequestStatus, string> = {
