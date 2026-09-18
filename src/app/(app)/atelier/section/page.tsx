@@ -2,18 +2,20 @@ import { requireRole } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server";
 import { getSizes } from "@/lib/sizes";
 import { PageHeader } from "@/components/shell/page-header";
-import {
-  SectionBoard,
-  type WorkOrderRow,
-  type MatelasRow,
-  type TraceOption,
-  type ArticleLotOption,
-  type ProductionOrderOption,
-  type WasteBagRow,
-  type StockItemOption,
-} from "./section-board";
+import { SectionQueue } from "./section-queue";
+import { SectionBoardLegacy } from "./section-board-legacy";
+import type {
+  WorkOrderRow,
+  WorkOrderContext,
+  MatelasRow,
+  TraceOption,
+  ArticleLotOption,
+  ProductionOrderOption,
+  QuantityEventRow,
+  WasteBagRow,
+  StockItemOption,
+} from "./types";
 import { SectionSwitcher } from "./section-switcher";
-import { QrScanButton } from "./qr-scan-button";
 import { Card, CardBody } from "@/components/ui/card";
 import Link from "next/link";
 
@@ -61,10 +63,10 @@ export default async function SectionQueuePage({
     .eq("id", sectionId)
     .single();
 
-  // Filtre `?odf=` posé par le lecteur QR (QrScanButton) : le chef de
-  // section scanne le QR d'en-tête de l'ODF (qui pointe vers
-  // /atelier/production/[id], une page qui lui est interdite) et se
-  // retrouve ici avec uniquement les sous-ODF de SA section pour cet ODF.
+  // Filtre `?odf=` posé par le lecteur QR (QrScanButton) : l'opérateur scanne
+  // le QR d'en-tête de l'ODF (qui pointe vers /atelier/production/[id], une
+  // page interdite au chef de section) et se retrouve ici avec uniquement les
+  // sous-ODF de SA section pour cet ODF.
   let odfReference: string | null = null;
   if (odfFilterId) {
     const { data: odf } = await supabase.from("production_orders").select("reference").eq("id", odfFilterId).maybeSingle();
@@ -87,21 +89,27 @@ export default async function SectionQueuePage({
   // Pré-remplissage des quantités depuis repartition_par_couche (section 13
   // du document de logique) — jamais ressaisies par l'opérateur.
   const isCoupe = (section?.atelier_categories as unknown as { cle: string } | null)?.cle === "coupe";
+  const contextByWorkOrderId: Record<string, WorkOrderContext> = {};
   const matelasByWorkOrderId: Record<string, MatelasRow[]> = {};
   const traceOptionsByWorkOrderId: Record<string, TraceOption[]> = {};
+  const eventsByWorkOrderId: Record<string, QuantityEventRow[]> = {};
   const lotsByProductionOrderId: Record<string, ArticleLotOption[]> = {};
   let productionOrderOptions: ProductionOrderOption[] = [];
   let openWasteBags: WasteBagRow[] = [];
   let stockItemOptions: StockItemOption[] = [];
+
+  const lineIds = (workOrders ?? [])
+    .map((wo) => wo.production_order_line_id)
+    .filter((lineId): lineId is string => !!lineId);
 
   if (isCoupe && workOrders && workOrders.length > 0) {
     const productionOrderIds = workOrders
       .map((wo) => (wo.production_orders as unknown as { id: string } | null)?.id)
       .filter((id): id is string => !!id);
 
-    // Lot 7 : ODF disponibles pour rattacher une pesée (reception_tissu /
-    // sortie_lot / retour_stock) ou la pesée incrémentale d'un sac —
-    // circonscrit aux ODF réellement visibles dans cette file Coupe.
+    // Lot 7 : ODF disponibles pour rattacher une pesée (sortie_lot /
+    // retour_stock) ou la pesée incrémentale d'un sac — circonscrit aux ODF
+    // réellement visibles dans cette file Coupe.
     const seenPoIds = new Set<string>();
     productionOrderOptions = workOrders.reduce<ProductionOrderOption[]>((acc, wo) => {
       const po = wo.production_orders as unknown as { id: string; reference: string; companies?: { name: string } | null } | null;
@@ -113,9 +121,8 @@ export default async function SectionQueuePage({
     }, []);
 
     // Lot 10 : miroir Sage (stock_item_view) — pour rattacher un article à
-    // une pesée reception_tissu/retour_stock. Peut être vide (jamais
-    // synchronisé, cf. Paramètres > Stock) : le formulaire reste utilisable
-    // sans, comme avant ce lot.
+    // une pesée retour_stock. Peut être vide (jamais synchronisé, cf.
+    // Paramètres > Stock) : le formulaire reste utilisable sans.
     const { data: stockItems } = await supabase
       .from("stock_item_view")
       .select("sage_reference,designation")
@@ -169,9 +176,6 @@ export default async function SectionQueuePage({
     // désormais directement via l'article de CET OT précis, plus besoin de
     // passer par l'ODF entier (deux OT Coupe du même ODF, un par article, ne
     // se mélangent plus).
-    const lineIds = workOrders
-      .map((wo) => wo.production_order_line_id)
-      .filter((lineId): lineId is string => !!lineId);
     const { data: fiches } = await supabase
       .from("fiches_placement")
       .select(
@@ -192,7 +196,10 @@ export default async function SectionQueuePage({
 
     const matelasByLineId: Record<string, MatelasRow[]> = {};
     const traceOptionsByLineId: Record<string, TraceOption[]> = {};
+    const numeroOtByLineId: Record<string, string> = {};
     for (const fiche of fiches ?? []) {
+      const lineId = fiche.production_order_line_id as string;
+      numeroOtByLineId[lineId] = fiche.numero_ot as string;
       const traces = (fiche.traces_placement ?? []) as unknown as {
         id: string;
         ordre: number;
@@ -203,7 +210,7 @@ export default async function SectionQueuePage({
         justification: string | null;
       }[];
       const usable = traces.filter((t) => !t.est_correctif || t.approuve_par);
-      matelasByLineId[fiche.production_order_line_id as string] = usable
+      matelasByLineId[lineId] = usable
         .filter((t) => !closedTraceIds.has(t.id))
         .sort((a, b) => a.ordre - b.ordre)
         .map((t) => ({
@@ -215,7 +222,7 @@ export default async function SectionQueuePage({
         }));
       // Lot 6 : le tracé d'origine (optionnel) d'un lot article peut être
       // n'importe quel matelas de la fiche, clôturé ou non.
-      traceOptionsByLineId[fiche.production_order_line_id as string] = usable
+      traceOptionsByLineId[lineId] = usable
         .sort((a, b) => a.ordre - b.ordre)
         .map((t) => ({ id: t.id, reference: t.reference }));
     }
@@ -224,6 +231,64 @@ export default async function SectionQueuePage({
       const lineId = wo.production_order_line_id;
       if (lineId && matelasByLineId[lineId]) matelasByWorkOrderId[wo.id] = matelasByLineId[lineId];
       if (lineId && traceOptionsByLineId[lineId]) traceOptionsByWorkOrderId[wo.id] = traceOptionsByLineId[lineId];
+      if (lineId && numeroOtByLineId[lineId]) {
+        contextByWorkOrderId[wo.id] = {
+          numeroOt: numeroOtByLineId[lineId],
+          articleDescription: null,
+        };
+      }
+    }
+  }
+
+  if (!isStockManager && workOrders && workOrders.length > 0) {
+    // Description de l'article, pour l'en-tête du sous-ODF déplié et pour la
+    // recherche. `production_order_lines` n'est aujourd'hui lisible que par
+    // le responsable de production, l'administrateur et le commercial : pour
+    // un chef de section la requête ne renvoie rien et l'écran s'en passe —
+    // c'est le lot B qui lui ouvre cette lecture.
+    if (lineIds.length > 0) {
+      const { data: lines } = await supabase
+        .from("production_order_lines")
+        .select("id,description")
+        .in("id", lineIds);
+      const descriptionByLineId = Object.fromEntries((lines ?? []).map((l) => [l.id, l.description as string | null]));
+      for (const wo of workOrders) {
+        const lineId = wo.production_order_line_id;
+        const existing = contextByWorkOrderId[wo.id];
+        contextByWorkOrderId[wo.id] = {
+          numeroOt: existing?.numeroOt ?? null,
+          articleDescription: (lineId && descriptionByLineId[lineId]) || null,
+        };
+      }
+    }
+
+    // Historique des saisies de quantité (sections hors Coupe) : savoir ce
+    // qui a déjà été compté, et par qui, évite la double saisie quand deux
+    // chefs d'équipe se relaient sur le même ordre.
+    if (!isCoupe) {
+      const { data: events } = await supabase
+        .from("work_order_events")
+        .select("id,work_order_id,quantity,comment,occurred_at,app_users(full_name)")
+        .in(
+          "work_order_id",
+          workOrders.map((wo) => wo.id)
+        )
+        .eq("event_type", "quantite_ajoutee")
+        .order("occurred_at", { ascending: false })
+        .limit(100);
+      for (const e of events ?? []) {
+        const rows = (eventsByWorkOrderId[e.work_order_id as string] ??= []);
+        // Cinq lignes suffisent sur un téléphone : au-delà, l'historique
+        // repousse le bouton de saisie hors de l'écran.
+        if (rows.length >= 5) continue;
+        rows.push({
+          id: e.id as string,
+          occurredAt: e.occurred_at as string,
+          quantity: e.quantity as number | null,
+          comment: e.comment as string | null,
+          authorName: (e.app_users as unknown as { full_name: string } | null)?.full_name ?? null,
+        });
+      }
     }
   }
 
@@ -238,13 +303,7 @@ export default async function SectionQueuePage({
               ? "Clôturez les matelas au fur et à mesure — quantités pré-remplies depuis le Patronnage."
               : "Ajoutez la quantité produite au fur et à mesure sur vos ordres de travail."
         }
-        action={
-          sections.length > 0 ? (
-            <SectionSwitcher sections={sections} value={sectionId} />
-          ) : profile.role === "chef_section" ? (
-            <QrScanButton />
-          ) : undefined
-        }
+        action={sections.length > 0 ? <SectionSwitcher sections={sections} value={sectionId} /> : undefined}
       />
 
       {odfFilterId && (
@@ -261,20 +320,32 @@ export default async function SectionQueuePage({
         </Card>
       )}
 
-      <SectionBoard
-        key={sectionId}
-        sectionId={sectionId}
-        initialWorkOrders={(workOrders ?? []) as unknown as WorkOrderRow[]}
-        matelasByWorkOrderId={matelasByWorkOrderId}
-        traceOptionsByWorkOrderId={traceOptionsByWorkOrderId}
-        isCoupe={isCoupe}
-        lotsByProductionOrderId={lotsByProductionOrderId}
-        productionOrderOptions={productionOrderOptions}
-        initialOpenWasteBags={openWasteBags}
-        stockItemOptions={stockItemOptions}
-        sizes={await getSizes()}
-        stockManagerOnly={isStockManager}
-      />
+      {isStockManager ? (
+        <SectionBoardLegacy
+          key={sectionId}
+          isCoupe={isCoupe}
+          lotsByProductionOrderId={lotsByProductionOrderId}
+          productionOrderOptions={productionOrderOptions}
+          initialOpenWasteBags={openWasteBags}
+          stockItemOptions={stockItemOptions}
+        />
+      ) : (
+        <SectionQueue
+          key={sectionId}
+          sectionId={sectionId}
+          initialWorkOrders={(workOrders ?? []) as unknown as WorkOrderRow[]}
+          contextByWorkOrderId={contextByWorkOrderId}
+          matelasByWorkOrderId={matelasByWorkOrderId}
+          traceOptionsByWorkOrderId={traceOptionsByWorkOrderId}
+          eventsByWorkOrderId={eventsByWorkOrderId}
+          isCoupe={isCoupe}
+          lotsByProductionOrderId={lotsByProductionOrderId}
+          productionOrderOptions={productionOrderOptions}
+          initialOpenWasteBags={openWasteBags}
+          stockItemOptions={stockItemOptions}
+          sizes={await getSizes()}
+        />
+      )}
     </div>
   );
 }
