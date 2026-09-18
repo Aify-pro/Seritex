@@ -91,11 +91,13 @@ export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
   ],
   // Base de cloisonnement partagée par l'infographiste et la PAO : chacun ne
   // voit que l'entrée dont il a le droit `view`. L'infographiste a
-  // `demandes`, la PAO a `patronnage` — la liste est la même, le menu non.
+  // `demandes` (+ `ordres_fabrication`, migration 0050 — circuit de
+  // validation), la PAO a `patronnage` — la liste est la même, le menu non.
   infographiste: [
     { href: "/dashboard", label: "Tableau de bord", icon: navIcon(LayoutDashboard) },
     { href: "/infographie/demandes", label: "Demandes graphiques", icon: navIcon(ImageIcon), module: "demandes" },
     { href: "/atelier/patronnage", label: "Patronnage", icon: navIcon(Ruler), module: "patronnage" },
+    { href: "/atelier/production", label: "Ordres de fabrication", icon: navIcon(Factory), module: "ordres_fabrication" },
   ],
   responsable_production: [
     { href: "/dashboard", label: "Tableau de bord", icon: navIcon(LayoutDashboard) },
@@ -138,6 +140,12 @@ export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
       module: "clients_sage",
     },
     { href: "/parametres/articles-sage", label: "Articles Sage (lecture)", icon: navIcon(Package), section: PARAMETRES, module: "articles_sage" },
+  ],
+  // Circuit de validation de l'ODF (migration 0050) : n'atteste que le
+  // compte client, aucun autre droit sur l'atelier.
+  comptabilite: [
+    { href: "/dashboard", label: "Tableau de bord", icon: navIcon(LayoutDashboard) },
+    { href: "/atelier/production", label: "Ordres de fabrication", icon: navIcon(Factory), module: "ordres_fabrication" },
   ],
   administrateur: [
     { href: "/dashboard", label: "Tableau de bord", icon: navIcon(LayoutDashboard) },

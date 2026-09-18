@@ -120,10 +120,12 @@ const data: OdfPdfData = {
     ["M", 6],
     ["L", 4],
   ],
-  lifecycle: [
-    { event: "Soumis à validation", date: "18 sept. 2026", by: "Sofia Bennani" },
-    { event: "Lancé en production", date: "21 sept. 2026", by: "Karim Elyazidi" },
-    { event: "Clôture demandée", date: "13 oct. 2026", by: "Karim Elyazidi" },
+  circuitValidation: [
+    { event: "Comptabilité — compte client", date: "17 sept. 2026", by: "Fatou Ndiaye" },
+    { event: "Infographie — visuels", date: "En attente", by: "-" },
+    { event: "Échantillon — Polo piqué manches courtes col chemise, broderie poitrine gauche", date: "Validé", by: "-" },
+    { event: "Échantillon — Pantalon de travail multipoches renforcé genoux", date: "À ajuster", by: "-" },
+    { event: "Chef de production — soumission", date: "18 sept. 2026", by: "Sofia Bennani" },
   ],
   clotureNote:
     "Reliquat de 12 pièces en taille L a reporter sur le prochain ODF du meme modele : le tissu recu sur le dernier rouleau presentait un defaut de teinture sur environ 4 metres.",

@@ -12,15 +12,26 @@ import { submitProductionOrder } from "../actions";
  * article sont déjà enregistrées au fil de l'eau (LineSectionsPicker,
  * migration 0037), donc plus de bouton "brouillon" séparé ici : ce panneau
  * ne fait plus que déclencher submit_production_order().
+ *
+ * `comptabiliteOk`/`infographieOk`/`echantillonsOk` reflètent, côté client,
+ * les mêmes gates que submit_production_order() (migration 0050, circuit de
+ * validation) — seulement pour désactiver le bouton avec un message clair
+ * avant de tenter : le contrôle qui fait autorité reste le RPC.
  */
 export function SubmitOdfPanel({
   productionOrderId,
   anySectionChosen,
   linesConfigured,
+  comptabiliteOk,
+  infographieOk,
+  echantillonsOk,
 }: {
   productionOrderId: string;
   anySectionChosen: boolean;
   linesConfigured: boolean;
+  comptabiliteOk: boolean;
+  infographieOk: boolean;
+  echantillonsOk: boolean;
 }) {
   const [pending, startTransition] = useTransition();
 
@@ -32,7 +43,15 @@ export function SubmitOdfPanel({
     });
   }
 
-  const disabled = !anySectionChosen || !linesConfigured;
+  const disabled = !anySectionChosen || !linesConfigured || !comptabiliteOk || !infographieOk || !echantillonsOk;
+
+  const circuitMessage = !comptabiliteOk
+    ? "La validation comptabilité (compte client) est requise avant soumission — voir « Circuit de validation » ci-dessus."
+    : !infographieOk
+      ? "La validation infographie (visuels) est requise avant soumission — voir « Circuit de validation » ci-dessus."
+      : !echantillonsOk
+        ? "Au moins un article porte un échantillon lié qui n'a pas encore le statut « Validé » — voir « Circuit de validation » ci-dessus."
+        : null;
 
   return (
     <Card>
@@ -46,7 +65,7 @@ export function SubmitOdfPanel({
               ? "Chaque article doit avoir son modèle, sa couleur et son dispatching des tailles au complet (voir Configuration produit ci-dessus)."
               : !anySectionChosen
                 ? "Retenez au moins une section sur au moins un article avant de soumettre."
-                : undefined
+                : (circuitMessage ?? undefined)
           }
         >
           <Send className="h-3.5 w-3.5" /> Soumettre pour validation
@@ -57,6 +76,7 @@ export function SubmitOdfPanel({
             dispatching des tailles totalisant exactement sa quantité — voir « Configuration produit » ci-dessus.
           </p>
         )}
+        {anySectionChosen && linesConfigured && circuitMessage && <p className="text-xs text-warning">{circuitMessage}</p>}
       </CardBody>
     </Card>
   );
