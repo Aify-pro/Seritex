@@ -39,10 +39,23 @@ function revalidateOdf(productionOrderId: string) {
  * sections sont choisies à la saisie, pas figées à l'avance. Écriture
  * directe autorisée par la RLS (is_production_manager()), même pattern que
  * `reassignSectionChief` ci-dessous.
+ *
+ * Chaque section porte sa quantité de pièces (migration 0052) : `null` =
+ * quantité totale de l'article. Utile quand plusieurs ateliers d'une même
+ * catégorie se partagent le travail — reprise comme quantité planifiée du
+ * sous-ODF à la validation.
  */
-export async function setProductionOrderLineSections(lineId: string, productionOrderId: string, sectionIds: string[]) {
+export async function setProductionOrderLineSections(
+  lineId: string,
+  productionOrderId: string,
+  sections: { sectionId: string; quantite: number | null }[]
+) {
   await requireRole(["administrateur", "responsable_production"]);
   const supabase = await createClient();
+
+  if (sections.some((s) => s.quantite !== null && (!Number.isInteger(s.quantite) || s.quantite < 0))) {
+    return { error: "La quantité d'une section doit être un nombre entier positif." };
+  }
 
   const { error: delError } = await supabase
     .from("production_order_line_sections")
@@ -50,12 +63,13 @@ export async function setProductionOrderLineSections(lineId: string, productionO
     .eq("production_order_line_id", lineId);
   if (delError) return { error: delError.message };
 
-  if (sectionIds.length > 0) {
+  if (sections.length > 0) {
     const { error: insError } = await supabase.from("production_order_line_sections").insert(
-      sectionIds.map((sectionId, i) => ({
+      sections.map((s, i) => ({
         production_order_line_id: lineId,
-        section_id: sectionId,
+        section_id: s.sectionId,
         ordre: i + 1,
+        quantite: s.quantite,
       }))
     );
     if (insError) return { error: insError.message };
