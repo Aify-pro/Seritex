@@ -89,7 +89,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
       .order("planned_start", { ascending: true }),
     supabase
       .from("sections")
-      .select("id,name,atelier_categories(cle,requiert_fiche_trace,requiert_visuel)")
+      .select("id,name,atelier_categories(nom,cle,requiert_fiche_trace,requiert_visuel)")
       .eq("active", true)
       .order("display_order"),
     // Sections retenues par article (migration 0037, plus par ODF entier) —
@@ -97,7 +97,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     // tables n'ayant pas de production_order_id en commun.
     supabase
       .from("production_order_line_sections")
-      .select("production_order_line_id,section_id,ordre,production_order_lines!inner(production_order_id)")
+      .select("production_order_line_id,section_id,ordre,quantite,production_order_lines!inner(production_order_id)")
       .eq("production_order_lines.production_order_id", id)
       .order("ordre"),
     // ODF multi-lignes : une ligne par article du devis accepté, avec sa
@@ -211,16 +211,16 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
       .filter((s) => (s.atelier_categories as unknown as { requiert_visuel: boolean } | null)?.requiert_visuel)
       .map((s) => s.id)
   );
-  type ChosenLineSection = { production_order_line_id: string; section_id: string; ordre: number };
-  const sectionIdsByLine: Record<string, string[]> = {};
+  type ChosenLineSection = { production_order_line_id: string; section_id: string; ordre: number; quantite: number | null };
+  const sectionsByLine: Record<string, { sectionId: string; quantite: number | null }[]> = {};
   const coupeSelectedByLine: Record<string, boolean> = {};
   const impressionSectionSelectedByLine: Record<string, boolean> = {};
   for (const s of (chosenLineSections ?? []) as unknown as ChosenLineSection[]) {
-    (sectionIdsByLine[s.production_order_line_id] ??= []).push(s.section_id);
+    (sectionsByLine[s.production_order_line_id] ??= []).push({ sectionId: s.section_id, quantite: s.quantite });
     if (coupeSectionIds.has(s.section_id)) coupeSelectedByLine[s.production_order_line_id] = true;
     if (impressionSectionIds.has(s.section_id)) impressionSectionSelectedByLine[s.production_order_line_id] = true;
   }
-  const anySectionChosen = Object.values(sectionIdsByLine).some((ids) => ids.length > 0);
+  const anySectionChosen = Object.values(sectionsByLine).some((sections) => sections.length > 0);
 
   type ChosenLinePrintableZone = { production_order_line_id: string; printable_zone_id: string };
   const printableZoneIdsByLine: Record<string, string[]> = {};
@@ -299,7 +299,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
   type RawLine = NonNullable<typeof productionOrderLines>[number];
   type LineConfig = Omit<
     LineData,
-    | "sectionIds"
+    | "sections"
     | "coupeSelected"
     | "fiche"
     | "impressionSectionSelected"
@@ -494,7 +494,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     const maquetteFromDevisFile = quoteLineId ? maquetteByQuoteLine[quoteLineId] : undefined;
     return {
       ...line,
-      sectionIds: sectionIdsByLine[line.id] ?? [],
+      sections: sectionsByLine[line.id] ?? [],
       coupeSelected: !!coupeSelectedByLine[line.id],
       fiche: fichesByLine[line.id] ?? null,
       impressionSectionSelected: !!impressionSectionSelectedByLine[line.id],
@@ -692,7 +692,11 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
         lines={linesWithConfig}
         productModels={productModels ?? []}
         colors={activeColors ?? []}
-        allSections={allSections ?? []}
+        allSections={(allSections ?? []).map((s) => ({
+          id: s.id,
+          name: s.name,
+          categorieNom: (s.atelier_categories as unknown as { nom: string } | null)?.nom ?? null,
+        }))}
         availableMediaFiles={availableMediaFiles}
         initialNote={order.note_disponibilite_couleurs}
       />
