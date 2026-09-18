@@ -66,20 +66,32 @@ export async function recordWorkOrderQuantity(
   return {};
 }
 
+/** Mesures réelles saisies à la clôture d'un matelas (migration 0053). */
+export type MatelasReel = {
+  /** Pièces obtenues par taille — TOTAL du matelas, toutes couches confondues. */
+  quantitesObtenues: Record<string, number>;
+  nbCouchesReel: number;
+  longueurReelleM: number;
+  laizeReelleCm: number;
+  poidsTissuKg: number;
+  justification?: string;
+};
+
 /**
- * Clôture d'un matelas (lot 4, section Coupe uniquement) — quantités
- * pré-remplies depuis le tracé Patronnage, jamais ressaisies. Comme pour
+ * Clôture d'un matelas (section de catégorie Coupe). Comme pour
  * recordWorkOrderQuantity, aucune vérification de rôle ici : c'est
- * `close_matelas` (SECURITY DEFINER) qui fait autorité (chef de la section
- * Coupe exacte, ou responsable_production/administrateur) et qui refuse
- * toute quantité à la hausse ou tout manquant sans justification.
+ * `close_matelas` (SECURITY DEFINER) qui fait autorité — chef de la section
+ * exacte, ou responsable_production/administrateur — et qui refuse toute
+ * quantité au-delà de « par couche × couches réelles », tout manquant sans
+ * justification, et toute clôture sans pesée de déchets.
+ *
+ * Le poids des déchets n'est plus transmis : `close_matelas` fait la somme
+ * des pesées de sac rattachées au tracé (migration 0053).
  */
 export async function closeMatelas(
   workOrderId: string,
   traceId: string,
-  quantitesObtenues: Record<string, number>,
-  poidsDechetKg: number,
-  justification?: string
+  reel: MatelasReel
 ): Promise<RecordQuantityResult> {
   await requireUser();
   const supabase = await createClient();
@@ -87,9 +99,12 @@ export async function closeMatelas(
   const { error } = await supabase.rpc("close_matelas", {
     p_work_order_id: workOrderId,
     p_trace_id: traceId,
-    p_quantites_obtenues: quantitesObtenues,
-    p_poids_dechet_kg: poidsDechetKg,
-    p_justification: justification?.trim() || null,
+    p_quantites_obtenues: reel.quantitesObtenues,
+    p_nb_couches_reel: reel.nbCouchesReel,
+    p_longueur_reelle_m: reel.longueurReelleM,
+    p_laize_reelle_cm: reel.laizeReelleCm,
+    p_poids_tissu_kg: reel.poidsTissuKg,
+    p_justification: reel.justification?.trim() || null,
   });
 
   if (error) {
@@ -198,7 +213,7 @@ export async function createWasteBag(): Promise<CreateWasteBagResult> {
   return { id: bag.id, code: bag.code };
 }
 
-export type RecordBagWeighingResult = { error: string } | { deltaKg: number };
+export type RecordBagWeighingResult = { error: string } | { id: string; deltaKg: number };
 
 /**
  * Pesée incrémentale d'un sac de déchets — le delta (poids relevé − dernier
@@ -227,7 +242,8 @@ export async function recordBagWeighing(
 
   revalidatePath("/atelier/section");
   revalidatePath("/atelier/production");
-  return { deltaKg: (data as { delta_kg: number }).delta_kg };
+  const row = data as { id: string; delta_kg: number };
+  return { id: row.id, deltaKg: row.delta_kg };
 }
 
 /** Marque un sac "chargé" — poids_total_kg figé sur le dernier relevé. */
@@ -241,4 +257,96 @@ export async function closeWasteBag(sacId: string): Promise<RecordQuantityResult
   revalidatePath("/atelier/section");
   revalidatePath("/dechets");
   return {};
+}
+
+/* ============================================================
+   Fiche d'un sac de déchets — scan depuis le terminal de section
+============================================================ */
+
+export type WasteBagWeighing = {
+  id: string;
+  occurredAt: string;
+  poidsReleveKg: number;
+  deltaKg: number;
+  odfReference: string | null;
+  clientName: string | null;
+  traceReference: string | null;
+  authorName: string | null;
+};
+
+export type WasteBagDetails = {
+  id: string;
+  code: string;
+  statut: "en_cours" | "charge";
+  /** Dernier relevé pour un sac en cours, poids figé pour un sac scellé. */
+  poidsKg: number;
+  createdAt: string;
+  createdByName: string | null;
+  closedAt: string | null;
+  closedByName: string | null;
+  /** Du plus récent au plus ancien. */
+  weighings: WasteBagWeighing[];
+};
+
+export type GetWasteBagResult = { error: string } | { bag: WasteBagDetails };
+
+/**
+ * Lecture seule, sous la RLS de l'utilisateur (sacs et pesées : tout le
+ * personnel sauf le client, migration 0017). Sert à la fois le scan « voir
+ * la traçabilité d'un sac » et le scan « peser les déchets d'un matelas »,
+ * qui a besoin de l'identifiant, du statut et du dernier relevé du sac.
+ */
+export async function getWasteBagByCode(code: string): Promise<GetWasteBagResult> {
+  await requireUser();
+  const supabase = await createClient();
+
+  const { data: bag, error } = await supabase
+    .from("sacs_dechets")
+    .select(
+      "id,code,statut,poids_total_kg,created_at,closed_at,createur:app_users!sacs_dechets_created_by_fkey(full_name),scelleur:app_users!sacs_dechets_closed_by_fkey(full_name)"
+    )
+    .eq("code", code.trim().toUpperCase())
+    .maybeSingle();
+
+  if (error) return { error: error.message };
+  if (!bag) return { error: `Aucun sac de déchets ne porte le code ${code}.` };
+
+  const { data: rows, error: weighingsError } = await supabase
+    .from("sacs_dechets_pesees")
+    .select(
+      "id,poids_releve_kg,delta_kg,occurred_at,production_orders(reference,companies(name)),traces_placement(reference),app_users(full_name)"
+    )
+    .eq("sac_id", bag.id)
+    .order("occurred_at", { ascending: false });
+
+  if (weighingsError) return { error: weighingsError.message };
+
+  const weighings: WasteBagWeighing[] = (rows ?? []).map((w) => {
+    const po = w.production_orders as unknown as { reference: string; companies: { name: string } | null } | null;
+    return {
+      id: w.id as string,
+      occurredAt: w.occurred_at as string,
+      poidsReleveKg: Number(w.poids_releve_kg),
+      deltaKg: Number(w.delta_kg),
+      odfReference: po?.reference ?? null,
+      clientName: po?.companies?.name ?? null,
+      traceReference: (w.traces_placement as unknown as { reference: string } | null)?.reference ?? null,
+      authorName: (w.app_users as unknown as { full_name: string } | null)?.full_name ?? null,
+    };
+  });
+
+  const statut = bag.statut as "en_cours" | "charge";
+  return {
+    bag: {
+      id: bag.id as string,
+      code: bag.code as string,
+      statut,
+      poidsKg: statut === "charge" ? Number(bag.poids_total_kg ?? 0) : (weighings[0]?.poidsReleveKg ?? 0),
+      createdAt: bag.created_at as string,
+      createdByName: (bag.createur as unknown as { full_name: string } | null)?.full_name ?? null,
+      closedAt: (bag.closed_at as string | null) ?? null,
+      closedByName: (bag.scelleur as unknown as { full_name: string } | null)?.full_name ?? null,
+      weighings,
+    },
+  };
 }

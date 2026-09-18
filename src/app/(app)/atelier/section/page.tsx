@@ -8,6 +8,7 @@ import type {
   WorkOrderRow,
   WorkOrderContext,
   MatelasRow,
+  MatelasDechetRow,
   TraceOption,
   ArticleLotOption,
   ProductionOrderOption,
@@ -86,8 +87,8 @@ export default async function SectionQueuePage({
   // Lot 4, généralisé migration 0036 : section de catégorie Coupe uniquement
   // (cle='coupe', plus seulement le nom "Coupe") — un matelas = un tracé
   // Patronnage d'une fiche "Bon pour coupe" liée à l'ODF du sous-ODF.
-  // Pré-remplissage des quantités depuis repartition_par_couche (section 13
-  // du document de logique) — jamais ressaisies par l'opérateur.
+  // Totaux pré-remplis depuis repartition_par_couche × couches réelles
+  // (migration 0053) — l'opérateur ne corrige que ce qui manque.
   const isCoupe = (section?.atelier_categories as unknown as { cle: string } | null)?.cle === "coupe";
   const contextByWorkOrderId: Record<string, WorkOrderContext> = {};
   const matelasByWorkOrderId: Record<string, MatelasRow[]> = {};
@@ -142,6 +143,114 @@ export default async function SectionQueuePage({
       });
     }
 
+    // Migration 0037 : une fiche par article (production_order_line_id),
+    // plus une seule par ODF entier — les matelas d'un OT se retrouvent
+    // désormais directement via l'article de CET OT précis, plus besoin de
+    // passer par l'ODF entier (deux OT Coupe du même ODF, un par article, ne
+    // se mélangent plus).
+    const { data: fiches } = await supabase
+      .from("fiches_placement")
+      .select(
+        "id,numero_ot,production_order_line_id,tissu_type,couleur,grammage,traces_placement(id,ordre,reference,reference_patron,longueur_matelas_m,largeur_matelas_cm,nb_plis,repartition_par_couche,est_correctif,approuve_par,justification)"
+      )
+      .in("production_order_line_id", lineIds)
+      .eq("statut", "bon_pour_coupe");
+
+    const { data: closedEvents } = await supabase
+      .from("work_order_events")
+      .select("trace_id")
+      .eq("event_type", "matelas_cloture")
+      .in(
+        "work_order_id",
+        workOrders.map((wo) => wo.id)
+      );
+    const closedTraceIds = new Set((closedEvents ?? []).map((e) => e.trace_id as string));
+
+    // Déchets déjà pesés pour les matelas encore ouverts : le chef de section
+    // peut peser (scan du sac), fermer la fiche et revenir clôturer plus tard
+    // — ce qui a été pesé doit réapparaître, c'est ce total que
+    // close_matelas retiendra (migration 0053).
+    const openTraceIds = (fiches ?? [])
+      .flatMap((f) => ((f.traces_placement ?? []) as unknown as { id: string }[]).map((t) => t.id))
+      .filter((id) => !closedTraceIds.has(id));
+    const dechetsByTraceId: Record<string, MatelasDechetRow[]> = {};
+    if (openTraceIds.length > 0) {
+      const { data: dechets } = await supabase
+        .from("sacs_dechets_pesees")
+        .select("id,trace_id,delta_kg,occurred_at,sacs_dechets(code)")
+        .in("trace_id", openTraceIds)
+        .order("occurred_at", { ascending: true });
+      for (const d of dechets ?? []) {
+        (dechetsByTraceId[d.trace_id as string] ??= []).push({
+          id: d.id as string,
+          bagCode: (d.sacs_dechets as unknown as { code: string } | null)?.code ?? "—",
+          deltaKg: Number(d.delta_kg),
+          occurredAt: d.occurred_at as string,
+        });
+      }
+    }
+
+    const matelasByLineId: Record<string, MatelasRow[]> = {};
+    const traceOptionsByLineId: Record<string, TraceOption[]> = {};
+    const numeroOtByLineId: Record<string, string> = {};
+    for (const fiche of fiches ?? []) {
+      const lineId = fiche.production_order_line_id as string;
+      numeroOtByLineId[lineId] = fiche.numero_ot as string;
+      const traces = (fiche.traces_placement ?? []) as unknown as {
+        id: string;
+        ordre: number;
+        reference: string;
+        reference_patron: string | null;
+        longueur_matelas_m: number | null;
+        largeur_matelas_cm: number | null;
+        nb_plis: number | null;
+        repartition_par_couche: Record<string, number>;
+        est_correctif: boolean;
+        approuve_par: string | null;
+        justification: string | null;
+      }[];
+      const usable = traces.filter((t) => !t.est_correctif || t.approuve_par);
+      matelasByLineId[lineId] = usable
+        .filter((t) => !closedTraceIds.has(t.id))
+        .sort((a, b) => a.ordre - b.ordre)
+        .map((t) => ({
+          id: t.id,
+          reference: t.reference,
+          referencePatron: t.reference_patron,
+          repartitionParCouche: t.repartition_par_couche ?? {},
+          nbPlis: t.nb_plis,
+          longueurM: t.longueur_matelas_m,
+          laizeCm: t.largeur_matelas_cm,
+          tissu: (fiche.tissu_type as string | null) ?? null,
+          couleur: (fiche.couleur as string | null) ?? null,
+          grammage: (fiche.grammage as number | null) ?? null,
+          estCorrectif: t.est_correctif,
+          justification: t.justification,
+          dechets: dechetsByTraceId[t.id] ?? [],
+        }));
+      // Lot 6 : le tracé d'origine (optionnel) d'un lot article peut être
+      // n'importe quel matelas de la fiche, clôturé ou non.
+      traceOptionsByLineId[lineId] = usable
+        .sort((a, b) => a.ordre - b.ordre)
+        .map((t) => ({ id: t.id, reference: t.reference }));
+    }
+
+    for (const wo of workOrders) {
+      const lineId = wo.production_order_line_id;
+      if (lineId && matelasByLineId[lineId]) matelasByWorkOrderId[wo.id] = matelasByLineId[lineId];
+      if (lineId && traceOptionsByLineId[lineId]) traceOptionsByWorkOrderId[wo.id] = traceOptionsByLineId[lineId];
+      if (lineId && numeroOtByLineId[lineId]) {
+        contextByWorkOrderId[wo.id] = {
+          numeroOt: numeroOtByLineId[lineId],
+          articleDescription: null,
+        };
+      }
+    }
+  }
+
+  // Sacs ouverts : chargés même quand la file est vide — on prépare souvent
+  // ses sacs avant le premier matelas.
+  if (isCoupe) {
     // Sacs de déchets ouverts — indépendants de tout ODF en propre (mélange
     // de productions accepté, section 17), donc listés au niveau section,
     // pas par sous-ODF.
@@ -170,74 +279,6 @@ export default async function SectionQueuePage({
       currentWeightKg: lastWeightBySacId[b.id] ?? 0,
       createdAt: b.created_at,
     }));
-
-    // Migration 0037 : une fiche par article (production_order_line_id),
-    // plus une seule par ODF entier — les matelas d'un OT se retrouvent
-    // désormais directement via l'article de CET OT précis, plus besoin de
-    // passer par l'ODF entier (deux OT Coupe du même ODF, un par article, ne
-    // se mélangent plus).
-    const { data: fiches } = await supabase
-      .from("fiches_placement")
-      .select(
-        "id,numero_ot,production_order_line_id,traces_placement(id,ordre,reference,repartition_par_couche,est_correctif,approuve_par,justification)"
-      )
-      .in("production_order_line_id", lineIds)
-      .eq("statut", "bon_pour_coupe");
-
-    const { data: closedEvents } = await supabase
-      .from("work_order_events")
-      .select("trace_id")
-      .eq("event_type", "matelas_cloture")
-      .in(
-        "work_order_id",
-        workOrders.map((wo) => wo.id)
-      );
-    const closedTraceIds = new Set((closedEvents ?? []).map((e) => e.trace_id as string));
-
-    const matelasByLineId: Record<string, MatelasRow[]> = {};
-    const traceOptionsByLineId: Record<string, TraceOption[]> = {};
-    const numeroOtByLineId: Record<string, string> = {};
-    for (const fiche of fiches ?? []) {
-      const lineId = fiche.production_order_line_id as string;
-      numeroOtByLineId[lineId] = fiche.numero_ot as string;
-      const traces = (fiche.traces_placement ?? []) as unknown as {
-        id: string;
-        ordre: number;
-        reference: string;
-        repartition_par_couche: Record<string, number>;
-        est_correctif: boolean;
-        approuve_par: string | null;
-        justification: string | null;
-      }[];
-      const usable = traces.filter((t) => !t.est_correctif || t.approuve_par);
-      matelasByLineId[lineId] = usable
-        .filter((t) => !closedTraceIds.has(t.id))
-        .sort((a, b) => a.ordre - b.ordre)
-        .map((t) => ({
-          id: t.id,
-          reference: t.reference,
-          repartitionParCouche: t.repartition_par_couche ?? {},
-          estCorrectif: t.est_correctif,
-          justification: t.justification,
-        }));
-      // Lot 6 : le tracé d'origine (optionnel) d'un lot article peut être
-      // n'importe quel matelas de la fiche, clôturé ou non.
-      traceOptionsByLineId[lineId] = usable
-        .sort((a, b) => a.ordre - b.ordre)
-        .map((t) => ({ id: t.id, reference: t.reference }));
-    }
-
-    for (const wo of workOrders) {
-      const lineId = wo.production_order_line_id;
-      if (lineId && matelasByLineId[lineId]) matelasByWorkOrderId[wo.id] = matelasByLineId[lineId];
-      if (lineId && traceOptionsByLineId[lineId]) traceOptionsByWorkOrderId[wo.id] = traceOptionsByLineId[lineId];
-      if (lineId && numeroOtByLineId[lineId]) {
-        contextByWorkOrderId[wo.id] = {
-          numeroOt: numeroOtByLineId[lineId],
-          articleDescription: null,
-        };
-      }
-    }
   }
 
   if (!isStockManager && workOrders && workOrders.length > 0) {
@@ -300,7 +341,7 @@ export default async function SectionQueuePage({
           isStockManager
             ? "Sortie lot et retour stock — changez de section ci-contre si besoin."
             : isCoupe
-              ? "Clôturez les matelas au fur et à mesure — quantités pré-remplies depuis le Patronnage."
+              ? "Ouvrez un matelas pour voir son tracé et saisir le réel — déchets pesés par scan du sac."
               : "Ajoutez la quantité produite au fur et à mesure sur vos ordres de travail."
         }
         action={sections.length > 0 ? <SectionSwitcher sections={sections} value={sectionId} /> : undefined}
@@ -339,10 +380,7 @@ export default async function SectionQueuePage({
           traceOptionsByWorkOrderId={traceOptionsByWorkOrderId}
           eventsByWorkOrderId={eventsByWorkOrderId}
           isCoupe={isCoupe}
-          lotsByProductionOrderId={lotsByProductionOrderId}
-          productionOrderOptions={productionOrderOptions}
           initialOpenWasteBags={openWasteBags}
-          stockItemOptions={stockItemOptions}
           sizes={await getSizes()}
         />
       )}
