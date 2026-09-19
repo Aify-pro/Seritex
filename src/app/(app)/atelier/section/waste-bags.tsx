@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, ArrowLeft, ChevronRight, ExternalLink, Lock, Plus, QrCode, ScanLine, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ChevronRight, ExternalLink, Lock, Plus, Printer, QrCode, ScanLine, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog } from "@/components/ui/dialog";
@@ -118,6 +118,25 @@ export function WasteBagsDialog({
                 <ScanLine className="h-4 w-4" /> Scanner un sac
               </Button>
             </div>
+
+            {bags.length > 0 ? (
+              <a
+                href="/api/dechets/etiquettes"
+                target="_blank"
+                rel="noreferrer"
+                className="flex min-h-9 w-full items-center justify-center gap-2 rounded-md border border-border bg-surface px-4 text-sm font-medium text-foreground transition-colors duration-150 hover:bg-surface-muted"
+              >
+                <Printer className="h-4 w-4" /> Générer les QR codes ({bags.length} sac{bags.length > 1 ? "s" : ""} en
+                cours, planche A4)
+              </a>
+            ) : (
+              <p
+                aria-disabled
+                className="flex min-h-9 w-full cursor-not-allowed items-center justify-center gap-2 rounded-md border border-border bg-surface px-4 text-sm font-medium text-foreground-muted opacity-50"
+              >
+                <Printer className="h-4 w-4" /> Générer les QR codes (aucun sac en cours)
+              </p>
+            )}
 
             {error && <ErrorBox message={error} />}
             {loading && <p className="text-xs text-foreground-muted">Chargement du sac…</p>}
