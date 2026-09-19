@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { Printer, Loader2 } from "lucide-react";
+import QRCode from "qrcode";
 import { cn } from "@/lib/utils";
 
 export type LabelPrintData = {
@@ -36,13 +37,22 @@ export function LabelPrintButton({ code, url, createdAt, sealedLine }: LabelPrin
 
   function print() {
     setPrinting(true);
+    // Le QR est plus ou moins dense selon l'URL : on prend le plus gros module qui tienne dans
+    // les 384 points imprimables du rouleau 58 mm (376 pour laisser un souffle de marge).
+    const modules = QRCode.create(url, { errorCorrectionLevel: "M" }).modules.size;
     const payload = {
-      header: "SERITEX · SAC DE DÉCHETS",
-      qrData: url,
-      code,
-      infoLine: sealedLine ? `Créé le ${createdAt} · ${sealedLine}` : `Créé le ${createdAt}`,
+      ops: [
+        { op: "align", v: 1 },
+        { op: "text", v: "SERITEX · SAC DE DÉCHETS", size: 26 },
+        { op: "feed", n: 1 },
+        { op: "qr", v: url, module: Math.max(1, Math.min(16, Math.floor(376 / modules))), level: 1 },
+        { op: "feed", n: 1 },
+        { op: "text", v: code, size: 40 },
+        { op: "text", v: sealedLine ? `Créé le ${createdAt} · ${sealedLine}` : `Créé le ${createdAt}`, size: 20 },
+        { op: "feed", n: 4 },
+      ],
     };
-    window.location.href = `sunmiprint://label?data=${encodeURIComponent(base64EncodeUtf8(JSON.stringify(payload)))}`;
+    window.location.href = `sunmiprint://commands?data=${encodeURIComponent(base64EncodeUtf8(JSON.stringify(payload)))}`;
     toast.info("Impression envoyée à l'imprimante de la tablette", {
       description: "Rien ne sort ? Vérifiez que l'app SunmiPrintBridge est installée sur ce terminal.",
     });
