@@ -53,6 +53,11 @@ export type MatelasRow = {
   justification: string | null;
   /** Pesées de sac déjà faites pour ce matelas, de la plus ancienne à la plus récente. */
   dechets: MatelasDechetRow[];
+  /**
+   * Renseigné quand le matelas est clôturé : il reste dans la liste, marqué
+   * terminé, et ses quantités obtenues par taille servent aux étiquettes.
+   */
+  cloture: { occurredAt: string; quantitesObtenues: Record<string, number> } | null;
 };
 
 /** Lot 6 : tracé d'origine optionnel d'un lot article — clôturé ou non. */

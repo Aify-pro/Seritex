@@ -116,6 +116,50 @@ export async function buildWasteBagsSheetPdf(bags: WasteBagLabelData[]): Promise
   return pdf.save();
 }
 
+/** Étiquette générique de la planche A4 : SERITEX, QR, puis trois lignes de texte (grosse, moyenne, petite). */
+export type SheetLabel = { url: string; lines: [string, string, string] };
+
+/**
+ * Planche A4 d'étiquettes 52 × 60 mm à trois lignes de texte, même grille et
+ * même QR vectoriel que les étiquettes de sacs. Sert les étiquettes de lot de
+ * la Coupe (sous-ODF, taille et quantité, date), une par taille.
+ */
+export async function buildLabelSheetPdf(labels: SheetLabel[], title: string): Promise<Uint8Array> {
+  const pdf = await PDFDocument.create();
+  pdf.setTitle(title);
+  pdf.setCreator("Seritex");
+  const fonts = {
+    regular: await pdf.embedFont(StandardFonts.Helvetica),
+    bold: await pdf.embedFont(StandardFonts.HelveticaBold),
+    mono: await pdf.embedFont(StandardFonts.CourierBold),
+  };
+
+  for (let i = 0; i < labels.length; i += A4_MAX_COPIES) {
+    const page = pdf.addPage([A4_W, A4_H]);
+    labels.slice(i, i + A4_MAX_COPIES).forEach((label, idx) => {
+      const { x, y } = gridCell(idx);
+      const cx = x + LABEL_W / 2;
+      const maxW = LABEL_W - 6 * MM;
+      const [big, medium, small] = label.lines;
+      drawCutMarks(page, x, y);
+
+      let cursor = y + LABEL_H - 2.5 * MM - 5 * MM;
+      centerText(page, "SERITEX", cx, cursor, fonts.bold, 14);
+      const qrSize = 32 * MM;
+      cursor -= 2.5 * MM + qrSize;
+      drawQr(page, QRCode.create(label.url, { errorCorrectionLevel: "M" }), cx - qrSize / 2, cursor, qrSize);
+      cursor -= 5.5 * MM;
+      centerText(page, big, cx, cursor, fonts.mono, fitSize(big, fonts.mono, 11, maxW));
+      cursor -= 4.5 * MM;
+      centerText(page, medium, cx, cursor, fonts.bold, fitSize(medium, fonts.bold, 9, maxW));
+      cursor -= 4 * MM;
+      centerText(page, small, cx, cursor, fonts.regular, fitSize(small, fonts.regular, 8, maxW));
+    });
+  }
+
+  return pdf.save();
+}
+
 /** Date au format compact utilisé sur les étiquettes (ex. « 18/09/2026 »). */
 export function formatLabelDate(value: string) {
   return new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" }).format(
