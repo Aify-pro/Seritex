@@ -1,7 +1,10 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_PATHS = ["/login", "/auth", "/api/health"];
+// Les écrans de mot de passe oublié/réinitialisation sont publics : ils sont
+// atteints sans session (ou avec la seule session de récupération créée par
+// /auth/confirm) ; chacun contrôle lui-même ce dont il a besoin.
+const PUBLIC_PATHS = ["/login", "/auth", "/api/health", "/mot-de-passe-oublie", "/reinitialiser-mot-de-passe"];
 
 /** Préfixes de route → rôles autorisés. Défense en profondeur : la RLS reste
  * la garantie ultime, mais on évite ici de laisser un rôle non concerné

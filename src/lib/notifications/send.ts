@@ -1,5 +1,7 @@
 import "server-only";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { getResendClient } from "./client";
 import { renderTemplate } from "./template";
 import { wrapHtml } from "./wrapper";
@@ -15,6 +17,15 @@ export type SendNotificationInput = {
   isTest?: boolean;
   /** Réservé à sendTestNotification() : envoie même si l'événement est désactivé. */
   bypassEnabledCheck?: boolean;
+  /**
+   * Lit la configuration et écrit le journal avec le client service_role
+   * plutôt qu'avec la session de l'appelant. Réservé aux envois sans session :
+   * « mot de passe oublié » est déclenché par quelqu'un qui n'est pas connecté,
+   * donc soumis à la RLS `authenticated` de notification_events/log. L'appelant
+   * reste responsable de n'utiliser cette option que sur un chemin déjà
+   * contrôlé (destinataire résolu côté serveur, jamais saisi tel quel).
+   */
+  useServiceRole?: boolean;
 };
 
 export type SendNotificationResult = {
@@ -46,11 +57,8 @@ type LogRow = {
  */
 export async function sendNotification(eventKey: string, input: SendNotificationInput): Promise<SendNotificationResult> {
   try {
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    const triggeredBy = user?.id ?? null;
+    const supabase = input.useServiceRole ? createAdminClient() : await createClient();
+    const triggeredBy = input.useServiceRole ? null : ((await supabase.auth.getUser()).data.user?.id ?? null);
 
     const [{ data: event }, { data: style }] = await Promise.all([
       supabase.from("notification_events").select("*").eq("event_key", eventKey).maybeSingle(),
@@ -202,7 +210,7 @@ export async function sendNotification(eventKey: string, input: SendNotification
   }
 }
 
-async function insertLogRows(supabase: Awaited<ReturnType<typeof createClient>>, rows: LogRow[]) {
+async function insertLogRows(supabase: SupabaseClient, rows: LogRow[]) {
   if (rows.length === 0) return;
   const { error } = await supabase.from("notification_log").insert(rows);
   if (error) console.error("[notifications] Échec de l'écriture dans notification_log :", error.message);

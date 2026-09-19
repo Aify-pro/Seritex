@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
+import Link from "next/link";
 import { motion } from "framer-motion";
 import { signInAction, type LoginState } from "./actions";
 import { Button } from "@/components/ui/button";
@@ -43,9 +44,14 @@ export function LoginForm({ next }: { next?: string }) {
         </div>
 
         <div>
-          <label htmlFor="password" className="mb-1.5 block text-xs font-medium text-foreground">
-            Mot de passe
-          </label>
+          <div className="mb-1.5 flex items-center justify-between">
+            <label htmlFor="password" className="text-xs font-medium text-foreground">
+              Mot de passe
+            </label>
+            <Link href="/mot-de-passe-oublie" className="text-xs text-brand hover:underline">
+              Mot de passe oublié ?
+            </Link>
+          </div>
           <div className="relative">
             <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-foreground-muted" />
             <input

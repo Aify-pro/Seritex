@@ -97,6 +97,10 @@ export interface AppUser {
   section_id: string | null;
   contact_id: string | null;
   active: boolean;
+  phone: string | null;
+  job_title: string | null;
+  must_change_password: boolean;
+  password_changed_at: string | null;
   created_at: string;
 }
 
