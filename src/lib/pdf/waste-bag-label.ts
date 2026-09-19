@@ -75,22 +75,63 @@ export async function buildWasteBagLabelPdf(
   } else {
     const page = pdf.addPage([A4_W, A4_H]);
     const n = Math.min(Math.max(1, Math.floor(copies)), A4_MAX_COPIES);
-    const gridW = A4_COLS * LABEL_W + (A4_COLS - 1) * A4_GAP_X;
-    const gridH = A4_ROWS * LABEL_H + (A4_ROWS - 1) * A4_GAP_Y;
-    const left = (A4_W - gridW) / 2;
-    const top = A4_H - (A4_H - gridH) / 2;
-
     for (let i = 0; i < n; i++) {
-      const col = i % A4_COLS;
-      const row = Math.floor(i / A4_COLS);
-      const x = left + col * (LABEL_W + A4_GAP_X);
-      const y = top - (row + 1) * LABEL_H - row * A4_GAP_Y;
+      const { x, y } = gridCell(i);
       drawCutMarks(page, x, y);
       drawLabel(page, x, y, data, qr, fonts);
     }
   }
 
   return pdf.save();
+}
+
+/**
+ * Planche A4 de plusieurs sacs différents — un QR chacun, jusqu'à
+ * `A4_MAX_COPIES` par page, pagination automatique au-delà. Sert le menu
+ * principal des sacs de déchets : générer d'un coup les étiquettes de tous
+ * les sacs en cours, à découper.
+ */
+export async function buildWasteBagsSheetPdf(bags: WasteBagLabelData[]): Promise<Uint8Array> {
+  const pdf = await PDFDocument.create();
+  pdf.setTitle("Étiquettes des sacs de déchets");
+  pdf.setCreator("Seritex");
+
+  const fonts = {
+    regular: await pdf.embedFont(StandardFonts.Helvetica),
+    bold: await pdf.embedFont(StandardFonts.HelveticaBold),
+    mono: await pdf.embedFont(StandardFonts.CourierBold),
+  };
+
+  for (let i = 0; i < bags.length; i += A4_MAX_COPIES) {
+    const page = pdf.addPage([A4_W, A4_H]);
+    const slice = bags.slice(i, i + A4_MAX_COPIES);
+    slice.forEach((bag, idx) => {
+      const qr = QRCode.create(bag.url, { errorCorrectionLevel: "M" });
+      const { x, y } = gridCell(idx);
+      drawCutMarks(page, x, y);
+      drawLabel(page, x, y, bag, qr, fonts);
+    });
+  }
+
+  return pdf.save();
+}
+
+/** Date au format compact utilisé sur les étiquettes (ex. « 18/09/2026 »). */
+export function formatLabelDate(value: string) {
+  return new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" }).format(
+    new Date(value)
+  );
+}
+
+/** Position (coin bas-gauche) de la cellule `index` (0-based) dans la grille 3 × 4 de la planche A4. */
+function gridCell(index: number): { x: number; y: number } {
+  const gridW = A4_COLS * LABEL_W + (A4_COLS - 1) * A4_GAP_X;
+  const gridH = A4_ROWS * LABEL_H + (A4_ROWS - 1) * A4_GAP_Y;
+  const left = (A4_W - gridW) / 2;
+  const top = A4_H - (A4_H - gridH) / 2;
+  const col = index % A4_COLS;
+  const row = Math.floor(index / A4_COLS);
+  return { x: left + col * (LABEL_W + A4_GAP_X), y: top - (row + 1) * LABEL_H - row * A4_GAP_Y };
 }
 
 function drawLabel(

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server";
 import { getBaseUrl } from "@/lib/url";
-import { buildWasteBagLabelPdf, A4_MAX_COPIES, type WasteBagLabelFormat } from "@/lib/pdf/waste-bag-label";
+import { buildWasteBagLabelPdf, formatLabelDate, A4_MAX_COPIES, type WasteBagLabelFormat } from "@/lib/pdf/waste-bag-label";
 
 /**
  * Étiquette imprimable d'un sac de déchets — `?format=thermique` (une
@@ -36,7 +36,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ code
     {
       code: bag.code,
       url: `${await getBaseUrl()}/dechets/${bag.code}`,
-      createdAt: formatDate(bag.created_at),
+      createdAt: formatLabelDate(bag.created_at),
       sealedLine:
         bag.statut === "charge" && bag.poids_total_kg !== null
           ? `Scellé ${Number(bag.poids_total_kg).toLocaleString("fr-FR", { maximumFractionDigits: 2 })} kg`
@@ -53,10 +53,4 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ code
       "Cache-Control": "no-store",
     },
   });
-}
-
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" }).format(
-    new Date(value)
-  );
 }
