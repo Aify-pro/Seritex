@@ -158,13 +158,22 @@ export default async function SectionQueuePage({
 
     const { data: closedEvents } = await supabase
       .from("work_order_events")
-      .select("trace_id")
+      .select("trace_id,occurred_at,quantites_obtenues")
       .eq("event_type", "matelas_cloture")
       .in(
         "work_order_id",
         workOrders.map((wo) => wo.id)
       );
     const closedTraceIds = new Set((closedEvents ?? []).map((e) => e.trace_id as string));
+    const clotureByTraceId = new Map(
+      (closedEvents ?? []).map((e) => [
+        e.trace_id as string,
+        {
+          occurredAt: e.occurred_at as string,
+          quantitesObtenues: (e.quantites_obtenues ?? {}) as Record<string, number>,
+        },
+      ])
+    );
 
     // Déchets déjà pesés pour les matelas encore ouverts : le chef de section
     // peut peser (scan du sac), fermer la fiche et revenir clôturer plus tard
@@ -210,8 +219,8 @@ export default async function SectionQueuePage({
         justification: string | null;
       }[];
       const usable = traces.filter((t) => !t.est_correctif || t.approuve_par);
+      // Un matelas clôturé reste dans la liste, marqué terminé (étiquettes du lot).
       matelasByLineId[lineId] = usable
-        .filter((t) => !closedTraceIds.has(t.id))
         .sort((a, b) => a.ordre - b.ordre)
         .map((t) => ({
           id: t.id,
@@ -227,6 +236,7 @@ export default async function SectionQueuePage({
           estCorrectif: t.est_correctif,
           justification: t.justification,
           dechets: dechetsByTraceId[t.id] ?? [],
+          cloture: clotureByTraceId.get(t.id) ?? null,
         }));
       // Lot 6 : le tracé d'origine (optionnel) d'un lot article peut être
       // n'importe quel matelas de la fiche, clôturé ou non.

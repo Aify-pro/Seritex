@@ -21,6 +21,7 @@ import { formatDateTime, cn } from "@/lib/utils";
 import { recordWorkOrderQuantity, closeMatelas, createArticleLot } from "./actions";
 import { reportAnomaly } from "../production/actions";
 import { QrScanButton } from "./qr-scan-button";
+import { MatelasClosedDialog } from "./matelas-closed-dialog";
 import { QueueSearch, normalizeSearch, type Suggestion } from "./queue-search";
 import { WasteBagsDialog, MatelasWastePesee, formatKg } from "./waste-bags";
 import {
@@ -508,7 +509,17 @@ function WorkOrderAccordionRow({
         )}
       </AnimatePresence>
 
-      {openMatelas && (
+      {openMatelas?.cloture && (
+        <MatelasClosedDialog
+          key={openMatelas.id}
+          workOrderId={wo.id}
+          workOrderReference={wo.reference}
+          productionOrderId={wo.production_order_id}
+          matelas={openMatelas}
+          onClose={() => setOpenMatelasId(null)}
+        />
+      )}
+      {openMatelas && !openMatelas.cloture && (
         <MatelasDetailDialog
           key={openMatelas.id}
           workOrderId={wo.id}
@@ -558,9 +569,12 @@ function MatelasList({
     return <p className="text-xs text-foreground-muted">Aucun matelas en attente de clôture.</p>;
   }
 
+  // À clôturer d'abord ; les terminés restent visibles en dessous.
+  const ordered = [...matelas.filter((m) => !m.cloture), ...matelas.filter((m) => m.cloture)];
+
   return (
     <ul className="divide-y divide-border overflow-hidden rounded-md border border-border">
-      {matelas.map((m) => {
+      {ordered.map((m) => {
         const dechetsKg = m.dechets.reduce((sum, d) => sum + d.deltaKg, 0);
         return (
           <li key={m.id}>
@@ -575,10 +589,19 @@ function MatelasList({
                 highlightMatelasId === m.id && "bg-brand-soft/40 ring-2 ring-inset ring-brand/40"
               )}
             >
-              <Scissors className="h-4 w-4 shrink-0 text-foreground-muted" />
+              {m.cloture ? (
+                <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
+              ) : (
+                <Scissors className="h-4 w-4 shrink-0 text-foreground-muted" />
+              )}
               <span className="min-w-0 flex-1">
                 <span className="flex items-center gap-2">
                   <span className="truncate text-sm font-medium text-foreground">{m.reference}</span>
+                  {m.cloture && (
+                    <span className="shrink-0 rounded-sm bg-success-soft px-1.5 py-0.5 text-[10px] font-medium text-success">
+                      terminé
+                    </span>
+                  )}
                   {m.estCorrectif && (
                     <span className="shrink-0 rounded-sm bg-warning-soft px-1.5 py-0.5 text-[10px] font-medium text-warning">
                       rattrapage
@@ -587,6 +610,7 @@ function MatelasList({
                 </span>
                 <span className="block truncate text-xs text-foreground-muted">
                   {[
+                    m.cloture ? `clôturé le ${formatDateTime(m.cloture.occurredAt)}` : null,
                     m.nbPlis ? `${m.nbPlis} couches` : null,
                     m.longueurCm ? `${fmt(m.longueurCm)} cm` : null,
                     dechetsKg > 0 ? `déchets pesés ${formatKg(dechetsKg)}` : null,
