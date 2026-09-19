@@ -1,4 +1,6 @@
+import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth/current-user";
+import { createClient } from "@/lib/supabase/server";
 import { getPermissionMap } from "@/lib/auth/permissions";
 import { NAV_BY_ROLE } from "@/lib/auth/nav";
 import { SidebarNav } from "@/components/shell/sidebar-nav";
@@ -8,7 +10,13 @@ import { Shirt } from "lucide-react";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const { profile } = await requireUser();
+  // Compte créé avec un mot de passe provisoire (ou réinitialisation exigée) :
+  // rien d'autre n'est accessible tant que l'utilisateur n'a pas choisi le sien.
+  if (profile.must_change_password) redirect("/reinitialiser-mot-de-passe");
   const permissions = await getPermissionMap();
+  // Libellé du rôle métier (« Direction »…) plutôt que celui du rôle de base.
+  const supabase = await createClient();
+  const { data: roleRow } = await supabase.from("roles").select("label").eq("id", profile.role_id).maybeSingle();
 
   // Une entrée rattachée à un module de droits n'apparaît que si le rôle a
   // `view` dessus : un module sans droit n'est pas grisé ni refusé à
@@ -39,7 +47,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             </div>
           </div>
           <div className="hidden md:block" />
-          <UserMenu fullName={profile.full_name} role={profile.role} email={profile.email} />
+          <UserMenu fullName={profile.full_name} role={profile.role} roleLabel={roleRow?.label} email={profile.email} />
         </header>
 
         <main className="flex-1 bg-background px-4 py-6 md:px-8 md:py-8">

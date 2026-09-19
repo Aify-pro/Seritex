@@ -1,30 +1,30 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { KeyRound, MailCheck, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { createUserAccount } from "../actions";
-import { ROLE_LABELS, type UserRole } from "@/lib/types/domain";
-import { KeyRound, Plus } from "lucide-react";
-
-const ROLES = Object.keys(ROLE_LABELS) as UserRole[];
+import { createUserAccount, type CreateUserResult } from "./actions";
+import { UserFields, type RoleOption } from "./user-fields";
 
 export function NewUserForm({
+  roles,
   companies,
   sections,
   contacts,
 }: {
+  roles: RoleOption[];
   companies: { id: string; name: string }[];
   sections: { id: string; name: string }[];
   contacts: { id: string; company_id: string; first_name: string; last_name: string }[];
 }) {
-  const [role, setRole] = useState<UserRole>("commercial");
-  const [companyId, setCompanyId] = useState("");
+  const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [credentials, setCredentials] = useState<{ email: string; tempPassword: string } | null>(null);
   const [open, setOpen] = useState(false);
-
-  const contactsForCompany = contacts.filter((c) => c.company_id === companyId);
+  const [result, setResult] = useState<CreateUserResult | null>(null);
+  // Remonté à chaque succès pour vider le formulaire (les champs sont non contrôlés).
+  const [formKey, setFormKey] = useState(0);
 
   if (!open) {
     return (
@@ -35,98 +35,34 @@ export function NewUserForm({
   }
 
   return (
-    <div className="space-y-3 rounded-md border border-border bg-surface-muted/50 p-4">
+    <div className="w-full space-y-3 rounded-lg border border-border bg-surface-muted/50 p-4 sm:max-w-2xl">
       <form
+        key={formKey}
         action={(formData) =>
           startTransition(async () => {
             const res = await createUserAccount(formData);
-            if (res.error) toast.error(res.error);
-            else {
-              toast.success("Compte créé");
-              setCredentials({ email: res.email!, tempPassword: res.tempPassword! });
+            if (res.error) {
+              toast.error(res.error);
+              return;
             }
+            toast.success("Compte créé");
+            setResult(res);
+            setFormKey((k) => k + 1);
+            router.refresh();
           })
         }
         className="grid grid-cols-1 gap-3 sm:grid-cols-2"
       >
-        <div>
-          <label className="mb-1 block text-xs font-medium text-foreground">Nom complet</label>
-          <input name="full_name" required className="h-9 w-full rounded-md border border-border bg-surface px-2 text-sm" />
-        </div>
-        <div>
-          <label className="mb-1 block text-xs font-medium text-foreground">E-mail</label>
-          <input name="email" type="email" required className="h-9 w-full rounded-md border border-border bg-surface px-2 text-sm" />
-        </div>
-        <div>
-          <label className="mb-1 block text-xs font-medium text-foreground">Rôle</label>
-          <select
-            name="role"
-            value={role}
-            onChange={(e) => setRole(e.target.value as UserRole)}
-            className="h-9 w-full rounded-md border border-border bg-surface px-2 text-sm"
-          >
-            {ROLES.map((r) => (
-              <option key={r} value={r}>
-                {ROLE_LABELS[r]}
-              </option>
-            ))}
-          </select>
-        </div>
-        {role === "client" && (
-          <div>
-            <label className="mb-1 block text-xs font-medium text-foreground">Entreprise</label>
-            <select
-              name="company_id"
-              required
-              value={companyId}
-              onChange={(e) => setCompanyId(e.target.value)}
-              className="h-9 w-full rounded-md border border-border bg-surface px-2 text-sm"
-            >
-              <option value="">—</option>
-              {companies.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-        {role === "client" && (
-          <div>
-            <label className="mb-1 block text-xs font-medium text-foreground">Contact (fiche CRM)</label>
-            <select
-              name="contact_id"
-              required
-              disabled={!companyId}
-              className="h-9 w-full rounded-md border border-border bg-surface px-2 text-sm disabled:opacity-50"
-            >
-              <option value="">—</option>
-              {contactsForCompany.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.first_name} {c.last_name}
-                </option>
-              ))}
-            </select>
-            {companyId && contactsForCompany.length === 0 && (
-              <p className="mt-1 text-xs text-warning">
-                Aucun contact pour cette entreprise — créez-le d&apos;abord depuis Clients.
-              </p>
-            )}
-          </div>
-        )}
-        {role === "chef_section" && (
-          <div>
-            <label className="mb-1 block text-xs font-medium text-foreground">Section</label>
-            <select name="section_id" required className="h-9 w-full rounded-md border border-border bg-surface px-2 text-sm">
-              <option value="">—</option>
-              {sections.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
+        <UserFields roles={roles} companies={companies} sections={sections} contacts={contacts} />
+        <label className="col-span-full flex items-start gap-2 text-sm text-foreground">
+          <input type="checkbox" name="send_invitation" defaultChecked className="mt-0.5" />
+          <span>
+            Envoyer une invitation par e-mail
+            <span className="block text-xs text-foreground-muted">
+              L&apos;utilisateur choisit lui-même son mot de passe. Sinon, un mot de passe provisoire vous est remis.
+            </span>
+          </span>
+        </label>
         <div className="col-span-full flex gap-2">
           <Button type="submit" size="sm" loading={pending}>
             Créer le compte
@@ -137,13 +73,23 @@ export function NewUserForm({
         </div>
       </form>
 
-      {credentials && (
-        <div className="flex items-start gap-2 rounded-md bg-info-soft px-3 py-2 text-xs text-info">
+      {result?.invited && (
+        <div className="flex items-start gap-2 rounded-md bg-success-soft px-3 py-2 text-xs text-success" role="status">
+          <MailCheck className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            Invitation envoyée à <strong>{result.email}</strong>. Tant qu&apos;elle n&apos;a pas été utilisée, le compte
+            apparaît « Invitation en attente » ; vous pouvez la renvoyer depuis sa fiche.
+          </span>
+        </div>
+      )}
+      {result?.tempPassword && (
+        <div className="flex items-start gap-2 rounded-md bg-info-soft px-3 py-2 text-xs text-info" role="status">
           <KeyRound className="mt-0.5 h-4 w-4 shrink-0" />
           <span>
-            Compte <strong>{credentials.email}</strong> créé avec le mot de passe temporaire{" "}
-            <code className="rounded bg-surface px-1">{credentials.tempPassword}</code> — à transmettre à
-            l&apos;utilisateur par un canal sécurisé ; recommandez-lui de le changer dès sa première connexion.
+            Aucun e-mail n&apos;est parti (invitation décochée ou envoi d&apos;e-mails non disponible). Compte{" "}
+            <strong>{result.email}</strong> créé avec le mot de passe provisoire{" "}
+            <code className="rounded bg-surface px-1">{result.tempPassword}</code> — à transmettre par un canal sécurisé.
+            L&apos;utilisateur devra en choisir un nouveau dès sa première connexion.
           </span>
         </div>
       )}
