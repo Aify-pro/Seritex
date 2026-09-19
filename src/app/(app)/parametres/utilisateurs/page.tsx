@@ -31,11 +31,11 @@ export default async function UsersPage({
   const { q = "", role = "", statut = "" } = await searchParams;
   const supabase = await createClient();
 
-  const [{ data: users }, { data: companies }, { data: sections }, { data: contacts }, { data: roles }, authList] =
+  const [{ data: users, error: usersError }, { data: companies }, { data: sections }, { data: contacts }, { data: roles }, authList] =
     await Promise.all([
       supabase
         .from("app_users")
-        .select("id,full_name,email,role,role_id,active,company_id,job_title,companies(name),sections(name),contacts(first_name,last_name)")
+        .select("id,full_name,email,role,role_id,active,company_id,companies(name),sections(name),contacts(first_name,last_name)")
         .order("full_name"),
       supabase.from("companies").select("id,name").order("name"),
       supabase.from("sections").select("id,name").order("display_order"),
@@ -44,6 +44,9 @@ export default async function UsersPage({
       // Dernière connexion : n'existe que côté Auth. Réservé à cet écran administrateur.
       createAdminClient().auth.admin.listUsers({ perPage: 1000 }),
     ]);
+
+  // Une requête en échec ne doit jamais passer pour « aucun compte » : on l'affiche.
+  const loadError = usersError?.message ?? null;
 
   const lastSignIn = new Map<string, string | null>(
     (authList.data?.users ?? []).map((u) => [u.id, u.last_sign_in_at ?? null])
@@ -75,6 +78,12 @@ export default async function UsersPage({
         description="Chaque compte porte un rôle qui détermine ses accès (réglés dans Rôles & permissions). Ouvrez une fiche pour modifier le compte, renvoyer une invitation ou réinitialiser un mot de passe."
         action={<NewUserForm roles={roles ?? []} companies={companies ?? []} sections={sections ?? []} contacts={contacts ?? []} />}
       />
+
+      {loadError && (
+        <div role="alert" className="rounded-md bg-danger-soft px-4 py-3 text-sm text-danger">
+          Impossible de charger les comptes : {loadError}
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-2 text-xs text-foreground-muted">
         <Badge tone="success" dot>{counts.actif} actif{counts.actif > 1 ? "s" : ""}</Badge>
