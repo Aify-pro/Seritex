@@ -43,12 +43,13 @@ export function LabelPrintButton({ code, url, createdAt, sealedLine }: LabelPrin
     const payload = {
       ops: [
         { op: "align", v: 1 },
-        { op: "text", v: "SERITEX · SAC DE DÉCHETS", size: 26 },
+        { op: "text", v: "SERITEX\n", size: 56 },
         { op: "feed", n: 1 },
         { op: "qr", v: url, module: Math.max(1, Math.min(16, Math.floor(376 / modules))), level: 1 },
         { op: "feed", n: 1 },
-        { op: "text", v: code, size: 40 },
-        { op: "text", v: sealedLine ? `Créé le ${createdAt} · ${sealedLine}` : `Créé le ${createdAt}`, size: 20 },
+        { op: "text", v: `${code}\n`, size: 40 },
+        { op: "text", v: `${createdAt}\n`, size: 30 },
+        ...(sealedLine ? [{ op: "text", v: `${sealedLine}\n`, size: 20 }] : []),
         { op: "feed", n: 4 },
       ],
     };
