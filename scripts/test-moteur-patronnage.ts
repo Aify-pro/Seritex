@@ -13,6 +13,10 @@
  *     tracés réels) ne compte que pour UNE pièce, sur son contour externe ;
  *  8. une pièce posée via une entité INSERT référençant un bloc (dxf.blocks)
  *     est reconnue au même titre qu'une entité LWPOLYLINE directe.
+ *  9. une ligne de coupe exportée en DEUX polylignes ouvertes (bout à bout),
+ *     à côté d'une ligne de couture fermée (convention du patron T-shirt
+ *     réel) : la coupe est reconstruite en contour fermé et sert seule à la
+ *     reconnaissance ; la couture est conservée pour l'affichage.
  *
  * Lancer : npx tsx scripts/test-moteur-patronnage.ts
  */
@@ -127,6 +131,26 @@ function toDxfWithBlocks(
   entitiesSection.push("0", "ENDSEC");
 
   return [...blocksSection, ...entitiesSection, "0", "EOF"].join("\n");
+}
+
+// Un bloc par pièce, chaque bloc contenant plusieurs polylignes (fermées ou
+// non), posé sans transformation — structure du patron T-shirt réel.
+function toDxfBlocsMulti(
+  blocs: { name: string; polys: { layer: string; points: Point[]; ferme: boolean }[] }[]
+): string {
+  const out: string[] = ["0", "SECTION", "2", "BLOCKS"];
+  for (const b of blocs) {
+    out.push("0", "BLOCK", "8", "0", "2", b.name, "70", "0", "10", "0.0", "20", "0.0");
+    for (const { layer, points, ferme } of b.polys) {
+      out.push("0", "LWPOLYLINE", "8", layer, "90", String(points.length), "70", ferme ? "1" : "0");
+      for (const [x, y] of points) out.push("10", x.toFixed(4), "20", y.toFixed(4));
+    }
+    out.push("0", "ENDBLK");
+  }
+  out.push("0", "ENDSEC", "0", "SECTION", "2", "ENTITIES");
+  for (const b of blocs) out.push("0", "INSERT", "8", "0", "2", b.name, "10", "0.0", "20", "0.0");
+  out.push("0", "ENDSEC", "0", "EOF");
+  return out.join("\n");
 }
 
 /* ---------- Bibliothèque de référence ---------- */
@@ -280,6 +304,35 @@ console.log("\n8. Tracé utilisant des blocs (BLOCK/INSERT) au lieu de LWPOLYLIN
   const res = reconnaitreTrace(contours, biblio);
   check("2 contours résolus depuis les blocs", contours.length === 2, `${contours.length} contour(s)`);
   check("100 % reconnu (position/rotation de l'INSERT appliquées)", res.reconnaissanceComplete, `taux=${(res.tauxReconnaissance * 100).toFixed(0)}%`);
+}
+
+// --- 9. Ligne de coupe en deux moitiés ouvertes + couture fermée (patron réel)
+console.log("\n9. Coupe exportée en 2 polylignes ouvertes + ligne de couture fermée");
+{
+  const dev = devantTshirt();
+  const man = translate(manche(), 1500, 0);
+  const moities = (pts: Point[]) => {
+    const k = Math.floor(pts.length / 2);
+    // A = début→milieu, B = milieu→début : se rejoignent aux deux bouts, B inversé pour tester le sens
+    return [pts.slice(0, k + 1), [...pts.slice(k), pts[0]].reverse()];
+  };
+  const bloc = (name: string, pts: Point[]) => {
+    const [a, b] = moities(pts);
+    return {
+      name,
+      polys: [
+        { layer: "14", points: [...contourInterieur(pts, 0.95), contourInterieur(pts, 0.95)[0]], ferme: false }, // couture, fermée par doublon du 1er sommet
+        { layer: "1", points: a, ferme: false },
+        { layer: "1", points: b, ferme: false },
+      ],
+    };
+  };
+  const contours = parseDxfContours(toDxfBlocsMulti([bloc("PCE_001", dev), bloc("PCE_002", man)]));
+  const res = reconnaitreTrace(contours, biblio);
+  check("1 contour par pièce (2, pas 6)", contours.length === 2, `${contours.length} contour(s)`);
+  check("contour retenu = ligne de coupe reconstruite (calque 1)", contours.every((c) => c.layer === "1"));
+  check("100 % reconnu sur la coupe reconstruite", res.reconnaissanceComplete, `taux=${(res.tauxReconnaissance * 100).toFixed(0)}%`);
+  check("ligne de couture conservée pour l'affichage", contours.every((c) => c.interieurs.length === 1), contours.map((c) => c.interieurs.length).join(","));
 }
 
 console.log(

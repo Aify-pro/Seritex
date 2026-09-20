@@ -1,5 +1,6 @@
 import {
   normalizeShape,
+  alignerSurContour,
   compareShapes,
   appliquerEchelleFichier,
   type Point,
@@ -24,12 +25,16 @@ export interface RecognizedGroupDetail {
   mirroredCount: number;
   referencePoints: Point[];
   exampleCandidatePoints: Point[];
+  /** Contours intérieurs de l'exemplaire (couture, détails), même repère que `exampleCandidatePoints`. */
+  exampleInnerPoints: Point[][];
 }
 
 export interface UnrecognizedPieceDetail {
   index: number;
   layer: string;
   points: Point[];
+  /** Contours intérieurs (couture, détails), même repère que `points`. */
+  innerPoints: Point[][];
   area: number;
   perimeter: number;
   bestGuess: {
@@ -82,6 +87,9 @@ export function construireAnalyseDetaillee(
     contours.map((c) => c.points),
     analyse.facteurEchelle
   );
+  // Contours intérieurs (couture, détails) : affichage seul, ramenés à la
+  // même échelle que le contour de coupe puis dans son repère normalisé.
+  const interieursCorriges = contours.map((c) => appliquerEchelleFichier(c.interieurs, analyse.facteurEchelle));
   const byId = new Map(references.map((r) => [r.id, r]));
 
   const recognized: RecognizedGroupDetail[] = analyse.patronsReconnus.map((g) => {
@@ -97,6 +105,7 @@ export function construireAnalyseDetaillee(
       mirroredCount: g.dont_en_miroir,
       referencePoints: ref?.geom.points ?? [],
       exampleCandidatePoints: exemple ? normalizeShape(exemple).points : [],
+      exampleInnerPoints: exemple ? alignerSurContour(exemple, interieursCorriges[exempleIndex]) : [],
     };
   });
 
@@ -111,6 +120,7 @@ export function construireAnalyseDetaillee(
       index: p.index_piece,
       layer: p.calque,
       points: geom.points,
+      innerPoints: alignerSurContour(corrected[p.index_piece], interieursCorriges[p.index_piece]),
       area: Math.round(geom.area),
       perimeter: Math.round(geom.perimeter),
       bestGuess:
