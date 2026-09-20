@@ -133,6 +133,18 @@ export function normalizeShape(points: Point[]): ShapeGeometry {
   return { points: rotated, area, perimeter, radial };
 }
 
+/**
+ * Applique à `autres` (contours intérieurs : couture, détails) la MÊME
+ * transformation que `normalizeShape` applique à `points` (recentrage sur le
+ * centroïde + rotation sur l'axe principal), pour que l'affichage superpose
+ * la ligne de couture au contour de coupe normalisé.
+ */
+export function alignerSurContour(points: Point[], autres: Point[][]): Point[][] {
+  const c = centroid(points);
+  const angle = principalAngle(points, c);
+  return autres.map((pts) => pts.map((p) => rotatePoint([p[0] - c[0], p[1] - c[1]], angle)));
+}
+
 /* ============================================================
    Extensions — pré-passe d'échelle fichier + passe réflexion (miroir)
    ============================================================

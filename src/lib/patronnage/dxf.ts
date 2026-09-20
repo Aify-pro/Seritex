@@ -11,7 +11,15 @@ import { polygonArea } from "@/lib/patronnage/geometry";
 
 export interface DxfContour {
   layer: string;
+  /** Contour de coupe (externe) : seul ce contour sert à la reconnaissance. */
   points: Point[];
+  /**
+   * Contours imbriqués dans celui de coupe (ligne de couture nette, détails
+   * internes). Affichage uniquement : jamais comparés à la bibliothèque, mais
+   * conservés pour que l'écran de détail montre la pièce telle qu'elle est
+   * dessinée (coupe + couture), pas seulement son enveloppe.
+   */
+  interieurs: Point[][];
 }
 
 /**
@@ -69,9 +77,78 @@ function resolveInsertPoint([x, y]: Point, base: Point, insert: IInsertEntity): 
   return [rx + (insert.position?.x ?? 0), ry + (insert.position?.y ?? 0)];
 }
 
-/** Extrait les contours LWPOLYLINE/POLYLINE bruts d'une liste d'entités, en appliquant un éventuel repère de transformation (résolution de bloc). */
+interface Polyligne {
+  layer: string;
+  points: Point[];
+  ferme: boolean;
+}
+
+function distance(a: Point, b: Point): number {
+  return Math.hypot(a[0] - b[0], a[1] - b[1]);
+}
+
+/**
+ * Assemble les polylignes OUVERTES d'un même repère en contours fermés.
+ * Constaté sur un patron réel : la ligne de coupe (valeur de couture incluse)
+ * est exportée en deux polylignes ouvertes qui se rejoignent bout à bout
+ * (fin de l'une = début de l'autre, et inversement) — chacune, prise seule,
+ * n'est qu'une moitié de pièce. Sans cet assemblage, la moitié était fermée
+ * par une corde et comparée comme si c'était la pièce.
+ *
+ * Tolérance relative à l'emprise des fragments (indépendante de l'unité
+ * d'export). Un assemblage qui ne se referme pas est conservé tel quel
+ * (jamais une pièce perdue en silence). Seuls des fragments d'un MÊME calque
+ * sont chaînés : deux pièces voisines qui se touchent sur des calques
+ * différents ne doivent pas fusionner.
+ */
+function assemblerOuvertes(ouvertes: Polyligne[]): Polyligne[] {
+  const parCalque = new Map<string, Polyligne[]>();
+  for (const o of ouvertes) parCalque.set(o.layer, [...(parCalque.get(o.layer) ?? []), o]);
+
+  const out: Polyligne[] = [];
+  for (const [layer, fragments] of parCalque) {
+    const b = boundingBox(fragments.flatMap((f) => f.points));
+    const tol = Math.max(1e-9, Math.hypot(b.maxX - b.minX, b.maxY - b.minY) * 1e-5);
+    const restants = fragments.map((f) => f.points);
+
+    while (restants.length > 0) {
+      let chaine = restants.shift()!;
+      let etendu = true;
+      while (etendu && distance(chaine[0], chaine[chaine.length - 1]) > tol) {
+        etendu = false;
+        for (let i = 0; i < restants.length; i++) {
+          const f = restants[i];
+          const debut = chaine[0];
+          const fin = chaine[chaine.length - 1];
+          let suite: Point[] | null = null;
+          let devant = false;
+          if (distance(fin, f[0]) <= tol) suite = f.slice(1);
+          else if (distance(fin, f[f.length - 1]) <= tol) suite = [...f].reverse().slice(1);
+          else if (distance(debut, f[f.length - 1]) <= tol) {
+            suite = f.slice(0, -1);
+            devant = true;
+          } else if (distance(debut, f[0]) <= tol) {
+            suite = [...f].reverse().slice(0, -1);
+            devant = true;
+          }
+          if (!suite) continue;
+          chaine = devant ? [...suite, ...chaine] : [...chaine, ...suite];
+          restants.splice(i, 1);
+          etendu = true;
+          break;
+        }
+      }
+      const ferme = chaine.length >= 3 && distance(chaine[0], chaine[chaine.length - 1]) <= tol;
+      out.push({ layer, points: ferme ? chaine.slice(0, -1) : chaine, ferme });
+    }
+  }
+  return out;
+}
+
+/** Extrait les contours LWPOLYLINE/POLYLINE bruts d'une liste d'entités, en appliquant un éventuel repère de transformation (résolution de bloc). Les polylignes ouvertes d'un même repère sont assemblées en contours fermés. */
 function extractRawContours(entities: IEntity[], transform?: (p: Point) => Point): DxfContour[] {
-  const out: DxfContour[] = [];
+  const fermees: Polyligne[] = [];
+  const ouvertes: Polyligne[] = [];
   for (const entity of entities) {
     if (entity.type !== "LWPOLYLINE" && entity.type !== "POLYLINE") continue;
     const poly = entity as ILwpolylineEntity | IPolylineEntity;
@@ -79,15 +156,21 @@ function extractRawContours(entities: IEntity[], transform?: (p: Point) => Point
     if (NOISE_LAYER_PATTERN.test(layer)) continue;
 
     const rawVertices = poly.vertices ?? [];
-    if (rawVertices.length < MIN_VERTICES) continue;
+    if (rawVertices.length < 2) continue;
 
     const points: Point[] = rawVertices.map((v) => {
       const p: Point = [v.x, v.y];
       return transform ? transform(p) : p;
     });
-    out.push({ layer, points });
+    const b = boundingBox(points);
+    const tol = Math.max(1e-9, Math.hypot(b.maxX - b.minX, b.maxY - b.minY) * 1e-5);
+    const ferme = poly.shape === true || distance(points[0], points[points.length - 1]) <= tol;
+    (ferme ? fermees : ouvertes).push({ layer, points, ferme });
   }
-  return out;
+
+  return [...fermees, ...assemblerOuvertes(ouvertes)]
+    .filter((p) => p.points.length >= MIN_VERTICES)
+    .map(({ layer, points }) => ({ layer, points, interieurs: [] }));
 }
 
 /**
@@ -198,15 +281,26 @@ function keepOnlyOuterContours(contours: DxfContour[]): DxfContour[] {
   }
 
   const largestByGroup = new Map<number, number>(); // racine -> index du contour de plus grande aire
+  const membres = new Map<number, number[]>(); // racine -> tous les contours du groupe
   for (let i = 0; i < n; i++) {
     const root = find(i);
+    membres.set(root, [...(membres.get(root) ?? []), i]);
     const current = largestByGroup.get(root);
     if (current === undefined || areas[i] > areas[current]) largestByGroup.set(root, i);
   }
 
-  return Array.from(largestByGroup.values())
-    .sort((a, b) => a - b)
-    .map((i) => contours[i]);
+  // Le contour externe fait foi pour la reconnaissance ; les autres du groupe
+  // (couture, détails) sont gardés en `interieurs`, triés du plus grand au
+  // plus petit, pour l'affichage.
+  return Array.from(largestByGroup.entries())
+    .sort(([, a], [, b]) => a - b)
+    .map(([root, externe]) => ({
+      ...contours[externe],
+      interieurs: (membres.get(root) ?? [])
+        .filter((i) => i !== externe)
+        .sort((a, b) => areas[b] - areas[a])
+        .map((i) => contours[i].points),
+    }));
 }
 
 /**
@@ -221,10 +315,14 @@ function keepOnlyOuterContours(contours: DxfContour[]): DxfContour[] {
  * entités INSERT référençant un bloc nommé (dxf.blocks) — convention
  * observée sur des tracés de placement réels du module.
  *
+ * Les polylignes ouvertes qui se rejoignent bout à bout (ligne de coupe
+ * exportée en deux moitiés) sont assemblées en un contour fermé avant tout
+ * filtrage — cf. assemblerOuvertes.
+ *
  * Limite connue : les arcs/bulges sont traités comme des segments droits
  * (pas d'interpolation de courbe), et les contours composés d'entités LINE
- * séparées (non chaînées en une seule polyligne) ne sont pas reconstruits —
- * non nécessaire sur les fichiers réels examinés à ce jour.
+ * séparées (non des polylignes) ne sont pas reconstruits — non nécessaire sur
+ * les fichiers réels examinés à ce jour.
  */
 export function parseDxfContours(dxfText: string): DxfContour[] {
   const parser = new DxfParser();
@@ -244,7 +342,7 @@ export function parseDxfContours(dxfText: string): DxfContour[] {
   const maxArea = Math.max(...candidates.map((c) => c.area));
   const filtered = candidates
     .filter((c) => c.area >= maxArea * MIN_RELATIVE_AREA)
-    .map(({ layer, points }) => ({ layer, points }));
+    .map(({ layer, points }) => ({ layer, points, interieurs: [] }));
 
   return keepOnlyOuterContours(filtered);
 }

@@ -43,11 +43,14 @@ function toSvgPath(points: Point[], bounds: ReturnType<typeof piecesBounds>, pad
 export function PieceOverlay({
   candidatePoints,
   referencePoints,
+  innerPoints,
   ok,
   className,
 }: {
   candidatePoints: Point[];
   referencePoints?: Point[] | null;
+  /** Contours intérieurs (ligne de couture, détails) : tracés fins, sans remplissage. */
+  innerPoints?: Point[][];
   ok?: boolean;
   className?: string;
 }) {
@@ -71,6 +74,15 @@ export function PieceOverlay({
         fillOpacity="0.6"
         strokeWidth="1.8"
       />
+      {innerPoints?.map((pts, i) => (
+        <path
+          key={i}
+          d={toSvgPath(pts, bounds)}
+          fill="none"
+          className="stroke-foreground-muted"
+          strokeWidth="0.8"
+        />
+      ))}
     </svg>
   );
 }

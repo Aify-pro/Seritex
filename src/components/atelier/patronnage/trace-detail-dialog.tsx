@@ -95,13 +95,18 @@ export function TraceDetailDialog({
                 <div className="space-y-2">
                   {detail.recognized.map((g) => (
                     <div key={g.patternPieceId} className="flex items-center gap-3 rounded-md border border-success/30 bg-success-soft/40 p-2">
-                      <PieceOverlay candidatePoints={g.exampleCandidatePoints} referencePoints={g.referencePoints} ok />
+                      <PieceOverlay
+                        candidatePoints={g.exampleCandidatePoints}
+                        referencePoints={g.referencePoints}
+                        innerPoints={g.exampleInnerPoints}
+                        ok
+                      />
                       <div className="flex-1 text-sm">
                         <p className="text-foreground">
                           {g.articleCode} · {g.size} · {g.pieceName}
                         </p>
                         <p className="text-xs text-foreground-muted">
-                          contour détecté (plein) superposé à la référence (pointillés)
+                          contour de coupe (plein) et ligne de couture (fin) superposés à la référence (pointillés)
                           {g.mirroredCount > 0 && (
                             <span className="ml-1 text-warning">— dont {g.mirroredCount} en miroir</span>
                           )}
@@ -122,6 +127,7 @@ export function TraceDetailDialog({
                     <div key={p.index} className="flex items-center gap-3 rounded-md border border-danger/30 bg-danger-soft/40 p-2">
                       <PieceOverlay
                         candidatePoints={p.points}
+                        innerPoints={p.innerPoints}
                         referencePoints={p.bestGuess?.referencePoints}
                         ok={false}
                       />
