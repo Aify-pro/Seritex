@@ -16,6 +16,19 @@ const FICHE_SELECT = `id,numero_ot,statut,statut_precedent,production_order_line
 // pour que getFichesPlacement et getFichePlacementById mappent exactement la
 // même forme (une divergence entre les deux produirait des écrans
 // liste/détail incohérents sur les mêmes données).
+type AnalyseRow = {
+  id: string;
+  nb_pieces_detectees: number;
+  facteur_echelle: number;
+  patrons_reconnus: unknown;
+  pieces_non_reconnues: unknown;
+  taux_reconnaissance: number;
+  reconnaissance_complete: boolean;
+  alerte_miroir: boolean;
+  alerte_echelle: boolean;
+  analysee_le: string;
+};
+
 type FicheRow = {
   id: string;
   numero_ot: string;
@@ -59,20 +72,10 @@ type FicheRow = {
     est_correctif: boolean;
     justification: string | null;
     approuve_le: string | null;
-    analyses_trace:
-      | {
-          id: string;
-          nb_pieces_detectees: number;
-          facteur_echelle: number;
-          patrons_reconnus: unknown;
-          pieces_non_reconnues: unknown;
-          taux_reconnaissance: number;
-          reconnaissance_complete: boolean;
-          alerte_miroir: boolean;
-          alerte_echelle: boolean;
-          analysee_le: string;
-        }[]
-      | null;
+    // `analyses_trace.trace_id` est UNIQUE : PostgREST renvoie alors l'analyse
+    // comme un OBJET (relation 1-1), pas comme une liste. Les deux formes sont
+    // acceptées pour ne pas dépendre de ce détail de schéma.
+    analyses_trace: AnalyseRow | AnalyseRow[] | null;
   }[];
 };
 
@@ -135,7 +138,7 @@ async function mapFiches(
     traces: (f.traces_placement ?? [])
       .sort((a, b) => a.ordre - b.ordre)
       .map((t) => {
-        const analyse = t.analyses_trace?.[0];
+        const analyse = Array.isArray(t.analyses_trace) ? t.analyses_trace[0] : (t.analyses_trace ?? undefined);
         return {
           id: t.id,
           ordre: t.ordre,
