@@ -779,7 +779,7 @@ export async function updateTrace(traceId: string, ficheId: string, formData: Fo
   if ("error" in gate) return gate;
 
   const supabase = await createClient();
-  const { error } = await supabase
+  const { data: updated, error } = await supabase
     .from("traces_placement")
     .update({
       reference_patron: String(formData.get("reference_patron") ?? "").trim() || null,
@@ -789,8 +789,10 @@ export async function updateTrace(traceId: string, ficheId: string, formData: Fo
       repartition_par_couche: await repartitionJson(formData, "couche"),
       updated_at: new Date().toISOString(),
     })
-    .eq("id", traceId);
+    .eq("id", traceId)
+    .select("id");
   if (error) return { error: error.message };
+  if (!updated?.length) return { error: "La base a refusé la mise à jour du tracé (droits ou verrou de l'ODF) — aucune modification n'a été enregistrée." };
 
   revalidatePath("/atelier/patronnage");
   revalidatePath(`/atelier/patronnage/${ficheId}`);
@@ -832,11 +834,13 @@ export async function removeTraceDxf(traceId: string, ficheId: string) {
   }
   await supabase.from("analyses_trace").delete().eq("trace_id", traceId);
 
-  const { error } = await supabase
+  const { data: updated, error } = await supabase
     .from("traces_placement")
     .update({ fichier_path: null, fichier_nom: null, fichier_taille: null, charge_par: null, charge_le: null })
-    .eq("id", traceId);
+    .eq("id", traceId)
+    .select("id");
   if (error) return { error: error.message };
+  if (!updated?.length) return { error: "La base a refusé la mise à jour du tracé (droits ou verrou de l'ODF) — aucune modification n'a été enregistrée." };
 
   revalidatePath("/atelier/patronnage");
   revalidatePath(`/atelier/patronnage/${ficheId}`);
@@ -891,7 +895,7 @@ export async function uploadTraceDxf(traceId: string, ficheId: string, formData:
     .upload(remotePath, buffer, { contentType: "application/dxf", upsert: false });
   if (uploadError) return { error: `Échec de l'enregistrement du fichier : ${uploadError.message}` };
 
-  const { error: traceUpdateError } = await supabase
+  const { data: traceUpdated, error: traceUpdateError } = await supabase
     .from("traces_placement")
     .update({
       fichier_path: remotePath,
@@ -901,8 +905,16 @@ export async function uploadTraceDxf(traceId: string, ficheId: string, formData:
       charge_le: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
-    .eq("id", traceId);
+    .eq("id", traceId)
+    .select("id");
   if (traceUpdateError) return { error: traceUpdateError.message };
+  // La RLS filtre sans erreur : 0 ligne modifiée = dépôt non pris en compte.
+  // On retire le fichier tout juste stocké plutôt que de laisser un orphelin,
+  // et surtout on ne prétend pas que le dépôt a réussi.
+  if (!traceUpdated?.length) {
+    await admin.storage.from("patronnage").remove([remotePath]);
+    return { error: "La base a refusé la mise à jour du tracé (droits ou verrou de l'ODF) — aucune modification n'a été enregistrée." };
+  }
 
   const { error: analyseError } = await supabase.from("analyses_trace").upsert(
     {
