@@ -32,6 +32,8 @@ export default async function PatronnagePage() {
 
   const canAddTrace = createTrace || canModify;
   const canModifyTrace = modifyTrace || canModify;
+  // Apprentissage via le tracé : mêmes rôles que la bibliothèque de patrons.
+  const canLearn = profile.role === "responsable_production" || profile.role === "administrateur";
   if (!canView) redirect("/dashboard?erreur=acces_refuse");
 
   const [fiches, productModels] = await Promise.all([getFichesPlacement(), getProductModelOptions()]);
@@ -55,7 +57,7 @@ export default async function PatronnagePage() {
       <FichesPlacementClient
         fiches={fiches}
         currentUserRole={profile.role}
-        permissions={{ canCreate, canModify, canAddTrace, canModifyTrace, canValidate, canUnlock, canArchive, canDelete }}
+        permissions={{ canCreate, canModify, canAddTrace, canModifyTrace, canValidate, canUnlock, canArchive, canDelete, canLearn }}
         sizes={sizes}
         productModels={productModels}
       />

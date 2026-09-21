@@ -2,10 +2,11 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { requireUser } from "@/lib/auth/current-user";
+import { requireUser, requireRole } from "@/lib/auth/current-user";
 import { can } from "@/lib/auth/permissions";
 import { getSizes, getSizesForProductModel, type Size } from "@/lib/sizes";
-import { parseDxfContours } from "@/lib/patronnage/dxf";
+import { parseDxfContours, type DxfContour } from "@/lib/patronnage/dxf";
+import { normalizeShape, appliquerEchelleFichier } from "@/lib/patronnage/geometry";
 import { loadReferenceLibrary } from "@/lib/patronnage/bibliotheque";
 import { reconnaitreTrace } from "@/lib/patronnage/reconnaissance";
 import { construireAnalyseDetaillee, type TraceAnalysisDetail } from "@/lib/patronnage/detail";
@@ -13,6 +14,7 @@ import { readDxfFile } from "@/lib/patronnage/upload";
 import type { StatutFiche, RepartitionTailles } from "@/lib/patronnage/types";
 import { repartitionDepuisTraces, repartitionTotal, sameRepartition } from "@/lib/patronnage/dispatching";
 import { revalidatePath } from "next/cache";
+import { z } from "zod";
 import { redirect } from "next/navigation";
 
 const MOTEUR_VERSION = "patronnage-v2 (rotation+180°, échelle, miroir)";
@@ -916,23 +918,8 @@ export async function uploadTraceDxf(traceId: string, ficheId: string, formData:
     return { error: "La base a refusé la mise à jour du tracé (droits ou verrou de l'ODF) — aucune modification n'a été enregistrée." };
   }
 
-  const { error: analyseError } = await supabase.from("analyses_trace").upsert(
-    {
-      trace_id: traceId,
-      nb_pieces_detectees: analyse.nbPiecesDetectees,
-      facteur_echelle: analyse.facteurEchelle,
-      patrons_reconnus: analyse.patronsReconnus,
-      pieces_non_reconnues: analyse.piecesNonReconnues,
-      taux_reconnaissance: analyse.tauxReconnaissance,
-      reconnaissance_complete: analyse.reconnaissanceComplete,
-      alerte_miroir: analyse.alerteMiroir,
-      alerte_echelle: analyse.alerteEchelle,
-      moteur_version: MOTEUR_VERSION,
-      analysee_le: new Date().toISOString(),
-    },
-    { onConflict: "trace_id" }
-  );
-  if (analyseError) return { error: analyseError.message };
+  const analyseError = await persisterAnalyse(supabase, traceId, analyse);
+  if (analyseError) return { error: analyseError };
 
   // 5. Fiche : passage automatique en "Tracés déposés" au premier dépôt
   if (gate.statut === "demande") {
@@ -959,6 +946,31 @@ export async function uploadTraceDxf(traceId: string, ficheId: string, formData:
   return { reconnaissanceComplete: analyse.reconnaissanceComplete };
 }
 
+/** Enregistre (ou remplace) l'analyse d'un tracé. Retourne le message d'erreur éventuel. */
+async function persisterAnalyse(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  traceId: string,
+  analyse: ReturnType<typeof reconnaitreTrace>
+): Promise<string | null> {
+  const { error } = await supabase.from("analyses_trace").upsert(
+    {
+      trace_id: traceId,
+      nb_pieces_detectees: analyse.nbPiecesDetectees,
+      facteur_echelle: analyse.facteurEchelle,
+      patrons_reconnus: analyse.patronsReconnus,
+      pieces_non_reconnues: analyse.piecesNonReconnues,
+      taux_reconnaissance: analyse.tauxReconnaissance,
+      reconnaissance_complete: analyse.reconnaissanceComplete,
+      alerte_miroir: analyse.alerteMiroir,
+      alerte_echelle: analyse.alerteEchelle,
+      moteur_version: MOTEUR_VERSION,
+      analysee_le: new Date().toISOString(),
+    },
+    { onConflict: "trace_id" }
+  );
+  return error ? error.message : null;
+}
+
 function sanitizeFileName(name: string) {
   return name.replace(/[^a-zA-Z0-9.\-_]/g, "_");
 }
@@ -967,18 +979,12 @@ function sanitizeFileName(name: string) {
 // Détail d'une analyse (bouton "Détail" d'un tracé déjà déposé)
 // ------------------------------------------------------------
 
-/**
- * Reconstruit la vue détaillée d'un tracé déjà déposé — pièce par pièce,
- * avec le rendu visuel de ce que le moteur a extrait et comparé. Relit le
- * DXF déjà stocké (jamais de nouvel upload) et relance le moteur contre la
- * bibliothèque ACTUELLE : aucun changement de schéma, le résultat reste donc
- * cohérent même si la bibliothèque a évolué depuis le dépôt initial du
- * tracé. Lecture seule : ne modifie ni le tracé ni son analyse persistée.
- */
-export async function getTraceDetail(traceId: string, ficheId: string): Promise<TraceAnalysisDetail | { error: string }> {
-  await requirePermission("view");
-
-  const supabase = await createClient();
+/** Relit le DXF stocké d'un tracé et en extrait les contours de coupe. */
+async function chargerContoursTrace(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  traceId: string,
+  ficheId: string
+): Promise<{ contours: DxfContour[] } | { error: string }> {
   const { data: trace, error: traceError } = await supabase
     .from("traces_placement")
     .select("fiche_id,fichier_path")
@@ -1001,9 +1007,194 @@ export async function getTraceDetail(traceId: string, ficheId: string): Promise<
   if (contours.length === 0) {
     return { error: "Aucun contour exploitable détecté dans ce tracé." };
   }
+  return { contours };
+}
+
+/**
+ * Reconstruit la vue détaillée d'un tracé déjà déposé — pièce par pièce,
+ * avec le rendu visuel de ce que le moteur a extrait et comparé. Relit le
+ * DXF déjà stocké (jamais de nouvel upload) et relance le moteur contre la
+ * bibliothèque ACTUELLE : aucun changement de schéma, le résultat reste donc
+ * cohérent même si la bibliothèque a évolué depuis le dépôt initial du
+ * tracé. Lecture seule : ne modifie ni le tracé ni son analyse persistée.
+ */
+export async function getTraceDetail(traceId: string, ficheId: string): Promise<TraceAnalysisDetail | { error: string }> {
+  await requirePermission("view");
+
+  const supabase = await createClient();
+  const chargement = await chargerContoursTrace(supabase, traceId, ficheId);
+  if ("error" in chargement) return chargement;
 
   const library = await loadReferenceLibrary(supabase);
   if ("error" in library) return { error: library.error };
 
-  return construireAnalyseDetaillee(contours, library.references, SEUIL_RECONNAISSANCE);
+  return construireAnalyseDetaillee(chargement.contours, library.references, SEUIL_RECONNAISSANCE);
+}
+
+// ------------------------------------------------------------
+// Apprentissage via le tracé : affectation d'une famille de pièces
+// non reconnues à un patron de la bibliothèque
+// ------------------------------------------------------------
+
+const ROLES_BIBLIOTHEQUE: ("responsable_production" | "administrateur")[] = ["responsable_production", "administrateur"];
+
+export interface OptionsAffectation {
+  articles: { id: string; code: string; designation: string; patrons: { id: string; taille: string }[] }[];
+}
+
+/** Articles et patrons de la bibliothèque, pour les listes de l'écran d'affectation. */
+export async function listerOptionsAffectation(): Promise<OptionsAffectation | { error: string }> {
+  await requireRole(ROLES_BIBLIOTHEQUE);
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("pattern_articles")
+    .select("id,article_code,designation,patterns(id,size)")
+    .order("article_code");
+  if (error) return { error: error.message };
+  return {
+    articles: (data ?? []).map((a) => ({
+      id: a.id as string,
+      code: a.article_code as string,
+      designation: a.designation as string,
+      patrons: ((a.patterns ?? []) as { id: string; size: string }[]).map((p) => ({ id: p.id, taille: p.size })),
+    })),
+  };
+}
+
+const affectationSchema = z.object({
+  indice: z.number().int().min(0),
+  nomPiece: z.string().trim().min(1, "Nom de pièce manquant").max(80),
+  quantiteAttendue: z.number().int().min(1).max(50),
+  cible: z.discriminatedUnion("mode", [
+    z.object({ mode: z.literal("existant"), patternId: z.string().uuid() }),
+    z.object({
+      mode: z.literal("nouveau"),
+      articleId: z.string().uuid().optional(),
+      articleCode: z.string().trim().max(60).optional(),
+      designation: z.string().trim().max(120).optional(),
+      taille: z.string().trim().min(1, "Taille manquante").max(30),
+    }),
+  ]),
+});
+export type AffectationInput = z.infer<typeof affectationSchema>;
+
+/**
+ * Apprend UNE famille de pièces non reconnues d'un tracé : l'administrateur
+ * l'affecte à un patron (existant, ou nouveau) et la géométrie de coupe de
+ * l'exemplaire devient une référence de la bibliothèque. Jamais automatique :
+ * chaque appel est une décision humaine, tracée dans l'audit avec le tracé
+ * d'origine. La géométrie est RECALCULÉE ici depuis le DXF stocké (aucune
+ * confiance dans ce que le client affiche), à l'échelle corrigée du fichier,
+ * et seulement si la pièce est bel et bien non reconnue à cet instant. L'analyse
+ * du tracé est ensuite relancée et persistée.
+ */
+export async function affecterFamille(
+  traceId: string,
+  ficheId: string,
+  input: AffectationInput
+): Promise<{ error: string } | { reconnaissanceComplete: boolean }> {
+  const { authId } = await requireRole(ROLES_BIBLIOTHEQUE);
+  const gate = await assertTraceEditable(traceId, ficheId);
+  if ("error" in gate) return gate;
+
+  const parsed = affectationSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Affectation invalide" };
+  const { indice, nomPiece, quantiteAttendue, cible } = parsed.data;
+
+  const supabase = await createClient();
+  const chargement = await chargerContoursTrace(supabase, traceId, ficheId);
+  if ("error" in chargement) return chargement;
+  const library = await loadReferenceLibrary(supabase);
+  if ("error" in library) return { error: library.error };
+
+  const avant = reconnaitreTrace(chargement.contours, library.references, SEUIL_RECONNAISSANCE);
+  if (!avant.piecesNonReconnues.some((p) => p.index_piece === indice)) {
+    return { error: "Cette pièce est déjà reconnue (la bibliothèque a changé depuis) — actualisez la vue." };
+  }
+  const corrigee = appliquerEchelleFichier(
+    chargement.contours.map((c) => c.points),
+    avant.facteurEchelle
+  )[indice];
+  if (!corrigee) return { error: "Pièce introuvable dans le tracé." };
+  const geom = normalizeShape(corrigee);
+
+  let patternId: string;
+  if (cible.mode === "existant") {
+    const { data: pattern } = await supabase.from("patterns").select("id").eq("id", cible.patternId).maybeSingle();
+    if (!pattern) return { error: "Patron introuvable." };
+    patternId = pattern.id as string;
+  } else {
+    let articleId = cible.articleId ?? "";
+    if (!articleId) {
+      if (!cible.articleCode) return { error: "Choisissez un article ou saisissez un code article." };
+      const { data: article, error: articleError } = await supabase
+        .from("pattern_articles")
+        .insert({ article_code: cible.articleCode, designation: cible.designation || "Sans désignation", created_by: authId })
+        .select("id")
+        .single();
+      if (articleError) {
+        return {
+          error: articleError.code === "23505" ? "Ce code article existe déjà : sélectionnez-le dans la liste." : articleError.message,
+        };
+      }
+      articleId = article.id as string;
+    }
+    const { data: pattern, error: patternError } = await supabase
+      .from("patterns")
+      .insert({ article_id: articleId, size: cible.taille, created_by: authId })
+      .select("id")
+      .single();
+    if (patternError) {
+      return {
+        error:
+          patternError.code === "23505"
+            ? "Un patron existe déjà pour cette taille sur cet article : affectez à « patron existant »."
+            : patternError.message,
+      };
+    }
+    patternId = pattern.id as string;
+  }
+
+  const { data: piece, error: pieceError } = await supabase
+    .from("pattern_pieces")
+    .insert({
+      pattern_id: patternId,
+      name: nomPiece,
+      expected_count: quantiteAttendue,
+      area: geom.area,
+      perimeter: geom.perimeter,
+      radial_signature: geom.radial,
+      points: geom.points,
+    })
+    .select("id")
+    .single();
+  if (pieceError) return { error: `Enregistrement de la pièce impossible : ${pieceError.message}` };
+
+  await supabase.from("audit_log").insert({
+    user_id: authId,
+    action: "learn_pattern_from_trace",
+    entity_type: "pattern_piece",
+    entity_id: piece.id,
+    metadata: {
+      trace_id: traceId,
+      fiche_id: ficheId,
+      pattern_id: patternId,
+      mode: cible.mode,
+      nom_piece: nomPiece,
+      index_piece: indice,
+      facteur_echelle: avant.facteurEchelle,
+    },
+  });
+
+  // Relance l'analyse contre la bibliothèque enrichie et persiste le nouveau verdict.
+  const bibliothequeMaj = await loadReferenceLibrary(supabase);
+  if ("error" in bibliothequeMaj) return { error: bibliothequeMaj.error };
+  const apres = reconnaitreTrace(chargement.contours, bibliothequeMaj.references, SEUIL_RECONNAISSANCE);
+  const analyseError = await persisterAnalyse(supabase, traceId, apres);
+  if (analyseError) return { error: analyseError };
+
+  revalidatePath("/atelier/patronnage");
+  revalidatePath(`/atelier/patronnage/${ficheId}`);
+  revalidatePath("/atelier/patronnage/bibliotheque");
+  return { reconnaissanceComplete: apres.reconnaissanceComplete };
 }

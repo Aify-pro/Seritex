@@ -26,7 +26,7 @@ export default async function FichePlacementPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ trace?: string }>;
 }) {
-  await requireUser();
+  const { profile } = await requireUser();
   const [canView, canCreate, canModify, canValidate, canUnlock, canArchive, canDelete, createTrace, modifyTrace] =
     await Promise.all([
       can("patronnage", "view"),
@@ -48,6 +48,8 @@ export default async function FichePlacementPage({
 
   const canAddTrace = createTrace || canModify;
   const canModifyTrace = modifyTrace || canModify;
+  // Apprentissage via le tracé : mêmes rôles que la bibliothèque de patrons.
+  const canLearn = profile.role === "responsable_production" || profile.role === "administrateur";
   if (!canView) redirect("/dashboard?erreur=acces_refuse");
 
   const { id } = await params;
@@ -77,7 +79,7 @@ export default async function FichePlacementPage({
       <FicheDetailContent
         fiche={fiche}
         referenceOptions={referenceOptions}
-        permissions={{ canCreate, canModify, canAddTrace, canModifyTrace, canValidate, canUnlock, canArchive, canDelete }}
+        permissions={{ canCreate, canModify, canAddTrace, canModifyTrace, canValidate, canUnlock, canArchive, canDelete, canLearn }}
         sizes={sizes}
         productModels={productModels}
         highlightTraceId={trace ?? null}
