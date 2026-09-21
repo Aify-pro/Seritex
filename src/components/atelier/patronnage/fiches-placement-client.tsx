@@ -18,7 +18,6 @@ import {
   ArchiveRestore,
   Search,
   Wrench,
-  ScanSearch,
 } from "lucide-react";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Table, Thead, Tbody, Tr, Th, Td, EmptyRow } from "@/components/ui/table";
@@ -27,11 +26,10 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { cn, formatDate, formatDateTime } from "@/lib/utils";
 import { QrScannerButton } from "@/components/atelier/patronnage/qr-scanner-button";
-import { TraceDetailDialog } from "@/components/atelier/patronnage/trace-detail-dialog";
+import { TracePiecesPanel } from "@/components/atelier/patronnage/trace-pieces-panel";
 import type { FichePlacement, RepartitionTailles, StatutFiche, TracePlacement } from "@/lib/patronnage/types";
 import { createContext, useContext } from "react";
 import type { Size } from "@/lib/sizes";
-import type { TraceAnalysisDetail } from "@/lib/patronnage/detail";
 import { repartitionDepuisTraces, repartitionTotal } from "@/lib/patronnage/dispatching";
 import {
   createFiche,
@@ -53,7 +51,6 @@ import {
   rejectCorrectiveTrace,
   searchOdfLines,
   searchClient,
-  getTraceDetail,
 } from "@/app/(app)/atelier/patronnage/fiches-actions";
 
 const STATUT_LABELS: Record<StatutFiche, string> = {
@@ -99,6 +96,8 @@ interface Permissions {
   canUnlock: boolean;
   canArchive: boolean;
   canDelete: boolean;
+  /** Affecter des pièces non reconnues à un patron (apprentissage via le tracé). */
+  canLearn: boolean;
 }
 
 
@@ -952,6 +951,7 @@ export function FicheDetailContent({
             locked={locked}
             canModify={permissions.canModifyTrace}
             canValidate={permissions.canValidate}
+            canLearn={permissions.canLearn}
             referenceOptions={referenceOptions}
             onChanged={refresh}
           />
@@ -1086,6 +1086,7 @@ function TraceDetailBody({
   locked,
   canModify,
   canValidate,
+  canLearn,
   onChanged,
 }: {
   fiche: FichePlacement;
@@ -1093,6 +1094,7 @@ function TraceDetailBody({
   locked: boolean;
   canModify: boolean;
   canValidate: boolean;
+  canLearn: boolean;
   referenceOptions: ReferenceOption[];
   onChanged: () => void;
 }) {
@@ -1100,23 +1102,8 @@ function TraceDetailBody({
   const [error, setError] = useState<string | null>(null);
   const [rejectMotif, setRejectMotif] = useState("");
   const [showReject, setShowReject] = useState(false);
-  const [showDetail, setShowDetail] = useState(false);
-  const [detailPending, startDetailTransition] = useTransition();
-  const [detail, setDetail] = useState<TraceAnalysisDetail | null>(null);
-  const [detailError, setDetailError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const matelasFormRef = useRef<HTMLFormElement>(null);
-
-  function openDetail() {
-    setShowDetail(true);
-    setDetail(null);
-    setDetailError(null);
-    startDetailTransition(async () => {
-      const res = await getTraceDetail(trace.id, fiche.id);
-      if ("error" in res) setDetailError(res.error);
-      else setDetail(res);
-    });
-  }
 
   function run(action: () => Promise<{ error?: string } | { reconnaissanceComplete?: boolean } | undefined>) {
     setError(null);
@@ -1187,10 +1174,14 @@ function TraceDetailBody({
   }
 
   function handleUpload() {
-    const file = fileInputRef.current?.files?.[0];
+    const input = fileInputRef.current;
+    const file = input?.files?.[0];
     if (!file) return;
     const fd = new FormData();
     fd.set("file", file);
+    // Vide le champ : sans cela, re-choisir le MÊME fichier (après une erreur,
+    // par exemple) ne déclenche aucun événement et « rien ne se passe ».
+    if (input) input.value = "";
     run(() => uploadTraceDxf(trace.id, fiche.id, fd));
   }
 
@@ -1217,11 +1208,6 @@ function TraceDetailBody({
           <span />
         )}
         <div className="flex shrink-0 items-center gap-2">
-          {a && (
-            <Button size="sm" variant="secondary" onClick={openDetail}>
-              <ScanSearch className="h-3.5 w-3.5" /> Détail
-            </Button>
-          )}
           {!effectiveLocked && canModify && (
             <button
               onClick={() => {
@@ -1270,6 +1256,7 @@ function TraceDetailBody({
         </form>
 
         <div className="rounded-md border border-dashed border-border bg-surface-muted p-3">
+          <input ref={fileInputRef} type="file" accept=".dxf" onChange={handleUpload} className="hidden" />
           {trace.fichierNom ? (
             <div className="flex items-center justify-between gap-3">
               <div className="text-sm text-foreground">
@@ -1278,12 +1265,9 @@ function TraceDetailBody({
               </div>
               {!effectiveLocked && canModify && (
                 <div className="flex gap-2">
-                  <input ref={fileInputRef} type="file" accept=".dxf" onChange={handleUpload} className="hidden" id={`replace-${trace.id}`} />
-                  <label htmlFor={`replace-${trace.id}`}>
-                    <Button size="sm" variant="secondary" type="button" onClick={() => fileInputRef.current?.click()} loading={pending}>
-                      Remplacer
-                    </Button>
-                  </label>
+                  <Button size="sm" variant="secondary" type="button" onClick={() => fileInputRef.current?.click()} loading={pending}>
+                    Remplacer
+                  </Button>
                   <Button size="sm" variant="ghost" loading={pending} onClick={() => run(() => removeTraceDxf(trace.id, fiche.id))}>
                     Retirer
                   </Button>
@@ -1291,9 +1275,11 @@ function TraceDetailBody({
               )}
             </div>
           ) : !effectiveLocked && canModify ? (
-            <div className="flex items-center gap-3">
-              <Upload className="h-4 w-4 text-foreground-muted" />
-              <input ref={fileInputRef} type="file" accept=".dxf" onChange={handleUpload} className="text-sm text-foreground-muted" />
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm text-foreground-muted">Aucun fichier déposé (DXF Modaris).</p>
+              <Button size="sm" type="button" onClick={() => fileInputRef.current?.click()} loading={pending}>
+                <Upload className="h-3.5 w-3.5" /> Choisir un fichier DXF
+              </Button>
             </div>
           ) : (
             <p className="text-sm text-foreground-muted">Aucun fichier déposé.</p>
@@ -1327,37 +1313,14 @@ function TraceDetailBody({
               </div>
             )}
 
-            {a.patronsReconnus.length > 0 && (
-              <div className="divide-y divide-border rounded-md border border-border">
-                {a.patronsReconnus.map((p) => (
-                  <div key={p.patron_id} className="flex items-center justify-between px-3 py-2 text-sm">
-                    <span className="text-foreground">
-                      {p.article} · {p.taille} · {p.piece}
-                      {p.dont_en_miroir > 0 && <span className="ml-1 text-xs text-warning">(dont {p.dont_en_miroir} en miroir)</span>}
-                    </span>
-                    <Badge tone="success">×{p.quantite}</Badge>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {a.piecesNonReconnues.length > 0 && (
-              <div className="divide-y divide-border rounded-md border border-danger/30">
-                {a.piecesNonReconnues.map((p) => (
-                  <div key={p.index_piece} className="px-3 py-2 text-sm">
-                    <p className="text-foreground">
-                      Pièce #{p.index_piece + 1} (calque {p.calque}) — non reconnue
-                    </p>
-                    {p.meilleur_candidat && (
-                      <p className="text-xs text-foreground-muted">
-                        Piste la plus proche : {p.meilleur_candidat.article} · {p.meilleur_candidat.taille} ·{" "}
-                        {p.meilleur_candidat.piece} ({p.meilleur_score}%)
-                      </p>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
+            <TracePiecesPanel
+              key={a.analyseeLe}
+              traceId={trace.id}
+              ficheId={fiche.id}
+              complete={a.reconnaissanceComplete}
+              canLearn={canLearn && !effectiveLocked && canModify}
+              onChanged={onChanged}
+            />
           </div>
         )}
 
@@ -1391,16 +1354,6 @@ function TraceDetailBody({
           </div>
         )}
 
-      {a && (
-        <TraceDetailDialog
-          open={showDetail}
-          onOpenChange={setShowDetail}
-          traceReference={trace.reference}
-          loading={detailPending}
-          error={detailError}
-          detail={detail}
-        />
-      )}
     </div>
   );
 }

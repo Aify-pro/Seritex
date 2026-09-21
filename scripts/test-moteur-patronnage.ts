@@ -17,12 +17,19 @@
  *     à côté d'une ligne de couture fermée (convention du patron T-shirt
  *     réel) : la coupe est reconstruite en contour fermé et sert seule à la
  *     reconnaissance ; la couture est conservée pour l'affichage.
+ * 10. les pièces non reconnues de même forme (miroir compris) sont regroupées
+ *     en familles — l'unité d'affectation de l'apprentissage via le tracé ;
+ * 11. une pièce d'une AUTRE TAILLE (≥ 90 % de ressemblance, < 98 %) reste non
+ *     reconnue mais est signalée « taille différente », jamais absorbée ;
+ * 12. même avec un écart d'échelle décimal (×10), une taille L n'est jamais
+ *     reconnue comme M : aucune correction d'échelle inventée.
  *
  * Lancer : npx tsx scripts/test-moteur-patronnage.ts
  */
 import { parseDxfContours } from "../src/lib/patronnage/dxf";
 import { normalizeShape, type Point } from "../src/lib/patronnage/geometry";
 import { reconnaitreTrace, type ReferencePiece } from "../src/lib/patronnage/reconnaissance";
+import { construireAnalyseDetaillee } from "../src/lib/patronnage/detail";
 
 /* ---------- Génération de contours de pièces plausibles ---------- */
 
@@ -333,6 +340,49 @@ console.log("\n9. Coupe exportée en 2 polylignes ouvertes + ligne de couture fe
   check("contour retenu = ligne de coupe reconstruite (calque 1)", contours.every((c) => c.layer === "1"));
   check("100 % reconnu sur la coupe reconstruite", res.reconnaissanceComplete, `taux=${(res.tauxReconnaissance * 100).toFixed(0)}%`);
   check("ligne de couture conservée pour l'affichage", contours.every((c) => c.interieurs.length === 1), contours.map((c) => c.interieurs.length).join(","));
+}
+
+// --- 10. Familles de pièces non reconnues
+console.log("\n10. Pièces non reconnues regroupées en familles (miroir compris)");
+{
+  const etrangerA: Point[] = [[0, 0], [400, 0], [400, 90], [180, 90], [180, 300], [0, 300]]; // L asymétrique
+  const etrangerB: Point[] = [[0, 0], [300, 0], [300, 40], [150, 220], [0, 40]];
+  const contours = parseDxfContours(
+    toDxf([
+      { layer: "1", points: translate(etrangerA, 0, 0) },
+      { layer: "1", points: translate(rotate(etrangerA, 90), 900, 100) },
+      { layer: "1", points: translate(mirror(etrangerA), 1800, 200) },
+      { layer: "1", points: translate(etrangerB, 2700, 0) },
+      { layer: "1", points: translate(devantTshirt(), 0, 1500) }, // reconnue, hors familles
+    ])
+  );
+  const d = construireAnalyseDetaillee(contours, biblio);
+  const fam = [...d.unrecognizedFamilies].sort((a, b) => b.count - a.count);
+  check("2 familles (pas 4 pièces isolées)", fam.length === 2, `${fam.length} famille(s)`);
+  check("famille A = 3 exemplaires dont 1 en miroir", fam[0]?.count === 3 && fam[0]?.mirroredCount === 1, `count=${fam[0]?.count} miroir=${fam[0]?.mirroredCount}`);
+  check("famille B = 1 exemplaire", fam[1]?.count === 1);
+  check("la pièce reconnue n'est dans aucune famille", d.recognized.length === 1 && fam.reduce((n, f) => n + f.count, 0) === 4);
+}
+
+// --- 11. Autre taille : ressemblance ≥ 90 % → « taille différente », jamais reconnue
+console.log("\n11. Pièce d'une autre taille absente de la bibliothèque");
+const biblioMseule = biblio.filter((r) => r.taille === "M");
+{
+  const contours = parseDxfContours(toDxf([{ layer: "1", points: devantTshirt(1.06) }])); // taille L
+  const res = reconnaitreTrace(contours, biblioMseule);
+  const d = construireAnalyseDetaillee(contours, biblioMseule);
+  const score = res.piecesNonReconnues[0]?.meilleur_score ?? 0;
+  check("le L n'est PAS reconnu comme M", res.piecesNonReconnues.length === 1 && res.patronsReconnus.length === 0, `score=${score}`);
+  check("signalé « taille différente »", d.unrecognizedFamilies[0]?.nature === "taille_differente", `nature=${d.unrecognizedFamilies[0]?.nature} @ ${score}`);
+}
+
+// --- 12. Taille L à une échelle décimale : jamais confondue avec M
+console.log("\n12. Taille L exportée ×10 (unité fausse) face à une bibliothèque M");
+{
+  const contours = parseDxfContours(toDxf([{ layer: "1", points: devantTshirt(10.6) }]));
+  const res = reconnaitreTrace(contours, biblioMseule);
+  check("aucun facteur d'échelle inventé pour rattraper la taille", res.facteurEchelle === 1, `f=${res.facteurEchelle}`);
+  check("le L ×10 n'est PAS reconnu comme M", res.piecesNonReconnues.length === 1 && res.patronsReconnus.length === 0);
 }
 
 console.log(

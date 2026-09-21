@@ -60,6 +60,16 @@ export interface ResultatReconnaissance {
 
 export const SEUIL_RECONNAISSANCE_DEFAUT = 98;
 
+/**
+ * Au-dessus de ce score (et sous le seuil de reconnaissance), une pièce
+ * ressemble assez à un patron connu pour que l'écart soit celui d'une AUTRE
+ * TAILLE (~5-6 % par taille, cf. pré-passe d'échelle) : jamais reconnue comme
+ * le patron voisin, mais signalée comme « taille différente » plutôt que comme
+ * pièce inconnue. Un écart d'ordre de grandeur (×0,1 / ×10…) n'entre pas ici :
+ * c'est un problème d'unité, absorbé par la pré-passe d'échelle fichier.
+ */
+export const SEUIL_TAILLE_PROCHE = 90;
+
 export function reconnaitreTrace(
   contours: DxfContour[],
   references: ReferencePiece[],

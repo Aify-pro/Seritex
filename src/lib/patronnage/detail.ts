@@ -2,10 +2,17 @@ import {
   normalizeShape,
   alignerSurContour,
   compareShapes,
+  mirrorContour,
   appliquerEchelleFichier,
   type Point,
+  type ShapeGeometry,
 } from "@/lib/patronnage/geometry";
-import { reconnaitreTrace, type ReferencePiece } from "@/lib/patronnage/reconnaissance";
+import {
+  reconnaitreTrace,
+  SEUIL_RECONNAISSANCE_DEFAUT,
+  SEUIL_TAILLE_PROCHE,
+  type ReferencePiece,
+} from "@/lib/patronnage/reconnaissance";
 import type { DxfContour } from "@/lib/patronnage/dxf";
 
 /**
@@ -49,10 +56,36 @@ export interface UnrecognizedPieceDetail {
   } | null;
 }
 
+/**
+ * Pièces non reconnues de même forme (miroir compris), regroupées : c'est
+ * l'unité d'affectation — l'administrateur associe UNE fois la famille à un
+ * patron, quel que soit le nombre d'exemplaires posés dans le tracé.
+ */
+export interface UnrecognizedFamilyDetail {
+  /** Index (dans le tracé) de toutes les pièces de la famille ; le premier sert d'exemplaire. */
+  indices: number[];
+  count: number;
+  /** Sous-ensemble de `count` posé en miroir de l'exemplaire. */
+  mirroredCount: number;
+  layer: string;
+  points: Point[];
+  innerPoints: Point[][];
+  area: number;
+  perimeter: number;
+  /**
+   * « taille_differente » : ressemble à un patron connu (≥ SEUIL_TAILLE_PROCHE)
+   * sans l'égaler — autre taille probable, à faire valider. « inconnue » :
+   * aucune ressemblance suffisante.
+   */
+  nature: "taille_differente" | "inconnue";
+  bestGuess: UnrecognizedPieceDetail["bestGuess"];
+}
+
 export interface TraceAnalysisDetail {
   totalDetected: number;
   recognized: RecognizedGroupDetail[];
   unrecognized: UnrecognizedPieceDetail[];
+  unrecognizedFamilies: UnrecognizedFamilyDetail[];
   allRecognized: boolean;
   /** Facteur d'échelle fichier appliqué (1 = aucune correction). */
   scaleFactor: number;
@@ -139,10 +172,13 @@ export function construireAnalyseDetaillee(
     };
   });
 
+  const unrecognizedFamilies = grouperEnFamilles(unrecognized, corrected, seuil ?? SEUIL_RECONNAISSANCE_DEFAUT);
+
   return {
     totalDetected: analyse.nbPiecesDetectees,
     recognized,
     unrecognized,
+    unrecognizedFamilies,
     allRecognized: analyse.reconnaissanceComplete,
     scaleFactor: analyse.facteurEchelle,
     scoreEchelle: analyse.scoreEchelle,
@@ -150,4 +186,53 @@ export function construireAnalyseDetaillee(
     mirrorAlert: analyse.alerteMiroir,
     scaleAlert: analyse.alerteEchelle,
   };
+}
+
+/**
+ * Regroupe les pièces non reconnues de même forme (comparaison directe ou en
+ * miroir au seuil de reconnaissance). Le premier exemplaire de chaque famille
+ * fait référence pour l'aperçu et pour la géométrie qui sera apprise.
+ */
+function grouperEnFamilles(
+  unrecognized: UnrecognizedPieceDetail[],
+  corrected: Point[][],
+  seuil: number
+): UnrecognizedFamilyDetail[] {
+  const familles: { rep: UnrecognizedPieceDetail; repGeom: ShapeGeometry; membres: number[]; miroir: number }[] = [];
+
+  for (const piece of unrecognized) {
+    const geom = normalizeShape(corrected[piece.index]);
+    const miroirGeom = normalizeShape(mirrorContour(corrected[piece.index]));
+    let placee = false;
+    for (const f of familles) {
+      if (compareShapes(geom, f.repGeom).confidence >= seuil) {
+        f.membres.push(piece.index);
+        placee = true;
+        break;
+      }
+      if (compareShapes(miroirGeom, f.repGeom).confidence >= seuil) {
+        f.membres.push(piece.index);
+        f.miroir += 1;
+        placee = true;
+        break;
+      }
+    }
+    if (!placee) familles.push({ rep: piece, repGeom: geom, membres: [piece.index], miroir: 0 });
+  }
+
+  return familles.map(({ rep, membres, miroir }) => ({
+    indices: membres,
+    count: membres.length,
+    mirroredCount: miroir,
+    layer: rep.layer,
+    points: rep.points,
+    innerPoints: rep.innerPoints,
+    area: rep.area,
+    perimeter: rep.perimeter,
+    nature:
+      rep.bestGuess && rep.bestGuess.confidence >= SEUIL_TAILLE_PROCHE
+        ? ("taille_differente" as const)
+        : ("inconnue" as const),
+    bestGuess: rep.bestGuess,
+  }));
 }
