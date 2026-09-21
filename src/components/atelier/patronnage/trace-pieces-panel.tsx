@@ -5,8 +5,14 @@ import { AlertTriangle, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PieceOverlay } from "@/components/atelier/patronnage/piece-overlay";
-import { affecterFamille, getTraceDetail, listerOptionsAffectation, type OptionsAffectation } from "@/app/(app)/atelier/patronnage/fiches-actions";
-import type { TraceAnalysisDetail, UnrecognizedFamilyDetail } from "@/lib/patronnage/detail";
+import {
+  affecterFamille,
+  getTraceDetail,
+  listerOptionsAffectation,
+  reanalyserTrace,
+  type OptionsAffectation,
+} from "@/app/(app)/atelier/patronnage/fiches-actions";
+import type { LignePieceDetail, TraceAnalysisDetail, UnrecognizedFamilyDetail } from "@/lib/patronnage/detail";
 
 /**
  * Pièces d'un tracé, visibles dans la vue étendue de sa ligne : toutes les
@@ -35,6 +41,7 @@ export function TracePiecesPanel({
   const [detail, setDetail] = useState<TraceAnalysisDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [version, setVersion] = useState(0);
+  const [lignesOuvertes, setLignesOuvertes] = useState(false);
 
   useEffect(() => {
     let annule = false;
@@ -75,6 +82,13 @@ export function TracePiecesPanel({
 
   return (
     <div className="space-y-3">
+      <div>
+        <Button size="sm" variant="secondary" onClick={() => setLignesOuvertes((o) => !o)}>
+          {lignesOuvertes ? "Masquer le détail pièce par pièce" : "Détail pièce par pièce (mm)"}
+        </Button>
+        {lignesOuvertes && <TableauPieces lignes={detail.lignes} />}
+      </div>
+
       {detail.recognized.length > 0 && (
         <div>
           <p className="mb-1.5 text-xs font-medium text-foreground-muted">Pièces reconnues</p>
@@ -113,6 +127,7 @@ export function TracePiecesPanel({
               <FamilleNonReconnue
                 key={f.indices[0]}
                 famille={f}
+                facteur={detail.scaleFactor}
                 traceId={traceId}
                 ficheId={ficheId}
                 canLearn={canLearn}
@@ -126,16 +141,88 @@ export function TracePiecesPanel({
   );
 }
 
+const RATIOS: { valeur: number; libelle: string }[] = [
+  { valeur: 0.01, libelle: "×0,01 (1 %)" },
+  { valeur: 0.1, libelle: "×0,1 (10 %)" },
+  { valeur: 1, libelle: "×1 (100 % — aucune correction)" },
+  { valeur: 10, libelle: "×10 (1 000 %)" },
+  { valeur: 100, libelle: "×100 (10 000 %)" },
+  { valeur: 1000, libelle: "×1000 (100 000 %)" },
+];
+
+function libelleRatio(f: number): string {
+  return RATIOS.find((r) => r.valeur === f)?.libelle ?? `×${f}`;
+}
+
+/**
+ * Choix manuel du ratio d'échelle du fichier. La détection automatique
+ * n'applique une correction que si une pièce est CONFIRMÉE par la bibliothèque :
+ * sur un tracé sans équivalent exact elle reste à ×1. La personne qui charge
+ * le fichier peut alors tester les ratios un à un et voir aussitôt le résultat
+ * (dimensions en mm, pièces reconnues) ; « Automatique » relance la détection.
+ */
+export function SelecteurEchelle({
+  traceId,
+  ficheId,
+  facteurApplique,
+  onChanged,
+}: {
+  traceId: string;
+  ficheId: string;
+  facteurApplique: number;
+  onChanged: () => void;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  function choisir(valeur: string) {
+    if (!valeur) return;
+    setError(null);
+    startTransition(async () => {
+      const res = await reanalyserTrace(traceId, ficheId, valeur === "auto" ? null : Number(valeur));
+      if ("error" in res) setError(res.error);
+      else onChanged();
+    });
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-surface-muted px-3 py-2 text-xs">
+      <span className="text-foreground-muted">
+        Échelle appliquée : <span className="font-medium text-foreground">{libelleRatio(facteurApplique)}</span>
+      </span>
+      <span className="text-foreground-muted">· Tester un autre ratio :</span>
+      <select
+        className="rounded-md border border-border bg-surface px-2 py-1 text-xs text-foreground"
+        value=""
+        disabled={pending}
+        onChange={(e) => choisir(e.target.value)}
+      >
+        <option value="">Choisir…</option>
+        <option value="auto">Automatique (relancer la détection)</option>
+        {RATIOS.map((r) => (
+          <option key={r.valeur} value={r.valeur}>
+            {r.libelle}
+          </option>
+        ))}
+      </select>
+      {pending && <Loader2 className="h-3.5 w-3.5 animate-spin text-foreground-muted" />}
+      {error && <span className="text-danger">{error}</span>}
+    </div>
+  );
+}
+
 const champ = "w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground";
 
 function FamilleNonReconnue({
   famille,
+  facteur,
   traceId,
   ficheId,
   canLearn,
   onLearned,
 }: {
   famille: UnrecognizedFamilyDetail;
+  facteur: number;
   traceId: string;
   ficheId: string;
   canLearn: boolean;
@@ -156,8 +243,7 @@ function FamilleNonReconnue({
         />
         <div className="flex-1 text-sm">
           <p className="text-foreground">
-            {famille.count} pièce(s) identique(s) (calque {famille.layer}) · {famille.area} u² · {famille.perimeter} u de
-            périmètre
+            {famille.count} pièce(s) identique(s) (calque {famille.layer}) · {famille.largeurMm} × {famille.hauteurMm} mm
             {famille.mirroredCount > 0 && <span className="ml-1 text-warning">— dont {famille.mirroredCount} en miroir</span>}
           </p>
           {tailleDifferente && g ? (
@@ -185,6 +271,7 @@ function FamilleNonReconnue({
       {canLearn && ouvert && (
         <FormulaireAffectation
           famille={famille}
+          facteur={facteur}
           traceId={traceId}
           ficheId={ficheId}
           onCancel={() => setOuvert(false)}
@@ -197,12 +284,14 @@ function FamilleNonReconnue({
 
 function FormulaireAffectation({
   famille,
+  facteur,
   traceId,
   ficheId,
   onCancel,
   onLearned,
 }: {
   famille: UnrecognizedFamilyDetail;
+  facteur: number;
   traceId: string;
   ficheId: string;
   onCancel: () => void;
@@ -279,6 +368,13 @@ function FormulaireAffectation({
         </p>
       )}
       {optionsError && <p className="text-xs text-danger">{optionsError}</p>}
+      <p className="text-xs text-foreground-muted">
+        Sera enregistrée à l&apos;échelle <span className="font-medium text-foreground">{libelleRatio(facteur)}</span> —{" "}
+        <span className="font-medium text-foreground">
+          {famille.largeurMm} × {famille.hauteurMm} mm
+        </span>
+        . Si ces dimensions ne sont pas plausibles pour la pièce, corrigez d&apos;abord le ratio d&apos;échelle du tracé.
+      </p>
 
       <div className="flex gap-4 text-sm">
         <label className="flex items-center gap-1.5">
@@ -373,6 +469,57 @@ function FormulaireAffectation({
           Enregistrer dans la bibliothèque
         </Button>
       </div>
+    </div>
+  );
+}
+
+/** Une ligne par pièce du tracé : dimensions physiques (mm) et verdict du moteur. */
+function TableauPieces({ lignes }: { lignes: LignePieceDetail[] }) {
+  return (
+    <div className="mt-2 overflow-x-auto rounded-md border border-border">
+      <table className="w-full text-xs">
+        <thead className="bg-surface-muted text-left text-foreground-muted">
+          <tr>
+            <th className="px-2 py-1.5 font-medium">N°</th>
+            <th className="px-2 py-1.5 font-medium">Calque</th>
+            <th className="px-2 py-1.5 font-medium">Dimensions (mm)</th>
+            <th className="px-2 py-1.5 font-medium">Périmètre (mm)</th>
+            <th className="px-2 py-1.5 font-medium">Surface (cm²)</th>
+            <th className="px-2 py-1.5 font-medium">Résultat</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border">
+          {lignes.map((l) => (
+            <tr key={l.index}>
+              <td className="px-2 py-1.5 text-foreground-muted">{l.index + 1}</td>
+              <td className="px-2 py-1.5 text-foreground-muted">{l.layer}</td>
+              <td className="px-2 py-1.5 text-foreground">
+                {l.largeurMm} × {l.hauteurMm}
+              </td>
+              <td className="px-2 py-1.5 text-foreground">{l.perimetreMm}</td>
+              <td className="px-2 py-1.5 text-foreground">{l.surfaceCm2}</td>
+              <td className="px-2 py-1.5">
+                {l.reconnue && l.patron ? (
+                  <span className="text-foreground">
+                    <Badge tone="success">Reconnue</Badge> {l.patron.articleCode} · {l.patron.size} · {l.patron.pieceName} (
+                    {l.score}%)
+                    {l.enMiroir && <span className="ml-1 text-warning">miroir</span>}
+                  </span>
+                ) : (
+                  <span className="text-foreground">
+                    <Badge tone="danger">Non reconnue</Badge>{" "}
+                    {l.nature === "taille_differente" ? (
+                      <span className="text-warning">taille différente probable ({l.score}%)</span>
+                    ) : (
+                      <span className="text-foreground-muted">aucune ressemblance suffisante ({l.score}%)</span>
+                    )}
+                  </span>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

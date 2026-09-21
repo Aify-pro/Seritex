@@ -37,8 +37,34 @@ export interface ReferencePiece extends ReferenceGeom {
   piece: string;
 }
 
+/** Verdict pour UNE pièce du tracé (index = position dans les contours). */
+export interface ResultatPiece {
+  index: number;
+  reconnue: boolean;
+  /** Patron reconnu ; null si la pièce n'est pas reconnue. */
+  patron_id: string | null;
+  /** Meilleur score obtenu (confiance de la reconnaissance, ou de la meilleure piste si non reconnue). */
+  score: number;
+  en_miroir: boolean;
+}
+
+export interface OptionsReconnaissance {
+  /**
+   * Facteur d'échelle imposé par l'utilisateur : remplace la détection
+   * automatique. La détection auto n'applique une correction que si une
+   * correspondance est CONFIRMÉE (garde-fou) ; sur un tracé sans équivalent
+   * exact dans la bibliothèque elle reste à ×1. Ce choix manuel est donc une
+   * décision humaine explicite, jamais un repli silencieux du moteur.
+   */
+  facteurForce?: FacteurEchelle;
+}
+
 export interface ResultatReconnaissance {
   nbPiecesDetectees: number;
+  /** Verdict pièce par pièce, dans l'ordre du tracé. */
+  pieces: ResultatPiece[];
+  /** true si le facteur vient d'un choix manuel (pas de la détection automatique). */
+  echelleManuelle: boolean;
   facteurEchelle: FacteurEchelle;
   /** Score global de la pré-passe d'échelle + détail par facteur (audit). */
   scoreEchelle: number;
@@ -73,12 +99,16 @@ export const SEUIL_TAILLE_PROCHE = 90;
 export function reconnaitreTrace(
   contours: DxfContour[],
   references: ReferencePiece[],
-  seuil: number = SEUIL_RECONNAISSANCE_DEFAUT
+  seuil: number = SEUIL_RECONNAISSANCE_DEFAUT,
+  options: OptionsReconnaissance = {}
 ): ResultatReconnaissance {
   const rawPoints = contours.map((c) => c.points);
 
-  // 1. Pré-passe d'échelle fichier
-  const echelle = detecterEchelleFichier(rawPoints, references, seuil);
+  // 1. Pré-passe d'échelle fichier (ou facteur imposé par l'utilisateur)
+  const echelleManuelle = options.facteurForce !== undefined;
+  const echelle = echelleManuelle
+    ? { facteur: options.facteurForce as FacteurEchelle, scoreGlobal: 0, detailParFacteur: {} as Record<string, number> }
+    : detecterEchelleFichier(rawPoints, references, seuil);
   const correctedPoints = appliquerEchelleFichier(rawPoints, echelle.facteur);
 
   // 2 + 3. Comparaison directe puis passe miroir
@@ -87,6 +117,7 @@ export function reconnaitreTrace(
     { ref: ReferencePiece; count: number; miroirCount: number; exempleIndex: number }
   >();
   const piecesNonReconnues: PieceNonReconnue[] = [];
+  const pieces: ResultatPiece[] = [];
 
   const compterReconnue = (ref: ReferencePiece, enMiroir: boolean, index: number) => {
     const existing = tally.get(ref.id);
@@ -109,16 +140,19 @@ export function reconnaitreTrace(
 
     if (best && best.confidence >= seuil) {
       compterReconnue(best.ref, false, i);
+      pieces.push({ index: i, reconnue: true, patron_id: best.ref.id, score: best.confidence, en_miroir: false });
       continue;
     }
 
     const miroir = testerEnMiroir(correctedPoints[i], references, seuil);
     if (miroir.reconnu && miroir.reference) {
       compterReconnue(miroir.reference as ReferencePiece, true, i);
+      pieces.push({ index: i, reconnue: true, patron_id: miroir.reference.id, score: miroir.score ?? 0, en_miroir: true });
       continue;
     }
 
     // Jamais masquée : remontée individuellement avec sa meilleure piste
+    pieces.push({ index: i, reconnue: false, patron_id: null, score: best?.confidence ?? 0, en_miroir: false });
     piecesNonReconnues.push({
       index_piece: i,
       calque: contours[i].layer,
@@ -145,6 +179,8 @@ export function reconnaitreTrace(
 
   return {
     exempleParPatron,
+    pieces,
+    echelleManuelle,
     nbPiecesDetectees: contours.length,
     facteurEchelle: echelle.facteur,
     scoreEchelle: echelle.scoreGlobal,

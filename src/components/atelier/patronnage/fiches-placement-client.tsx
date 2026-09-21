@@ -26,7 +26,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { cn, formatDate, formatDateTime } from "@/lib/utils";
 import { QrScannerButton } from "@/components/atelier/patronnage/qr-scanner-button";
-import { TracePiecesPanel } from "@/components/atelier/patronnage/trace-pieces-panel";
+import { SelecteurEchelle, TracePiecesPanel } from "@/components/atelier/patronnage/trace-pieces-panel";
 import type { FichePlacement, RepartitionTailles, StatutFiche, TracePlacement } from "@/lib/patronnage/types";
 import { createContext, useContext } from "react";
 import type { Size } from "@/lib/sizes";
@@ -1301,6 +1301,15 @@ function TraceDetailBody({
               )}
               {a.nbPiecesDetectees} pièce(s) détectée(s) — {a.reconnaissanceComplete ? "100% reconnues" : `${a.piecesNonReconnues.length} non reconnue(s)`}
             </div>
+
+            {!effectiveLocked && canModify && (
+              <SelecteurEchelle
+                traceId={trace.id}
+                ficheId={fiche.id}
+                facteurApplique={a.facteurEchelle}
+                onChanged={onChanged}
+              />
+            )}
 
             {a.alerteEchelle && (
               <div className="flex items-center gap-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-xs text-foreground">

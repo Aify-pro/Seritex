@@ -6,7 +6,7 @@ import { requireUser, requireRole } from "@/lib/auth/current-user";
 import { can } from "@/lib/auth/permissions";
 import { getSizes, getSizesForProductModel, type Size } from "@/lib/sizes";
 import { parseDxfContours, type DxfContour } from "@/lib/patronnage/dxf";
-import { normalizeShape, appliquerEchelleFichier } from "@/lib/patronnage/geometry";
+import { normalizeShape, appliquerEchelleFichier, FACTEURS_ECHELLE, type FacteurEchelle } from "@/lib/patronnage/geometry";
 import { loadReferenceLibrary } from "@/lib/patronnage/bibliotheque";
 import { reconnaitreTrace } from "@/lib/patronnage/reconnaissance";
 import { construireAnalyseDetaillee, type TraceAnalysisDetail } from "@/lib/patronnage/detail";
@@ -1028,7 +1028,80 @@ export async function getTraceDetail(traceId: string, ficheId: string): Promise<
   const library = await loadReferenceLibrary(supabase);
   if ("error" in library) return { error: library.error };
 
-  return construireAnalyseDetaillee(chargement.contours, library.references, SEUIL_RECONNAISSANCE);
+  return construireAnalyseDetaillee(chargement.contours, library.references, SEUIL_RECONNAISSANCE, {
+    facteurForce: await facteurEnregistre(supabase, traceId),
+  });
+}
+
+/**
+ * Facteur d'échelle de la dernière analyse enregistrée du tracé, ou
+ * `undefined` s'il n'y en a pas. Le détail, l'apprentissage et la
+ * ré-analyse repartent de CE facteur (auto-détecté au dépôt, ou choisi à la
+ * main) : sinon un ratio choisi manuellement serait perdu à la relecture, et
+ * l'écran montrerait autre chose que ce qui a été enregistré. Pour relancer la
+ * détection automatique, il faut le demander explicitement (`reanalyserTrace`).
+ */
+async function facteurEnregistre(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  traceId: string
+): Promise<FacteurEchelle | undefined> {
+  const { data } = await supabase.from("analyses_trace").select("facteur_echelle").eq("trace_id", traceId).maybeSingle();
+  const f = Number(data?.facteur_echelle);
+  return (FACTEURS_ECHELLE as readonly number[]).includes(f) ? (f as FacteurEchelle) : undefined;
+}
+
+/**
+ * Relance l'analyse d'un tracé DÉJÀ déposé avec un ratio d'échelle choisi à la
+ * main (`facteur`), ou avec la détection automatique (`null`). Pour le cas où
+ * la détection auto ne confirme rien et laisse le tracé à ×1 : la personne qui
+ * charge le fichier teste les ratios (×0,01 … ×1000) et voit tout de suite le
+ * résultat. Ne relit que le DXF déjà stocké, remplace l'analyse persistée et
+ * laisse une trace dans l'audit.
+ */
+export async function reanalyserTrace(
+  traceId: string,
+  ficheId: string,
+  facteur: number | null
+): Promise<{ error: string } | { reconnaissanceComplete: boolean; facteurEchelle: number }> {
+  const { authId } = await requireTracePermission("modify");
+  const gate = await assertTraceEditable(traceId, ficheId);
+  if ("error" in gate) return gate;
+
+  if (facteur !== null && !(FACTEURS_ECHELLE as readonly number[]).includes(facteur)) {
+    return { error: "Ratio d'échelle invalide." };
+  }
+
+  const supabase = await createClient();
+  const chargement = await chargerContoursTrace(supabase, traceId, ficheId);
+  if ("error" in chargement) return chargement;
+  const library = await loadReferenceLibrary(supabase);
+  if ("error" in library) return { error: library.error };
+
+  const analyse = reconnaitreTrace(
+    chargement.contours,
+    library.references,
+    SEUIL_RECONNAISSANCE,
+    facteur === null ? {} : { facteurForce: facteur as FacteurEchelle }
+  );
+  const analyseError = await persisterAnalyse(supabase, traceId, analyse);
+  if (analyseError) return { error: analyseError };
+
+  await supabase.from("audit_log").insert({
+    user_id: authId,
+    action: "reanalyse_trace_echelle",
+    entity_type: "trace_placement",
+    entity_id: traceId,
+    metadata: {
+      mode: facteur === null ? "auto" : "manuel",
+      facteur_echelle: analyse.facteurEchelle,
+      taux_reconnaissance: analyse.tauxReconnaissance,
+      reconnaissance_complete: analyse.reconnaissanceComplete,
+    },
+  });
+
+  revalidatePath("/atelier/patronnage");
+  revalidatePath(`/atelier/patronnage/${ficheId}`);
+  return { reconnaissanceComplete: analyse.reconnaissanceComplete, facteurEchelle: analyse.facteurEchelle };
 }
 
 // ------------------------------------------------------------
@@ -1107,7 +1180,9 @@ export async function affecterFamille(
   const library = await loadReferenceLibrary(supabase);
   if ("error" in library) return { error: library.error };
 
-  const avant = reconnaitreTrace(chargement.contours, library.references, SEUIL_RECONNAISSANCE);
+  // Même échelle que celle affichée et enregistrée pour ce tracé (auto ou choisie à la main).
+  const facteurForce = await facteurEnregistre(supabase, traceId);
+  const avant = reconnaitreTrace(chargement.contours, library.references, SEUIL_RECONNAISSANCE, { facteurForce });
   if (!avant.piecesNonReconnues.some((p) => p.index_piece === indice)) {
     return { error: "Cette pièce est déjà reconnue (la bibliothèque a changé depuis) — actualisez la vue." };
   }
@@ -1189,7 +1264,7 @@ export async function affecterFamille(
   // Relance l'analyse contre la bibliothèque enrichie et persiste le nouveau verdict.
   const bibliothequeMaj = await loadReferenceLibrary(supabase);
   if ("error" in bibliothequeMaj) return { error: bibliothequeMaj.error };
-  const apres = reconnaitreTrace(chargement.contours, bibliothequeMaj.references, SEUIL_RECONNAISSANCE);
+  const apres = reconnaitreTrace(chargement.contours, bibliothequeMaj.references, SEUIL_RECONNAISSANCE, { facteurForce });
   const analyseError = await persisterAnalyse(supabase, traceId, apres);
   if (analyseError) return { error: analyseError };
 
