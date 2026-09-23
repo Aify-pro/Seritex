@@ -23,6 +23,11 @@
  *     reconnue mais est signalée « taille différente », jamais absorbée ;
  * 12. même avec un écart d'échelle décimal (×10), une taille L n'est jamais
  *     reconnue comme M : aucune correction d'échelle inventée.
+ * 13. ratio d'échelle imposé manuellement : un tracé que la détection auto
+ *     laisse à ×1 (aucune correspondance exacte) devient exploitable ; une
+ *     taille L reste « taille différente », jamais reconnue comme M ;
+ * 14. détail pièce par pièce : dimensions en mm (1 unité = 0,1 mm), verdict et
+ *     patron reconnu sur chaque ligne, dans l'ordre du tracé.
  *
  * Lancer : npx tsx scripts/test-moteur-patronnage.ts
  */
@@ -383,6 +388,44 @@ console.log("\n12. Taille L exportée ×10 (unité fausse) face à une biblioth�
   const res = reconnaitreTrace(contours, biblioMseule);
   check("aucun facteur d'échelle inventé pour rattraper la taille", res.facteurEchelle === 1, `f=${res.facteurEchelle}`);
   check("le L ×10 n'est PAS reconnu comme M", res.piecesNonReconnues.length === 1 && res.patronsReconnus.length === 0);
+}
+
+// --- 13. Ratio manuel
+console.log("\n13. Ratio d'échelle choisi manuellement");
+{
+  const contoursM10 = parseDxfContours(toDxf([{ layer: "1", points: devantTshirt(10) }]));
+  const auto = reconnaitreTrace(contoursM10, biblioMseule);
+  check("auto : M ×10 détecté (×0,1) et reconnu — référence", auto.facteurEchelle === 0.1 && auto.reconnaissanceComplete, `f=${auto.facteurEchelle}`);
+  const manuel = reconnaitreTrace(contoursM10, biblioMseule, 98, { facteurForce: 0.1 });
+  check("manuel ×0,1 : M ×10 reconnu", manuel.reconnaissanceComplete && manuel.facteurEchelle === 0.1, `f=${manuel.facteurEchelle}`);
+  check("marqué comme échelle manuelle", manuel.echelleManuelle === true && auto.echelleManuelle === false);
+
+  // Taille L exportée ×10 : la détection auto reste à ×1 (rien ne se confirme)
+  const contoursL10 = parseDxfContours(toDxf([{ layer: "1", points: devantTshirt(10.6) }]));
+  const autoL = reconnaitreTrace(contoursL10, biblioMseule);
+  check("auto : L ×10 laissé à ×1 (garde-fou)", autoL.facteurEchelle === 1, `f=${autoL.facteurEchelle}`);
+  const dL = construireAnalyseDetaillee(contoursL10, biblioMseule, 98, { facteurForce: 0.1 });
+  check("manuel ×0,1 : L jamais reconnu comme M", dL.recognized.length === 0 && dL.unrecognizedFamilies.length === 1);
+  check("manuel ×0,1 : signalé « taille différente »", dL.unrecognizedFamilies[0]?.nature === "taille_differente", `nature=${dL.unrecognizedFamilies[0]?.nature}`);
+  check("manuel : facteur appliqué remonté dans le détail", dL.scaleFactor === 0.1);
+}
+
+// --- 14. Détail pièce par pièce, dimensions en mm
+console.log("\n14. Détail pièce par pièce (mm)");
+{
+  const rect: Point[] = [[0, 0], [1000, 0], [1000, 400], [0, 400]]; // 100 × 40 mm
+  const contours = parseDxfContours(toDxf([
+    { layer: "1", points: translate(rotate(rect, 30), 500, 500) }, // posé de travers : dimensions inchangées
+    { layer: "1", points: translate(devantTshirt(), 3000, 0) },
+  ]));
+  const d = construireAnalyseDetaillee(contours, biblioMseule);
+  check("une ligne par pièce, dans l'ordre", d.lignes.length === 2 && d.lignes[0].index === 0 && d.lignes[1].index === 1);
+  const l0 = d.lignes[0];
+  check("dimensions en mm indépendantes de la pose (100 × 40)", l0.largeurMm === 100 && l0.hauteurMm === 40, `${l0.largeurMm} × ${l0.hauteurMm}`);
+  check("périmètre 280 mm, surface 40 cm²", l0.perimetreMm === 280 && l0.surfaceCm2 === 40, `${l0.perimetreMm} mm, ${l0.surfaceCm2} cm²`);
+  check("rectangle non reconnu, patron vide", !l0.reconnue && l0.patron === null);
+  const l1 = d.lignes[1];
+  check("Devant reconnu, patron renseigné", l1.reconnue && l1.patron?.pieceName === "Devant", `${l1.patron?.pieceName} @ ${l1.score}`);
 }
 
 console.log(

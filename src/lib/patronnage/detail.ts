@@ -11,6 +11,7 @@ import {
   reconnaitreTrace,
   SEUIL_RECONNAISSANCE_DEFAUT,
   SEUIL_TAILLE_PROCHE,
+  type OptionsReconnaissance,
   type ReferencePiece,
 } from "@/lib/patronnage/reconnaissance";
 import type { DxfContour } from "@/lib/patronnage/dxf";
@@ -22,6 +23,48 @@ import type { DxfContour } from "@/lib/patronnage/dxf";
  * tracé, par opposition au résumé persistable (`AnalyseTrace`,
  * lib/patronnage/types.ts) qui ne garde que les totaux.
  */
+/**
+ * Unité des coordonnées de la bibliothèque : 1 unité = 0,1 mm. Déduite des
+ * exports Modaris réels (un matelas « 60CM » y mesure 6000 unités de haut ;
+ * le DXF n'en porte pas la mention, pas de $INSUNITS). Sert UNIQUEMENT à
+ * l'affichage en millimètres — jamais à la reconnaissance, qui compare des
+ * formes et une échelle relative.
+ */
+export const MM_PAR_UNITE = 0.1;
+
+/** Une ligne du détail « pièce par pièce » : dimensions physiques et verdict. */
+export interface LignePieceDetail {
+  index: number;
+  layer: string;
+  /** Rectangle englobant aligné sur l'axe principal de la pièce (indépendant de sa pose dans le tracé), grand côté d'abord. */
+  largeurMm: number;
+  hauteurMm: number;
+  perimetreMm: number;
+  surfaceCm2: number;
+  reconnue: boolean;
+  enMiroir: boolean;
+  /** Meilleur score (reconnaissance, ou meilleure piste si non reconnue). */
+  score: number;
+  /** Patron reconnu (null si non reconnue). */
+  patron: { articleCode: string; size: string; pieceName: string } | null;
+  /** Pour une pièce non reconnue : ressemble à un autre patron (autre taille) ou inconnue. */
+  nature: "taille_differente" | "inconnue" | null;
+}
+
+/** Dimensions physiques (mm / cm²) d'une géométrie normalisée. */
+function dimensionsMm(geom: ShapeGeometry) {
+  const xs = geom.points.map((p) => p[0]);
+  const ys = geom.points.map((p) => p[1]);
+  const a = (Math.max(...xs) - Math.min(...xs)) * MM_PAR_UNITE;
+  const b = (Math.max(...ys) - Math.min(...ys)) * MM_PAR_UNITE;
+  return {
+    largeurMm: Math.round(Math.max(a, b)),
+    hauteurMm: Math.round(Math.min(a, b)),
+    perimetreMm: Math.round(geom.perimeter * MM_PAR_UNITE),
+    surfaceCm2: Math.round(geom.area * MM_PAR_UNITE * MM_PAR_UNITE) / 100,
+  };
+}
+
 export interface RecognizedGroupDetail {
   patternPieceId: string;
   articleCode: string;
@@ -72,6 +115,9 @@ export interface UnrecognizedFamilyDetail {
   innerPoints: Point[][];
   area: number;
   perimeter: number;
+  /** Dimensions physiques de l'exemplaire (mm), grand côté d'abord. */
+  largeurMm: number;
+  hauteurMm: number;
   /**
    * « taille_differente » : ressemble à un patron connu (≥ SEUIL_TAILLE_PROCHE)
    * sans l'égaler — autre taille probable, à faire valider. « inconnue » :
@@ -86,6 +132,8 @@ export interface TraceAnalysisDetail {
   recognized: RecognizedGroupDetail[];
   unrecognized: UnrecognizedPieceDetail[];
   unrecognizedFamilies: UnrecognizedFamilyDetail[];
+  /** Détail pièce par pièce (une ligne par contour du tracé), dimensions en mm. */
+  lignes: LignePieceDetail[];
   allRecognized: boolean;
   /** Facteur d'échelle fichier appliqué (1 = aucune correction). */
   scaleFactor: number;
@@ -109,9 +157,10 @@ export interface TraceAnalysisDetail {
 export function construireAnalyseDetaillee(
   contours: DxfContour[],
   references: ReferencePiece[],
-  seuil?: number
+  seuil?: number,
+  options?: OptionsReconnaissance
 ): TraceAnalysisDetail {
-  const analyse = reconnaitreTrace(contours, references, seuil);
+  const analyse = reconnaitreTrace(contours, references, seuil, options);
 
   // Géométries d'aperçu : reconstruites à l'échelle corrigée, pour que le
   // rendu SVG superpose bien candidat et référence même quand le fichier
@@ -174,11 +223,26 @@ export function construireAnalyseDetaillee(
 
   const unrecognizedFamilies = grouperEnFamilles(unrecognized, corrected, seuil ?? SEUIL_RECONNAISSANCE_DEFAUT);
 
+  const lignes: LignePieceDetail[] = analyse.pieces.map((p) => {
+    const ref = p.patron_id ? byId.get(p.patron_id) : undefined;
+    return {
+      index: p.index,
+      layer: contours[p.index].layer,
+      ...dimensionsMm(normalizeShape(corrected[p.index])),
+      reconnue: p.reconnue,
+      enMiroir: p.en_miroir,
+      score: p.score,
+      patron: ref ? { articleCode: ref.article, size: ref.taille, pieceName: ref.piece } : null,
+      nature: p.reconnue ? null : p.score >= SEUIL_TAILLE_PROCHE ? "taille_differente" : "inconnue",
+    };
+  });
+
   return {
     totalDetected: analyse.nbPiecesDetectees,
     recognized,
     unrecognized,
     unrecognizedFamilies,
+    lignes,
     allRecognized: analyse.reconnaissanceComplete,
     scaleFactor: analyse.facteurEchelle,
     scoreEchelle: analyse.scoreEchelle,
@@ -220,7 +284,7 @@ function grouperEnFamilles(
     if (!placee) familles.push({ rep: piece, repGeom: geom, membres: [piece.index], miroir: 0 });
   }
 
-  return familles.map(({ rep, membres, miroir }) => ({
+  return familles.map(({ rep, repGeom, membres, miroir }) => ({
     indices: membres,
     count: membres.length,
     mirroredCount: miroir,
@@ -229,6 +293,8 @@ function grouperEnFamilles(
     innerPoints: rep.innerPoints,
     area: rep.area,
     perimeter: rep.perimeter,
+    largeurMm: dimensionsMm(repGeom).largeurMm,
+    hauteurMm: dimensionsMm(repGeom).hauteurMm,
     nature:
       rep.bestGuess && rep.bestGuess.confidence >= SEUIL_TAILLE_PROCHE
         ? ("taille_differente" as const)
