@@ -4,6 +4,8 @@ import {
   compareShapes,
   mirrorContour,
   appliquerEchelleFichier,
+  polygonArea,
+  polygonPerimeter,
   type Point,
   type ShapeGeometry,
 } from "@/lib/patronnage/geometry";
@@ -36,7 +38,10 @@ export const MM_PAR_UNITE = 0.1;
 export interface LignePieceDetail {
   index: number;
   layer: string;
-  /** Rectangle englobant aligné sur l'axe principal de la pièce (indépendant de sa pose dans le tracé), grand côté d'abord. */
+  /**
+   * Rectangle englobant aligné sur les AXES DU TRACÉ (X/Y du DXF, comme la
+   * pièce est posée), grand côté d'abord — cf. dimensionsMm ci-dessous.
+   */
   largeurMm: number;
   hauteurMm: number;
   perimetreMm: number;
@@ -51,17 +56,40 @@ export interface LignePieceDetail {
   nature: "taille_differente" | "inconnue" | null;
 }
 
-/** Dimensions physiques (mm / cm²) d'une géométrie normalisée. */
-function dimensionsMm(geom: ShapeGeometry) {
-  const xs = geom.points.map((p) => p[0]);
-  const ys = geom.points.map((p) => p[1]);
+/**
+ * Dimensions physiques (mm / cm²) d'une pièce, mesurées SUR SES AXES DE POSE
+ * DANS LE TRACÉ (repère X/Y du DXF), PAS sur l'axe principal de sa forme.
+ *
+ * `normalizeShape` tourne chaque pièce sur son axe principal d'inertie
+ * (`principalAngle`) pour comparer des formes indépendamment de leur
+ * rotation — c'est le bon repère pour reconnaître, mais PAS pour mesurer :
+ * sur une pièce asymétrique (encolure décalée, emmanchure…), cet axe est
+ * décalé de quelques degrés par rapport à la pose réelle même quand la pièce
+ * est posée bien droite dans le tracé, ce qui gonflait légèrement largeur et
+ * hauteur affichées (un rectangle tourné a toujours un englobant plus grand
+ * que lui-même). Les tracés réels posent quasi systématiquement les pièces à
+ * l'horizontale ou à la verticale (jamais en biais) : le rectangle englobant
+ * DIRECT du contour, sans rotation, est donc la dimension physique réelle —
+ * `Math.max`/`Math.min` absorbent le cas 90°/270° (largeur/hauteur
+ * inversées mais mêmes valeurs). Périmètre et aire sont, eux, invariants par
+ * rotation : recalculés ici sur le contour brut pour ne dépendre d'aucune
+ * normalisation.
+ *
+ * Limite connue : une pièce réellement posée en biais (rare, non observé sur
+ * les tracés examinés) afficherait l'encombrement occupé, plus grand que sa
+ * taille intrinsèque — préférable à une mesure silencieusement faussée par
+ * l'axe d'inertie sur le cas courant.
+ */
+function dimensionsMm(points: Point[]) {
+  const xs = points.map((p) => p[0]);
+  const ys = points.map((p) => p[1]);
   const a = (Math.max(...xs) - Math.min(...xs)) * MM_PAR_UNITE;
   const b = (Math.max(...ys) - Math.min(...ys)) * MM_PAR_UNITE;
   return {
     largeurMm: Math.round(Math.max(a, b)),
     hauteurMm: Math.round(Math.min(a, b)),
-    perimetreMm: Math.round(geom.perimeter * MM_PAR_UNITE),
-    surfaceCm2: Math.round(geom.area * MM_PAR_UNITE * MM_PAR_UNITE) / 100,
+    perimetreMm: Math.round(polygonPerimeter(points) * MM_PAR_UNITE),
+    surfaceCm2: Math.round(polygonArea(points) * MM_PAR_UNITE * MM_PAR_UNITE) / 100,
   };
 }
 
@@ -228,7 +256,7 @@ export function construireAnalyseDetaillee(
     return {
       index: p.index,
       layer: contours[p.index].layer,
-      ...dimensionsMm(normalizeShape(corrected[p.index])),
+      ...dimensionsMm(corrected[p.index]),
       reconnue: p.reconnue,
       enMiroir: p.en_miroir,
       score: p.score,
@@ -284,7 +312,7 @@ function grouperEnFamilles(
     if (!placee) familles.push({ rep: piece, repGeom: geom, membres: [piece.index], miroir: 0 });
   }
 
-  return familles.map(({ rep, repGeom, membres, miroir }) => ({
+  return familles.map(({ rep, membres, miroir }) => ({
     indices: membres,
     count: membres.length,
     mirroredCount: miroir,
@@ -293,8 +321,11 @@ function grouperEnFamilles(
     innerPoints: rep.innerPoints,
     area: rep.area,
     perimeter: rep.perimeter,
-    largeurMm: dimensionsMm(repGeom).largeurMm,
-    hauteurMm: dimensionsMm(repGeom).hauteurMm,
+    // Dims mesurées sur la pose réelle de l'exemplaire dans le tracé (pas sur
+    // `repGeom`, tourné sur son axe principal — ne sert qu'à la comparaison
+    // de familles ci-dessus).
+    largeurMm: dimensionsMm(corrected[rep.index]).largeurMm,
+    hauteurMm: dimensionsMm(corrected[rep.index]).hauteurMm,
     nature:
       rep.bestGuess && rep.bestGuess.confidence >= SEUIL_TAILLE_PROCHE
         ? ("taille_differente" as const)

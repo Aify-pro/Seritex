@@ -410,22 +410,39 @@ console.log("\n13. Ratio d'échelle choisi manuellement");
   check("manuel : facteur appliqué remonté dans le détail", dL.scaleFactor === 0.1);
 }
 
-// --- 14. Détail pièce par pièce, dimensions en mm
-console.log("\n14. Détail pièce par pièce (mm)");
+// --- 14. Détail pièce par pièce, dimensions en mm mesurées sur les AXES DU
+// TRACÉ (pose réelle), pas sur l'axe principal de la forme (`normalizeShape`) :
+// une pièce posée droite (horizontale ou verticale, convention quasi
+// systématique des tracés réels) doit donner la même dimension dans les deux
+// cas ; seule une pose réellement en biais (rare) fait apparaître
+// l'encombrement occupé plutôt que la taille intrinsèque — limite assumée et
+// documentée, préférable à une mesure faussée par l'axe d'inertie sur le cas
+// courant (c'était le défaut : une légère rotation détectée par le moteur
+// gonflait les dimensions même sur une pièce posée bien droite).
+console.log("\n14. Détail pièce par pièce (mm, mesurées sur la pose dans le tracé)");
 {
   const rect: Point[] = [[0, 0], [1000, 0], [1000, 400], [0, 400]]; // 100 × 40 mm
   const contours = parseDxfContours(toDxf([
-    { layer: "1", points: translate(rotate(rect, 30), 500, 500) }, // posé de travers : dimensions inchangées
-    { layer: "1", points: translate(devantTshirt(), 3000, 0) },
+    { layer: "1", points: translate(rect, 500, 500) }, // posé droit (0°)
+    { layer: "1", points: translate(rotate(rect, 90), 2500, 500) }, // posé droit (90°) : mêmes dimensions
+    { layer: "1", points: translate(rotate(rect, 30), 4500, 500) }, // posé en biais (rare) : encombrement occupé
+    { layer: "1", points: translate(devantTshirt(), 7000, 0) },
   ]));
   const d = construireAnalyseDetaillee(contours, biblioMseule);
-  check("une ligne par pièce, dans l'ordre", d.lignes.length === 2 && d.lignes[0].index === 0 && d.lignes[1].index === 1);
-  const l0 = d.lignes[0];
-  check("dimensions en mm indépendantes de la pose (100 × 40)", l0.largeurMm === 100 && l0.hauteurMm === 40, `${l0.largeurMm} × ${l0.hauteurMm}`);
-  check("périmètre 280 mm, surface 40 cm²", l0.perimetreMm === 280 && l0.surfaceCm2 === 40, `${l0.perimetreMm} mm, ${l0.surfaceCm2} cm²`);
+  check("une ligne par pièce, dans l'ordre", d.lignes.length === 4 && d.lignes.every((l, i) => l.index === i));
+
+  const [l0, l90, l30, lDevant] = d.lignes;
+  check("posé à 0° : 100 × 40 mm", l0.largeurMm === 100 && l0.hauteurMm === 40, `${l0.largeurMm} × ${l0.hauteurMm}`);
+  check("posé à 90° : mêmes dimensions (100 × 40)", l90.largeurMm === 100 && l90.hauteurMm === 40, `${l90.largeurMm} × ${l90.hauteurMm}`);
+  check("périmètre et surface identiques quelle que soit la pose", l0.perimetreMm === 280 && l0.surfaceCm2 === 40 && l90.perimetreMm === 280 && l90.surfaceCm2 === 40);
+  check(
+    "posé en biais (30°) : encombrement occupé, pas la taille intrinsèque",
+    l30.largeurMm === 107 && l30.hauteurMm === 85,
+    `${l30.largeurMm} × ${l30.hauteurMm}`
+  );
+  check("mais périmètre/surface restent corrects (invariants par rotation)", l30.perimetreMm === 280 && l30.surfaceCm2 === 40);
   check("rectangle non reconnu, patron vide", !l0.reconnue && l0.patron === null);
-  const l1 = d.lignes[1];
-  check("Devant reconnu, patron renseigné", l1.reconnue && l1.patron?.pieceName === "Devant", `${l1.patron?.pieceName} @ ${l1.score}`);
+  check("Devant reconnu, patron renseigné", lDevant.reconnue && lDevant.patron?.pieceName === "Devant", `${lDevant.patron?.pieceName} @ ${lDevant.score}`);
 }
 
 console.log(
