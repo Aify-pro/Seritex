@@ -31,10 +31,15 @@ export default async function LoginPage({
           />
         </div>
 
-        <div className="relative flex items-center gap-3">
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white shadow-lg shadow-black/20">
-            <Image src="/logo-seritex.png" alt="Seritex" width={44} height={44} className="h-10 w-10 object-contain" />
-          </div>
+        <div className="relative inline-flex w-fit items-center rounded-3xl bg-white px-8 py-6 shadow-xl shadow-black/25">
+          <Image
+            src="/logo-seritex-wide.png"
+            alt="Seritex"
+            width={447}
+            height={265}
+            className="h-20 w-auto object-contain sm:h-24"
+            priority
+          />
         </div>
 
         <div className="relative space-y-8">
@@ -73,7 +78,7 @@ export default async function LoginPage({
       <div className="flex items-center justify-center bg-background p-6 sm:p-10">
         <div className="w-full max-w-sm">
           <div className="mb-8 flex items-center justify-center lg:hidden">
-            <Image src="/logo-seritex.png" alt="Seritex" width={72} height={72} className="h-16 w-auto object-contain" priority />
+            <Image src="/logo-seritex-wide.png" alt="Seritex" width={447} height={265} className="h-14 w-auto object-contain" priority />
           </div>
           <LoginForm next={next} />
         </div>

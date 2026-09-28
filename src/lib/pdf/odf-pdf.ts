@@ -1,5 +1,6 @@
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFImage, type PDFPage, type RGB } from "pdf-lib";
 import QRCode from "qrcode";
+import { getLogoPngBytes } from "./logo";
 
 /**
  * Mise en page du bon imprimable de l'ordre de fabrication.
@@ -138,8 +139,8 @@ const VALUE_SIZE = 9.5;
 const VALUE_LH = 12;
 const CELL_PAD_BOTTOM = 7;
 
-const BRAND = rgb(0.059, 0.298, 0.361); // #0f4c5c
-const BRAND_SOFT = rgb(0.906, 0.937, 0.945); // #e7eff1
+const BRAND = rgb(0, 0.251, 0.565); // #004090
+const BRAND_SOFT = rgb(0.89, 0.918, 0.965); // #e3eaf6
 const WHITE = rgb(1, 1, 1);
 const INK = rgb(0.11, 0.09, 0.09);
 const MUTED = rgb(0.42, 0.4, 0.38);
@@ -188,6 +189,8 @@ export async function buildOdfPdf(data: OdfPdfData): Promise<Uint8Array> {
 
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const bold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const logo = await pdfDoc.embedPng(await getLogoPngBytes());
+  const logoRatio = logo.width / logo.height;
 
   // QR d'en-tête, embarqué d'avance : le dessin qui suit est entièrement
   // synchrone, donc lisible de haut en bas. Plus qu'un seul QR par document
@@ -296,8 +299,10 @@ export async function buildOdfPdf(data: OdfPdfData): Promise<Uint8Array> {
   /** En-tête de première page : identité à gauche, ODF + statut à droite. */
   function drawMainHeader() {
     const top = PAGE_H - M_TOP;
-    text("SERITEX", { x: LEFT, baseline: top - 20, size: 21, font: bold, color: BRAND });
-    text("Ordre de fabrication", { x: LEFT, baseline: top - 36, size: 11.5, color: MUTED });
+    const logoH = 26;
+    const logoW = logoH * logoRatio;
+    page.drawImage(logo, { x: LEFT, y: top - 4 - logoH, width: logoW, height: logoH });
+    text("Ordre de fabrication", { x: LEFT, baseline: top - 4 - logoH - 10, size: 11.5, color: MUTED });
 
     text(data.reference, { x: LEFT, baseline: top - 18, size: 16, font: bold, color: INK, width: CONTENT_W, align: "right" });
 
@@ -319,7 +324,7 @@ export async function buildOdfPdf(data: OdfPdfData): Promise<Uint8Array> {
       align: "center",
     });
 
-    const ruleY = top - 50;
+    const ruleY = top - 54;
     hLine(ruleY, LEFT, RIGHT, 1.2, BRAND);
     y = ruleY - 22;
   }
@@ -327,7 +332,9 @@ export async function buildOdfPdf(data: OdfPdfData): Promise<Uint8Array> {
   /** En-tête allégé des pages suivantes. */
   function drawContinuationHeader() {
     const top = PAGE_H - M_TOP;
-    text("SERITEX", { x: LEFT, baseline: top - 10, size: 10, font: bold, color: BRAND });
+    const logoH = 12;
+    const logoW = logoH * logoRatio;
+    page.drawImage(logo, { x: LEFT, y: top - 14, width: logoW, height: logoH });
     text(`Ordre de fabrication ${data.reference}`, {
       x: LEFT,
       baseline: top - 10,
@@ -336,8 +343,8 @@ export async function buildOdfPdf(data: OdfPdfData): Promise<Uint8Array> {
       width: CONTENT_W,
       align: "right",
     });
-    hLine(top - 17, LEFT, RIGHT, 0.75, RULE);
-    y = top - 36;
+    hLine(top - 20, LEFT, RIGHT, 0.75, RULE);
+    y = top - 39;
   }
 
   /** Ouvre une page vierge (en-tête allégé posé, curseur replacé en haut). */
