@@ -18,6 +18,9 @@ export function LoginForm({ next }: { next?: string }) {
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35, ease: "easeOut" }}
     >
+      <div className="mb-5 flex h-11 w-11 items-center justify-center rounded-xl bg-brand-soft">
+        <Lock className="h-5 w-5 text-brand" />
+      </div>
       <h2 className="text-xl font-semibold text-foreground">Connexion</h2>
       <p className="mt-1 text-sm text-foreground-muted">
         Accédez à votre espace Seritex avec vos identifiants.
@@ -77,15 +80,6 @@ export function LoginForm({ next }: { next?: string }) {
           Se connecter
         </Button>
       </form>
-
-      <div className="mt-8 rounded-md border border-dashed border-border bg-surface-muted p-3 text-xs text-foreground-muted">
-        <p className="font-medium text-foreground">Environnement de démonstration</p>
-        <p className="mt-1">
-          Comptes de test (mot de passe <code className="rounded bg-surface px-1">Seritex2026!</code>) :
-          admin@seritex.local, commercial@seritex.local, production@seritex.local,
-          coupe@seritex.local, client@ivoiresport.example…
-        </p>
-      </div>
     </motion.div>
   );
 }
