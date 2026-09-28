@@ -3,6 +3,7 @@ import { PDFDocument, StandardFonts, rgb, type PDFFont } from "pdf-lib";
 import QRCode from "qrcode";
 import { createClient } from "@/lib/supabase/server";
 import { getBaseUrl } from "@/lib/url";
+import { getLogoPngBytes } from "@/lib/pdf/logo";
 import {
   SAMPLE_STATUS_LABELS,
   SAMPLE_PRIORITY_LABELS,
@@ -73,8 +74,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
   const qrImage = await pdfDoc.embedPng(qrPngBytes);
+  const logo = await pdfDoc.embedPng(await getLogoPngBytes());
 
-  const brand = rgb(0.059, 0.298, 0.361); // #0f4c5c
   const ink = rgb(0.11, 0.09, 0.09);
   const muted = rgb(0.42, 0.4, 0.38);
 
@@ -114,8 +115,10 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   // En-tête
-  page.drawText("SERITEX", { x: MARGIN, y, size: 20, font: fontBold, color: brand });
-  y -= 22;
+  const logoH = 26;
+  const logoW = logoH * (logo.width / logo.height);
+  page.drawImage(logo, { x: MARGIN, y: y - logoH, width: logoW, height: logoH });
+  y -= logoH + 8;
   drawLine("Fiche échantillon", { size: 12, color: muted, gap: 14 });
 
   // QR code en haut à droite

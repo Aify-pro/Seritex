@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import Image from "next/image";
 import { requireUser } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server";
 import { getPermissionMap } from "@/lib/auth/permissions";
@@ -6,7 +7,6 @@ import { NAV_BY_ROLE } from "@/lib/auth/nav";
 import { SidebarNav } from "@/components/shell/sidebar-nav";
 import { MobileSidebar } from "@/components/shell/mobile-sidebar";
 import { UserMenu } from "@/components/shell/user-menu";
-import { Shirt } from "lucide-react";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const { profile } = await requireUser();
@@ -30,9 +30,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <div className="flex min-h-screen">
       <aside className="hidden w-60 shrink-0 flex-col border-r border-border bg-surface py-4 md:flex">
-        <div className="mb-6 flex items-center gap-2 px-4 text-base font-semibold text-foreground">
-          <Shirt className="h-5 w-5 text-brand" />
-          Seritex
+        <div className="mb-6 flex items-center px-4">
+          <Image src="/logo-seritex-wide.png" alt="Seritex" width={447} height={265} className="h-9 w-auto object-contain" priority />
         </div>
         <SidebarNav items={items} />
       </aside>
@@ -41,10 +40,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-surface px-4 md:px-6">
           <div className="flex items-center gap-2 md:hidden">
             <MobileSidebar items={items} />
-            <div className="flex items-center gap-2 font-semibold text-foreground">
-              <Shirt className="h-5 w-5 text-brand" />
-              Seritex
-            </div>
+            <Image src="/logo-seritex-wide.png" alt="Seritex" width={447} height={265} className="h-7 w-auto object-contain" />
           </div>
           <div className="hidden md:block" />
           <UserMenu fullName={profile.full_name} role={profile.role} roleLabel={roleRow?.label} email={profile.email} />
