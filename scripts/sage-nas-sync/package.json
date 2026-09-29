@@ -1,0 +1,15 @@
+{
+  "name": "sage-nas-sync",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Synchronisation NAS (miroir Sage) -> Supabase (sage_customers_view, sage_articles_view, stock_item_view). Destine a tourner sur le NAS, hors du build Next.js principal.",
+  "main": "sync.js",
+  "scripts": {
+    "start": "node sync.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.4",
+    "dotenv": "^16.4.5",
+    "mssql": "^11.0.1"
+  }
+}
