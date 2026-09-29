@@ -576,13 +576,21 @@ export interface SampleRequestMediaFile {
   media_files?: MediaFile;
 }
 
+/**
+ * Depuis la migration 0058 : une ligne par (sage_reference, warehouse) —
+ * un même article existe potentiellement dans plusieurs dépôts Sage.
+ * `en_attente_classement` couvre les matières premières Sage (famille MP)
+ * pas encore triées manuellement en tissu/fil/encre (voir migration 0058).
+ */
 export interface StockItem {
   sage_reference: string;
   designation: string;
-  category: "tissu" | "fil" | "encre" | "consommable";
+  category: "tissu" | "fil" | "encre" | "consommable" | "en_attente_classement";
   unit: string;
+  quantite_reelle: number;
+  quantite_reservee: number;
   quantity_available: number;
-  warehouse: string | null;
+  warehouse: string;
   last_sync_at: string;
 }
 
