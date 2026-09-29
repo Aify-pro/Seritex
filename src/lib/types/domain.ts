@@ -772,32 +772,9 @@ export interface RolePermissionRecord {
 }
 
 // ----------------------------------------------------------------------------
-// Paramètres — Intégration Sage (v4)
-// ----------------------------------------------------------------------------
-
-export type SageSyncMode = "simulation" | "agent_local";
-
-export interface SageConnectionConfig {
-  id: string;
-  label: string;
-  sync_mode: SageSyncMode;
-  host: string | null;
-  port: number | null;
-  database_name: string | null;
-  schema_stock: string | null;
-  schema_clients: string | null;
-  schema_articles: string | null;
-  sync_frequency_minutes: number;
-  active: boolean;
-  last_test_status: string | null;
-  last_test_at: string | null;
-  updated_at: string;
-}
-
-// ----------------------------------------------------------------------------
 // Paramètres — Fabrication (migration 0045)
 // ----------------------------------------------------------------------------
-// Réglage à une seule ligne, même pattern que SageConnectionConfig. Taux
+// Réglage à une seule ligne. Taux
 // d'acceptation par défaut du surplus tracé (section 11 du document de
 // logique) — appliqué à toute catégorie d'atelier requérant une fiche de
 // tracé sans taux propre (AtelierCategorie.taux_acceptation_surplus_trace).

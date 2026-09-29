@@ -1,7 +1,6 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { requireRole } from "@/lib/auth/current-user";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -418,36 +417,5 @@ export async function removeNomenclatureLine(lineId: string) {
   const { error } = await supabase.from("nomenclature_lines").delete().eq("id", lineId);
   if (error) return { error: error.message };
   revalidatePath("/parametres/produits");
-  return {};
-}
-
-/**
- * Simule un cycle de synchronisation du miroir de stock Sage (section 7.1b).
- * En production, ce serait un job planifié utilisant un compte technique
- * Sage à droits lecture seule — jamais déclenché depuis une session
- * utilisateur normale. Conservé ici en lecture/démo uniquement, réservé à
- * l'administrateur, pour illustrer le mécanisme sans connecter un vrai Sage.
- */
-export async function simulateStockSync() {
-  await requireRole(["administrateur"]);
-  // stock_item_view n'a volontairement AUCUNE policy d'écriture pour les
-  // rôles applicatifs (cf. 0002_rls.sql) : seul un job technique via
-  // service_role peut y écrire, jamais une session utilisateur normale même
-  // administrateur. On utilise donc le client admin ici, uniquement après
-  // vérification du rôle ci-dessus, pour simuler ce job de synchronisation.
-  const admin = createAdminClient();
-  const { data: items } = await admin.from("stock_item_view").select("sage_reference,quantity_available");
-
-  for (const item of items ?? []) {
-    const delta = Math.round((Math.random() - 0.5) * 20 * 10) / 10;
-    await admin
-      .from("stock_item_view")
-      .update({
-        quantity_available: Math.max(0, item.quantity_available + delta),
-        last_sync_at: new Date().toISOString(),
-      })
-      .eq("sage_reference", item.sage_reference);
-  }
-  revalidatePath("/parametres/stock");
   return {};
 }

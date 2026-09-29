@@ -5,7 +5,6 @@ import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatDate, formatDateTime } from "@/lib/utils";
-import { SyncButton } from "./sync-button";
 import { Lock } from "lucide-react";
 
 const STOCK_MOVEMENT_TYPE_LABELS: Record<string, string> = {
@@ -53,7 +52,7 @@ export default async function StockPage() {
   };
 
   let pendingClosureOrders: PendingOrder[] = [];
-  let sageByReference = new Map<string, { designation: string; quantity_available: number; unit: string; last_sync_at: string }>();
+  const sageByReference = new Map<string, { designation: string; quantity_available: number; unit: string; last_sync_at: string }>();
 
   if (isDirection) {
     const { data: orders } = await supabase
@@ -82,7 +81,19 @@ export default async function StockPage() {
             .select("sage_reference,designation,quantity_available,unit,last_sync_at")
             .in("sage_reference", articleRefs)
         : { data: [] };
-    sageByReference = new Map((sageItems ?? []).map((i) => [i.sage_reference, i]));
+
+    // Depuis la migration 0058, un article a une ligne par dépôt : on agrège
+    // (somme des quantités, date la plus récente) pour obtenir le total
+    // comparable à la quantité mouvementée par Seritex, tous dépôts confondus.
+    for (const i of sageItems ?? []) {
+      const existing = sageByReference.get(i.sage_reference);
+      if (existing) {
+        existing.quantity_available += i.quantity_available;
+        if (i.last_sync_at > existing.last_sync_at) existing.last_sync_at = i.last_sync_at;
+      } else {
+        sageByReference.set(i.sage_reference, { ...i });
+      }
+    }
 
     pendingClosureOrders = (orders ?? []).map((o) => ({
       id: o.id,
@@ -98,7 +109,6 @@ export default async function StockPage() {
       <PageHeader
         title="Stock matières (Sage)"
         description="Vue miroir en lecture seule — Sage reste l'unique source de vérité des stocks."
-        action={profile.role === "administrateur" ? <SyncButton /> : undefined}
       />
 
       <div className="flex items-start gap-2 rounded-md bg-info-soft px-3 py-2 text-xs text-info">
@@ -122,7 +132,7 @@ export default async function StockPage() {
             </thead>
             <tbody className="divide-y divide-border">
               {items?.map((i) => (
-                <tr key={i.sage_reference}>
+                <tr key={`${i.sage_reference}-${i.warehouse}`}>
                   <td className="px-5 py-3 font-mono text-xs text-foreground-muted">{i.sage_reference}</td>
                   <td className="px-5 py-3 font-medium text-foreground">{i.designation}</td>
                   <td className="px-5 py-3 capitalize text-foreground-muted">{i.category}</td>
