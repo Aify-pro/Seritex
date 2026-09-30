@@ -80,7 +80,9 @@ const contactSchema = z.object({
 export async function upsertContact(formData: FormData) {
   await requireRole(["commercial", "administrateur"]);
   const parsed = contactSchema.safeParse({
-    contact_id: formData.get("contact_id"),
+    // Absent du formulaire à la création (champ caché uniquement en modification) :
+    // `get` renvoie alors null, que le schéma refuserait — d'où « Invalid input ».
+    contact_id: formData.get("contact_id") ?? "",
     company_id: formData.get("company_id"),
     first_name: formData.get("first_name"),
     last_name: formData.get("last_name"),
