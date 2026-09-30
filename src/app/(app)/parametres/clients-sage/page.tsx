@@ -4,11 +4,10 @@ import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardBody } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatDateTime } from "@/lib/utils";
-import { SyncButton } from "./sync-button";
 import { Lock } from "lucide-react";
 
 export default async function ClientsSagePage() {
-  const { profile } = await requireRole(["administrateur", "commercial", "responsable_production"]);
+  await requireRole(["administrateur", "commercial", "responsable_production"]);
   const supabase = await createClient();
 
   const { data: customers } = await supabase.from("sage_customers_view").select("*,companies(name)").order("name");
@@ -18,7 +17,6 @@ export default async function ClientsSagePage() {
       <PageHeader
         title="Clients (Sage)"
         description="Vue miroir en lecture seule — Sage reste l'unique source de vérité pour la fiche client comptable ; la fiche client CRM Seritex (Clients) reste distincte et sert la relation commerciale."
-        action={profile.role === "administrateur" ? <SyncButton /> : undefined}
       />
 
       <div className="flex items-start gap-2 rounded-md bg-info-soft px-3 py-2 text-xs text-info">
