@@ -12,7 +12,8 @@ Supabase uniquement (via la clé `service_role`, qui contourne le RLS —
 jamais utilisée côté client).
 
 **Préalable** : les migrations `0058_stock_item_view_multi_depot.sql` et
-`0059_clients_sage_source_de_verite.sql` doivent être appliquées sur le projet
+`0059_clients_sage_source_de_verite.sql` et
+`0060_clients_liste_recherche_filtres.sql` doivent être appliquées sur le projet
 Supabase **avant** de reconstruire l'image et de relancer la synchro
 (structure multi-dépôt de `stock_item_view`, colonnes structurées de
 `sage_customers_view` et fonction `sync_companies_from_sage()`).
@@ -25,6 +26,8 @@ Supabase **avant** de reconstruire l'image et de relancer la synchro
   clients, mise à jour des champs Sage (lecture seule dans Seritex), archivage
   — jamais suppression — des clients disparus de Sage. Les contacts et les
   notes ne sont jamais touchés (gérés dans Seritex).
+- **Commerciaux** (`F_COLLABORATEUR`) : copiés dans `sage_representants` pour
+  afficher et filtrer le commercial de chaque client.
 - **Articles** (`F_ARTICLE`) et **stock** (`F_ARTSTOCK`) : uniquement les
   familles `MP` (matière première), `SF` (semi-fini), `PF` (produit fini) —
   modifiable en tête de `sync.js` (`FAMILLES_SUIVIES`).

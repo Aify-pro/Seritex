@@ -4,17 +4,26 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { CompanyPicker } from "@/components/clients/company-picker";
+import { listCompanyContacts, type CompanyContactOption, type CompanySearchResult } from "@/lib/actions/companies";
 import { createRequest } from "../../actions";
 
-type Company = { id: string; name: string };
-type Contact = { id: string; company_id: string; first_name: string; last_name: string };
-
-export function NewRequestForm({ companies, contacts }: { companies: Company[]; contacts: Contact[] }) {
-  const [companyId, setCompanyId] = useState("");
+/**
+ * L'entreprise se cherche par saisie (plusieurs milliers de clients importés de
+ * Sage : un menu déroulant serait tronqué) ; ses contacts sont chargés à la
+ * sélection.
+ */
+export function NewRequestForm() {
+  const [company, setCompany] = useState<CompanySearchResult | null>(null);
+  const [contacts, setContacts] = useState<CompanyContactOption[]>([]);
   const [pending, startTransition] = useTransition();
   const router = useRouter();
 
-  const filteredContacts = contacts.filter((c) => c.company_id === companyId);
+  async function onCompanyChange(c: CompanySearchResult | null) {
+    setCompany(c);
+    setContacts([]);
+    if (c) setContacts(await listCompanyContacts(c.id));
+  }
 
   return (
     <form
@@ -32,28 +41,15 @@ export function NewRequestForm({ companies, contacts }: { companies: Company[]; 
     >
       <div>
         <label className="mb-1 block text-xs font-medium text-foreground">Entreprise</label>
-        <select
-          name="company_id"
-          required
-          value={companyId}
-          onChange={(e) => setCompanyId(e.target.value)}
-          className="h-10 w-full rounded-md border border-border bg-surface px-3 text-sm"
-        >
-          <option value="">— Sélectionner —</option>
-          {companies.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
+        <CompanyPicker name="company_id" required onChange={onCompanyChange} />
       </div>
 
-      {filteredContacts.length > 0 && (
+      {contacts.length > 0 && (
         <div>
           <label className="mb-1 block text-xs font-medium text-foreground">Contact</label>
           <select name="contact_id" className="h-10 w-full rounded-md border border-border bg-surface px-3 text-sm">
             <option value="">—</option>
-            {filteredContacts.map((c) => (
+            {contacts.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.first_name} {c.last_name}
               </option>
@@ -78,7 +74,7 @@ export function NewRequestForm({ companies, contacts }: { companies: Company[]; 
         Nécessite une intervention graphique (visuel à préparer)
       </label>
 
-      <Button type="submit" loading={pending}>
+      <Button type="submit" loading={pending} disabled={!company}>
         Créer la demande
       </Button>
     </form>

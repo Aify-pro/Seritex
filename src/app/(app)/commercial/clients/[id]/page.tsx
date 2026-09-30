@@ -10,7 +10,7 @@ import { ContactForm } from "./contact-form";
 import { ContactActions } from "./contact-actions";
 import type { Company, Contact } from "@/lib/types/domain";
 import { formatDate } from "@/lib/utils";
-import { FolderOpen, Mail, Phone, Star, User } from "lucide-react";
+import { FolderOpen, Globe, Lock, Mail, MapPin, Phone, Star, User } from "lucide-react";
 
 /**
  * Fiche client CRM (addendum v4 de l'analyse fonctionnelle) : l'entreprise
@@ -23,13 +23,34 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
   const { id } = await params;
   const supabase = await createClient();
 
-  const [{ data: company }, { data: contacts }, { data: linkedAccounts }] = await Promise.all([
+  const [{ data: company }, { data: sage }, { data: contacts }, { data: linkedAccounts }] = await Promise.all([
     supabase.from("companies").select("*").eq("id", id).single(),
+    // Vue de liste : libellés Sage normalisés, commercial, statut (migration 0060).
+    supabase
+      .from("companies_list")
+      .select("famille,zone,typologie,categorie,representant_name,statut,is_prospect")
+      .eq("id", id)
+      .maybeSingle(),
     supabase.from("contacts").select("*").eq("company_id", id).order("is_primary_contact", { ascending: false }),
     supabase.from("app_users").select("id,full_name,email,active,contact_id").eq("company_id", id).eq("role", "client"),
   ]);
 
   if (!company) notFound();
+
+  const fromSage = company.origin === "sage";
+  const fullAddress = [company.address, [company.postal_code, company.city].filter(Boolean).join(" "), company.country]
+    .filter(Boolean)
+    .join(", ");
+  const sageRows: [string, string | null | undefined][] = [
+    ["Code Sage", company.sage_code],
+    ["Famille", sage?.famille],
+    ["Zone / commune", sage?.zone],
+    ["Typologie", sage?.typologie],
+    ["Catégorie", sage?.categorie],
+    ["Commercial", sage?.representant_name],
+    ["N° TVA", company.vat_number],
+    ["Code APE", company.ape_code],
+  ];
 
   const accountByContact = new Map((linkedAccounts ?? []).map((a) => [a.contact_id, a]));
 
@@ -54,13 +75,46 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
           action={<CompanyForm company={company as Company} />}
         />
         <CardBody className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+          {fromSage && (
+            <p className="flex items-start gap-2 rounded-md bg-info-soft px-3 py-2 text-xs text-info sm:col-span-2">
+              <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              Identité et coordonnées importées de Sage — lecture seule dans Seritex. Les contacts et les notes se gèrent ici.
+            </p>
+          )}
+          {fromSage && (
+            <div className="flex flex-wrap gap-1.5 sm:col-span-2">
+              {sage?.is_prospect && <Badge tone="accent">Prospect</Badge>}
+              {sage?.statut === "sommeil" && <Badge tone="warning">En sommeil dans Sage</Badge>}
+              {sage?.statut === "archive" && <Badge tone="danger">Disparu de Sage</Badge>}
+              {sage?.statut === "actif" && !sage.is_prospect && <Badge tone="success">Actif</Badge>}
+            </div>
+          )}
           <p className="flex items-center gap-2 text-foreground-muted">
             <Phone className="h-4 w-4" /> {company.phone ?? "—"}
           </p>
           <p className="flex items-center gap-2 text-foreground-muted">
             <Mail className="h-4 w-4" /> {company.email ?? "—"}
           </p>
-          <p className="text-foreground-muted sm:col-span-2">{company.address ?? "Adresse non renseignée"}</p>
+          {company.website && (
+            <p className="flex items-center gap-2 text-foreground-muted sm:col-span-2">
+              <Globe className="h-4 w-4" /> {company.website}
+            </p>
+          )}
+          <p className="flex items-start gap-2 text-foreground-muted sm:col-span-2">
+            <MapPin className="mt-0.5 h-4 w-4 shrink-0" /> {fullAddress || "Adresse non renseignée"}
+          </p>
+          {fromSage && (
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-2 border-t border-border pt-3 text-xs sm:col-span-2 sm:grid-cols-4">
+              {sageRows
+                .filter(([, v]) => v)
+                .map(([label, value]) => (
+                  <div key={label}>
+                    <dt className="text-foreground-muted">{label}</dt>
+                    <dd className="font-medium text-foreground">{value}</dd>
+                  </div>
+                ))}
+            </dl>
+          )}
           {company.notes && (
             <p className="rounded-md bg-surface-muted px-3 py-2 text-xs text-foreground-muted sm:col-span-2">
               {company.notes}
