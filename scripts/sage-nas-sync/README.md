@@ -40,25 +40,52 @@ exécution (structure multi-dépôt de `stock_item_view`).
    ```bash
    docker build -t sage-nas-sync .
    ```
-4. Test manuel :
+4. Rendre le script de lancement exécutable, puis tester :
    ```bash
-   docker run --rm --env-file .env --network host sage-nas-sync
+   chmod +x run-sync.sh
+   sudo ./run-sync.sh
    ```
-   (`--network host` pour joindre le conteneur `mssql` du NAS sur
-   `localhost` — sinon utiliser l'IP du NAS et le port `1433` publié.)
+   (`--network host`, dans le script, permet de joindre le conteneur `mssql`
+   du NAS sur `localhost` — sinon utiliser l'IP du NAS et le port `1433`
+   publié.)
+
+## Lancer une synchronisation à la demande
+
+À tout moment, en dehors de la planification (test, ou besoin ponctuel de
+données à jour immédiatement) :
+```bash
+cd /volume1/docker/sage-nas-sync
+sudo ./run-sync.sh
+```
+Le script vérifie que `.env` existe et affiche le résultat (nombre de
+lignes synchronisées par table, éventuelles erreurs).
 
 ## Planification (DSM, toutes les 15 minutes)
 
 Panneau de configuration DSM → **Planificateur de tâches** → Créer →
 **Tâche planifiée** → **Script défini par l'utilisateur** :
-- Déclencheur : toutes les 15 minutes.
-- Commande :
+- Utilisateur : `root` (nécessaire pour parler au socket Docker).
+- Déclencheur : **Répéter**, toutes les **15 minutes**.
+- Commande (onglet **Paramètres de la tâche**) :
   ```bash
-  docker run --rm --env-file /volume1/docker/sage-nas-sync/.env --network host sage-nas-sync
+  /volume1/docker/sage-nas-sync/run-sync.sh
   ```
+- Optionnel mais recommandé : dans **Paramètres de la tâche → Envoyer les
+  détails d'exécution par e-mail**, cocher "seulement en cas d'échec" pour
+  être alerté si la synchro s'arrête sans avoir à consulter les journaux.
 
 Pas de dépendance à une session Windows ni à une astuce anti-déconnexion —
 le NAS tourne en continu par nature.
+
+## Déclenchement depuis l'application Seritex (pas encore fait)
+
+Un vrai bouton "Synchroniser maintenant" dans Seritex nécessiterait un
+mécanisme de demande, puisque Vercel n'a aucun accès réseau vers le NAS :
+l'app écrirait une ligne dans une table Supabase (`sage_sync_requests` par
+exemple), et une tâche DSM plus fréquente (ex. toutes les minutes) la
+surveillerait pour lancer la synchro dès qu'une demande est en attente —
+délai d'au plus une minute, pas un déclenchement instantané. Non implémenté
+pour l'instant : la commande ci-dessus suffit en attendant un besoin réel.
 
 ## Recommandation (sécurité)
 Le login `nas_ecriture` a des droits `db_owner` sur `SAGE_SERITEX` (hérités
