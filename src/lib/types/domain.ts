@@ -113,6 +113,15 @@ export interface Company {
   email: string | null;
   notes: string | null;
   created_at: string;
+  /** Lien Sage (migration 0059) : `origin === "sage"` => champs Sage en lecture seule. */
+  sage_code?: string | null;
+  origin?: "sage" | "manuel";
+  postal_code?: string | null;
+  city?: string | null;
+  country?: string | null;
+  website?: string | null;
+  vat_number?: string | null;
+  ape_code?: string | null;
 }
 
 export type ContactStatus = "actif" | "inactif";

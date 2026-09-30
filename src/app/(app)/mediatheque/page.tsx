@@ -11,8 +11,15 @@ export default async function MediathequeIndexPage() {
   await requireRole(["commercial", "administrateur", "responsable_production"]);
   const supabase = await createClient();
 
-  const { data: companies } = await supabase.from("companies").select("id,name").order("name");
   const { data: files } = await supabase.from("media_files").select("company_id,created_at");
+
+  // Seuls les clients qui ont des fichiers : avec plusieurs milliers de clients
+  // importés de Sage, lister tous les autres noyerait l'index (et l'API tronque à
+  // 1 000 lignes). Un client sans fichier s'ouvre depuis sa fiche client.
+  const companyIds = [...new Set((files ?? []).map((f) => f.company_id as string))];
+  const { data: companies } = companyIds.length
+    ? await supabase.from("companies").select("id,name").in("id", companyIds).order("name")
+    : { data: [] as { id: string; name: string }[] };
 
   const stats = new Map<string, { count: number; lastAdded: string }>();
   for (const f of files ?? []) {
@@ -34,7 +41,7 @@ export default async function MediathequeIndexPage() {
     <div className="space-y-6">
       <PageHeader
         title="Médiathèque"
-        description="Fichiers liés à chaque client, triés par date d'ajout, avec la raison de chaque dépôt ou mise à jour."
+        description="Clients ayant des fichiers, triés par date d'ajout. Pour un client sans fichier, ouvrez sa fiche client puis sa médiathèque."
       />
       <Card>
         <CardBody className="p-0">
