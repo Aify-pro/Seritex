@@ -9,6 +9,7 @@
 //   - sage_customers_view  (clients Sage, filtre CG_NumPrinc LIKE '411%'),
 //                            puis rattachement a `companies` via la fonction
 //                            SQL sync_companies_from_sage() (migration 0059)
+//   - sage_representants   (commerciaux Sage, pour afficher/filtrer les clients)
 //   - sage_articles_view   (articles des familles MP/SF/PF uniquement)
 //   - stock_item_view      (stock reel/reserve par article ET par depot,
 //                            migration 0058)
@@ -135,6 +136,29 @@ async function syncClients(pool) {
   );
 }
 
+// Commerciaux / collaborateurs Sage (F_COLLABORATEUR) : sert uniquement a
+// afficher le nom du commercial d'un client et a filtrer la liste (migration
+// 0060). Sage range souvent les anciens collaborateurs sous un nom prefixe par
+// "Z" : on garde le libelle tel quel (Nom puis Prenom) pour rester reconnaissable.
+async function syncRepresentants(pool) {
+  const result = await pool.request().query(`
+    SELECT CO_No, CO_Nom, CO_Prenom
+    FROM F_COLLABORATEUR
+  `);
+
+  const now = new Date().toISOString();
+  const rows = result.recordset
+    .filter((r) => r.CO_No !== null && r.CO_No !== undefined)
+    .map((r) => ({
+      co_no: Number(r.CO_No),
+      name: [r.CO_Nom, r.CO_Prenom].map((v) => trimOrNull(v)).filter(Boolean).join(" ") || `Collaborateur ${r.CO_No}`,
+      last_sync_at: now,
+    }));
+
+  await upsertAndPrune("sage_representants", ["co_no"], rows);
+  console.log(`Commerciaux : ${rows.length} synchronises.`);
+}
+
 async function syncArticles(pool) {
   const result = await pool.request().query(`
     SELECT AR_Ref, AR_Design, FA_CodeFamille, AR_UniteVen, AR_PrixVen, AR_Sommeil
@@ -222,6 +246,7 @@ async function main() {
   console.log(`[${new Date().toISOString()}] Debut synchronisation NAS -> Supabase`);
   const pool = await sql.connect(nasConfig);
   try {
+    await syncRepresentants(pool);
     await syncClients(pool);
     await syncArticles(pool);
     await syncStock(pool);

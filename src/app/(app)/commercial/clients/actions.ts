@@ -15,7 +15,7 @@ const companySchema = z.object({
   notes: z.string().trim().optional(),
 });
 
-/** Met à jour la fiche entreprise (coordonnées, SIRET, notes CRM). */
+/** Met à jour la fiche entreprise (coordonnées, SIRET, notes CRM) — notes seules pour une fiche Sage. */
 export async function updateCompany(formData: FormData) {
   await requireRole(["commercial", "administrateur"]);
   const parsed = companySchema.safeParse({
@@ -30,16 +30,27 @@ export async function updateCompany(formData: FormData) {
   if (!parsed.success) return { error: parsed.error.issues[0]?.message };
 
   const supabase = await createClient();
+
+  // Fiche importée de Sage : identité et coordonnées appartiennent à Sage
+  // (migration 0059, protégées aussi par un trigger) — seules les notes CRM
+  // sont modifiables ici, quoi que le formulaire envoie.
+  const { data: existing } = await supabase.from("companies").select("origin").eq("id", parsed.data.company_id).maybeSingle();
+  if (!existing) return { error: "Fiche entreprise introuvable" };
+
   const { error } = await supabase
     .from("companies")
-    .update({
-      name: parsed.data.name,
-      siret: parsed.data.siret || null,
-      address: parsed.data.address || null,
-      phone: parsed.data.phone || null,
-      email: parsed.data.email || null,
-      notes: parsed.data.notes || null,
-    })
+    .update(
+      existing.origin === "sage"
+        ? { notes: parsed.data.notes || null }
+        : {
+            name: parsed.data.name,
+            siret: parsed.data.siret || null,
+            address: parsed.data.address || null,
+            phone: parsed.data.phone || null,
+            email: parsed.data.email || null,
+            notes: parsed.data.notes || null,
+          }
+    )
     .eq("id", parsed.data.company_id);
   if (error) return { error: error.message };
 
