@@ -77,6 +77,19 @@ Panneau de configuration DSM → **Planificateur de tâches** → Créer →
 Pas de dépendance à une session Windows ni à une astuce anti-déconnexion —
 le NAS tourne en continu par nature.
 
+## Dépannage
+
+**`Error: Node.js detected but native WebSocket not found`** (au lancement) :
+`@supabase/supabase-js` initialise un client Realtime en interne (même s'il
+n'est pas utilisé ici), qui nécessite l'API `WebSocket` native — disponible
+à partir de **Node.js 22**. Le `Dockerfile` utilise `node:22-alpine` depuis
+ce correctif ; si l'erreur persiste, l'image a probablement été construite
+avant la mise à jour du `Dockerfile` — recopiez-le sur le NAS et
+reconstruisez :
+```bash
+docker build -t sage-nas-sync .
+```
+
 ## Déclenchement depuis l'application Seritex (pas encore fait)
 
 Un vrai bouton "Synchroniser maintenant" dans Seritex nécessiterait un
