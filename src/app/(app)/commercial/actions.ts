@@ -140,7 +140,10 @@ export async function createRequest(formData: FormData) {
   const { authId } = await requireRole(["commercial", "administrateur"]);
   const parsed = newRequestSchema.safeParse({
     company_id: formData.get("company_id"),
-    contact_id: formData.get("contact_id"),
+    // Le menu Contact n'est affiché que si le client a des contacts : sans lui
+    // (cas de tous les clients importés de Sage au départ) le champ est absent
+    // du formulaire et `get` renvoie null, que le schéma refuserait.
+    contact_id: formData.get("contact_id") ?? "",
     description: formData.get("description"),
     needs_graphics: formData.get("needs_graphics") === "on",
   });
