@@ -118,7 +118,7 @@ async function syncArticles(pool) {
 
 async function syncStock(pool) {
   const result = await pool.request().query(`
-    SELECT s.AR_Ref, s.DE_No, s.AS_QteSto, s.AS_QteRes, a.AR_Design, a.FA_CodeFamille
+    SELECT s.AR_Ref, s.DE_No, s.AS_QteSto, s.AS_QteRes, a.AR_Design, a.FA_CodeFamille, a.AR_UniteVen
     FROM F_ARTSTOCK s
     JOIN F_ARTICLE a ON a.AR_Ref = s.AR_Ref
     WHERE a.FA_CodeFamille IN (${FAMILLES_SQL})
@@ -133,7 +133,11 @@ async function syncStock(pool) {
       warehouse: String(r.DE_No).trim(),
       designation: trimOrNull(r.AR_Design) || "(sans designation)",
       category: categoriePourFamille(r.FA_CodeFamille),
-      unit: null,
+      // stock_item_view.unit est NOT NULL ; F_ARTSTOCK n'a pas d'unite propre,
+      // on reprend celle de l'article (code brut Sage, cf. syncArticles —
+      // aucune correspondance connue vers un libelle, P_UNITE est vide).
+      // Chaine vide plutot que null si l'article n'en a aucune.
+      unit: r.AR_UniteVen !== null && r.AR_UniteVen !== undefined ? String(r.AR_UniteVen).trim() : "",
       quantite_reelle: reelle,
       quantite_reservee: reservee,
       quantity_available: reelle - reservee,
