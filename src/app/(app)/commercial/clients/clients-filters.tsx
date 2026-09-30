@@ -2,11 +2,12 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { Loader2, Search, X } from "lucide-react";
+import { ChevronDown, Loader2, Search, SlidersHorizontal, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   CLIENT_PAGE_SIZES,
   CLIENT_STATUTS,
+  activeFilterCount,
   filtersToSearchParams,
   parseClientFilters,
   type ClientFilterOptions,
@@ -108,6 +109,7 @@ export function ClientsFilters({
   const [local, setLocal] = useState(values);
   const [prevValues, setPrevValues] = useState(values);
   const [sentQ, setSentQ] = useState(values.q);
+  const [advancedOpen, setAdvancedOpen] = useState(activeCount - (values.q ? 1 : 0) > 0);
   const localRef = useRef(local);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -159,6 +161,10 @@ export function ClientsFilters({
     startTransition(() => router.replace(pathname, { scroll: false }));
   }
 
+  // Filtres avancés actifs (hors saisie de recherche) : affichés sur le bouton pour
+  // qu'un filtre posé ne passe pas inaperçu quand le panneau est replié.
+  const advancedActive = activeFilterCount(local) - (local.q ? 1 : 0);
+
   return (
     <div className="space-y-3 rounded-lg border border-border bg-surface p-4">
       <div className="flex flex-wrap items-end gap-3">
@@ -173,6 +179,21 @@ export function ClientsFilters({
             className={`${inputClass} pl-8`}
           />
         </div>
+        <Button
+          type="button"
+          size="md"
+          variant={advancedOpen ? "primary" : "secondary"}
+          onClick={() => setAdvancedOpen((o) => !o)}
+          aria-expanded={advancedOpen}
+          aria-controls="clients-recherche-avancee"
+        >
+          <SlidersHorizontal className="h-4 w-4" />
+          Recherche avancée
+          {advancedActive > 0 && (
+            <span className="rounded-full bg-brand-foreground/20 px-1.5 text-xs font-semibold">{advancedActive}</span>
+          )}
+          <ChevronDown className={`h-4 w-4 transition-transform ${advancedOpen ? "rotate-180" : ""}`} />
+        </Button>
         {pending && <Loader2 className="mb-2 h-4 w-4 animate-spin text-foreground-muted" aria-label="Chargement" />}
         {activeCount > 0 && (
           <Button type="button" size="sm" variant="secondary" onClick={reset}>
@@ -181,132 +202,136 @@ export function ClientsFilters({
         )}
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Field label="Statut">
-          <select
-            value={local.statut}
-            onChange={(e) => navigate({ statut: e.target.value as ClientFilters["statut"] })}
-            className={inputClass}
-          >
-            {CLIENT_STATUTS.map((s) => (
-              <option key={s} value={s}>
-                {STATUT_LABELS[s]}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Famille">
-          <OptionSelect value={local.famille} onChange={(v) => navigate({ famille: v })} options={options.familles} placeholder="Toutes" />
-        </Field>
-        <Field label="Zone / commune">
-          <OptionSelect value={local.zone} onChange={(v) => navigate({ zone: v })} options={options.zones} placeholder="Toutes" />
-        </Field>
-        <Field label="Typologie">
-          <OptionSelect value={local.typologie} onChange={(v) => navigate({ typologie: v })} options={options.typologies} placeholder="Toutes" />
-        </Field>
-        <Field label="Ville">
-          <OptionSelect value={local.ville} onChange={(v) => navigate({ ville: v })} options={options.villes} placeholder="Toutes" />
-        </Field>
-        <Field label="Pays">
-          <OptionSelect value={local.pays} onChange={(v) => navigate({ pays: v })} options={options.pays} placeholder="Tous" />
-        </Field>
-        <Field label="Commercial (Sage)">
-          <OptionSelect
-            value={local.representant}
-            onChange={(v) => navigate({ representant: v })}
-            options={options.representants}
-            placeholder="Tous"
-          />
-        </Field>
-        <Field label="Type">
-          <ToggleSelect
-            value={local.type}
-            onChange={(v) => navigate({ type: v })}
-            choices={[
-              { value: "", label: "Clients et prospects" },
-              { value: "client", label: "Clients" },
-              { value: "prospect", label: "Prospects" },
-            ]}
-          />
-        </Field>
-        <Field label="Origine">
-          <ToggleSelect
-            value={local.origine}
-            onChange={(v) => navigate({ origine: v })}
-            choices={[
-              { value: "", label: "Toutes" },
-              { value: "sage", label: "Importés de Sage" },
-              { value: "manuel", label: "Créés dans Seritex" },
-            ]}
-          />
-        </Field>
-        <Field label="Contacts">
-          <ToggleSelect
-            value={local.contacts}
-            onChange={(v) => navigate({ contacts: v })}
-            choices={[
-              { value: "", label: "Peu importe" },
-              { value: "avec", label: "Avec au moins un contact" },
-              { value: "sans", label: "Sans contact" },
-            ]}
-          />
-        </Field>
-        <Field label="Compte portail">
-          <ToggleSelect
-            value={local.portail}
-            onChange={(v) => navigate({ portail: v })}
-            choices={[
-              { value: "", label: "Peu importe" },
-              { value: "avec", label: "Avec compte portail" },
-              { value: "sans", label: "Sans compte portail" },
-            ]}
-          />
-        </Field>
-        <Field label="Activité">
-          <ToggleSelect
-            value={local.activite}
-            onChange={(v) => navigate({ activite: v })}
-            choices={[
-              { value: "", label: "Peu importe" },
-              { value: "en_cours", label: "Demande ou ODF en cours" },
-              { value: "aucune", label: "Aucune activité en cours" },
-            ]}
-          />
-        </Field>
-      </div>
+      {advancedOpen && (
+        <div id="clients-recherche-avancee" className="space-y-3 border-t border-border pt-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <Field label="Statut">
+              <select
+                value={local.statut}
+                onChange={(e) => navigate({ statut: e.target.value as ClientFilters["statut"] })}
+                className={inputClass}
+              >
+                {CLIENT_STATUTS.map((s) => (
+                  <option key={s} value={s}>
+                    {STATUT_LABELS[s]}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Famille">
+              <OptionSelect value={local.famille} onChange={(v) => navigate({ famille: v })} options={options.familles} placeholder="Toutes" />
+            </Field>
+            <Field label="Zone / commune">
+              <OptionSelect value={local.zone} onChange={(v) => navigate({ zone: v })} options={options.zones} placeholder="Toutes" />
+            </Field>
+            <Field label="Typologie">
+              <OptionSelect value={local.typologie} onChange={(v) => navigate({ typologie: v })} options={options.typologies} placeholder="Toutes" />
+            </Field>
+            <Field label="Ville">
+              <OptionSelect value={local.ville} onChange={(v) => navigate({ ville: v })} options={options.villes} placeholder="Toutes" />
+            </Field>
+            <Field label="Pays">
+              <OptionSelect value={local.pays} onChange={(v) => navigate({ pays: v })} options={options.pays} placeholder="Tous" />
+            </Field>
+            <Field label="Commercial (Sage)">
+              <OptionSelect
+                value={local.representant}
+                onChange={(v) => navigate({ representant: v })}
+                options={options.representants}
+                placeholder="Tous"
+              />
+            </Field>
+            <Field label="Type">
+              <ToggleSelect
+                value={local.type}
+                onChange={(v) => navigate({ type: v })}
+                choices={[
+                  { value: "", label: "Clients et prospects" },
+                  { value: "client", label: "Clients" },
+                  { value: "prospect", label: "Prospects" },
+                ]}
+              />
+            </Field>
+            <Field label="Origine">
+              <ToggleSelect
+                value={local.origine}
+                onChange={(v) => navigate({ origine: v })}
+                choices={[
+                  { value: "", label: "Toutes" },
+                  { value: "sage", label: "Importés de Sage" },
+                  { value: "manuel", label: "Créés dans Seritex" },
+                ]}
+              />
+            </Field>
+            <Field label="Contacts">
+              <ToggleSelect
+                value={local.contacts}
+                onChange={(v) => navigate({ contacts: v })}
+                choices={[
+                  { value: "", label: "Peu importe" },
+                  { value: "avec", label: "Avec au moins un contact" },
+                  { value: "sans", label: "Sans contact" },
+                ]}
+              />
+            </Field>
+            <Field label="Compte portail">
+              <ToggleSelect
+                value={local.portail}
+                onChange={(v) => navigate({ portail: v })}
+                choices={[
+                  { value: "", label: "Peu importe" },
+                  { value: "avec", label: "Avec compte portail" },
+                  { value: "sans", label: "Sans compte portail" },
+                ]}
+              />
+            </Field>
+            <Field label="Activité">
+              <ToggleSelect
+                value={local.activite}
+                onChange={(v) => navigate({ activite: v })}
+                choices={[
+                  { value: "", label: "Peu importe" },
+                  { value: "en_cours", label: "Demande ou ODF en cours" },
+                  { value: "aucune", label: "Aucune activité en cours" },
+                ]}
+              />
+            </Field>
+          </div>
 
-      <div className="grid grid-cols-2 gap-3 border-t border-border pt-3 sm:max-w-md">
-        <Field label="Trier par">
-          <select
-            value={local.tri}
-            onChange={(e) => navigate({ tri: e.target.value as ClientSortKey, ordre: e.target.value === "activite" || e.target.value === "creation" ? "desc" : "asc" })}
-            className={inputClass}
-          >
-            {(Object.keys(SORT_LABELS) as ClientSortKey[]).map((k) => (
-              <option key={k} value={k}>
-                {SORT_LABELS[k]}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Ordre">
-            <select value={local.ordre} onChange={(e) => navigate({ ordre: e.target.value as "asc" | "desc" })} className={inputClass}>
-              <option value="asc">Croissant</option>
-              <option value="desc">Décroissant</option>
-            </select>
-          </Field>
-          <Field label="Par page">
-            <select value={local.taille} onChange={(e) => navigate({ taille: Number(e.target.value) })} className={inputClass}>
-              {CLIENT_PAGE_SIZES.map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
-          </Field>
+          <div className="grid grid-cols-2 gap-3 border-t border-border pt-3 sm:max-w-md">
+            <Field label="Trier par">
+              <select
+                value={local.tri}
+                onChange={(e) => navigate({ tri: e.target.value as ClientSortKey, ordre: e.target.value === "activite" || e.target.value === "creation" ? "desc" : "asc" })}
+                className={inputClass}
+              >
+                {(Object.keys(SORT_LABELS) as ClientSortKey[]).map((k) => (
+                  <option key={k} value={k}>
+                    {SORT_LABELS[k]}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Ordre">
+                <select value={local.ordre} onChange={(e) => navigate({ ordre: e.target.value as "asc" | "desc" })} className={inputClass}>
+                  <option value="asc">Croissant</option>
+                  <option value="desc">Décroissant</option>
+                </select>
+              </Field>
+              <Field label="Par page">
+                <select value={local.taille} onChange={(e) => navigate({ taille: Number(e.target.value) })} className={inputClass}>
+                  {CLIENT_PAGE_SIZES.map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
