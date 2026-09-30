@@ -6,7 +6,9 @@
 // taches DSM. Lit les tables Sage deja miroirees sur le NAS (SAGE_SERITEX,
 // alimentees depuis Sage par le pont VM decrit dans le depot) et alimente
 // les 3 tables miroir Supabase prevues depuis la migration 0005 :
-//   - sage_customers_view  (clients Sage, filtre CG_NumPrinc LIKE '411%')
+//   - sage_customers_view  (clients Sage, filtre CG_NumPrinc LIKE '411%'),
+//                            puis rattachement a `companies` via la fonction
+//                            SQL sync_companies_from_sage() (migration 0059)
 //   - sage_articles_view   (articles des familles MP/SF/PF uniquement)
 //   - stock_item_view      (stock reel/reserve par article ET par depot,
 //                            migration 0058)
@@ -67,10 +69,23 @@ function trimOrNull(v) {
   return t.length > 0 ? t : null;
 }
 
+// Les dates vides de Sage valent 1753-01-01 (ou 1899-12-30 selon les champs) :
+// on les traite comme "pas de date".
+function dateOrNull(v) {
+  if (!v) return null;
+  const d = v instanceof Date ? v : new Date(v);
+  if (Number.isNaN(d.getTime()) || d.getUTCFullYear() < 1900) return null;
+  return d.toISOString();
+}
+
 async function syncClients(pool) {
+  // Les colonnes libres Sage contiennent un "/" ou un espace : crochets obligatoires.
   const result = await pool.request().query(`
-    SELECT CT_Num, CT_Intitule, CT_Siret, CT_Adresse, CT_Complement,
-           CT_CodePostal, CT_Ville, CT_Pays, CT_Telephone, CT_EMail
+    SELECT CT_Num, CT_Intitule, CT_Siret, CT_Identifiant, CT_Ape,
+           CT_Adresse, CT_Complement, CT_CodePostal, CT_Ville, CT_Pays,
+           CT_Telephone, CT_EMail, CT_Site, CT_Sommeil, CT_Prospect,
+           FAMILLE, [S/FAMILLE] AS SOUS_FAMILLE, CATEGORIE, [Typologie client] AS TYPOLOGIE,
+           CO_No, cbCreation
     FROM F_COMPTET
     WHERE CG_NumPrinc LIKE '411%'
   `);
@@ -80,18 +95,44 @@ async function syncClients(pool) {
     sage_code: String(r.CT_Num).trim(),
     name: trimOrNull(r.CT_Intitule) || "(sans nom)",
     siret: trimOrNull(r.CT_Siret),
+    // Rue + complement uniquement : CP, ville et pays ont leurs propres
+    // colonnes (filtrage cote Seritex, migration 0059).
     address:
-      [r.CT_Adresse, r.CT_Complement, r.CT_CodePostal, r.CT_Ville, r.CT_Pays]
+      [r.CT_Adresse, r.CT_Complement]
         .map((v) => trimOrNull(v))
         .filter(Boolean)
         .join(", ") || null,
+    postal_code: trimOrNull(r.CT_CodePostal),
+    city: trimOrNull(r.CT_Ville),
+    country: trimOrNull(r.CT_Pays),
     phone: trimOrNull(r.CT_Telephone),
     email: trimOrNull(r.CT_EMail),
+    website: trimOrNull(r.CT_Site),
+    vat_number: trimOrNull(r.CT_Identifiant),
+    ape_code: trimOrNull(r.CT_Ape),
+    is_active: Number(r.CT_Sommeil) === 0,
+    is_prospect: Number(r.CT_Prospect) === 1,
+    famille: trimOrNull(r.FAMILLE),
+    sous_famille: trimOrNull(r.SOUS_FAMILLE),
+    categorie: trimOrNull(r.CATEGORIE),
+    typologie: trimOrNull(r.TYPOLOGIE),
+    representant_no: r.CO_No !== null && r.CO_No !== undefined && Number(r.CO_No) > 0 ? Number(r.CO_No) : null,
+    sage_created_at: dateOrNull(r.cbCreation),
     last_sync_at: now,
   }));
 
   await upsertAndPrune("sage_customers_view", ["sage_code"], rows);
-  console.log(`Clients : ${rows.length} synchronises.`);
+  console.log(`Clients : ${rows.length} synchronises (table miroir).`);
+
+  // Rattachement aux fiches Seritex (`companies`) : cree les nouveaux clients,
+  // met a jour les champs Sage, archive ceux disparus de Sage (jamais de
+  // suppression). Ne touche ni aux contacts ni aux notes.
+  const { data, error } = await supabase.rpc("sync_companies_from_sage");
+  if (error) throw new Error(`Rattachement companies : ${error.message}`);
+  console.log(
+    `Fiches clients : ${data.creees} creee(s), ${data.mises_a_jour} mise(s) a jour, ` +
+      `${data.reprises} reprise(s) de rapprochement, ${data.archivees} archivee(s).`,
+  );
 }
 
 async function syncArticles(pool) {
