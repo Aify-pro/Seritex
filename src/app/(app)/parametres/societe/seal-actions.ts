@@ -51,7 +51,10 @@ export async function removeCompanyStamp() {
 // ── Signatures (une par compte utilisateur) ─────────────────────────────────
 
 const signatorySchema = z.object({
-  user_id: z.string().uuid("Choisissez un compte utilisateur"),
+  // guid() et non uuid() : zod 4 exige les bits de version/variante RFC 9562, que
+  // ne respectent pas les comptes de démonstration (44444444-…-4401) — la
+  // vérification réelle est l'existence du compte, juste après.
+  user_id: z.guid("Choisissez un compte utilisateur"),
   fonction: z.string().trim().max(120, "Fonction trop longue").transform((v) => v || null),
 });
 
