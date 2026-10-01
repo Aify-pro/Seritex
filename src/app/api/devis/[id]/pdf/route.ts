@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { printableZoneLabel } from "@/lib/printable-zones";
+import { getSizeOptionsByModel } from "@/lib/quote-dispatch";
 import QRCode from "qrcode";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -35,12 +36,15 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const [{ data: rawLines }, { data: zoneTemplates }, issuer] = await Promise.all([
     supabase
       .from("quote_lines")
-      .select("id,description,quantity,unit_price,remise_pct,product_model_id,couleur_unique:couleur_unique_id(name),zone_colors:quote_line_zone_colors(zone_key,colors:color_id(name)),printable_zones:quote_line_printable_zones(nb_couleurs,product_printable_zones(zone_label,display_order))")
+      .select("id,description,quantity,unit_price,remise_pct,product_model_id,couleur_unique:couleur_unique_id(name),zone_colors:quote_line_zone_colors(zone_key,colors:color_id(name)),printable_zones:quote_line_printable_zones(nb_couleurs,product_printable_zones(zone_label,display_order)),sizes:quote_line_sizes(taille,quantite)")
       .eq("quote_id", id)
       .order("id"),
     supabase.from("product_zone_templates").select("product_model_id,zone_key,zone_label"),
     getCompanySettings(),
   ]);
+
+  // Ordre métier des tailles (migration 0066) pour la répartition de chaque ligne.
+  const sizeOptionsByModel = await getSizeOptionsByModel((rawLines ?? []).map((l) => l.product_model_id as string | null));
 
   const zoneLabel = (modelId: string | null, key: string) =>
     (zoneTemplates ?? []).find((z) => z.product_model_id === modelId && z.zone_key === key)?.zone_label ?? key;
@@ -59,7 +63,16 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       .filter((z) => z.product_printable_zones)
       .sort((a, b) => a.product_printable_zones!.display_order - b.product_printable_zones!.display_order)
       .map((z) => printableZoneLabel(z.product_printable_zones!.zone_label, z.nb_couleurs));
-    const config = [colors, prints.length > 0 ? `Impressions : ${prints.join(", ")}` : ""].filter(Boolean).join("  |  ");
+    // Répartition par taille (migration 0066) : validée par le client avec le devis.
+    const qtyBySize = new Map(((l.sizes ?? []) as unknown as { taille: string; quantite: number }[]).map((z) => [z.taille, z.quantite]));
+    const ordered = (sizeOptionsByModel[l.product_model_id as string] ?? []).filter((o) => qtyBySize.has(o.cle));
+    const sizesText = [
+      ...ordered.map((o) => `${o.libelle} ${qtyBySize.get(o.cle)}`),
+      ...[...qtyBySize.entries()].filter(([cle]) => !ordered.some((o) => o.cle === cle)).map(([cle, q]) => `${cle.split("/").pop()} ${q}`),
+    ].join(", ");
+    const config = [colors, prints.length > 0 ? `Impressions : ${prints.join(", ")}` : "", sizesText ? `Tailles : ${sizesText}` : ""]
+      .filter(Boolean)
+      .join("  |  ");
     return { description: l.description, quantity: l.quantity, unit_price: Number(l.unit_price), remise_pct: Number(l.remise_pct ?? 0), colors: config };
   });
 

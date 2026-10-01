@@ -27,6 +27,7 @@ import {
   ArrowLeftRight,
   Gauge,
   Mail,
+  ChartPie,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { createElement, type ReactNode } from "react";
@@ -167,6 +168,7 @@ export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
     { href: "/parametres/textiles", label: "Textiles", icon: navIcon(Layers), section: PARAMETRES },
     { href: "/parametres/societe", label: "Informations société", icon: navIcon(Landmark), section: PARAMETRES, module: "societe" },
     { href: "/parametres/fabrication", label: "Fabrication", icon: navIcon(Gauge), section: PARAMETRES, module: "fabrication" },
+    { href: "/parametres/dispatching", label: "Dispatching des tailles", icon: navIcon(ChartPie), section: PARAMETRES, module: "dispatching" },
     { href: "/parametres/stockage", label: "Stockage médiathèque", icon: navIcon(Database), section: PARAMETRES, module: "stockage_cibles" },
     { href: "/parametres/sage", label: "Intégration Sage", icon: navIcon(Plug), section: PARAMETRES, module: "parametres_sage" },
     { href: "/parametres/stock", label: "Stock Sage (lecture)", icon: navIcon(Warehouse), section: PARAMETRES, module: "stock_sage" },

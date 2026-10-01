@@ -14,6 +14,7 @@ import { formatDate } from "@/lib/utils";
 import { CreateSampleDialog } from "@/components/samples/create-sample-dialog";
 import { getSampleQuoteLineOptions } from "@/lib/samples";
 import { getCompanySettings } from "@/lib/company-settings";
+import { getDispatchRules, getSizeOptionsByModel } from "@/lib/quote-dispatch";
 
 export default async function RequestDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { authId } = await requireRole(["commercial", "administrateur"]);
@@ -52,7 +53,7 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
       supabase
         .from("quotes")
         .select(
-          "*,quote_lines(id,product_model_id,description,quantity,unit_price,remise_pct,couleur_unique_id,quote_line_zone_colors(zone_key,color_id),quote_line_printable_zones(printable_zone_id,nb_couleurs))"
+          "*,quote_lines(id,product_model_id,description,quantity,unit_price,remise_pct,couleur_unique_id,quote_line_zone_colors(zone_key,color_id),quote_line_printable_zones(printable_zone_id,nb_couleurs),quote_line_sizes(taille,quantite))"
         )
         .eq("request_id", id),
       supabase.from("product_models").select("id,name,base_price").eq("active", true),
@@ -96,6 +97,7 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
       couleur_unique_id: string | null;
       quote_line_zone_colors: { zone_key: string; color_id: string }[] | null;
       quote_line_printable_zones: { printable_zone_id: string; nb_couleurs: number }[] | null;
+      quote_line_sizes: { taille: string; quantite: number }[] | null;
     }[];
     corrections.set(q.id, {
       motif: q.rejet_motif ?? null,
@@ -112,6 +114,7 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
           couleurUniqueId: l.couleur_unique_id,
           zoneColors: Object.fromEntries((l.quote_line_zone_colors ?? []).map((z) => [z.zone_key, z.color_id])),
           printZones: Object.fromEntries((l.quote_line_printable_zones ?? []).map((z) => [z.printable_zone_id, z.nb_couleurs])),
+          sizes: Object.fromEntries((l.quote_line_sizes ?? []).map((z) => [z.taille, z.quantite])),
         })),
         terms: {
           objet: q.objet ?? "",
@@ -135,6 +138,12 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
       },
     });
   }
+
+  // Dispatching (migration 0066) : tailles proposables par modèle et règle de répartition.
+  const [sizeOptionsByModel, dispatchRules] = await Promise.all([
+    getSizeOptionsByModel((products ?? []).map((pm) => pm.id as string)),
+    getDispatchRules(),
+  ]);
 
   const printableZonesByModel = (printableZones ?? []).reduce<Record<string, { id: string; zone_label: string; display_order: number }[]>>((acc, z) => {
     (acc[z.product_model_id] ??= []).push({ id: z.id, zone_label: z.zone_label, display_order: z.display_order });
@@ -161,6 +170,8 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
     products: products ?? [],
     zoneTemplatesByModel,
     printableZonesByModel,
+    sizeOptionsByModel,
+    dispatchRules,
     colors: colors ?? [],
     defaults: {
       tvaRate: companySettings?.assujetti_tva === false ? 0 : (companySettings?.tva_taux_defaut ?? 18),

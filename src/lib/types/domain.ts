@@ -394,6 +394,8 @@ export interface QuoteLine {
   // Impressions par emplacement (migration 0065) — base du chiffrage, héritées
   // dans la ligne d'ODF par accept_quote().
   printable_zones?: QuoteLinePrintableZone[];
+  // Répartition par taille (migration 0066) — clé « Groupe/Libellé » → pièces.
+  sizes?: Record<string, number>;
 }
 
 /** Emplacement imprimé d'une ligne de devis et son nombre de couleurs (migration 0065). */

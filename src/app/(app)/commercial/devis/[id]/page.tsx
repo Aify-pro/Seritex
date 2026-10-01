@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getQuoteLinesWithColorConfig } from "@/lib/quotes";
 import { notFound } from "next/navigation";
 import { QuoteDetail } from "@/components/quotes/quote-detail";
+import { getSizeOptionsByModel } from "@/lib/quote-dispatch";
 import type { AttachableMediaFile } from "@/lib/types/domain";
 
 export default async function CommercialQuoteDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -34,6 +35,7 @@ export default async function CommercialQuoteDetailPage({ params }: { params: Pr
       ? supabase.from("app_users").select("full_name").eq("id", quote.validated_by).maybeSingle().then((r) => r.data?.full_name ?? null)
       : Promise.resolve(null),
   ]);
+  const sizeOptionsByModel = await getSizeOptionsByModel(lines.map((l) => l.product_model_id));
   const availableMediaFiles = (requestMedia ?? [])
     .map((m) => m.media_files as unknown as AttachableMediaFile | null)
     .filter((f): f is AttachableMediaFile => !!f);
@@ -50,6 +52,7 @@ export default async function CommercialQuoteDetailPage({ params }: { params: Pr
       canValidate={canValidate}
       validators={validators}
       validatedBy={validator}
+      sizeOptionsByModel={sizeOptionsByModel}
     />
   );
 }

@@ -9,6 +9,8 @@ import { amountInWordsFr } from "@/lib/number-to-words-fr";
 import { FileDown } from "lucide-react";
 import Link from "next/link";
 import { printableZoneLabel } from "@/lib/printable-zones";
+import { QuoteLineDispatch } from "./quote-line-dispatch";
+import type { SizeOption } from "./dispatch-editor";
 import { AcceptQuoteButton } from "./accept-quote-button";
 import { ValidateQuoteCard } from "./validate-quote-card";
 import { ZoneColorSummary } from "@/components/product/zone-color-picker";
@@ -27,6 +29,7 @@ export function QuoteDetail({
   canValidate = false,
   validators = [],
   validatedBy = null,
+  sizeOptionsByModel = {},
 }: {
   quote: Quote;
   lines: QuoteLine[];
@@ -44,6 +47,8 @@ export function QuoteDetail({
   validators?: string[];
   /** Validation interne déjà faite : nom du validateur. */
   validatedBy?: string | null;
+  /** Tailles proposables par modèle — affichage ordonné et ajustement de la répartition (migration 0066). */
+  sizeOptionsByModel?: Record<string, SizeOption[]>;
 }) {
   const tvaRate = Number(quote.tva_rate ?? 0);
   const remisePct = Number(quote.remise_pct ?? 0);
@@ -128,6 +133,17 @@ export function QuoteDetail({
                           }))}
                         />
                       </div>
+                    )}
+                    {l.product_model_id && (
+                      <QuoteLineDispatch
+                        quoteId={quote.id}
+                        quoteLineId={l.id}
+                        sizes={sizeOptionsByModel[l.product_model_id] ?? []}
+                        initial={l.sizes ?? {}}
+                        quantity={l.quantity}
+                        // Ajustable une fois le devis envoyé, avant acceptation (client, ou commercial à sa demande).
+                        editable={canAccept && quote.status === "envoye"}
+                      />
                     )}
                     {l.printable_zones && l.printable_zones.length > 0 && (
                       <p className="mt-1 text-xs text-foreground-muted">
