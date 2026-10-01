@@ -13,6 +13,7 @@ import Link from "next/link";
 import { formatDate } from "@/lib/utils";
 import { CreateSampleDialog } from "@/components/samples/create-sample-dialog";
 import { getSampleQuoteLineOptions } from "@/lib/samples";
+import { getCompanySettings } from "@/lib/company-settings";
 
 export default async function RequestDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { authId } = await requireRole(["commercial", "administrateur"]);
@@ -27,7 +28,7 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
 
   if (!request) notFound();
 
-  const [{ data: messages }, { data: quotes }, { data: products }, { data: zoneTemplates }, { data: colors }, { data: samples }, quoteLines] =
+  const [{ data: messages }, { data: quotes }, { data: products }, { data: zoneTemplates }, { data: colors }, { data: samples }, quoteLines, companySettings] =
     await Promise.all([
       supabase
         .from("messages")
@@ -48,6 +49,7 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
         .eq("request_id", id)
         .order("created_at", { ascending: false }),
       getSampleQuoteLineOptions([id]),
+      getCompanySettings(),
     ]);
 
   const zoneTemplatesByModel = (zoneTemplates ?? []).reduce<Record<string, { zone_key: string; zone_label: string; display_order: number }[]>>(
@@ -105,6 +107,12 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
                 products={products ?? []}
                 zoneTemplatesByModel={zoneTemplatesByModel}
                 colors={colors ?? []}
+                defaults={{
+                  tvaRate: companySettings?.assujetti_tva === false ? 0 : (companySettings?.tva_taux_defaut ?? 18),
+                  validiteJours: companySettings?.validite_devis_jours ?? 30,
+                  acomptePct: companySettings?.acompte_pct_defaut ?? 0,
+                  conditionsPaiement: companySettings?.conditions_paiement_defaut ?? "",
+                }}
               />
             </CardBody>
           </Card>

@@ -67,6 +67,14 @@ export function CompanyForm({ company }: { company: Company }) {
       </div>
         </>
       )}
+      <div>
+        <label className="mb-1 block text-xs font-medium text-foreground">N° compte contribuable (NCC)</label>
+        <input name="ncc" defaultValue={company.ncc ?? ""} className="h-9 w-full rounded-md border border-border bg-surface px-2 text-sm" />
+      </div>
+      <div>
+        <label className="mb-1 block text-xs font-medium text-foreground">N° RCCM</label>
+        <input name="rccm" defaultValue={company.rccm ?? ""} className="h-9 w-full rounded-md border border-border bg-surface px-2 text-sm" />
+      </div>
       <div className="sm:col-span-2">
         <label className="mb-1 block text-xs font-medium text-foreground">Notes CRM</label>
         <textarea name="notes" defaultValue={company.notes ?? ""} rows={2} className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm" />

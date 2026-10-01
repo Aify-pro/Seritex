@@ -7,6 +7,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { sendNotification } from "@/lib/notifications/send";
 import { resolveContactEmailForRequest, resolveRoleEmails } from "@/lib/notifications/recipients";
+import { computeQuoteTotals } from "@/lib/quote-totals";
 
 export async function updateRequestStatus(requestId: string, status: RequestStatus) {
   await requireRole(["commercial", "administrateur"]);
@@ -41,14 +42,43 @@ const quoteLineSchema = z.object({
   zone_colors: z.array(z.object({ zone_key: z.string().min(1), color_id: z.string().uuid() })),
 });
 
+const optionalText = z.string().trim().max(2000).transform((v) => v || null);
+
+/**
+ * Mentions de la proforma (migration 0061) : TVA, remise, règlement, délais.
+ * Le taux de TVA vient du formulaire (pré-rempli depuis Paramètres >
+ * Informations société) ; un devis exonéré (tva_rate = 0) doit en donner le
+ * motif, mention exigée sur un document sans TVA pour une société assujettie.
+ */
+const quoteTermsSchema = z
+  .object({
+    objet: optionalText,
+    reference_client: optionalText,
+    remise_pct: z.coerce.number().min(0, "Remise invalide").max(100, "La remise ne peut pas dépasser 100 %"),
+    tva_rate: z.coerce.number().min(0, "Taux de TVA invalide").max(100, "Taux de TVA invalide"),
+    tva_exoneration_motif: optionalText,
+    mode_reglement: optionalText,
+    conditions_paiement: optionalText,
+    acompte_pct: z.coerce.number().min(0, "Acompte invalide").max(100, "L'acompte ne peut pas dépasser 100 %"),
+    delai_livraison: optionalText,
+    notes: optionalText,
+    valid_until: z.string().date().nullable(),
+  })
+  .refine((t) => t.tva_rate > 0 || !!t.tva_exoneration_motif, {
+    message: "Indiquez le motif d'exonération de TVA (ou un taux de TVA)",
+    path: ["tva_exoneration_motif"],
+  });
+
 const createQuoteSchema = z.object({
   lines: z.array(quoteLineSchema).min(1, "Au moins un article est requis"),
   // Date de livraison promise au client (migration 0048) — optionnelle,
   // comme valid_until déjà sur cette table : aucune obligation de saisie.
   date_livraison_prevue: z.string().date().nullable(),
+  terms: quoteTermsSchema,
 });
 
 export type QuoteLineInput = z.infer<typeof quoteLineSchema>;
+export type QuoteTermsInput = z.input<typeof quoteTermsSchema>;
 
 /**
  * Un devis peut porter plusieurs articles (`quote_lines` est une vraie
@@ -61,15 +91,21 @@ export async function createQuote(
   requestId: string,
   companyId: string,
   lines: QuoteLineInput[],
-  dateLivraisonPrevue: string | null
+  dateLivraisonPrevue: string | null,
+  terms: QuoteTermsInput
 ) {
   await requireRole(["commercial", "administrateur"]);
-  const parsed = createQuoteSchema.safeParse({ lines, date_livraison_prevue: dateLivraisonPrevue });
+  const parsed = createQuoteSchema.safeParse({ lines, date_livraison_prevue: dateLivraisonPrevue, terms });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Devis invalide" };
 
   const supabase = await createClient();
-  const reference = "DEV-" + Date.now().toString(36).toUpperCase();
-  const totalAmount = parsed.data.lines.reduce((sum, l) => sum + l.quantity * l.unit_price, 0);
+  // Numérotation continue DEV-AAAA-NNNN (migration 0061).
+  const { data: reference, error: refError } = await supabase.rpc("next_document_number", { p_prefix: "DEV" });
+  if (refError || !reference) return { error: refError?.message ?? "Numérotation du devis impossible" };
+
+  const t = parsed.data.terms;
+  const totals = computeQuoteTotals(parsed.data.lines, t.remise_pct, t.tva_rate, t.acompte_pct);
+  const totalAmount = totals.ttc;
 
   const { data: quote, error } = await supabase
     .from("quotes")
@@ -79,7 +115,20 @@ export async function createQuote(
       company_id: companyId,
       status: "envoye",
       total_amount: totalAmount,
+      total_ht: totals.ht,
+      total_tva: totals.tva,
       date_livraison_prevue: parsed.data.date_livraison_prevue,
+      valid_until: t.valid_until,
+      objet: t.objet,
+      reference_client: t.reference_client,
+      remise_pct: t.remise_pct,
+      tva_rate: t.tva_rate,
+      tva_exoneration_motif: t.tva_rate > 0 ? null : t.tva_exoneration_motif,
+      mode_reglement: t.mode_reglement,
+      conditions_paiement: t.conditions_paiement,
+      acompte_pct: t.acompte_pct,
+      delai_livraison: t.delai_livraison,
+      notes: t.notes,
     })
     .select()
     .single();

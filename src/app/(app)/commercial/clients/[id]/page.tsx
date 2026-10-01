@@ -103,6 +103,11 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
           <p className="flex items-start gap-2 text-foreground-muted sm:col-span-2">
             <MapPin className="mt-0.5 h-4 w-4 shrink-0" /> {fullAddress || "Adresse non renseignée"}
           </p>
+          {(company.ncc || company.rccm) && (
+            <p className="text-xs text-foreground-muted sm:col-span-2">
+              {[company.ncc && `NCC ${company.ncc}`, company.rccm && `RCCM ${company.rccm}`].filter(Boolean).join(" · ")}
+            </p>
+          )}
           {fromSage && (
             <dl className="grid grid-cols-2 gap-x-4 gap-y-2 border-t border-border pt-3 text-xs sm:col-span-2 sm:grid-cols-4">
               {sageRows
