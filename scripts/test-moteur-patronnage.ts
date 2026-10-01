@@ -28,13 +28,20 @@
  *     taille L reste « taille différente », jamais reconnue comme M ;
  * 14. détail pièce par pièce : dimensions en mm (1 unité = 0,1 mm), verdict et
  *     patron reconnu sur chaque ligne, dans l'ordre du tracé.
+ * 15. DXF marqué (téléchargement) : texte au centre de chaque pièce reconnue
+ *     (article/taille/pièce) ou « NON RECONNUE », cartouche avec QR — ajouté
+ *     par SURCHARGE du fichier déposé (jamais une régénération à partir des
+ *     contours analysés, cf. dxf-export.ts) ; échoue proprement si la section
+ *     ENTITIES est introuvable, plutôt que de rendre un fichier à moitié marqué.
  *
  * Lancer : npx tsx scripts/test-moteur-patronnage.ts
  */
+import DxfParser from "dxf-parser";
 import { parseDxfContours } from "../src/lib/patronnage/dxf";
 import { normalizeShape, type Point } from "../src/lib/patronnage/geometry";
-import { reconnaitreTrace, type ReferencePiece } from "../src/lib/patronnage/reconnaissance";
 import { construireAnalyseDetaillee } from "../src/lib/patronnage/detail";
+import { genererDxfMarque } from "../src/lib/patronnage/dxf-export";
+import { reconnaitreTrace, type ReferencePiece } from "../src/lib/patronnage/reconnaissance";
 
 /* ---------- Génération de contours de pièces plausibles ---------- */
 
@@ -443,6 +450,79 @@ console.log("\n14. Détail pièce par pièce (mm, mesurées sur la pose dans le 
   check("mais périmètre/surface restent corrects (invariants par rotation)", l30.perimetreMm === 280 && l30.surfaceCm2 === 40);
   check("rectangle non reconnu, patron vide", !l0.reconnue && l0.patron === null);
   check("Devant reconnu, patron renseigné", lDevant.reconnue && lDevant.patron?.pieceName === "Devant", `${lDevant.patron?.pieceName} @ ${lDevant.score}`);
+}
+
+// --- 15. DXF marqué : marquage pièce par pièce + cartouche QR, par surcharge
+console.log("\n15. DXF marqué (texte au centre des pièces + cartouche QR)");
+{
+  const cartouche = (facteurEchelle = 1): Parameters<typeof genererDxfMarque>[3] => ({
+    traceReference: "OT-2026-0004-T1",
+    numeroOt: "OT-2026-0004",
+    odfReference: "OF-38906 — T-shirt col rond",
+    clientLabel: "Client Test SARL",
+    articleLabel: "T-shirt col rond 180g — Blanc",
+    dateLabel: "01/10/2026",
+    url: "https://seritex.example/atelier/patronnage/abc?trace=def",
+    facteurEchelle,
+  });
+
+  // 100 % reconnu : Devant + Manche, tous deux dans la bibliothèque.
+  const dxfText = toDxf([
+    { layer: "1", points: devantTshirt() },
+    { layer: "1", points: translate(manche(), 1500, 0) },
+  ]);
+  const contours = parseDxfContours(dxfText);
+  const detailComplet = construireAnalyseDetaillee(contours, biblio);
+  const resultat = genererDxfMarque(dxfText, contours, detailComplet.lignes, cartouche());
+  check("marquage réussi (pas d'erreur)", "dxf" in resultat, "dxf" in resultat ? "" : (resultat as { error: string }).error);
+
+  if ("dxf" in resultat) {
+    // Le fichier marqué doit rester lisible par notre propre parseur — sinon
+    // il ne le serait probablement pas non plus par un vrai lecteur CAO.
+    const relu = new DxfParser().parseSync(resultat.dxf) as unknown as { entities: { type: string; text?: string; layer?: string }[] };
+    const textes = relu.entities.filter((e) => e.type === "TEXT");
+    check("relecture du fichier marqué sans erreur", Array.isArray(relu.entities));
+    check(
+      "une étiquette par pièce reconnue (Devant, Manche)",
+      textes.some((t) => t.text?.includes("Devant")) && textes.some((t) => t.text?.includes("Manche")),
+      textes.map((t) => t.text).join(" | ")
+    );
+    check("aucune pièce marquée « NON RECONNUE »", !textes.some((t) => t.text === "NON RECONNUE"));
+    check(
+      "verdict « toutes reconnues » dans le cartouche",
+      textes.some((t) => t.layer === "SERITEX_CARTOUCHE" && t.text?.includes("TOUTES LES PIÈCES RECONNUES"))
+    );
+    check(
+      "des entités QR (SOLID) sur le calque dédié",
+      relu.entities.some((e) => e.type === "SOLID" && e.layer === "SERITEX_QR")
+    );
+  }
+
+  // Tracé partiellement reconnu : Devant reconnu, pièce étrangère non reconnue.
+  const dxfPartiel = toDxf([
+    { layer: "1", points: devantTshirt() },
+    { layer: "1", points: translate([[0, 0], [400, 0], [400, 90], [180, 90], [180, 300], [0, 300]] as Point[], 1500, 0) },
+  ]);
+  const contoursPartiel = parseDxfContours(dxfPartiel);
+  const detailPartiel = construireAnalyseDetaillee(contoursPartiel, biblio);
+  const resultatPartiel = genererDxfMarque(dxfPartiel, contoursPartiel, detailPartiel.lignes, cartouche());
+  if ("dxf" in resultatPartiel) {
+    const relu = new DxfParser().parseSync(resultatPartiel.dxf) as unknown as {
+      entities: { type: string; text?: string; layer?: string; colorIndex?: number }[];
+    };
+    const textes = relu.entities.filter((e) => e.type === "TEXT");
+    check("pièce étrangère marquée « NON RECONNUE »", textes.some((t) => t.text === "NON RECONNUE"));
+    const verdict = textes.find((t) => t.layer === "SERITEX_CARTOUCHE" && t.text?.includes("NON RECONNUE(S)"));
+    check("verdict partiel présent, en rouge (ACI 1)", verdict?.colorIndex === 1, `colorIndex=${verdict?.colorIndex}`);
+  } else {
+    check("marquage partiel réussi (pas d'erreur)", false, resultatPartiel.error);
+  }
+
+  // Robustesse : un DXF sans section ENTITIES (ex. fichier tronqué) ne doit
+  // jamais produire un fichier à moitié marqué — erreur explicite, c'est tout.
+  const sansEntites = "0\nSECTION\n2\nHEADER\n0\nENDSEC\n0\nEOF\n";
+  const echec = genererDxfMarque(sansEntites, contours, detailComplet.lignes, cartouche());
+  check("échoue proprement sans section ENTITIES (jamais un fichier à moitié marqué)", "error" in echec);
 }
 
 console.log(

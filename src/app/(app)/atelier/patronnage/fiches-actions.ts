@@ -1,12 +1,13 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { readTraceFile, removeTraceFiles, storeTraceFile } from "@/lib/storage/patronnage-files";
+import { removeTraceFiles, storeTraceFile } from "@/lib/storage/patronnage-files";
 import { requireUser, requireRole } from "@/lib/auth/current-user";
 import { can } from "@/lib/auth/permissions";
 import { getSizes, getSizesForProductModel, type Size } from "@/lib/sizes";
-import { parseDxfContours, type DxfContour } from "@/lib/patronnage/dxf";
+import { parseDxfContours } from "@/lib/patronnage/dxf";
 import { normalizeShape, appliquerEchelleFichier, FACTEURS_ECHELLE, type FacteurEchelle } from "@/lib/patronnage/geometry";
+import { chargerTraceSource, facteurEnregistreTrace } from "@/lib/patronnage/trace-source";
 import { loadReferenceLibrary } from "@/lib/patronnage/bibliotheque";
 import { reconnaitreTrace } from "@/lib/patronnage/reconnaissance";
 import { construireAnalyseDetaillee, type TraceAnalysisDetail } from "@/lib/patronnage/detail";
@@ -974,36 +975,6 @@ function sanitizeFileName(name: string) {
 // Détail d'une analyse (bouton "Détail" d'un tracé déjà déposé)
 // ------------------------------------------------------------
 
-/** Relit le DXF stocké d'un tracé et en extrait les contours de coupe. */
-async function chargerContoursTrace(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  traceId: string,
-  ficheId: string
-): Promise<{ contours: DxfContour[] } | { error: string }> {
-  const { data: trace, error: traceError } = await supabase
-    .from("traces_placement")
-    .select("fiche_id,fichier_path")
-    .eq("id", traceId)
-    .single();
-  if (traceError || !trace || trace.fiche_id !== ficheId) return { error: "Tracé introuvable" };
-  if (!trace.fichier_path) return { error: "Aucun fichier déposé pour ce tracé." };
-
-  const stored = await readTraceFile(trace.fichier_path);
-  if (!stored) return { error: "Impossible de relire le fichier déposé." };
-
-  let text: string;
-  try {
-    text = stored.toString("utf-8");
-  } catch {
-    return { error: "Impossible de lire le fichier déposé." };
-  }
-  const contours = parseDxfContours(text);
-  if (contours.length === 0) {
-    return { error: "Aucun contour exploitable détecté dans ce tracé." };
-  }
-  return { contours };
-}
-
 /**
  * Reconstruit la vue détaillée d'un tracé déjà déposé — pièce par pièce,
  * avec le rendu visuel de ce que le moteur a extrait et comparé. Relit le
@@ -1016,32 +987,15 @@ export async function getTraceDetail(traceId: string, ficheId: string): Promise<
   await requirePermission("view");
 
   const supabase = await createClient();
-  const chargement = await chargerContoursTrace(supabase, traceId, ficheId);
+  const chargement = await chargerTraceSource(supabase, traceId, ficheId);
   if ("error" in chargement) return chargement;
 
   const library = await loadReferenceLibrary(supabase);
   if ("error" in library) return { error: library.error };
 
   return construireAnalyseDetaillee(chargement.contours, library.references, SEUIL_RECONNAISSANCE, {
-    facteurForce: await facteurEnregistre(supabase, traceId),
+    facteurForce: await facteurEnregistreTrace(supabase, traceId),
   });
-}
-
-/**
- * Facteur d'échelle de la dernière analyse enregistrée du tracé, ou
- * `undefined` s'il n'y en a pas. Le détail, l'apprentissage et la
- * ré-analyse repartent de CE facteur (auto-détecté au dépôt, ou choisi à la
- * main) : sinon un ratio choisi manuellement serait perdu à la relecture, et
- * l'écran montrerait autre chose que ce qui a été enregistré. Pour relancer la
- * détection automatique, il faut le demander explicitement (`reanalyserTrace`).
- */
-async function facteurEnregistre(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  traceId: string
-): Promise<FacteurEchelle | undefined> {
-  const { data } = await supabase.from("analyses_trace").select("facteur_echelle").eq("trace_id", traceId).maybeSingle();
-  const f = Number(data?.facteur_echelle);
-  return (FACTEURS_ECHELLE as readonly number[]).includes(f) ? (f as FacteurEchelle) : undefined;
 }
 
 /**
@@ -1066,7 +1020,7 @@ export async function reanalyserTrace(
   }
 
   const supabase = await createClient();
-  const chargement = await chargerContoursTrace(supabase, traceId, ficheId);
+  const chargement = await chargerTraceSource(supabase, traceId, ficheId);
   if ("error" in chargement) return chargement;
   const library = await loadReferenceLibrary(supabase);
   if ("error" in library) return { error: library.error };
@@ -1169,13 +1123,13 @@ export async function affecterFamille(
   const { indice, nomPiece, quantiteAttendue, cible } = parsed.data;
 
   const supabase = await createClient();
-  const chargement = await chargerContoursTrace(supabase, traceId, ficheId);
+  const chargement = await chargerTraceSource(supabase, traceId, ficheId);
   if ("error" in chargement) return chargement;
   const library = await loadReferenceLibrary(supabase);
   if ("error" in library) return { error: library.error };
 
   // Même échelle que celle affichée et enregistrée pour ce tracé (auto ou choisie à la main).
-  const facteurForce = await facteurEnregistre(supabase, traceId);
+  const facteurForce = await facteurEnregistreTrace(supabase, traceId);
   const avant = reconnaitreTrace(chargement.contours, library.references, SEUIL_RECONNAISSANCE, { facteurForce });
   if (!avant.piecesNonReconnues.some((p) => p.index_piece === indice)) {
     return { error: "Cette pièce est déjà reconnue (la bibliothèque a changé depuis) — actualisez la vue." };
