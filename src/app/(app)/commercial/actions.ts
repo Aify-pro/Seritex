@@ -33,6 +33,10 @@ export async function updateRequestStatus(requestId: string, status: RequestStat
 }
 
 const quoteLineSchema = z.object({
+  // Ligne existante (resoumission d'un devis renvoyé) — absente pour une ligne
+  // nouvelle ; ignorée à la création. z.guid : les comptes/données de
+  // démonstration n'ont pas des UUID strictement RFC (cf. seal-actions.ts).
+  id: z.guid().nullable().optional(),
   description: z.string().min(1, "Description requise"),
   quantity: z.coerce.number().int().positive("Quantité invalide"),
   unit_price: z.coerce.number().nonnegative("Prix invalide"),
@@ -95,6 +99,87 @@ const createQuoteSchema = z.object({
 export type QuoteLineInput = z.infer<typeof quoteLineSchema>;
 export type QuoteTermsInput = z.input<typeof quoteTermsSchema>;
 
+type ServerSupabase = Awaited<ReturnType<typeof createClient>>;
+type QuoteDraft = z.infer<typeof createQuoteSchema>;
+
+/**
+ * Contrôles et champs d'en-tête communs à la création et à la resoumission
+ * d'un devis : livraison exclusive, devise active (F CFA toujours au taux 1),
+ * condition de paiement connue, totaux recalculés côté serveur.
+ */
+async function prepareQuoteFields(supabase: ServerSupabase, data: QuoteDraft) {
+  const t = data.terms;
+  if (data.date_livraison_prevue && t.delai_valeur !== null) {
+    return { error: "Choisissez soit une date de livraison, soit un délai — pas les deux" };
+  }
+
+  // Devise : active et connue ; F CFA toujours au taux 1 (le taux saisi côté
+  // client n'est pas digne de confiance pour la devise de base).
+  const { data: currency } = await supabase.from("currencies").select("code,is_base,active").eq("code", t.devise).maybeSingle();
+  if (!currency || !currency.active) return { error: "Devise indisponible" };
+  const tauxChange = currency.is_base ? 1 : t.taux_change;
+
+  if (t.conditions_paiement) {
+    const { data: term } = await supabase.from("payment_terms").select("id").eq("label", t.conditions_paiement).eq("active", true).maybeSingle();
+    if (!term) return { error: "Condition de paiement inconnue ou désactivée" };
+  }
+
+  const totals = computeQuoteTotals(data.lines, t.remise_pct, t.tva_rate, t.acompte_pct, t.devise);
+  return {
+    fields: {
+      total_amount: totals.ttc,
+      total_ht: totals.ht,
+      total_tva: totals.tva,
+      date_livraison_prevue: data.date_livraison_prevue,
+      valid_until: t.valid_until,
+      objet: t.objet,
+      reference_client: t.reference_client,
+      remise_pct: t.remise_pct,
+      tva_rate: t.tva_rate,
+      tva_exoneration_motif: t.tva_rate > 0 ? null : t.tva_exoneration_motif,
+      mode_reglement: t.mode_reglement,
+      conditions_paiement: t.conditions_paiement,
+      acompte_pct: t.acompte_pct,
+      devise: t.devise,
+      taux_change: tauxChange,
+      delai_valeur: t.delai_valeur,
+      delai_unite: t.delai_unite,
+      delai_depart: t.delai_valeur !== null ? t.delai_depart : null,
+      notes: t.notes,
+    },
+  };
+}
+
+function quoteLineFields(line: QuoteLineInput) {
+  return {
+    product_model_id: line.product_model_id,
+    description: line.description,
+    quantity: line.quantity,
+    unit_price: line.unit_price,
+    remise_pct: line.remise_pct,
+    couleur_unique_id: line.couleur_unique_id,
+  };
+}
+
+/** Couleurs par zone d'une ligne — jamais en plus d'une couleur unique (migration 0034). */
+async function insertZoneColors(supabase: ServerSupabase, quoteLineId: string, line: QuoteLineInput) {
+  if (line.couleur_unique_id || line.zone_colors.length === 0) return {};
+  const { error } = await supabase
+    .from("quote_line_zone_colors")
+    .insert(line.zone_colors.map((z) => ({ quote_line_id: quoteLineId, zone_key: z.zone_key, color_id: z.color_id })));
+  return error ? { error: error.message } : {};
+}
+
+async function insertQuoteLine(supabase: ServerSupabase, quoteId: string, line: QuoteLineInput) {
+  const { data: quoteLine, error } = await supabase
+    .from("quote_lines")
+    .insert({ quote_id: quoteId, ...quoteLineFields(line) })
+    .select("id")
+    .single();
+  if (error) return { error: error.message };
+  return insertZoneColors(supabase, quoteLine.id as string, line);
+}
+
 /**
  * Un devis peut porter plusieurs articles (`quote_lines` est une vraie
  * table enfant depuis le schéma initial — seule l'UI n'exposait qu'une
@@ -114,24 +199,8 @@ export async function createQuote(
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Devis invalide" };
 
   const supabase = await createClient();
-  const t = parsed.data.terms;
-  if (parsed.data.date_livraison_prevue && t.delai_valeur !== null) {
-    return { error: "Choisissez soit une date de livraison, soit un délai — pas les deux" };
-  }
-
-  // Devise : active et connue ; F CFA toujours au taux 1 (le taux saisi côté
-  // client n'est pas digne de confiance pour la devise de base).
-  const { data: currency } = await supabase.from("currencies").select("code,is_base,active").eq("code", t.devise).maybeSingle();
-  if (!currency || !currency.active) return { error: "Devise indisponible" };
-  const tauxChange = currency.is_base ? 1 : t.taux_change;
-
-  if (t.conditions_paiement) {
-    const { data: term } = await supabase.from("payment_terms").select("id").eq("label", t.conditions_paiement).eq("active", true).maybeSingle();
-    if (!term) return { error: "Condition de paiement inconnue ou désactivée" };
-  }
-
-  const totals = computeQuoteTotals(parsed.data.lines, t.remise_pct, t.tva_rate, t.acompte_pct, t.devise);
-  const totalAmount = totals.ttc;
+  const prepared = await prepareQuoteFields(supabase, parsed.data);
+  if ("error" in prepared) return { error: prepared.error };
 
   // Numéro attribué en dernier, une fois toutes les validations passées, pour
   // ne pas « brûler » de numéros sur un devis refusé (numérotation continue).
@@ -148,25 +217,7 @@ export async function createQuote(
       created_by: authId,
       // Validation interne obligatoire avant envoi au client (migration 0063).
       status: "en_validation_interne",
-      total_amount: totalAmount,
-      total_ht: totals.ht,
-      total_tva: totals.tva,
-      date_livraison_prevue: parsed.data.date_livraison_prevue,
-      valid_until: t.valid_until,
-      objet: t.objet,
-      reference_client: t.reference_client,
-      remise_pct: t.remise_pct,
-      tva_rate: t.tva_rate,
-      tva_exoneration_motif: t.tva_rate > 0 ? null : t.tva_exoneration_motif,
-      mode_reglement: t.mode_reglement,
-      conditions_paiement: t.conditions_paiement,
-      acompte_pct: t.acompte_pct,
-      devise: t.devise,
-      taux_change: tauxChange,
-      delai_valeur: t.delai_valeur,
-      delai_unite: t.delai_unite,
-      delai_depart: t.delai_valeur !== null ? t.delai_depart : null,
-      notes: t.notes,
+      ...prepared.fields,
     })
     .select()
     .single();
@@ -174,27 +225,8 @@ export async function createQuote(
   if (error) return { error: error.message };
 
   for (const line of parsed.data.lines) {
-    const { data: quoteLine, error: lineError } = await supabase
-      .from("quote_lines")
-      .insert({
-        quote_id: quote.id,
-        product_model_id: line.product_model_id,
-        description: line.description,
-        quantity: line.quantity,
-        unit_price: line.unit_price,
-        remise_pct: line.remise_pct,
-        couleur_unique_id: line.couleur_unique_id,
-      })
-      .select("id")
-      .single();
-    if (lineError) return { error: lineError.message };
-
-    if (!line.couleur_unique_id && line.zone_colors.length > 0) {
-      const { error: zoneError } = await supabase.from("quote_line_zone_colors").insert(
-        line.zone_colors.map((z) => ({ quote_line_id: quoteLine.id, zone_key: z.zone_key, color_id: z.color_id }))
-      );
-      if (zoneError) return { error: zoneError.message };
-    }
+    const res = await insertQuoteLine(supabase, quote.id as string, line);
+    if (res.error) return { error: res.error };
   }
 
   await supabase.from("requests").update({ status: "devis_en_preparation" }).eq("id", requestId);
@@ -209,6 +241,84 @@ export async function createQuote(
   revalidatePath(`/commercial/demandes/${requestId}`);
   revalidatePath("/commercial/devis");
   return { quoteId: quote.id as string };
+}
+
+/**
+ * Resoumission d'un devis renvoyé par la Direction (migration 0064) : le
+ * commercial corrige le brouillon puis le renvoie en validation interne
+ * (brouillon → en_validation_interne, transition admise par le trigger de
+ * 0063). Le numéro du devis est conservé. Les lignes conservées gardent leur
+ * identité — et donc leur visuel, leur maquette et l'échantillon qui leur est
+ * rattaché ; seules les lignes retirées sont supprimées. Le motif du dernier
+ * renvoi reste affiché au validateur.
+ */
+export async function resubmitQuote(
+  quoteId: string,
+  lines: QuoteLineInput[],
+  dateLivraisonPrevue: string | null,
+  terms: QuoteTermsInput
+) {
+  const { authId } = await requireRole(["commercial", "administrateur"]);
+  const parsed = createQuoteSchema.safeParse({ lines, date_livraison_prevue: dateLivraisonPrevue, terms });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Devis invalide" };
+
+  const supabase = await createClient();
+  const { data: quote } = await supabase.from("quotes").select("id,status,request_id").eq("id", quoteId).maybeSingle();
+  if (!quote) return { error: "Devis introuvable" };
+  if (quote.status !== "brouillon") return { error: "Seul un devis renvoyé (brouillon) peut être corrigé et resoumis" };
+
+  const prepared = await prepareQuoteFields(supabase, parsed.data);
+  if ("error" in prepared) return { error: prepared.error };
+
+  const { data: existing, error: existingError } = await supabase.from("quote_lines").select("id").eq("quote_id", quoteId);
+  if (existingError) return { error: existingError.message };
+  const existingIds = new Set((existing ?? []).map((l) => l.id as string));
+  const keptIds = new Set(parsed.data.lines.map((l) => l.id).filter((id): id is string => !!id));
+  for (const id of keptIds) {
+    if (!existingIds.has(id)) return { error: "Une ligne ne correspond pas à ce devis — rechargez la page" };
+  }
+
+  // Lignes d'abord, statut en dernier : en cas d'échec en cours de route, le
+  // devis reste un brouillon invisible du client, jamais un devis à moitié
+  // corrigé en attente de validation.
+  const removed = [...existingIds].filter((id) => !keptIds.has(id));
+  if (removed.length > 0) {
+    const { error } = await supabase.from("quote_lines").delete().in("id", removed);
+    if (error) return { error: error.message };
+  }
+
+  for (const line of parsed.data.lines) {
+    if (!line.id) {
+      const res = await insertQuoteLine(supabase, quoteId, line);
+      if (res.error) return { error: res.error };
+      continue;
+    }
+    const { error: lineError } = await supabase.from("quote_lines").update(quoteLineFields(line)).eq("id", line.id);
+    if (lineError) return { error: lineError.message };
+    const { error: clearError } = await supabase.from("quote_line_zone_colors").delete().eq("quote_line_id", line.id);
+    if (clearError) return { error: clearError.message };
+    const res = await insertZoneColors(supabase, line.id, line);
+    if (res.error) return { error: res.error };
+  }
+
+  const { error } = await supabase
+    .from("quotes")
+    .update({ ...prepared.fields, status: "en_validation_interne" })
+    .eq("id", quoteId);
+  if (error) return { error: error.message };
+
+  await supabase.from("status_history").insert({
+    entity_type: "quote",
+    entity_id: quoteId,
+    from_status: "brouillon",
+    to_status: "en_validation_interne",
+    changed_by: authId,
+  });
+
+  revalidatePath(`/commercial/demandes/${quote.request_id}`);
+  revalidateQuote(quoteId);
+  revalidatePath("/commercial/devis");
+  return {};
 }
 
 const newRequestSchema = z.object({
@@ -331,7 +441,7 @@ export async function detachMediaFileFromQuoteLine(quoteLineId: string, quoteId:
  */
 export async function validateQuote(quoteId: string) {
   const { authId } = await requireUser();
-  if (!(await isQuoteValidator(authId))) return { error: "Seules les personnes habilitées (signature enregistrée) peuvent valider un devis." };
+  if (!(await isQuoteValidator(authId))) return { error: "Seules la Direction et l'administrateur, avec une signature enregistrée, peuvent valider un devis." };
 
   const supabase = await createClient();
   const { error } = await supabase.rpc("validate_quote", { p_quote_id: quoteId });
@@ -366,7 +476,7 @@ export async function validateQuote(quoteId: string) {
 /** Renvoie un devis en validation interne au commercial, avec motif obligatoire. */
 export async function rejectQuote(quoteId: string, motif: string) {
   const { authId } = await requireUser();
-  if (!(await isQuoteValidator(authId))) return { error: "Seules les personnes habilitées (signature enregistrée) peuvent renvoyer un devis." };
+  if (!(await isQuoteValidator(authId))) return { error: "Seules la Direction et l'administrateur, avec une signature enregistrée, peuvent renvoyer un devis." };
   const parsed = z.string().trim().min(3, "Indiquez le motif du renvoi").max(1000).safeParse(motif);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message };
 

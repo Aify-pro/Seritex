@@ -67,9 +67,10 @@ export async function saveSignatory(formData: FormData) {
   const supabase = await createClient();
   const { data: user } = await supabase.from("app_users").select("id,role,active").eq("id", parsed.data.user_id).maybeSingle();
   if (!user) return { error: "Compte introuvable" };
-  // Signature = habilitation à valider les devis : le compte doit pouvoir ouvrir l'écran devis.
-  if (user.role !== "commercial" && user.role !== "administrateur") {
-    return { error: "Une signature ne peut être affiliée qu'à un compte commercial ou administrateur" };
+  // Signature = habilitation à valider les devis, réservée à la Direction et à
+  // l'administrateur (base_role administrateur, migration 0064).
+  if (user.role !== "administrateur") {
+    return { error: "Une signature ne peut être affiliée qu'à un compte de la Direction ou administrateur" };
   }
 
   const hasFile = formData.get("image") instanceof File && (formData.get("image") as File).size > 0;

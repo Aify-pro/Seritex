@@ -7,7 +7,7 @@ import { QUOTE_STATUS_LABELS, REQUEST_STATUS_LABELS, SAMPLE_STATUS_LABELS } from
 import { notFound } from "next/navigation";
 import { StatusSelect } from "./status-select";
 import { MessageThread, type Message } from "./message-thread";
-import { QuoteForm } from "./quote-form";
+import { QuoteForm, type QuoteCorrection } from "./quote-form";
 import { postMessage } from "@/lib/actions/requests";
 import Link from "next/link";
 import { formatDate } from "@/lib/utils";
@@ -35,7 +35,14 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
         .select("id,body,created_at,sender_id,app_users(full_name)")
         .eq("request_id", id)
         .order("created_at", { ascending: true }),
-      supabase.from("quotes").select("id,reference,status,total_amount,created_at").eq("request_id", id),
+      // Les devis renvoyés par la Direction (brouillon, migration 0064) sont
+      // chargés au complet : ils se corrigent ici, avec le même formulaire.
+      supabase
+        .from("quotes")
+        .select(
+          "*,quote_lines(id,product_model_id,description,quantity,unit_price,remise_pct,couleur_unique_id,quote_line_zone_colors(zone_key,color_id))"
+        )
+        .eq("request_id", id),
       supabase.from("product_models").select("id,name,base_price").eq("active", true),
       // Gabarits de zones de tous les modèles — nécessaire au sélecteur de
       // couleur du devis (chantier config-produit-devis) dès qu'une ligne
@@ -62,6 +69,57 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
     {}
   );
 
+  const corrections = new Map<string, { motif: string | null; correction: QuoteCorrection }>();
+  for (const q of quotes ?? []) {
+    if (q.status !== "brouillon") continue;
+    const lines = (q.quote_lines ?? []) as unknown as {
+      id: string;
+      product_model_id: string | null;
+      description: string;
+      quantity: number;
+      unit_price: number;
+      remise_pct: number | null;
+      couleur_unique_id: string | null;
+      quote_line_zone_colors: { zone_key: string; color_id: string }[] | null;
+    }[];
+    corrections.set(q.id, {
+      motif: q.rejet_motif ?? null,
+      correction: {
+        quoteId: q.id,
+        reference: q.reference,
+        lines: lines.map((l) => ({
+          id: l.id,
+          productModelId: l.product_model_id,
+          description: l.description,
+          quantity: l.quantity,
+          unitPrice: Number(l.unit_price),
+          remisePct: Number(l.remise_pct ?? 0),
+          couleurUniqueId: l.couleur_unique_id,
+          zoneColors: Object.fromEntries((l.quote_line_zone_colors ?? []).map((z) => [z.zone_key, z.color_id])),
+        })),
+        terms: {
+          objet: q.objet ?? "",
+          referenceClient: q.reference_client ?? "",
+          remisePct: String(q.remise_pct ?? 0),
+          tvaRate: String(q.tva_rate ?? 0),
+          tvaExonerationMotif: q.tva_exoneration_motif ?? "",
+          modeReglement: q.mode_reglement ?? "",
+          conditionsPaiement: q.conditions_paiement ?? "",
+          acomptePct: String(q.acompte_pct ?? 0),
+          devise: q.devise ?? "XOF",
+          tauxChange: String(q.taux_change ?? 1),
+          livraisonMode: q.date_livraison_prevue ? "date" : "delai",
+          delaiValeur: q.delai_valeur != null ? String(q.delai_valeur) : "",
+          delaiUnite: q.delai_unite ?? "semaines",
+          delaiDepart: q.delai_depart ?? "commande",
+          dateLivraison: q.date_livraison_prevue ?? "",
+          notes: q.notes ?? "",
+          validUntil: q.valid_until ?? "",
+        },
+      },
+    });
+  }
+
   const company = request.companies as unknown as {
     id: string;
     name: string;
@@ -75,6 +133,34 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
     rccm: string | null;
   };
   const contact = request.contacts as unknown as { first_name: string; last_name: string; email: string } | null;
+
+  const quoteFormProps = {
+    requestId: request.id,
+    companyId: company.id,
+    products: products ?? [],
+    zoneTemplatesByModel,
+    colors: colors ?? [],
+    defaults: {
+      tvaRate: companySettings?.assujetti_tva === false ? 0 : (companySettings?.tva_taux_defaut ?? 18),
+      validiteJours: companySettings?.validite_devis_jours ?? 30,
+      acomptePct: companySettings?.acompte_pct_defaut ?? 0,
+    },
+    paymentTerms: paymentTerms ?? [],
+    currencies: currencies ?? [],
+    client: {
+      name: company.name,
+      address: company.address ?? null,
+      postalCode: company.postal_code ?? null,
+      city: company.city ?? null,
+      country: company.country ?? null,
+      phone: company.phone ?? null,
+      email: company.email ?? null,
+      ncc: company.ncc ?? null,
+      rccm: company.rccm ?? null,
+      contactName: contact ? `${contact.first_name} ${contact.last_name}` : null,
+      contactEmail: contact?.email ?? null,
+    },
+  };
 
   return (
     <div className="space-y-6">
@@ -101,46 +187,35 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
             <CardBody className="space-y-3">
               {quotes && quotes.length > 0 && (
                 <ul className="space-y-2">
-                  {quotes.map((q) => (
-                    <li key={q.id} className="flex items-center justify-between rounded-md border border-border p-3">
-                      <div>
-                        <Link href={`/commercial/devis/${q.id}`} className="text-sm font-medium text-foreground hover:text-brand">
-                          {q.reference}
-                        </Link>
-                        <p className="text-xs text-foreground-muted">{formatDate(q.created_at)}</p>
-                      </div>
-                      <StatusBadge status={q.status} labels={QUOTE_STATUS_LABELS} kind="quote" />
-                    </li>
-                  ))}
+                  {quotes.map((q) => {
+                    const toCorrect = corrections.get(q.id);
+                    return (
+                      <li key={q.id} className="space-y-3 rounded-md border border-border p-3">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <Link href={`/commercial/devis/${q.id}`} className="text-sm font-medium text-foreground hover:text-brand">
+                              {q.reference}
+                            </Link>
+                            <p className="text-xs text-foreground-muted">{formatDate(q.created_at)}</p>
+                          </div>
+                          <StatusBadge status={q.status} labels={QUOTE_STATUS_LABELS} kind="quote" />
+                        </div>
+                        {toCorrect && (
+                          <div className="space-y-2">
+                            {toCorrect.motif && (
+                              <p className="rounded-md bg-danger-soft/40 px-3 py-2 text-sm text-foreground">
+                                <span className="font-medium">Renvoyé par la Direction :</span> {toCorrect.motif}
+                              </p>
+                            )}
+                            <QuoteForm {...quoteFormProps} correction={toCorrect.correction} />
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
-              <QuoteForm
-                requestId={request.id}
-                companyId={company.id}
-                products={products ?? []}
-                zoneTemplatesByModel={zoneTemplatesByModel}
-                colors={colors ?? []}
-                defaults={{
-                  tvaRate: companySettings?.assujetti_tva === false ? 0 : (companySettings?.tva_taux_defaut ?? 18),
-                  validiteJours: companySettings?.validite_devis_jours ?? 30,
-                  acomptePct: companySettings?.acompte_pct_defaut ?? 0,
-                }}
-                paymentTerms={paymentTerms ?? []}
-                currencies={currencies ?? []}
-                client={{
-                  name: company.name,
-                  address: company.address ?? null,
-                  postalCode: company.postal_code ?? null,
-                  city: company.city ?? null,
-                  country: company.country ?? null,
-                  phone: company.phone ?? null,
-                  email: company.email ?? null,
-                  ncc: company.ncc ?? null,
-                  rccm: company.rccm ?? null,
-                  contactName: contact ? `${contact.first_name} ${contact.last_name}` : null,
-                  contactEmail: contact?.email ?? null,
-                }}
-              />
+              <QuoteForm {...quoteFormProps} />
             </CardBody>
           </Card>
 
