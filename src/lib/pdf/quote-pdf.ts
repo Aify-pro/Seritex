@@ -80,7 +80,6 @@ const PAGE_W = 595.28;
 const PAGE_H = 841.89;
 const M = 40;
 const CW = PAGE_W - M * 2;
-const FOOTER_H = 62; // réservé en bas de chaque page (mentions légales + pagination)
 
 const ink = rgb(0.11, 0.09, 0.09);
 const muted = rgb(0.42, 0.4, 0.38);
@@ -175,8 +174,38 @@ export async function buildQuotePdf(data: QuotePdfData): Promise<Uint8Array> {
     page.drawLine({ start: { x: M, y: yy }, end: { x: PAGE_W - M, y: yy }, thickness: 0.7, color });
   }
 
+  // ── Pied de page (calculé d'avance : sa hauteur borne le contenu de chaque page) ──
+  // Mentions de pied de proforma en gras (Paramètres > Informations société),
+  // puis les coordonnées et identifiants légaux de l'émetteur sur une ligne continue.
+  const footerMentions = issuer?.mentions_devis ? wrap(issuer.mentions_devis, CW, 7.5, bold) : [];
+  // Coupure entre blocs d'information (jamais au milieu d'un montant ou d'un numéro).
+  const footerSegments = [
+    [issuer?.adresse, issuer?.boite_postale, issuer?.ville, issuer?.pays].filter(Boolean).join(", "),
+    [issuer?.telephone, issuer?.email].filter(Boolean).join(" - "),
+    issuer?.site_web,
+    issuer?.forme_juridique || issuer?.capital_social != null
+      ? `${issuer?.forme_juridique ?? "Capital"} ${issuer?.capital_social != null ? `au capital de ${fcfa(issuer.capital_social)}` : ""}`.trim()
+      : null,
+    issuer?.rccm ? `RCCM ${issuer.rccm}` : null,
+    issuer?.ncc ? `N° compte contribuable (NCC) ${issuer.ncc}` : null,
+    issuer?.banque_nom ? `Banque ${issuer.banque_nom}` : null,
+    issuer?.banque_compte ? `RIB / IBAN ${issuer.banque_compte}` : null,
+  ]
+    .filter((v): v is string => !!v)
+    .map(safe);
+  const footerCoords: string[] = [];
+  for (const seg of footerSegments) {
+    const last = footerCoords[footerCoords.length - 1];
+    const joined = last !== undefined ? `${last}  -  ${seg}` : seg;
+    if (last !== undefined && font.widthOfTextAtSize(joined, 7) > CW) footerCoords.push(seg);
+    else if (last !== undefined) footerCoords[footerCoords.length - 1] = joined;
+    else footerCoords.push(seg);
+  }
+  const mentionsH = footerMentions.length ? footerMentions.length * 10 + 4 : 0;
+  const footerH = 12 + mentionsH + footerCoords.length * 9 + 14;
+
   function ensureSpace(height: number, onNewPage?: () => void) {
-    if (y - height < M + FOOTER_H) {
+    if (y - height < M + footerH) {
       page = pdf.addPage([PAGE_W, PAGE_H]);
       pages.push(page);
       y = PAGE_H - M;
@@ -184,8 +213,8 @@ export async function buildQuotePdf(data: QuotePdfData): Promise<Uint8Array> {
     }
   }
 
-  // ── En-tête : logo + émetteur à gauche, QR à droite ──────────────────────
-  const logoH = 36;
+  // ── En-tête : le logo seul à gauche, QR à droite (l'identité de l'émetteur est en pied de page) ──
+  const logoH = 52;
   const logoW = logoH * (logo.width / logo.height);
   page.drawImage(logo, { x: M, y: y - logoH, width: logoW, height: logoH });
 
@@ -195,24 +224,7 @@ export async function buildQuotePdf(data: QuotePdfData): Promise<Uint8Array> {
   text(qrCaption, PAGE_W - M - QR / 2 - font.widthOfTextAtSize(qrCaption, 6.5) / 2, y - QR - 8, 6.5, font, muted);
   const qrCaption2 = "la proforma en ligne";
   text(qrCaption2, PAGE_W - M - QR / 2 - font.widthOfTextAtSize(qrCaption2, 6.5) / 2, y - QR - 15, 6.5, font, muted);
-
-  let iy = y - logoH - 12;
-  text(issuerName, M, iy, 10.5, bold);
-  iy -= 12;
-  const issuerLines = [
-    [issuer?.forme_juridique, issuer?.capital_social != null ? `capital de ${fcfa(issuer.capital_social)}` : null]
-      .filter(Boolean)
-      .join(" au "),
-    [issuer?.adresse, issuer?.boite_postale ? `BP ${issuer.boite_postale}` : null].filter(Boolean).join(", "),
-    [issuer?.ville, issuer?.pays].filter(Boolean).join(", "),
-    [issuer?.telephone ? `Tél. ${issuer.telephone}` : null, issuer?.email].filter(Boolean).join("  |  "),
-    issuer?.site_web ?? "",
-  ].filter(Boolean);
-  for (const l of issuerLines) {
-    text(l, M, iy, 8.5, font, muted);
-    iy -= 11;
-  }
-  y = Math.min(iy, y - QR - 22) - 6;
+  y -= QR + 26;
 
   // ── Titre + numéro ────────────────────────────────────────────────────────
   hr(y + 4, accent);
@@ -391,7 +403,7 @@ export async function buildQuotePdf(data: QuotePdfData): Promise<Uint8Array> {
   if (issuer?.mobile_money) terms.push(["Mobile money", issuer.mobile_money]);
   if (quote.notes) terms.push(["Remarques", quote.notes]);
 
-  ensureSpace(30);
+  ensureSpace(60); // titre + au moins une ligne : pas de titre orphelin en bas de page
   text("CONDITIONS", M, y, 7.5, bold, muted);
   y -= 6;
   hr(y);
@@ -402,14 +414,6 @@ export async function buildQuotePdf(data: QuotePdfData): Promise<Uint8Array> {
     text(label, M, y, 8.5, bold);
     valueLines.forEach((v, i) => text(v, M + 130, y - i * 11, 8.5));
     y -= valueLines.length * 11 + 4;
-  }
-  if (issuer?.mentions_devis) {
-    y -= 4;
-    for (const l of wrap(issuer.mentions_devis, CW, 7.5, font)) {
-      ensureSpace(10);
-      text(l, M, y, 7.5, font, muted);
-      y -= 10;
-    }
   }
 
   // ── Signatures ────────────────────────────────────────────────────────────
@@ -429,29 +433,23 @@ export async function buildQuotePdf(data: QuotePdfData): Promise<Uint8Array> {
     [issuer?.signataire_nom, issuer?.signataire_fonction].filter(Boolean).join(", ") || "Signature et cachet"
   );
 
-  // ── Pied de page de chaque page : mentions légales + pagination ──────────
-  const legal = [
-    [issuerName, issuer?.forme_juridique, issuer?.capital_social != null ? `au capital de ${fcfa(issuer.capital_social)}` : null]
-      .filter(Boolean)
-      .join(" "),
-    issuer?.rccm ? `RCCM ${issuer.rccm}` : null,
-    issuer?.ncc ? `N° CC ${issuer.ncc}` : null,
-    issuer?.regime_imposition ? `Régime ${issuer.regime_imposition}` : null,
-    issuer?.centre_impots ? `Centre des impôts ${issuer.centre_impots}` : null,
-    [issuer?.adresse, issuer?.ville].filter(Boolean).length ? `Siège : ${[issuer?.adresse, issuer?.ville].filter(Boolean).join(", ")}` : null,
-  ]
-    .filter(Boolean)
-    .join("  -  ");
-  const legalLines = wrap(legal, CW, 7, font).slice(0, 3);
+  // ── Pied de page de chaque page : mentions, coordonnées, pagination ──────
   pages.forEach((p, idx) => {
     page = p;
-    hr(M + FOOTER_H - 14);
-    legalLines.forEach((l, i) => {
-      const w = font.widthOfTextAtSize(safe(l), 7);
-      text(l, (PAGE_W - w) / 2, M + FOOTER_H - 25 - i * 9, 7, font, muted);
-    });
-    text(`${quote.reference}  -  ${data.quoteUrl}`, M, M + 4, 6.5, font, muted);
-    textRight(`Page ${idx + 1} / ${pages.length}`, PAGE_W - M, M + 4, 6.5, font, muted);
+    const hrY = M + footerH - 6;
+    hr(hrY);
+    let fy = hrY - 11;
+    for (const l of footerMentions) {
+      text(l, (PAGE_W - bold.widthOfTextAtSize(safe(l), 7.5)) / 2, fy, 7.5, bold);
+      fy -= 10;
+    }
+    if (footerMentions.length) fy -= 4;
+    for (const l of footerCoords) {
+      text(l, (PAGE_W - font.widthOfTextAtSize(safe(l), 7)) / 2, fy, 7, font, muted);
+      fy -= 9;
+    }
+    text(`${quote.reference}  -  ${data.quoteUrl}`, M, M + 2, 6.5, font, muted);
+    textRight(`Page ${idx + 1} / ${pages.length}`, PAGE_W - M, M + 2, 6.5, font, muted);
   });
 
   return pdf.save();
