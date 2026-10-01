@@ -3,6 +3,7 @@ import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf
 import { computeQuoteTotals, lineNet } from "@/lib/quote-totals";
 import { BASE_CURRENCY, formatMoney } from "@/lib/currency";
 import { delaiLabel } from "@/lib/delivery";
+import type { DocumentSeal } from "@/lib/signatures";
 import { amountInWordsFr } from "@/lib/number-to-words-fr";
 import { QUOTE_STATUS_LABELS, type CompanySettings, type Quote } from "@/lib/types/domain";
 
@@ -87,6 +88,8 @@ export interface QuotePdfData {
   client: QuotePdfClient;
   representative: QuotePdfRepresentative | null;
   acceptance: QuotePdfAcceptance | null;
+  /** Signature de l'auteur du devis + cachet (migration 0062) ; null → case vide à signer à la main. */
+  seal: DocumentSeal | null;
   issuer: CompanySettings | null;
   lines: QuotePdfLine[];
   logoPng: Uint8Array;
@@ -132,7 +135,7 @@ function pct(n: number): string {
 }
 
 export async function buildQuotePdf(data: QuotePdfData): Promise<Uint8Array> {
-  const { quote, client, issuer, lines, representative, acceptance } = data;
+  const { quote, client, issuer, lines, representative, acceptance, seal } = data;
   const pdf = await PDFDocument.create();
   pdf.setTitle(`Proforma ${quote.reference}`);
   pdf.setProducer("Seritex");
@@ -453,7 +456,7 @@ export async function buildQuotePdf(data: QuotePdfData): Promise<Uint8Array> {
   }
 
   // ── Signatures ────────────────────────────────────────────────────────────
-  const sigH = 78;
+  const sigH = 100;
   y -= 14;
   ensureSpace(sigH + 6);
   const sigW = (CW - 14) / 2;
@@ -463,11 +466,25 @@ export async function buildQuotePdf(data: QuotePdfData): Promise<Uint8Array> {
     text(sub, x + 8, y - 24, 7, font, muted);
   };
   drawSig(M, "Le client - Bon pour accord", "Date, nom, cachet et signature");
-  drawSig(
-    M + sigW + 14,
-    `Pour ${issuerName}`,
-    [issuer?.signataire_nom, issuer?.signataire_fonction].filter(Boolean).join(", ") || "Signature et cachet"
-  );
+
+  const sx = M + sigW + 14;
+  if (seal) {
+    // Signature de l'auteur du devis + cachet de la société. Le cachet passe
+    // dessous, la signature par-dessus (encre sur tampon), comme sur papier.
+    drawSig(sx, `Pour ${issuerName}`, "Établi et signé par");
+    if (seal.stampPng) {
+      const stamp = await pdf.embedPng(seal.stampPng);
+      const st = 70;
+      page.drawImage(stamp, { x: sx + sigW - st - 14, y: y - sigH + 14, width: st, height: st, opacity: 0.92 });
+    }
+    const sigImg = await pdf.embedPng(seal.signaturePng);
+    const scale = Math.min((sigW * 0.55) / sigImg.width, 42 / sigImg.height);
+    page.drawImage(sigImg, { x: sx + 14, y: y - sigH + 30, width: sigImg.width * scale, height: sigImg.height * scale });
+    text(seal.name, sx + 8, y - sigH + 17, 8, bold);
+    if (seal.fonction) text(seal.fonction, sx + 8, y - sigH + 8, 7, font, muted);
+  } else {
+    drawSig(sx, `Pour ${issuerName}`, [issuer?.signataire_nom, issuer?.signataire_fonction].filter(Boolean).join(", ") || "Signature et cachet");
+  }
 
   // ── Pied de page de chaque page : mentions, coordonnées, pagination ──────
   pages.forEach((p) => {
