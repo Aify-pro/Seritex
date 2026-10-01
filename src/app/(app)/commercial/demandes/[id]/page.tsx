@@ -22,13 +22,13 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
 
   const { data: request } = await supabase
     .from("requests")
-    .select("*,companies(id,name,email,phone),contacts(first_name,last_name,email)")
+    .select("*,companies(id,name,email,phone,address,postal_code,city,country,ncc,rccm),contacts(first_name,last_name,email)")
     .eq("id", id)
     .single();
 
   if (!request) notFound();
 
-  const [{ data: messages }, { data: quotes }, { data: products }, { data: zoneTemplates }, { data: colors }, { data: samples }, quoteLines, companySettings] =
+  const [{ data: messages }, { data: quotes }, { data: products }, { data: zoneTemplates }, { data: colors }, { data: samples }, quoteLines, companySettings, { data: paymentTerms }, { data: currencies }] =
     await Promise.all([
       supabase
         .from("messages")
@@ -50,6 +50,8 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
         .order("created_at", { ascending: false }),
       getSampleQuoteLineOptions([id]),
       getCompanySettings(),
+      supabase.from("payment_terms").select("label,is_default").eq("active", true).order("display_order"),
+      supabase.from("currencies").select("code,label,rate_xof").eq("active", true).order("display_order"),
     ]);
 
   const zoneTemplatesByModel = (zoneTemplates ?? []).reduce<Record<string, { zone_key: string; zone_label: string; display_order: number }[]>>(
@@ -60,7 +62,18 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
     {}
   );
 
-  const company = request.companies as unknown as { id: string; name: string; email: string; phone: string };
+  const company = request.companies as unknown as {
+    id: string;
+    name: string;
+    email: string;
+    phone: string;
+    address: string | null;
+    postal_code: string | null;
+    city: string | null;
+    country: string | null;
+    ncc: string | null;
+    rccm: string | null;
+  };
   const contact = request.contacts as unknown as { first_name: string; last_name: string; email: string } | null;
 
   return (
@@ -111,7 +124,21 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
                   tvaRate: companySettings?.assujetti_tva === false ? 0 : (companySettings?.tva_taux_defaut ?? 18),
                   validiteJours: companySettings?.validite_devis_jours ?? 30,
                   acomptePct: companySettings?.acompte_pct_defaut ?? 0,
-                  conditionsPaiement: companySettings?.conditions_paiement_defaut ?? "",
+                }}
+                paymentTerms={paymentTerms ?? []}
+                currencies={currencies ?? []}
+                client={{
+                  name: company.name,
+                  address: company.address ?? null,
+                  postalCode: company.postal_code ?? null,
+                  city: company.city ?? null,
+                  country: company.country ?? null,
+                  phone: company.phone ?? null,
+                  email: company.email ?? null,
+                  ncc: company.ncc ?? null,
+                  rccm: company.rccm ?? null,
+                  contactName: contact ? `${contact.first_name} ${contact.last_name}` : null,
+                  contactEmail: contact?.email ?? null,
                 }}
               />
             </CardBody>

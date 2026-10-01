@@ -1,3 +1,5 @@
+import { currencyDecimals, currencyNames } from "@/lib/currency";
+
 /**
  * Montant en toutes lettres (français, orthographe de 1990 non retenue :
  * « quatre-vingts », « deux cents »…) pour la formule « Arrêté la présente
@@ -75,16 +77,24 @@ export function numberToWordsFr(value: number): string {
 }
 
 /**
- * « Un million deux cent mille francs CFA » — première lettre en capitale,
- * « franc » au singulier pour 0 et 1, « de francs » après un nombre rond de
- * millions / milliards (deux millions de francs CFA).
+ * « Un million deux cent mille francs CFA », « Mille euros et cinquante
+ * centimes » — première lettre en capitale, unité au singulier pour 0 et 1,
+ * « de » après un nombre rond de millions / milliards (deux millions d'euros
+ * / de francs CFA), centimes en toutes lettres pour les devises décimales.
  */
-export function amountInWordsFr(value: number): string {
-  const n = Math.round(value);
-  const words = numberToWordsFr(n);
-  if (!words) return "";
-  const roundMillions = n >= 1_000_000 && n % 1_000_000 === 0;
-  const unit = n <= 1 ? "franc CFA" : roundMillions ? "de francs CFA" : "francs CFA";
-  const text = `${words} ${unit}`;
+export function amountInWordsFr(value: number, currency: string = "XOF"): string {
+  const names = currencyNames(currency);
+  const decimals = currencyDecimals(currency);
+  const total = Math.round(value * 10 ** decimals);
+  const whole = Math.floor(total / 10 ** decimals);
+  const sub = total % 10 ** decimals;
+
+  const words = numberToWordsFr(whole);
+  const roundMillions = whole >= 1_000_000 && whole % 1_000_000 === 0;
+  const unit = whole <= 1 ? names.one : roundMillions ? `${/^[aeiouyéèh]/i.test(names.many) ? "d'" : "de "}${names.many}` : names.many;
+  let text = `${words} ${unit}`;
+  if (sub > 0) {
+    text += ` et ${numberToWordsFr(sub)} ${sub === 1 ? (names.subOne ?? "") : (names.subMany ?? "")}`.trimEnd();
+  }
   return text.charAt(0).toUpperCase() + text.slice(1);
 }

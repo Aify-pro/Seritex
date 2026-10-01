@@ -1,6 +1,8 @@
 import "server-only";
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
-import { computeQuoteTotals } from "@/lib/quote-totals";
+import { computeQuoteTotals, lineNet } from "@/lib/quote-totals";
+import { BASE_CURRENCY, formatMoney } from "@/lib/currency";
+import { delaiLabel } from "@/lib/delivery";
 import { amountInWordsFr } from "@/lib/number-to-words-fr";
 import { QUOTE_STATUS_LABELS, type CompanySettings, type Quote } from "@/lib/types/domain";
 
@@ -25,6 +27,7 @@ export interface QuotePdfLine {
   description: string;
   quantity: number;
   unit_price: number;
+  remise_pct: number;
   /** « Couleur unique : Bleu » / « Col : Rouge · Manches : Blanc » — vide si aucune configuration. */
   colors: string;
 }
@@ -58,7 +61,11 @@ export interface QuotePdfData {
     | "mode_reglement"
     | "conditions_paiement"
     | "acompte_pct"
-    | "delai_livraison"
+    | "devise"
+    | "taux_change"
+    | "delai_valeur"
+    | "delai_unite"
+    | "delai_depart"
     | "notes"
   >;
   client: QuotePdfClient;
@@ -91,8 +98,9 @@ function safe(input: string | null | undefined): string {
     .replace(/[^\n\x20-\x7e\xa1-\xff€–—•…]/g, "?");
 }
 
-function money(n: number): string {
-  return `${Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ")} F CFA`;
+/** Montant en F CFA (capital social de l'émetteur, équivalent d'un devis en devise). */
+function fcfa(n: number): string {
+  return safe(formatMoney(n, BASE_CURRENCY));
 }
 
 function dateFr(value: string | null | undefined): string {
@@ -117,15 +125,22 @@ export async function buildQuotePdf(data: QuotePdfData): Promise<Uint8Array> {
   const qr = await pdf.embedPng(data.qrPng);
 
   const issuerName = safe(issuer?.raison_sociale || "SERITEX");
+  const devise = quote.devise ?? BASE_CURRENCY;
+  const isBase = devise === BASE_CURRENCY;
+  const tauxChange = Number(quote.taux_change ?? 1);
+  /** Montant dans la devise du devis. */
+  const money = (n: number) => safe(formatMoney(n, devise));
   const tvaRate = Number(quote.tva_rate ?? 0);
   const remisePct = Number(quote.remise_pct ?? 0);
   const acomptePct = Number(quote.acompte_pct ?? 0);
   const totals = computeQuoteTotals(
-    lines.map((l) => ({ quantity: l.quantity, unit_price: l.unit_price })),
+    lines.map((l) => ({ quantity: l.quantity, unit_price: l.unit_price, remise_pct: l.remise_pct })),
     remisePct,
     tvaRate,
-    acomptePct
+    acomptePct,
+    devise
   );
+  const hasLineDiscount = lines.some((l) => l.remise_pct > 0);
 
   let page: PDFPage = pdf.addPage([PAGE_W, PAGE_H]);
   let y = PAGE_H - M;
@@ -185,7 +200,7 @@ export async function buildQuotePdf(data: QuotePdfData): Promise<Uint8Array> {
   text(issuerName, M, iy, 10.5, bold);
   iy -= 12;
   const issuerLines = [
-    [issuer?.forme_juridique, issuer?.capital_social != null ? `capital de ${money(issuer.capital_social)}` : null]
+    [issuer?.forme_juridique, issuer?.capital_social != null ? `capital de ${fcfa(issuer.capital_social)}` : null]
       .filter(Boolean)
       .join(" au "),
     [issuer?.adresse, issuer?.boite_postale ? `BP ${issuer.boite_postale}` : null].filter(Boolean).join(", "),
@@ -215,7 +230,7 @@ export async function buildQuotePdf(data: QuotePdfData): Promise<Uint8Array> {
     ["Date d'émission", dateFr(quote.created_at)],
     ["Valable jusqu'au", dateFr(quote.valid_until)],
     ["Référence client", quote.reference_client || "-"],
-    ["Livraison prévue", quote.date_livraison_prevue ? dateFr(quote.date_livraison_prevue) : "-"],
+    ["Devise", isBase ? "Franc CFA (XOF)" : devise],
   ];
   const colW = CW / metas.length;
   page.drawRectangle({ x: M, y: y - 30, width: CW, height: 34, color: band });
@@ -269,7 +284,14 @@ export async function buildQuotePdf(data: QuotePdfData): Promise<Uint8Array> {
   }
 
   // ── Tableau des articles ──────────────────────────────────────────────────
-  const X = { n: M, desc: M + 26, qtyRight: M + CW - 190, puRight: M + CW - 105, total: M + CW };
+  const X = {
+    n: M,
+    desc: M + 26,
+    qtyRight: M + CW - (hasLineDiscount ? 250 : 190),
+    remRight: M + CW - 190,
+    puRight: M + CW - 105,
+    total: M + CW,
+  };
   const descW = X.qtyRight - 40 - X.desc;
   const drawTableHeader = () => {
     page.drawRectangle({ x: M, y: y - 16, width: CW, height: 20, color: accent });
@@ -277,6 +299,7 @@ export async function buildQuotePdf(data: QuotePdfData): Promise<Uint8Array> {
     text("N°", X.n + 6, y - 9, 8, bold, h);
     text("DÉSIGNATION", X.desc, y - 9, 8, bold, h);
     textRight("QTÉ", X.qtyRight, y - 9, 8, bold, h);
+    if (hasLineDiscount) textRight("REMISE", X.remRight, y - 9, 8, bold, h);
     textRight("PU HT", X.puRight, y - 9, 8, bold, h);
     textRight("TOTAL HT", X.total - 6, y - 9, 8, bold, h);
     y -= 24;
@@ -300,8 +323,9 @@ export async function buildQuotePdf(data: QuotePdfData): Promise<Uint8Array> {
       ry -= 10;
     }
     textRight(String(l.quantity), X.qtyRight, y - 9, 9);
+    if (hasLineDiscount) textRight(l.remise_pct > 0 ? pct(l.remise_pct) : "-", X.remRight, y - 9, 9, font, l.remise_pct > 0 ? ink : muted);
     textRight(money(l.unit_price), X.puRight, y - 9, 9);
-    textRight(money(l.quantity * l.unit_price), X.total - 6, y - 9, 9, bold);
+    textRight(money(lineNet(l, devise)), X.total - 6, y - 9, 9, bold);
     y -= rowH;
     hr(y + 3);
   });
@@ -309,13 +333,17 @@ export async function buildQuotePdf(data: QuotePdfData): Promise<Uint8Array> {
 
   // ── Totaux ────────────────────────────────────────────────────────────────
   const totalRows: { label: string; value: string; strong?: boolean }[] = [{ label: "Total brut HT", value: money(totals.brut) }];
-  if (totals.remise > 0) totalRows.push({ label: `Remise ${pct(remisePct)}`, value: `- ${money(totals.remise)}` });
+  if (totals.remiseLignes > 0) totalRows.push({ label: "Remises de lignes", value: `- ${money(totals.remiseLignes)}` });
+  if (totals.remise > 0) totalRows.push({ label: `Remise globale ${pct(remisePct)}`, value: `- ${money(totals.remise)}` });
   totalRows.push({ label: "Total HT", value: money(totals.ht) });
   totalRows.push({ label: tvaRate > 0 ? `TVA ${pct(tvaRate)}` : "TVA", value: tvaRate > 0 ? money(totals.tva) : "Exonéré" });
   totalRows.push({ label: "TOTAL TTC", value: money(totals.ttc), strong: true });
   if (totals.acompte > 0) {
     totalRows.push({ label: `Acompte à la commande (${pct(acomptePct)})`, value: money(totals.acompte) });
     totalRows.push({ label: "Reste à payer à la livraison", value: money(totals.reste) });
+  }
+  if (!isBase) {
+    totalRows.push({ label: `Équivalent F CFA (1 ${devise} = ${String(tauxChange).replace(".", ",")} F CFA)`, value: fcfa(totals.ttc * tauxChange) });
   }
   ensureSpace(totalRows.length * 16 + 60);
   const tx = M + CW - 250;
@@ -331,7 +359,7 @@ export async function buildQuotePdf(data: QuotePdfData): Promise<Uint8Array> {
 
   // ── Montant en lettres ────────────────────────────────────────────────────
   const words = wrap(
-    `Arrêtée la présente proforma à la somme de : ${amountInWordsFr(totals.ttc)}${tvaRate > 0 ? " toutes taxes comprises" : ""}.`,
+    `Arrêtée la présente proforma à la somme de : ${amountInWordsFr(totals.ttc, devise)}${tvaRate > 0 ? " toutes taxes comprises" : ""}.`,
     CW - 16,
     9,
     bold
@@ -345,7 +373,11 @@ export async function buildQuotePdf(data: QuotePdfData): Promise<Uint8Array> {
   const terms: [string, string][] = [];
   if (quote.mode_reglement) terms.push(["Mode de règlement", quote.mode_reglement]);
   if (quote.conditions_paiement) terms.push(["Conditions de paiement", quote.conditions_paiement]);
-  if (quote.delai_livraison) terms.push(["Délai de livraison", quote.delai_livraison]);
+  const livraison = quote.date_livraison_prevue
+    ? `Le ${dateFr(quote.date_livraison_prevue)}`
+    : delaiLabel(quote.delai_valeur, quote.delai_unite, quote.delai_depart);
+  if (livraison) terms.push(["Livraison", livraison]);
+  if (!isBase) terms.push(["Devise et taux", `${devise} - 1 ${devise} = ${String(tauxChange).replace(".", ",")} F CFA (taux figé à l'émission)`]);
   terms.push(["Validité de l'offre", quote.valid_until ? `Jusqu'au ${dateFr(quote.valid_until)}` : "Non précisée"]);
   if (tvaRate === 0 && quote.tva_exoneration_motif) terms.push(["Exonération de TVA", quote.tva_exoneration_motif]);
   const bank = [
@@ -399,7 +431,7 @@ export async function buildQuotePdf(data: QuotePdfData): Promise<Uint8Array> {
 
   // ── Pied de page de chaque page : mentions légales + pagination ──────────
   const legal = [
-    [issuerName, issuer?.forme_juridique, issuer?.capital_social != null ? `au capital de ${money(issuer.capital_social)}` : null]
+    [issuerName, issuer?.forme_juridique, issuer?.capital_social != null ? `au capital de ${fcfa(issuer.capital_social)}` : null]
       .filter(Boolean)
       .join(" "),
     issuer?.rccm ? `RCCM ${issuer.rccm}` : null,

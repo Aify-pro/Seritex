@@ -305,6 +305,29 @@ export interface RequestRecord {
   companies?: Pick<Company, "id" | "name">;
 }
 
+export type DelaiUnite = "jours" | "jours_ouvres" | "semaines" | "mois";
+export type DelaiDepart = "commande" | "acompte" | "validation_echantillon";
+
+/** Condition de paiement proposée sur les devis (migration 0061, gérée dans Informations société). */
+export interface PaymentTerm {
+  id: string;
+  label: string;
+  is_system: boolean;
+  is_default: boolean;
+  active: boolean;
+  display_order: number;
+}
+
+/** Devise utilisable sur un devis (migration 0061) — rate_xof : F CFA pour 1 unité. */
+export interface Currency {
+  code: string;
+  label: string;
+  rate_xof: number | null;
+  is_base: boolean;
+  active: boolean;
+  display_order: number;
+}
+
 export interface Quote {
   id: string;
   reference: string;
@@ -329,7 +352,11 @@ export interface Quote {
   mode_reglement?: string | null;
   conditions_paiement?: string | null;
   acompte_pct?: number;
-  delai_livraison?: string | null;
+  devise?: string;
+  taux_change?: number;
+  delai_valeur?: number | null;
+  delai_unite?: DelaiUnite | null;
+  delai_depart?: DelaiDepart | null;
   notes?: string | null;
   created_at: string;
   companies?: Pick<Company, "id" | "name">;
@@ -343,6 +370,8 @@ export interface QuoteLine {
   quantity: number;
   unit_price: number;
   line_total: number;
+  /** Remise propre à la ligne (migration 0061) ; line_total reste le brut. */
+  remise_pct?: number;
   // Configuration couleur (chantier config-produit-devis) — la « maquette »
   // que le client valide en acceptant le devis, héritée 1:1 dans la ligne
   // d'ODF correspondante par accept_quote() (chantier ODF multi-lignes).
@@ -833,7 +862,6 @@ export interface CompanySettings {
   tva_taux_defaut: number;
   validite_devis_jours: number;
   acompte_pct_defaut: number;
-  conditions_paiement_defaut: string | null;
   mentions_devis: string | null;
   updated_at: string;
   updated_by: string | null;

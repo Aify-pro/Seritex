@@ -32,7 +32,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const [{ data: rawLines }, { data: zoneTemplates }, issuer] = await Promise.all([
     supabase
       .from("quote_lines")
-      .select("id,description,quantity,unit_price,product_model_id,couleur_unique:couleur_unique_id(name),zone_colors:quote_line_zone_colors(zone_key,colors:color_id(name))")
+      .select("id,description,quantity,unit_price,remise_pct,product_model_id,couleur_unique:couleur_unique_id(name),zone_colors:quote_line_zone_colors(zone_key,colors:color_id(name))")
       .eq("quote_id", id)
       .order("id"),
     supabase.from("product_zone_templates").select("product_model_id,zone_key,zone_label"),
@@ -51,7 +51,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
           .filter((z) => z.colors)
           .map((z) => `${zoneLabel(l.product_model_id, z.zone_key)} : ${z.colors!.name}`)
           .join("  |  ");
-    return { description: l.description, quantity: l.quantity, unit_price: Number(l.unit_price), colors };
+    return { description: l.description, quantity: l.quantity, unit_price: Number(l.unit_price), remise_pct: Number(l.remise_pct ?? 0), colors };
   });
 
   const company = quote.companies as unknown as {

@@ -2,7 +2,9 @@ import { Card, CardHeader, CardBody } from "@/components/ui/card";
 import { StatusBadge } from "@/components/ui/badge";
 import { QUOTE_STATUS_LABELS, type AttachableMediaFile, type Quote, type QuoteLine } from "@/lib/types/domain";
 import { formatAmount, formatDate } from "@/lib/utils";
-import { computeQuoteTotals } from "@/lib/quote-totals";
+import { computeQuoteTotals, lineNet } from "@/lib/quote-totals";
+import { delaiLabel } from "@/lib/delivery";
+import { BASE_CURRENCY } from "@/lib/currency";
 import { amountInWordsFr } from "@/lib/number-to-words-fr";
 import { FileDown } from "lucide-react";
 import { AcceptQuoteButton } from "./accept-quote-button";
@@ -36,14 +38,20 @@ export function QuoteDetail({
   const acomptePct = Number(quote.acompte_pct ?? 0);
   // Devis antérieur à la migration 0061 : pas de ventilation, le total fait foi.
   const detailed = quote.total_ht != null;
-  const totals = computeQuoteTotals(lines, remisePct, tvaRate, acomptePct);
+  const devise = quote.devise ?? BASE_CURRENCY;
+  const money = (n: number | null | undefined) => formatAmount(n, devise);
+  const totals = computeQuoteTotals(lines, remisePct, tvaRate, acomptePct, devise);
+  const livraison = quote.date_livraison_prevue
+    ? `Le ${formatDate(quote.date_livraison_prevue)}`
+    : delaiLabel(quote.delai_valeur, quote.delai_unite, quote.delai_depart);
   const terms: [string, string | null | undefined][] = [
     ["Objet", quote.objet],
     ["Référence client", quote.reference_client],
     ["Mode de règlement", quote.mode_reglement],
     ["Conditions de paiement", quote.conditions_paiement],
-    ["Acompte à la commande", acomptePct > 0 ? `${acomptePct} % — ${formatAmount(totals.acompte)}` : null],
-    ["Délai de livraison", quote.delai_livraison],
+    ["Acompte à la commande", acomptePct > 0 ? `${acomptePct} % — ${money(totals.acompte)}` : null],
+    ["Livraison", livraison],
+    ["Devise", devise !== BASE_CURRENCY ? `${devise} — 1 ${devise} = ${quote.taux_change} F CFA` : null],
     ["Exonération de TVA", tvaRate === 0 && detailed ? quote.tva_exoneration_motif : null],
     ["Remarques", quote.notes],
   ];
@@ -123,22 +131,26 @@ export function QuoteDetail({
                     />
                   </td>
                   <td className="px-5 py-3 text-foreground-muted">{l.quantity}</td>
-                  <td className="px-5 py-3 text-foreground-muted">{formatAmount(l.unit_price)}</td>
-                  <td className="px-5 py-3 font-medium text-foreground">{formatAmount(l.line_total)}</td>
+                  <td className="px-5 py-3 text-foreground-muted">
+                    {money(l.unit_price)}
+                    {Number(l.remise_pct ?? 0) > 0 && <span className="block text-xs">remise {l.remise_pct} %</span>}
+                  </td>
+                  <td className="px-5 py-3 font-medium text-foreground">{money(lineNet(l, devise))}</td>
                 </tr>
               ))}
             </tbody>
             <tfoot>
               {detailed ? (
                 <>
-                  <TotalRow label="Total brut HT" value={formatAmount(totals.brut)} />
-                  {totals.remise > 0 && <TotalRow label={`Remise ${remisePct} %`} value={`- ${formatAmount(totals.remise)}`} />}
-                  <TotalRow label="Total HT" value={formatAmount(quote.total_ht)} />
-                  <TotalRow label={tvaRate > 0 ? `TVA ${tvaRate} %` : "TVA"} value={tvaRate > 0 ? formatAmount(quote.total_tva) : "Exonéré"} />
-                  <TotalRow label="Total TTC" value={formatAmount(quote.total_amount)} strong />
+                  <TotalRow label="Total brut HT" value={money(totals.brut)} />
+                  {totals.remiseLignes > 0 && <TotalRow label="Remises de lignes" value={`- ${money(totals.remiseLignes)}`} />}
+                  {totals.remise > 0 && <TotalRow label={`Remise globale ${remisePct} %`} value={`- ${money(totals.remise)}`} />}
+                  <TotalRow label="Total HT" value={money(quote.total_ht)} />
+                  <TotalRow label={tvaRate > 0 ? `TVA ${tvaRate} %` : "TVA"} value={tvaRate > 0 ? money(quote.total_tva) : "Exonéré"} />
+                  <TotalRow label="Total TTC" value={money(quote.total_amount)} strong />
                 </>
               ) : (
-                <TotalRow label="Total" value={formatAmount(quote.total_amount)} strong />
+                <TotalRow label="Total" value={money(quote.total_amount)} strong />
               )}
             </tfoot>
           </table>
@@ -149,7 +161,7 @@ export function QuoteDetail({
         <Card>
           <CardBody className="space-y-3 text-sm">
             <p className="text-foreground-muted">
-              <span className="font-medium text-foreground">Arrêté à la somme de :</span> {amountInWordsFr(quote.total_amount)}
+              <span className="font-medium text-foreground">Arrêté à la somme de :</span> {amountInWordsFr(quote.total_amount, devise)}
               {tvaRate > 0 ? " toutes taxes comprises" : ""}.
             </p>
             <dl className="grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2">

@@ -7,8 +7,11 @@ import { Button } from "@/components/ui/button";
 import { createQuote, type QuoteLineInput } from "../../actions";
 import { useRouter } from "next/navigation";
 import { ZoneColorPicker, EMPTY_ZONE_COLOR_DRAFT, type ZoneColorDraft } from "@/components/product/zone-color-picker";
-import { computeQuoteTotals } from "@/lib/quote-totals";
-import { formatAmount } from "@/lib/utils";
+import { computeQuoteTotals, lineNet } from "@/lib/quote-totals";
+import { BASE_CURRENCY, currencyDecimals, formatMoney } from "@/lib/currency";
+import { DELAI_DEPARTS, DELAI_UNITES } from "@/lib/delivery";
+import type { DelaiDepart, DelaiUnite } from "@/lib/types/domain";
+import { MapPin, Phone, Mail, User } from "lucide-react";
 
 type ProductModel = { id: string; name: string; base_price: number | null };
 type ZoneTemplate = { zone_key: string; zone_label: string; display_order: number };
@@ -21,6 +24,7 @@ type LineDraft = {
   description: string;
   quantity: string;
   unitPrice: string;
+  remisePct: string;
   colorDraft: ZoneColorDraft;
 };
 
@@ -29,8 +33,27 @@ export type QuoteDefaults = {
   tvaRate: number;
   validiteJours: number;
   acomptePct: number;
-  conditionsPaiement: string;
 };
+
+/** Identité du client affichée avant les articles (fiche entreprise + contact de la demande). */
+export type QuoteClientInfo = {
+  name: string;
+  address: string | null;
+  postalCode: string | null;
+  city: string | null;
+  country: string | null;
+  phone: string | null;
+  email: string | null;
+  ncc: string | null;
+  rccm: string | null;
+  contactName: string | null;
+  contactEmail: string | null;
+};
+
+type PaymentTermOption = { label: string; is_default: boolean };
+type CurrencyOption = { code: string; label: string; rate_xof: number | null };
+
+const EXPORT_MOTIF = "Vente à l'exportation — exonérée de TVA";
 
 type TermsDraft = {
   objet: string;
@@ -41,7 +64,14 @@ type TermsDraft = {
   modeReglement: string;
   conditionsPaiement: string;
   acomptePct: string;
-  delaiLivraison: string;
+  devise: string;
+  tauxChange: string;
+  /** Livraison : un délai normalisé OU une date ferme. */
+  livraisonMode: "delai" | "date";
+  delaiValeur: string;
+  delaiUnite: DelaiUnite;
+  delaiDepart: DelaiDepart;
+  dateLivraison: string;
   notes: string;
   validUntil: string;
 };
@@ -54,7 +84,7 @@ function addDays(days: number) {
   return d.toISOString().slice(0, 10);
 }
 
-function newTerms(defaults: QuoteDefaults): TermsDraft {
+function newTerms(defaults: QuoteDefaults, paymentTerms: PaymentTermOption[]): TermsDraft {
   return {
     objet: "",
     referenceClient: "",
@@ -62,9 +92,15 @@ function newTerms(defaults: QuoteDefaults): TermsDraft {
     tvaRate: String(defaults.tvaRate),
     tvaExonerationMotif: "",
     modeReglement: "",
-    conditionsPaiement: defaults.conditionsPaiement,
+    conditionsPaiement: (paymentTerms.find((t) => t.is_default) ?? paymentTerms[0])?.label ?? "",
     acomptePct: String(defaults.acomptePct),
-    delaiLivraison: "",
+    devise: BASE_CURRENCY,
+    tauxChange: "1",
+    livraisonMode: "delai",
+    delaiValeur: "",
+    delaiUnite: "semaines",
+    delaiDepart: "commande",
+    dateLivraison: "",
     notes: "",
     validUntil: addDays(defaults.validiteJours),
   };
@@ -77,6 +113,7 @@ function newLine(): LineDraft {
     description: "",
     quantity: "",
     unitPrice: "",
+    remisePct: "0",
     colorDraft: EMPTY_ZONE_COLOR_DRAFT,
   };
 }
@@ -94,24 +131,29 @@ function newLine(): LineDraft {
 export function QuoteForm({
   requestId,
   companyId,
+  client,
   products,
   zoneTemplatesByModel,
   colors,
   defaults,
+  paymentTerms,
+  currencies,
 }: {
   requestId: string;
   companyId: string;
+  client: QuoteClientInfo;
   products: ProductModel[];
   /** Gabarit de zones par modèle de produit — nécessaire au ZoneColorPicker dès qu'une ligne choisit un modèle. */
   zoneTemplatesByModel: Record<string, ZoneTemplate[]>;
   colors: ColorOption[];
   defaults: QuoteDefaults;
+  paymentTerms: PaymentTermOption[];
+  currencies: CurrencyOption[];
 }) {
   const [pending, startTransition] = useTransition();
   const [open, setOpen] = useState(false);
   const [lines, setLines] = useState<LineDraft[]>([newLine()]);
-  const [dateLivraisonPrevue, setDateLivraisonPrevue] = useState("");
-  const [terms, setTerms] = useState<TermsDraft>(() => newTerms(defaults));
+  const [terms, setTerms] = useState<TermsDraft>(() => newTerms(defaults, paymentTerms));
   const router = useRouter();
 
   if (!open) {
@@ -121,8 +163,7 @@ export function QuoteForm({
         size="sm"
         onClick={() => {
           setLines([newLine()]);
-          setDateLivraisonPrevue("");
-          setTerms(newTerms(defaults));
+          setTerms(newTerms(defaults, paymentTerms));
           setOpen(true);
         }}
       >
@@ -159,12 +200,32 @@ export function QuoteForm({
     setTerms((prev) => ({ ...prev, ...patch }));
   }
 
+  const isBase = terms.devise === BASE_CURRENCY;
+  const decimals = currencyDecimals(terms.devise);
   const totals = computeQuoteTotals(
-    lines.map((l) => ({ quantity: Number(l.quantity) || 0, unit_price: Number(l.unitPrice) || 0 })),
+    lines.map((l) => ({ quantity: Number(l.quantity) || 0, unit_price: Number(l.unitPrice) || 0, remise_pct: Number(l.remisePct) || 0 })),
     Number(terms.remisePct) || 0,
     Number(terms.tvaRate) || 0,
-    Number(terms.acomptePct) || 0
+    Number(terms.acomptePct) || 0,
+    terms.devise
   );
+  const money = (n: number) => formatMoney(n, terms.devise);
+
+  /** Changer de devise reprend le taux des paramètres ; une vente hors F CFA est en principe un export (TVA 0). */
+  function chooseCurrency(code: string) {
+    const cur = currencies.find((c) => c.code === code);
+    setTerms((prev) => {
+      const toBase = code === BASE_CURRENCY;
+      const wasExport = prev.tvaExonerationMotif === EXPORT_MOTIF;
+      return {
+        ...prev,
+        devise: code,
+        tauxChange: toBase ? "1" : String(cur?.rate_xof ?? ""),
+        tvaRate: toBase ? (wasExport ? String(defaults.tvaRate) : prev.tvaRate) : "0",
+        tvaExonerationMotif: toBase ? (wasExport ? "" : prev.tvaExonerationMotif) : prev.tvaExonerationMotif || EXPORT_MOTIF,
+      };
+    });
+  }
 
   function removeLine(key: string) {
     setLines((prev) => (prev.length > 1 ? prev.filter((l) => l.key !== key) : prev));
@@ -178,6 +239,7 @@ export function QuoteForm({
         description: l.description,
         quantity: Number(l.quantity),
         unit_price: Number(l.unitPrice),
+        remise_pct: Number(l.remisePct) || 0,
         product_model_id: l.productModelId || null,
         couleur_unique_id: uni ? l.colorDraft.couleurUniqueId : null,
         zone_colors: uni
@@ -189,7 +251,8 @@ export function QuoteForm({
     });
 
     startTransition(async () => {
-      const res = await createQuote(requestId, companyId, payload, dateLivraisonPrevue || null, {
+      const delai = terms.livraisonMode === "delai" && terms.delaiValeur !== "";
+      const res = await createQuote(requestId, companyId, payload, terms.livraisonMode === "date" ? terms.dateLivraison || null : null, {
         objet: terms.objet,
         reference_client: terms.referenceClient,
         remise_pct: Number(terms.remisePct) || 0,
@@ -198,7 +261,11 @@ export function QuoteForm({
         mode_reglement: terms.modeReglement,
         conditions_paiement: terms.conditionsPaiement,
         acompte_pct: Number(terms.acomptePct) || 0,
-        delai_livraison: terms.delaiLivraison,
+        devise: terms.devise,
+        taux_change: Number(terms.tauxChange) || 1,
+        delai_valeur: delai ? Number(terms.delaiValeur) : null,
+        delai_unite: delai ? terms.delaiUnite : null,
+        delai_depart: delai ? terms.delaiDepart : null,
         notes: terms.notes,
         valid_until: terms.validUntil || null,
       });
@@ -213,17 +280,70 @@ export function QuoteForm({
 
   return (
     <div className="space-y-3 rounded-md border border-border bg-surface-muted/50 p-4">
-      <div className="max-w-xs">
-        <label className="mb-1 block text-xs font-medium text-foreground">Date de livraison prévue</label>
-        <input
-          type="date"
-          value={dateLivraisonPrevue}
-          onChange={(e) => setDateLivraisonPrevue(e.target.value)}
-          disabled={pending}
-          className="h-9 w-full rounded-md border border-border bg-surface px-2 text-sm disabled:opacity-60"
-        />
-        <p className="mt-1 text-xs text-foreground-muted">
-          Optionnelle — reprise sur le PDF de l&apos;ordre de fabrication qui héritera de ce devis.
+      <div className="space-y-2 rounded-md border border-border bg-surface p-3">
+        <p className="text-xs font-medium text-foreground-muted">Client</p>
+        <p className="text-sm font-semibold text-foreground">{client.name}</p>
+        <div className="grid grid-cols-1 gap-x-6 gap-y-1 text-sm text-foreground-muted sm:grid-cols-2">
+          <p className="flex items-start gap-2 sm:col-span-2">
+            <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            {[client.address, [client.postalCode, client.city].filter(Boolean).join(" "), client.country].filter(Boolean).join(", ") || "Adresse non renseignée"}
+          </p>
+          {client.contactName && (
+            <p className="flex items-center gap-2">
+              <User className="h-3.5 w-3.5 shrink-0" /> {client.contactName}
+            </p>
+          )}
+          {(client.contactEmail ?? client.email) && (
+            <p className="flex items-center gap-2">
+              <Mail className="h-3.5 w-3.5 shrink-0" /> {client.contactEmail ?? client.email}
+            </p>
+          )}
+          {client.phone && (
+            <p className="flex items-center gap-2">
+              <Phone className="h-3.5 w-3.5 shrink-0" /> {client.phone}
+            </p>
+          )}
+        </div>
+        <p className="text-xs text-foreground-muted">
+          {[client.ncc ? `NCC ${client.ncc}` : null, client.rccm ? `RCCM ${client.rccm}` : null].filter(Boolean).join(" · ") ||
+            "NCC et RCCM non renseignés — à compléter sur la fiche client pour qu'ils figurent sur la proforma."}
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 rounded-md border border-border bg-surface p-3 sm:grid-cols-3">
+        <div>
+          <label className="mb-1 block text-xs font-medium text-foreground">Devise du devis</label>
+          <select
+            value={terms.devise}
+            onChange={(e) => chooseCurrency(e.target.value)}
+            disabled={pending}
+            className="h-9 w-full rounded-md border border-border bg-surface px-2 text-sm"
+          >
+            {currencies.map((c) => (
+              <option key={c.code} value={c.code}>
+                {c.code} — {c.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        {!isBase && (
+          <div>
+            <label className="mb-1 block text-xs font-medium text-foreground">Taux : 1 {terms.devise} = … F CFA</label>
+            <input
+              type="number"
+              min={0}
+              step="0.000001"
+              value={terms.tauxChange}
+              onChange={(e) => updateTerms({ tauxChange: e.target.value })}
+              disabled={pending}
+              className="h-9 w-full rounded-md border border-border bg-surface px-2 text-sm"
+            />
+          </div>
+        )}
+        <p className="self-end text-xs text-foreground-muted sm:col-span-3">
+          {isBase
+            ? "Les prix se saisissent en F CFA. D'autres devises se configurent dans Paramètres > Informations société."
+            : "Les prix se saisissent dans cette devise ; le taux est figé à l'émission du devis."}
         </p>
       </div>
 
@@ -279,16 +399,34 @@ export function QuoteForm({
                 />
               </div>
               <div>
-                <label className="mb-1 block text-xs font-medium text-foreground">Prix unitaire HT (F CFA)</label>
+                <label className="mb-1 block text-xs font-medium text-foreground">Prix unitaire HT ({isBase ? "F CFA" : terms.devise})</label>
                 <input
                   value={line.unitPrice}
                   onChange={(e) => updateLine(line.key, { unitPrice: e.target.value })}
                   type="number"
                   min={0}
-                  step="1"
+                  step={decimals === 0 ? "1" : "0.01"}
                   className="h-9 w-full rounded-md border border-border bg-surface px-2 text-sm"
                 />
               </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-foreground">Remise sur cette ligne (%)</label>
+                <input
+                  value={line.remisePct}
+                  onChange={(e) => updateLine(line.key, { remisePct: e.target.value })}
+                  type="number"
+                  min={0}
+                  max={100}
+                  step="0.01"
+                  className="h-9 w-full rounded-md border border-border bg-surface px-2 text-sm"
+                />
+              </div>
+              <p className="self-end pb-2 text-sm text-foreground-muted">
+                Total HT de la ligne :{" "}
+                <span className="font-medium text-foreground">
+                  {money(lineNet({ quantity: Number(line.quantity) || 0, unit_price: Number(line.unitPrice) || 0, remise_pct: Number(line.remisePct) || 0 }, terms.devise))}
+                </span>
+              </p>
             </div>
 
             {line.productModelId && (
@@ -324,8 +462,7 @@ export function QuoteForm({
             disabled={pending}
           />
           <TermField label="Validité du devis jusqu'au" type="date" value={terms.validUntil} onChange={(v) => updateTerms({ validUntil: v })} disabled={pending} />
-          <TermField label="Délai de livraison" value={terms.delaiLivraison} onChange={(v) => updateTerms({ delaiLivraison: v })} disabled={pending} placeholder="ex. 3 semaines après acompte" />
-          <TermField label="Remise commerciale (%)" type="number" value={terms.remisePct} onChange={(v) => updateTerms({ remisePct: v })} disabled={pending} />
+          <TermField label="Remise commerciale globale (%)" type="number" value={terms.remisePct} onChange={(v) => updateTerms({ remisePct: v })} disabled={pending} />
           <TermField label="TVA (%)" type="number" value={terms.tvaRate} onChange={(v) => updateTerms({ tvaRate: v })} disabled={pending} />
           {Number(terms.tvaRate) === 0 && (
             <div className="sm:col-span-2">
@@ -355,16 +492,76 @@ export function QuoteForm({
             </select>
           </div>
           <TermField label="Acompte à la commande (%)" type="number" value={terms.acomptePct} onChange={(v) => updateTerms({ acomptePct: v })} disabled={pending} />
-          <div className="sm:col-span-2">
+          <div>
             <label className="mb-1 block text-xs font-medium text-foreground">Conditions de paiement</label>
-            <textarea
+            <select
               value={terms.conditionsPaiement}
               onChange={(e) => updateTerms({ conditionsPaiement: e.target.value })}
               disabled={pending}
-              rows={2}
-              className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm"
-            />
+              className="h-9 w-full rounded-md border border-border bg-surface px-2 text-sm"
+            >
+              {paymentTerms.map((t) => (
+                <option key={t.label} value={t.label}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
           </div>
+          <fieldset className="space-y-2 sm:col-span-2" disabled={pending}>
+            <legend className="mb-1 text-xs font-medium text-foreground">Livraison</legend>
+            <div className="flex gap-4 text-sm">
+              <label className="flex items-center gap-1.5">
+                <input type="radio" checked={terms.livraisonMode === "delai"} onChange={() => updateTerms({ livraisonMode: "delai" })} /> Délai
+              </label>
+              <label className="flex items-center gap-1.5">
+                <input type="radio" checked={terms.livraisonMode === "date"} onChange={() => updateTerms({ livraisonMode: "date" })} /> Date ferme
+              </label>
+            </div>
+            {terms.livraisonMode === "delai" ? (
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-[6rem_10rem_1fr]">
+                <input
+                  type="number"
+                  min={1}
+                  value={terms.delaiValeur}
+                  onChange={(e) => updateTerms({ delaiValeur: e.target.value })}
+                  placeholder="ex. 4"
+                  className="h-9 rounded-md border border-border bg-surface px-2 text-sm"
+                />
+                <select
+                  value={terms.delaiUnite}
+                  onChange={(e) => updateTerms({ delaiUnite: e.target.value as DelaiUnite })}
+                  className="h-9 rounded-md border border-border bg-surface px-2 text-sm"
+                >
+                  {DELAI_UNITES.map((u) => (
+                    <option key={u.value} value={u.value}>
+                      {Number(terms.delaiValeur) > 1 ? u.many : u.one}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={terms.delaiDepart}
+                  onChange={(e) => updateTerms({ delaiDepart: e.target.value as DelaiDepart })}
+                  className="h-9 rounded-md border border-border bg-surface px-2 text-sm"
+                >
+                  {DELAI_DEPARTS.map((d) => (
+                    <option key={d.value} value={d.value}>
+                      à compter de {d.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div className="max-w-xs">
+                <input
+                  type="date"
+                  value={terms.dateLivraison}
+                  onChange={(e) => updateTerms({ dateLivraison: e.target.value })}
+                  className="h-9 w-full rounded-md border border-border bg-surface px-2 text-sm"
+                />
+                <p className="mt-1 text-xs text-foreground-muted">Reprise sur le PDF de l&apos;ordre de fabrication qui héritera de ce devis.</p>
+              </div>
+            )}
+          </fieldset>
           <div className="sm:col-span-2">
             <label className="mb-1 block text-xs font-medium text-foreground">Remarques pour le client</label>
             <textarea
@@ -378,12 +575,16 @@ export function QuoteForm({
         </div>
 
         <dl className="ml-auto max-w-xs space-y-1 border-t border-border pt-3 text-sm">
-          <TotalRow label="Total brut HT" value={totals.brut} />
-          {totals.remise > 0 && <TotalRow label={`Remise ${terms.remisePct} %`} value={-totals.remise} />}
-          <TotalRow label="Total HT" value={totals.ht} />
-          <TotalRow label={`TVA ${terms.tvaRate || 0} %`} value={totals.tva} />
-          <TotalRow label="Total TTC" value={totals.ttc} strong />
-          {totals.acompte > 0 && <TotalRow label={`Acompte ${terms.acomptePct} %`} value={totals.acompte} />}
+          <TotalRow label="Total brut HT" value={money(totals.brut)} />
+          {totals.remiseLignes > 0 && <TotalRow label="Remises de lignes" value={`- ${money(totals.remiseLignes)}`} />}
+          {totals.remise > 0 && <TotalRow label={`Remise globale ${terms.remisePct} %`} value={`- ${money(totals.remise)}`} />}
+          <TotalRow label="Total HT" value={money(totals.ht)} />
+          <TotalRow label={`TVA ${terms.tvaRate || 0} %`} value={money(totals.tva)} />
+          <TotalRow label="Total TTC" value={money(totals.ttc)} strong />
+          {totals.acompte > 0 && <TotalRow label={`Acompte ${terms.acomptePct} %`} value={money(totals.acompte)} />}
+          {!isBase && (
+            <TotalRow label={`Équivalent F CFA (1 ${terms.devise} = ${terms.tauxChange || "?"})`} value={formatMoney(Math.round(totals.ttc * (Number(terms.tauxChange) || 0)), BASE_CURRENCY)} />
+          )}
         </dl>
       </div>
 
@@ -432,11 +633,11 @@ function TermField({
   );
 }
 
-function TotalRow({ label, value, strong = false }: { label: string; value: number; strong?: boolean }) {
+function TotalRow({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
   return (
     <div className={`flex justify-between gap-4 ${strong ? "font-semibold text-foreground" : "text-foreground-muted"}`}>
       <dt>{label}</dt>
-      <dd>{formatAmount(value)}</dd>
+      <dd>{value}</dd>
     </div>
   );
 }

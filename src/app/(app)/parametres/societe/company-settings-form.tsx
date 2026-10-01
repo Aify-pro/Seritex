@@ -70,12 +70,11 @@ const SECTIONS: { title: string; description: string; fields: Field[] }[] = [
   },
   {
     title: "Valeurs par défaut des devis",
-    description: "Pré-remplies à la création d'un devis, modifiables devis par devis.",
+    description: "Pré-remplies à la création d'un devis, modifiables devis par devis. Les conditions de paiement se gèrent plus bas.",
     fields: [
       { name: "tva_taux_defaut", label: "Taux de TVA par défaut (%)", type: "number", step: "0.01", hint: "Taux normal en Côte d'Ivoire : 18 %" },
       { name: "validite_devis_jours", label: "Validité du devis (jours)", type: "number", step: "1" },
       { name: "acompte_pct_defaut", label: "Acompte par défaut (%)", type: "number", step: "0.01" },
-      { name: "conditions_paiement_defaut", label: "Conditions de paiement par défaut", type: "textarea", wide: true, hint: "ex. 50 % à la commande, solde à la livraison" },
       { name: "mentions_devis", label: "Mentions de pied de proforma", type: "textarea", wide: true, hint: "Pénalités de retard, réserve de propriété, juridiction compétente…" },
     ],
   },
