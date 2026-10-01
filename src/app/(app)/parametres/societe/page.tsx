@@ -24,7 +24,7 @@ export default async function SocieteSettingsPage() {
     supabase.from("currencies").select("*").order("display_order"),
     // Cachet et signatures (migration 0062) : lisibles par l'administrateur de plateforme uniquement.
     supabase.from("company_stamp").select("image_png").limit(1).maybeSingle(),
-    supabase.from("document_signatories").select("user_id,fonction,active,signature_png,app_users(full_name,role)").order("created_at"),
+    supabase.from("document_signatories").select("user_id,fonction,active,signature_png,app_users!document_signatories_user_id_fkey(full_name,role)").order("created_at"),
     supabase.from("app_users").select("id,full_name,role").neq("role", "client").eq("active", true).order("full_name"),
   ]);
   const signatories: SignatoryRow[] = (sigRows ?? []).map((r) => {
