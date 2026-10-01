@@ -18,7 +18,7 @@ export async function getQuoteLinesWithColorConfig(quoteId: string): Promise<Quo
     supabase
       .from("quote_lines")
       .select(
-        "*,couleur_unique:couleur_unique_id(id,name,code),zone_colors:quote_line_zone_colors(zone_key,colors:color_id(id,name,code))"
+        "*,couleur_unique:couleur_unique_id(id,name,code),zone_colors:quote_line_zone_colors(zone_key,colors:color_id(id,name,code)),printable_zones:quote_line_printable_zones(printable_zone_id,nb_couleurs,product_printable_zones(zone_label,display_order))"
       )
       .eq("quote_id", quoteId),
     supabase.from("product_zone_templates").select("product_model_id,zone_key,zone_label"),
@@ -59,9 +59,22 @@ export async function getQuoteLinesWithColorConfig(quoteId: string): Promise<Quo
       ...f,
       downloadUrl: visuelDownloadUrls.get(f.id) ?? null,
     }));
+    const printable = (l.printable_zones ?? []) as unknown as {
+      printable_zone_id: string;
+      nb_couleurs: number;
+      product_printable_zones: { zone_label: string; display_order: number } | null;
+    }[];
     return {
       ...l,
       zone_colors: (l.zone_colors ?? []).map((z) => ({ ...z, zone_label: labelOf(l.product_model_id, z.zone_key) })),
+      printable_zones: printable
+        .map((z) => ({
+          printable_zone_id: z.printable_zone_id,
+          nb_couleurs: z.nb_couleurs,
+          zone_label: z.product_printable_zones?.zone_label,
+          display_order: z.product_printable_zones?.display_order ?? 0,
+        }))
+        .sort((a, b) => a.display_order - b.display_order),
       visuels,
       maquette: maquette ? { ...maquette, previewUrl: maquettePreviewUrls.get(maquette.id) ?? null } : null,
     };

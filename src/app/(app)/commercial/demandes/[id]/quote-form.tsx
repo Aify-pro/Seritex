@@ -16,6 +16,11 @@ import { MapPin, Phone, Mail, User } from "lucide-react";
 type ProductModel = { id: string; name: string; base_price: number | null };
 type ZoneTemplate = { zone_key: string; zone_label: string; display_order: number };
 type ColorOption = { id: string; name: string; code: string };
+/** Emplacement imprimable d'un modèle (Paramètres > Produits, migration 0039). */
+export type PrintableZoneOption = { id: string; zone_label: string; display_order: number };
+
+/** Nombre de couleurs proposé par impression — même plafond que la contrainte de 0065. */
+const NB_COULEURS_MAX = 12;
 
 type LineDraft = {
   /** Identité côté client (clé React / suppression) — jamais envoyée au serveur. */
@@ -28,6 +33,8 @@ type LineDraft = {
   unitPrice: string;
   remisePct: string;
   colorDraft: ZoneColorDraft;
+  /** Impressions retenues : emplacement → nombre de couleurs (migration 0065). */
+  printZones: Record<string, number>;
 };
 
 /** Valeurs par défaut des mentions de proforma, issues de Paramètres > Informations société (migration 0061). */
@@ -118,6 +125,7 @@ export type CorrectionLine = {
   remisePct: number;
   couleurUniqueId: string | null;
   zoneColors: Record<string, string>;
+  printZones: Record<string, number>;
 };
 
 /** Devis renvoyé par la Direction, à corriger puis resoumettre (migration 0064). */
@@ -140,6 +148,7 @@ function lineFromCorrection(l: CorrectionLine): LineDraft {
     colorDraft: l.couleurUniqueId
       ? { isUni: true, couleurUniqueId: l.couleurUniqueId, zoneColors: {} }
       : { isUni: false, couleurUniqueId: null, zoneColors: l.zoneColors },
+    printZones: l.printZones,
   };
 }
 
@@ -152,6 +161,7 @@ function newLine(): LineDraft {
     unitPrice: "",
     remisePct: "0",
     colorDraft: EMPTY_ZONE_COLOR_DRAFT,
+    printZones: {},
   };
 }
 
@@ -171,6 +181,7 @@ export function QuoteForm({
   client,
   products,
   zoneTemplatesByModel,
+  printableZonesByModel,
   colors,
   defaults,
   paymentTerms,
@@ -183,6 +194,8 @@ export function QuoteForm({
   products: ProductModel[];
   /** Gabarit de zones par modèle de produit — nécessaire au ZoneColorPicker dès qu'une ligne choisit un modèle. */
   zoneTemplatesByModel: Record<string, ZoneTemplate[]>;
+  /** Emplacements imprimables par modèle — choix des impressions de chaque ligne (migration 0065). */
+  printableZonesByModel: Record<string, PrintableZoneOption[]>;
   colors: ColorOption[];
   defaults: QuoteDefaults;
   paymentTerms: PaymentTermOption[];
@@ -230,6 +243,8 @@ export function QuoteForm({
               // configuration couleur vide plutôt que de laisser des zones
               // d'un autre modèle.
               colorDraft: EMPTY_ZONE_COLOR_DRAFT,
+              // Les emplacements imprimables sont propres au modèle.
+              printZones: {},
             }
           : l
       )
@@ -288,6 +303,9 @@ export function QuoteForm({
           : Object.entries(l.colorDraft.zoneColors)
               .filter(([, colorId]) => !!colorId)
               .map(([zone_key, color_id]) => ({ zone_key, color_id })),
+        printable_zones: l.productModelId
+          ? Object.entries(l.printZones).map(([printable_zone_id, nb_couleurs]) => ({ printable_zone_id, nb_couleurs }))
+          : [],
       };
     });
 
@@ -488,6 +506,15 @@ export function QuoteForm({
                 />
               </div>
             )}
+
+            {line.productModelId && (
+              <PrintZonesEditor
+                zones={printableZonesByModel[line.productModelId] ?? []}
+                value={line.printZones}
+                onChange={(next) => updateLine(line.key, { printZones: next })}
+                disabled={pending}
+              />
+            )}
           </div>
         ))}
       </div>
@@ -640,6 +667,76 @@ export function QuoteForm({
         <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(false)}>
           Annuler
         </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Impressions d'une ligne (migration 0065) : les emplacements imprimables du
+ * modèle, cochés avec leur nombre de couleurs. Saisis une fois ici, ils servent
+ * au chiffrage par la Direction et sont hérités par l'ODF à l'acceptation.
+ */
+function PrintZonesEditor({
+  zones,
+  value,
+  onChange,
+  disabled,
+}: {
+  zones: PrintableZoneOption[];
+  value: Record<string, number>;
+  onChange: (next: Record<string, number>) => void;
+  disabled: boolean;
+}) {
+  if (zones.length === 0) {
+    return <p className="text-xs text-foreground-muted">Aucun emplacement d&apos;impression défini pour ce modèle — Paramètres &gt; Produits.</p>;
+  }
+
+  function toggle(zoneId: string, checked: boolean) {
+    const next = { ...value };
+    if (checked) next[zoneId] = 1;
+    else delete next[zoneId];
+    onChange(next);
+  }
+
+  return (
+    <div>
+      <p className="mb-1 text-xs font-medium text-foreground">Impressions — emplacement et nombre de couleurs</p>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        {[...zones]
+          .sort((a, b) => a.display_order - b.display_order)
+          .map((zone) => {
+            const checked = zone.id in value;
+            return (
+              <div key={zone.id} className="flex items-center justify-between gap-2 rounded-md border border-border px-2 py-1.5">
+                <label className="flex items-center gap-1.5 text-sm text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={disabled}
+                    onChange={(e) => toggle(zone.id, e.target.checked)}
+                    className="h-4 w-4 rounded border-border text-brand focus:ring-2 focus:ring-brand/30"
+                  />
+                  {zone.zone_label}
+                </label>
+                {checked && (
+                  <select
+                    value={value[zone.id]}
+                    disabled={disabled}
+                    onChange={(e) => onChange({ ...value, [zone.id]: Number(e.target.value) })}
+                    aria-label={`Nombre de couleurs — ${zone.zone_label}`}
+                    className="h-8 rounded-md border border-border bg-surface px-2 text-sm"
+                  >
+                    {Array.from({ length: NB_COULEURS_MAX }, (_, i) => i + 1).map((n) => (
+                      <option key={n} value={n}>
+                        {n} couleur{n > 1 ? "s" : ""}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            );
+          })}
       </div>
     </div>
   );

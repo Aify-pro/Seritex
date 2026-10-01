@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { printableZoneLabel } from "@/lib/printable-zones";
 import { createClient } from "@/lib/supabase/server";
 import { getBaseUrl } from "@/lib/url";
 import { getMediaFileBuffers } from "@/lib/media/preview";
@@ -169,9 +170,15 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     lineIds.length > 0
       ? await supabase
           .from("production_order_line_printable_zones")
-          .select("production_order_line_id,product_printable_zones(zone_label,display_order)")
+          .select("production_order_line_id,nb_couleurs,product_printable_zones(zone_label,display_order)")
           .in("production_order_line_id", lineIds)
-      : { data: [] as { production_order_line_id: string; product_printable_zones: { zone_label: string; display_order: number } | null }[] };
+      : {
+          data: [] as {
+            production_order_line_id: string;
+            nb_couleurs: number | null;
+            product_printable_zones: { zone_label: string; display_order: number } | null;
+          }[],
+        };
   const printableZonesByLine = new Map<string, string[]>();
   for (const row of (printableZonesRows ?? [])
     .slice()
@@ -183,7 +190,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     const zone = row.product_printable_zones as unknown as { zone_label: string; display_order: number } | null;
     if (!zone) continue;
     const list = printableZonesByLine.get(row.production_order_line_id) ?? [];
-    list.push(zone.zone_label);
+    // Nombre de couleurs (migration 0065) : l'atelier sérigraphie prépare un écran par couleur.
+    list.push(printableZoneLabel(zone.zone_label, row.nb_couleurs));
     printableZonesByLine.set(row.production_order_line_id, list);
   }
 

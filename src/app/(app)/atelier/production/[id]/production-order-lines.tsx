@@ -18,7 +18,7 @@ import { LineSectionsPicker } from "./line-sections-picker";
 import { FichePatronnageLink } from "./fiche-patronnage-link";
 import { LineVisuelPicker } from "./line-visuel-picker";
 import { LineMaquettePicker } from "./line-maquette-picker";
-import { LinePrintableZonesPicker, type PrintableZoneOption } from "./line-printable-zones-picker";
+import { LinePrintableZonesPicker, type PrintableZoneOption, type SelectedPrintableZone } from "./line-printable-zones-picker";
 import type { AttachableMediaFile, DownloadableMediaFile, MaquetteFile } from "@/lib/types/domain";
 import type { StatutFiche } from "@/lib/patronnage/types";
 
@@ -88,8 +88,8 @@ export interface LineData {
   maquetteAttached: MaquetteFile[];
   /** Zones imprimables définies pour le modèle de cet article (product_printable_zones). */
   printableZoneOptions: PrintableZoneOption[];
-  /** Zones imprimables déjà cochées pour cet article. */
-  printableZoneIdsSelected: string[];
+  /** Zones imprimables déjà cochées pour cet article, avec leur nombre de couleurs (hérité du devis, migration 0065). */
+  printableZonesSelected: SelectedPrintableZone[];
   /** Échantillon lié à cet article précis (migration 0044), s'il y en a un — lien libre posé depuis l'écran Échantillonnage. */
   linkedSample: { id: string; sampleNumber: string } | null;
 }
@@ -484,13 +484,13 @@ function LineCard({
           />
         )}
 
-        {(line.impressionSectionSelected || line.printableZoneIdsSelected.length > 0) &&
+        {(line.impressionSectionSelected || line.printableZonesSelected.length > 0) &&
           (line.printableZoneOptions.length > 0 ? (
             <LinePrintableZonesPicker
               lineId={line.id}
               productionOrderId={productionOrderId}
               zones={line.printableZoneOptions}
-              initialZoneIds={line.printableZoneIdsSelected}
+              initialZones={line.printableZonesSelected}
             />
           ) : (
             <p className="text-xs text-foreground-muted">
