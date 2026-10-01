@@ -50,6 +50,11 @@ export interface UploadInput {
   fileName: string;
   mimeType: string | null;
   buffer: Buffer;
+  /**
+   * Chemin relatif imposé sous le dossier de base (ex. "Patronnage/traces/…/x.dxf").
+   * Pris en charge par WebDAV uniquement ; absent = chemin par entreprise habituel.
+   */
+  relativePath?: string;
 }
 
 export interface UploadResult {
@@ -59,6 +64,10 @@ export interface UploadResult {
 export interface StorageProvider {
   /** Copie le fichier sur la cible et renvoie le chemin/identifiant distant. */
   upload(target: StorageTargetRow, input: UploadInput): Promise<UploadResult>;
+  /** Relit le contenu d'un fichier à partir du chemin renvoyé par `upload`. Absent = lecture non prise en charge par ce support. */
+  download?(target: StorageTargetRow, remotePath: string): Promise<Buffer>;
+  /** Supprime un fichier (ou un dossier) — sans erreur s'il n'existe déjà plus. */
+  remove?(target: StorageTargetRow, remotePath: string): Promise<void>;
 }
 
 export class StorageProviderError extends Error {

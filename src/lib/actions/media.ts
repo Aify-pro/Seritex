@@ -3,7 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireUser, requirePlatformAdmin } from "@/lib/auth/current-user";
-import { replicateToTargets } from "@/lib/storage";
+import { replicateToTargets, selectWriteTargets } from "@/lib/storage";
 import type { StorageTargetRow } from "@/lib/storage/types";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -87,7 +87,7 @@ export async function uploadMediaFile(formData: FormData) {
   }
 
   const buffer = Buffer.from(await file.arrayBuffer());
-  await replicateVersion({
+  const replicationError = await replicateVersion({
     versionId,
     companyId: parsed.data.company_id,
     companyName: company?.name ?? "Client",
@@ -95,6 +95,7 @@ export async function uploadMediaFile(formData: FormData) {
     mimeType: file.type || null,
     buffer,
   });
+  if (replicationError) return { error: replicationError };
 
   revalidatePath(`/mediatheque/${parsed.data.company_id}`);
   return { mediaFileId: mediaFile.id };
@@ -145,7 +146,7 @@ export async function addMediaFileVersion(formData: FormData) {
 
   const buffer = Buffer.from(await file.arrayBuffer());
   const companyName = (mediaFile.companies as unknown as { name: string } | null)?.name ?? "Client";
-  await replicateVersion({
+  const replicationError = await replicateVersion({
     versionId,
     companyId: mediaFile.company_id,
     companyName,
@@ -153,6 +154,7 @@ export async function addMediaFileVersion(formData: FormData) {
     mimeType: file.type || null,
     buffer,
   });
+  if (replicationError) return { error: replicationError };
 
   revalidatePath(`/mediatheque/${mediaFile.company_id}`);
   return { mediaFileId: mediaFile.id };
@@ -166,6 +168,10 @@ export async function addMediaFileVersion(formData: FormData) {
  * exposés à un rôle non-administrateur, y compris via une requête cliente
  * involontaire) — l'écriture des copies repasse par le client authentifié de
  * l'utilisateur, soumis aux policies RLS habituelles.
+ *
+ * Dès qu'un NAS est actif il est le stockage exclusif (`selectWriteTargets`) :
+ * si l'écriture y échoue, il n'existe aucune copie ailleurs, donc l'erreur
+ * est renvoyée à l'utilisateur plutôt que passée sous silence.
  */
 async function replicateVersion(params: {
   versionId: string;
@@ -174,16 +180,16 @@ async function replicateVersion(params: {
   fileName: string;
   mimeType: string | null;
   buffer: Buffer;
-}) {
+}): Promise<string | null> {
   const admin = createAdminClient();
   const { data: targets } = await admin
     .from("storage_targets")
     .select("*")
     .eq("active", true);
 
-  if (!targets || targets.length === 0) return;
+  if (!targets || targets.length === 0) return null;
 
-  const outcomes = await replicateToTargets(targets as StorageTargetRow[], {
+  const outcomes = await replicateToTargets(selectWriteTargets(targets as StorageTargetRow[]), {
     companyId: params.companyId,
     companyName: params.companyName,
     fileName: params.fileName,
@@ -202,6 +208,11 @@ async function replicateVersion(params: {
       synced_at: outcome.status === "synchronise" ? new Date().toISOString() : null,
     }))
   );
+
+  if (outcomes.length > 0 && outcomes.every((o) => o.status === "erreur")) {
+    return `Le fichier n'a pas pu être enregistré sur le stockage (${outcomes[0].errorMessage ?? "erreur inconnue"}). Vérifiez que le NAS est joignable, puis redéposez-le.`;
+  }
+  return null;
 }
 
 /** Liste des cibles de stockage actives, sans exposer leur configuration — utilisable par n'importe quel rôle staff pour afficher où un fichier est répliqué. */
@@ -280,12 +291,136 @@ export async function createStorageTarget(formData: FormData) {
   return {};
 }
 
-/** Active/désactive une cible de stockage — réservé à l'administrateur de plateforme. */
+/**
+ * Active/désactive une cible de stockage — réservé à l'administrateur de
+ * plateforme. Refuse de désactiver la dernière cible active : un dépôt ne
+ * serait alors enregistré nulle part.
+ */
 export async function toggleStorageTargetActive(targetId: string, active: boolean) {
   await requirePlatformAdmin();
   const supabase = await createClient();
-  const { error } = await supabase.from("storage_targets").update({ active }).eq("id", targetId);
+
+  if (!active) {
+    const { data: others } = await supabase
+      .from("storage_targets")
+      .select("id")
+      .eq("active", true)
+      .neq("id", targetId);
+    if (!others?.length) {
+      return { error: "Impossible de désactiver la dernière cible active : plus aucun fichier ne serait enregistré." };
+    }
+  }
+
+  const { data, error } = await supabase.from("storage_targets").update({ active }).eq("id", targetId).select("id");
   if (error) return { error: error.message };
+  if (!data?.length) return { error: "Modification refusée ou cible introuvable." };
+  revalidatePath("/parametres/stockage");
+  return {};
+}
+
+const updateTargetSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().trim().min(2, "Le nom doit contenir au moins 2 caractères"),
+  bucket: z.string().trim().optional(),
+  service_account_json: z.string().trim().optional(),
+  root_folder_id: z.string().trim().optional(),
+  url: z.string().trim().optional(),
+  username: z.string().trim().optional(),
+  password: z.string().optional(),
+  base_path: z.string().trim().optional(),
+});
+
+/**
+ * Modifie une cible (le type est figé). Un mot de passe / JSON de compte de
+ * service laissé vide conserve la valeur actuelle : ces secrets ne sont
+ * jamais renvoyés au navigateur, donc jamais pré-remplis.
+ */
+export async function updateStorageTarget(formData: FormData) {
+  await requirePlatformAdmin();
+
+  const parsed = updateTargetSchema.safeParse({
+    id: formData.get("id"),
+    name: formData.get("name"),
+    bucket: formData.get("bucket") || undefined,
+    service_account_json: formData.get("service_account_json") || undefined,
+    root_folder_id: formData.get("root_folder_id") || undefined,
+    url: formData.get("url") || undefined,
+    username: formData.get("username") || undefined,
+    password: (formData.get("password") as string) || undefined,
+    base_path: formData.get("base_path") || undefined,
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message };
+  const d = parsed.data;
+
+  const supabase = await createClient();
+  const { data: existing } = await supabase.from("storage_targets").select("type, config").eq("id", d.id).single();
+  if (!existing) return { error: "Cible introuvable" };
+  const current = (existing.config ?? {}) as Record<string, unknown>;
+
+  let config: Record<string, unknown>;
+  switch (existing.type) {
+    case "supabase_storage":
+      if (!d.bucket) return { error: "Le nom du bucket est requis" };
+      config = { ...current, bucket: d.bucket };
+      break;
+    case "google_drive":
+      if (!d.root_folder_id) return { error: "Le dossier racine Google Drive est requis" };
+      config = {
+        ...current,
+        rootFolderId: d.root_folder_id,
+        serviceAccountJson: d.service_account_json ?? current.serviceAccountJson,
+      };
+      break;
+    default:
+      if (!d.url || !d.username) return { error: "L'URL WebDAV et l'identifiant sont requis" };
+      config = {
+        ...current,
+        url: d.url,
+        username: d.username,
+        password: d.password ?? current.password,
+        basePath: d.base_path || "/",
+      };
+  }
+
+  const { data, error } = await supabase
+    .from("storage_targets")
+    .update({ name: d.name, config })
+    .eq("id", d.id)
+    .select("id");
+  if (error) return { error: error.message };
+  if (!data?.length) return { error: "Modification refusée ou cible introuvable." };
+  revalidatePath("/parametres/stockage");
+  return {};
+}
+
+/**
+ * Supprime une cible. Refusée si des fichiers y ont déjà été copiés (les
+ * chemins enregistrés deviendraient illisibles) ou si c'est la dernière cible
+ * active : dans ce cas on propose de la désactiver.
+ */
+export async function deleteStorageTarget(targetId: string) {
+  await requirePlatformAdmin();
+  const supabase = await createClient();
+
+  const { data: target } = await supabase.from("storage_targets").select("id, active").eq("id", targetId).single();
+  if (!target) return { error: "Cible introuvable" };
+
+  const { count } = await supabase
+    .from("media_file_copies")
+    .select("id", { count: "exact", head: true })
+    .eq("storage_target_id", targetId);
+  if (count) {
+    return { error: `Suppression impossible : ${count} copie(s) de fichiers sont enregistrées sur cette cible. Désactivez-la plutôt.` };
+  }
+
+  if (target.active) {
+    const { data: others } = await supabase.from("storage_targets").select("id").eq("active", true).neq("id", targetId);
+    if (!others?.length) return { error: "Impossible de supprimer la dernière cible active." };
+  }
+
+  const { data, error } = await supabase.from("storage_targets").delete().eq("id", targetId).select("id");
+  if (error) return { error: error.message };
+  if (!data?.length) return { error: "Suppression refusée." };
   revalidatePath("/parametres/stockage");
   return {};
 }

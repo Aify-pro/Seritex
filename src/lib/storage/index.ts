@@ -2,6 +2,7 @@ import "server-only";
 import { supabaseStorageProvider } from "@/lib/storage/providers/supabase-storage";
 import { googleDriveProvider } from "@/lib/storage/providers/google-drive";
 import { webdavProvider } from "@/lib/storage/providers/webdav";
+import { StorageProviderError } from "@/lib/storage/types";
 import type { StorageProvider, StorageTargetRow, UploadInput, UploadResult } from "@/lib/storage/types";
 
 export type { StorageTargetRow, UploadInput, UploadResult, StorageBackendType } from "@/lib/storage/types";
@@ -54,4 +55,31 @@ export async function replicateToTargets(
       }
     })
   );
+}
+
+export function isWebdavTarget(target: Pick<StorageTargetRow, "type">) {
+  return target.type === "nas" || target.type === "local_server";
+}
+
+/**
+ * Cibles réellement utilisées pour ÉCRIRE : dès qu'un NAS/serveur local est
+ * actif, il devient le stockage exclusif et Supabase Storage n'est plus
+ * alimenté. Sans NAS actif, on garde le comportement historique.
+ */
+export function selectWriteTargets(activeTargets: StorageTargetRow[]): StorageTargetRow[] {
+  return activeTargets.some(isWebdavTarget)
+    ? activeTargets.filter((t) => t.type !== "supabase_storage")
+    : activeTargets;
+}
+
+export async function downloadFromTarget(target: StorageTargetRow, remotePath: string): Promise<Buffer> {
+  const provider = PROVIDERS[target.type];
+  if (!provider.download) {
+    throw new StorageProviderError(target.type, "La lecture n'est pas prise en charge pour ce type de stockage");
+  }
+  return provider.download(target, remotePath);
+}
+
+export async function removeFromTarget(target: StorageTargetRow, remotePath: string): Promise<void> {
+  await PROVIDERS[target.type].remove?.(target, remotePath);
 }

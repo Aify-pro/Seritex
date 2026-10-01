@@ -30,6 +30,20 @@ export const supabaseStorageProvider: StorageProvider = {
 
     return { remotePath: `${bucket}/${remotePath}` };
   },
+
+  async download(_target: StorageTargetRow, remotePath: string): Promise<Buffer> {
+    const [bucket, ...rest] = remotePath.split("/");
+    const { data, error } = await createAdminClient().storage.from(bucket).download(rest.join("/"));
+    if (error || !data) {
+      throw new StorageProviderError("supabase_storage", `Lecture Supabase Storage impossible : ${error?.message ?? "fichier introuvable"}`, error);
+    }
+    return Buffer.from(await data.arrayBuffer());
+  },
+
+  async remove(_target: StorageTargetRow, remotePath: string): Promise<void> {
+    const [bucket, ...rest] = remotePath.split("/");
+    await createAdminClient().storage.from(bucket).remove([rest.join("/")]);
+  },
 };
 
 export async function getSupabaseStorageSignedUrl(bucket: string, remotePath: string, expiresInSeconds = 3600) {

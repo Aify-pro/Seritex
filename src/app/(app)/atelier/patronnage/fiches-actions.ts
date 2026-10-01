@@ -1,7 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { readTraceFile, removeTraceFiles, storeTraceFile } from "@/lib/storage/patronnage-files";
 import { requireUser, requireRole } from "@/lib/auth/current-user";
 import { can } from "@/lib/auth/permissions";
 import { getSizes, getSizesForProductModel, type Size } from "@/lib/sizes";
@@ -669,7 +669,6 @@ export async function unarchiveFiche(ficheId: string) {
 export async function deleteFicheDefinitively(ficheId: string) {
   await requirePermission("delete");
   const supabase = await createClient();
-  const admin = createAdminClient();
 
   const { data: fiche } = await supabase
     .from("fiches_placement")
@@ -681,10 +680,8 @@ export async function deleteFicheDefinitively(ficheId: string) {
     return { error: "Suppression impossible : cette fiche a déjà été validée ou liée à un ODF. Archivez-la à la place." };
   }
 
-  const { data: files } = await admin.storage.from("patronnage").list(`traces/${ficheId}`);
-  if (files?.length) {
-    await admin.storage.from("patronnage").remove(files.map((f) => `traces/${ficheId}/${f.name}`));
-  }
+  const { data: ficheTraces } = await supabase.from("traces_placement").select("fichier_path").eq("fiche_id", ficheId);
+  await removeTraceFiles((ficheTraces ?? []).map((t) => t.fichier_path).filter((p): p is string => !!p));
 
   const { error } = await supabase.from("fiches_placement").delete().eq("id", ficheId);
   if (error) {
@@ -807,11 +804,10 @@ export async function deleteTrace(traceId: string, ficheId: string) {
   if ("error" in gate) return gate;
 
   const supabase = await createClient();
-  const admin = createAdminClient();
 
   const { data: trace } = await supabase.from("traces_placement").select("fichier_path").eq("id", traceId).single();
   if (trace?.fichier_path) {
-    await admin.storage.from("patronnage").remove([trace.fichier_path]);
+    await removeTraceFiles([trace.fichier_path]);
   }
 
   const { error } = await supabase.from("traces_placement").delete().eq("id", traceId);
@@ -828,11 +824,10 @@ export async function removeTraceDxf(traceId: string, ficheId: string) {
   if ("error" in gate) return gate;
 
   const supabase = await createClient();
-  const admin = createAdminClient();
 
   const { data: trace } = await supabase.from("traces_placement").select("fichier_path").eq("id", traceId).single();
   if (trace?.fichier_path) {
-    await admin.storage.from("patronnage").remove([trace.fichier_path]);
+    await removeTraceFiles([trace.fichier_path]);
   }
   await supabase.from("analyses_trace").delete().eq("trace_id", traceId);
 
@@ -881,21 +876,21 @@ export async function uploadTraceDxf(traceId: string, ficheId: string, formData:
   const analyse = reconnaitreTrace(contours, library.references, SEUIL_RECONNAISSANCE);
 
   // 4. Stockage du fichier (remplace l'ancien s'il existe)
-  const admin = createAdminClient();
   const { data: existingTrace } = await supabase
     .from("traces_placement")
     .select("fichier_path")
     .eq("id", traceId)
     .single();
   if (existingTrace?.fichier_path) {
-    await admin.storage.from("patronnage").remove([existingTrace.fichier_path]);
+    await removeTraceFiles([existingTrace.fichier_path]);
   }
-  const remotePath = `traces/${ficheId}/${traceId}-${Date.now()}-${sanitizeFileName(read.file.name)}`;
   const buffer = Buffer.from(await read.file.arrayBuffer());
-  const { error: uploadError } = await admin.storage
-    .from("patronnage")
-    .upload(remotePath, buffer, { contentType: "application/dxf", upsert: false });
-  if (uploadError) return { error: `Échec de l'enregistrement du fichier : ${uploadError.message}` };
+  const stored = await storeTraceFile(
+    `traces/${ficheId}/${traceId}-${Date.now()}-${sanitizeFileName(read.file.name)}`,
+    buffer
+  );
+  if ("error" in stored) return { error: `Échec de l'enregistrement du fichier : ${stored.error}` };
+  const remotePath = stored.path;
 
   const { data: traceUpdated, error: traceUpdateError } = await supabase
     .from("traces_placement")
@@ -914,7 +909,7 @@ export async function uploadTraceDxf(traceId: string, ficheId: string, formData:
   // On retire le fichier tout juste stocké plutôt que de laisser un orphelin,
   // et surtout on ne prétend pas que le dépôt a réussi.
   if (!traceUpdated?.length) {
-    await admin.storage.from("patronnage").remove([remotePath]);
+    await removeTraceFiles([remotePath]);
     return { error: "La base a refusé la mise à jour du tracé (droits ou verrou de l'ODF) — aucune modification n'a été enregistrée." };
   }
 
@@ -993,13 +988,12 @@ async function chargerContoursTrace(
   if (traceError || !trace || trace.fiche_id !== ficheId) return { error: "Tracé introuvable" };
   if (!trace.fichier_path) return { error: "Aucun fichier déposé pour ce tracé." };
 
-  const admin = createAdminClient();
-  const { data: blob, error: downloadError } = await admin.storage.from("patronnage").download(trace.fichier_path);
-  if (downloadError || !blob) return { error: "Impossible de relire le fichier déposé." };
+  const stored = await readTraceFile(trace.fichier_path);
+  if (!stored) return { error: "Impossible de relire le fichier déposé." };
 
   let text: string;
   try {
-    text = await blob.text();
+    text = stored.toString("utf-8");
   } catch {
     return { error: "Impossible de lire le fichier déposé." };
   }
