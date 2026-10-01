@@ -8,6 +8,7 @@ import {
   Plus,
   Eye,
   Upload,
+  Download,
   Trash2,
   AlertTriangle,
   CheckCircle2,
@@ -1263,16 +1264,37 @@ function TraceDetailBody({
                 <p>{trace.fichierNom}</p>
                 <p className="text-xs text-foreground-muted">déposé le {formatDateTime(trace.chargeLe)}</p>
               </div>
-              {!effectiveLocked && canModify && (
-                <div className="flex gap-2">
-                  <Button size="sm" variant="secondary" type="button" onClick={() => fileInputRef.current?.click()} loading={pending}>
-                    Remplacer
-                  </Button>
-                  <Button size="sm" variant="ghost" loading={pending} onClick={() => run(() => removeTraceDxf(trace.id, fiche.id))}>
-                    Retirer
-                  </Button>
-                </div>
-              )}
+              <div className="flex flex-wrap justify-end gap-2">
+                <a
+                  href={`/api/patronnage/traces/${trace.id}/dxf`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-xs font-medium text-foreground hover:bg-surface-muted"
+                >
+                  <Download className="h-3.5 w-3.5" /> Télécharger
+                </a>
+                {a && (
+                  <a
+                    href={`/api/patronnage/traces/${trace.id}/dxf-marque`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-xs font-medium text-foreground hover:bg-surface-muted"
+                    title="Texte au centre des pièces reconnues + cartouche (QR, OT, ODF, client)"
+                  >
+                    <Download className="h-3.5 w-3.5" /> Télécharger marqué
+                  </a>
+                )}
+                {!effectiveLocked && canModify && (
+                  <>
+                    <Button size="sm" variant="secondary" type="button" onClick={() => fileInputRef.current?.click()} loading={pending}>
+                      Remplacer
+                    </Button>
+                    <Button size="sm" variant="ghost" loading={pending} onClick={() => run(() => removeTraceDxf(trace.id, fiche.id))}>
+                      Retirer
+                    </Button>
+                  </>
+                )}
+              </div>
             </div>
           ) : !effectiveLocked && canModify ? (
             <div className="flex items-center justify-between gap-3">
