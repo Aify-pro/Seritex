@@ -358,6 +358,11 @@ export interface Quote {
   delai_unite?: DelaiUnite | null;
   delai_depart?: DelaiDepart | null;
   notes?: string | null;
+  // Validation interne avant envoi au client (migration 0063).
+  validated_by?: string | null;
+  validated_at?: string | null;
+  rejet_motif?: string | null;
+  rejet_at?: string | null;
   created_at: string;
   companies?: Pick<Company, "id" | "name">;
 }

@@ -1,4 +1,5 @@
 import { requireRole } from "@/lib/auth/current-user";
+import { isQuoteValidator, listQuoteValidatorNames } from "@/lib/signatures";
 import { createClient } from "@/lib/supabase/server";
 import { getQuoteLinesWithColorConfig } from "@/lib/quotes";
 import { notFound } from "next/navigation";
@@ -6,7 +7,7 @@ import { QuoteDetail } from "@/components/quotes/quote-detail";
 import type { AttachableMediaFile } from "@/lib/types/domain";
 
 export default async function CommercialQuoteDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  await requireRole(["commercial", "administrateur"]);
+  const { authId } = await requireRole(["commercial", "administrateur"]);
   const { id } = await params;
   const supabase = await createClient();
 
@@ -17,7 +18,7 @@ export default async function CommercialQuoteDetailPage({ params }: { params: Pr
   // toute la médiathèque du client, seulement ce qui est déjà affilié à
   // cette demande — voir src/app/(app)/atelier/production/[id]/page.tsx
   // pour le même principe côté ODF.
-  const [lines, { data: requestMedia }, { data: samples }] = await Promise.all([
+  const [lines, { data: requestMedia }, { data: samples }, canValidate, validators, validator] = await Promise.all([
     getQuoteLinesWithColorConfig(id),
     supabase.from("request_media_files").select("media_files(id,file_name,category)").eq("request_id", quote.request_id),
     // Échantillons de la demande, liables à une ligne du devis (migration 0051).
@@ -26,6 +27,12 @@ export default async function CommercialQuoteDetailPage({ params }: { params: Pr
       .select("id,sample_number,status,quote_line_id")
       .eq("request_id", quote.request_id)
       .order("created_at", { ascending: false }),
+    // Validation interne (migration 0063).
+    isQuoteValidator(authId),
+    quote.status === "en_validation_interne" ? listQuoteValidatorNames() : Promise.resolve([] as string[]),
+    quote.validated_by
+      ? supabase.from("app_users").select("full_name").eq("id", quote.validated_by).maybeSingle().then((r) => r.data?.full_name ?? null)
+      : Promise.resolve(null),
   ]);
   const availableMediaFiles = (requestMedia ?? [])
     .map((m) => m.media_files as unknown as AttachableMediaFile | null)
@@ -40,6 +47,9 @@ export default async function CommercialQuoteDetailPage({ params }: { params: Pr
       editable
       availableMediaFiles={availableMediaFiles}
       samples={samples ?? []}
+      canValidate={canValidate}
+      validators={validators}
+      validatedBy={validator}
     />
   );
 }

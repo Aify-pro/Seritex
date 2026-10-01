@@ -88,15 +88,17 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     .limit(1)
     .maybeSingle();
   const repId = request?.assigned_commercial_id ?? quote.created_by ?? null;
-  const userIds = [accepted?.changed_by, repId].filter((v): v is string => !!v);
+  const userIds = [accepted?.changed_by, repId, quote.validated_by].filter((v): v is string => !!v);
   const { data: people } = userIds.length
     ? await admin.from("app_users").select("id,full_name,email,role").in("id", userIds)
     : { data: [] };
   const person = (uid: string | null | undefined) => (people ?? []).find((p) => p.id === uid);
   const rep = person(repId);
   const acceptedBy = person(accepted?.changed_by);
-  // Signature + cachet : uniquement ceux de l'auteur du devis, s'il en a une active (migration 0062).
-  const seal = await getDocumentSeal(quote.created_by);
+  // Signature + cachet : ceux du VALIDATEUR interne (migration 0063), s'il en a une
+  // active. Un devis pas encore validé n'est signé par personne.
+  const validator = person(quote.validated_by);
+  const seal = await getDocumentSeal(quote.validated_by);
 
   const baseUrl = await getBaseUrl();
   const quoteUrl = `${baseUrl}/devis/${quote.reference}`;
@@ -122,6 +124,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         ? { name: acceptedBy.full_name, by: acceptedBy.role === "client" ? "client" : "staff", at: accepted.changed_at }
         : null,
     seal,
+    validation: validator && quote.validated_at ? { name: validator.full_name, at: quote.validated_at } : null,
     issuer,
     lines,
     logoPng: await getLogoPngBytes(),

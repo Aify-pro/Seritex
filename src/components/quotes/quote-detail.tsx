@@ -8,6 +8,7 @@ import { BASE_CURRENCY } from "@/lib/currency";
 import { amountInWordsFr } from "@/lib/number-to-words-fr";
 import { FileDown } from "lucide-react";
 import { AcceptQuoteButton } from "./accept-quote-button";
+import { ValidateQuoteCard } from "./validate-quote-card";
 import { ZoneColorSummary } from "@/components/product/zone-color-picker";
 import { QuoteLineVisuelPicker } from "./quote-line-visuel-picker";
 import { QuoteLineMaquettePicker } from "./quote-line-maquette-picker";
@@ -21,6 +22,9 @@ export function QuoteDetail({
   editable = false,
   availableMediaFiles = [],
   samples = [],
+  canValidate = false,
+  validators = [],
+  validatedBy = null,
 }: {
   quote: Quote;
   lines: QuoteLine[];
@@ -32,6 +36,12 @@ export function QuoteDetail({
   availableMediaFiles?: AttachableMediaFile[];
   /** Échantillons de la demande du devis (migration 0051), liables par ligne. */
   samples?: QuoteSample[];
+  /** Vue commercial : l'utilisateur a une signature active et peut valider (migration 0063). */
+  canValidate?: boolean;
+  /** Noms des personnes habilitées, affichés tant que le devis attend sa validation. */
+  validators?: string[];
+  /** Validation interne déjà faite : nom du validateur. */
+  validatedBy?: string | null;
 }) {
   const tvaRate = Number(quote.tva_rate ?? 0);
   const remisePct = Number(quote.remise_pct ?? 0);
@@ -56,8 +66,19 @@ export function QuoteDetail({
     ["Remarques", quote.notes],
   ];
 
+  const pendingValidation = quote.status === "en_validation_interne";
+
   return (
     <div className="space-y-6">
+      {pendingValidation && editable && <ValidateQuoteCard quoteId={quote.id} canValidate={canValidate} validators={validators} />}
+      {quote.status === "brouillon" && quote.rejet_motif && editable && (
+        <Card className="border-danger/30 bg-danger-soft/40">
+          <CardBody className="text-sm">
+            <p className="font-medium text-foreground">Renvoyé par le validateur{quote.rejet_at ? ` le ${formatDate(quote.rejet_at)}` : ""}</p>
+            <p className="text-foreground-muted">{quote.rejet_motif}</p>
+          </CardBody>
+        </Card>
+      )}
       <Card>
         <CardHeader
           title={quote.reference}
@@ -180,6 +201,7 @@ export function QuoteDetail({
 
       <p className="text-xs text-foreground-muted">
         {quote.valid_until ? `Valable jusqu'au ${formatDate(quote.valid_until)}` : ""}
+        {validatedBy && quote.validated_at ? `${quote.valid_until ? " · " : ""}Validé en interne par ${validatedBy} le ${formatDate(quote.validated_at)}` : ""}
       </p>
 
       {quote.status === "envoye" && canAccept && (

@@ -38,3 +38,32 @@ export async function getDocumentSeal(userId: string | null | undefined): Promis
     return null;
   }
 }
+
+/**
+ * Habilitation à valider les devis (migration 0063) : avoir une signature
+ * ACTIVE enregistrée. Lecture avec le client d'administration (tables réservées
+ * à l'administrateur de plateforme) ; la règle est appliquée aussi en base par
+ * is_quote_validator() — ce contrôle-ci sert à l'affichage et aux messages.
+ */
+export async function isQuoteValidator(userId: string): Promise<boolean> {
+  try {
+    const { data } = await createAdminClient().from("document_signatories").select("user_id").eq("user_id", userId).eq("active", true).maybeSingle();
+    return !!data;
+  } catch {
+    return false;
+  }
+}
+
+/** Noms des personnes habilitées à valider (affichage informatif). */
+export async function listQuoteValidatorNames(): Promise<string[]> {
+  try {
+    const admin = createAdminClient();
+    const { data: sigs } = await admin.from("document_signatories").select("user_id").eq("active", true);
+    const ids = (sigs ?? []).map((r) => r.user_id);
+    if (!ids.length) return [];
+    const { data: users } = await admin.from("app_users").select("full_name").in("id", ids).eq("active", true).order("full_name");
+    return (users ?? []).map((u) => u.full_name);
+  } catch {
+    return [];
+  }
+}

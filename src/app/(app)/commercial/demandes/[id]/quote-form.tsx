@@ -271,7 +271,7 @@ export function QuoteForm({
       });
       if (res.error) toast.error(res.error);
       else {
-        toast.success("Devis créé et envoyé au client");
+        toast.success("Devis créé — en attente de validation interne");
         setOpen(false);
         router.refresh();
       }
@@ -590,7 +590,7 @@ export function QuoteForm({
 
       <div className="flex gap-2 border-t border-border pt-3">
         <Button type="button" size="sm" loading={pending} onClick={submit}>
-          Envoyer le devis au client
+          Soumettre à la validation interne
         </Button>
         <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(false)}>
           Annuler

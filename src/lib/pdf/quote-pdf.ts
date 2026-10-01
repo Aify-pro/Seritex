@@ -90,6 +90,8 @@ export interface QuotePdfData {
   acceptance: QuotePdfAcceptance | null;
   /** Signature de l'auteur du devis + cachet (migration 0062) ; null → case vide à signer à la main. */
   seal: DocumentSeal | null;
+  /** Validation interne (migration 0063) : qui a validé le devis avant envoi, et quand. */
+  validation: { name: string; at: string } | null;
   issuer: CompanySettings | null;
   lines: QuotePdfLine[];
   logoPng: Uint8Array;
@@ -135,7 +137,7 @@ function pct(n: number): string {
 }
 
 export async function buildQuotePdf(data: QuotePdfData): Promise<Uint8Array> {
-  const { quote, client, issuer, lines, representative, acceptance, seal } = data;
+  const { quote, client, issuer, lines, representative, acceptance, seal, validation } = data;
   const pdf = await PDFDocument.create();
   pdf.setTitle(`Proforma ${quote.reference}`);
   pdf.setProducer("Seritex");
@@ -255,6 +257,9 @@ export async function buildQuotePdf(data: QuotePdfData): Promise<Uint8Array> {
   text("FACTURE PROFORMA", M, y, 16, bold);
   textRight(`N° ${quote.reference}`, PAGE_W - M, y, 12, bold);
   y -= 8;
+  if (quote.status === "brouillon" || quote.status === "en_validation_interne") {
+    text("PROJET - EN ATTENTE DE VALIDATION INTERNE - NON ENVOYÉ AU CLIENT", M, y - 6, 8.5, bold, rgb(0.7, 0.1, 0.1));
+  }
   if (quote.status === "refuse" || quote.status === "expire") {
     text(`Statut : ${QUOTE_STATUS_LABELS[quote.status]}`, M, y - 6, 8.5, bold, rgb(0.7, 0.1, 0.1));
   }
@@ -301,6 +306,7 @@ export async function buildQuotePdf(data: QuotePdfData): Promise<Uint8Array> {
   const repRows: string[] = [
     ...(representative?.email ? wrap(representative.email, repW - 16, 8.5, font) : []),
     `Offre établie le ${dateFr(quote.created_at)}`,
+    ...(validation ? wrap(`Validée en interne par ${validation.name}, le ${dateFr(validation.at)}`, repW - 16, 8, bold) : []),
     ...(acceptance?.by === "staff" ? wrap(`Acceptation saisie par ${acceptance.name}, le ${dateFr(acceptance.at)}`, repW - 16, 8, bold) : []),
   ];
 
