@@ -108,7 +108,7 @@ export async function createQuote(
   dateLivraisonPrevue: string | null,
   terms: QuoteTermsInput
 ) {
-  await requireRole(["commercial", "administrateur"]);
+  const { authId } = await requireRole(["commercial", "administrateur"]);
   const parsed = createQuoteSchema.safeParse({ lines, date_livraison_prevue: dateLivraisonPrevue, terms });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Devis invalide" };
 
@@ -144,6 +144,7 @@ export async function createQuote(
       reference,
       request_id: requestId,
       company_id: companyId,
+      created_by: authId,
       status: "envoye",
       total_amount: totalAmount,
       total_ht: totals.ht,
