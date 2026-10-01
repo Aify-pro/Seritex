@@ -28,6 +28,7 @@ import {
   Gauge,
   Mail,
   ChartPie,
+  Calculator,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { createElement, type ReactNode } from "react";
@@ -154,6 +155,7 @@ export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
     { href: "/commercial/clients", label: "Clients", icon: navIcon(Contact) },
     { href: "/commercial/demandes", label: "Demandes", icon: navIcon(Inbox) },
     { href: "/commercial/devis", label: "Devis", icon: navIcon(FileText) },
+    { href: "/tarification", label: "Tarification", icon: navIcon(Calculator), module: "tarification" },
     { href: "/commercial/echantillons", label: "Échantillons", icon: navIcon(FlaskConical) },
     { href: "/mediatheque", label: "Médiathèque", icon: navIcon(FolderOpen), module: "mediatheque" },
     { href: "/atelier/production", label: "Ordres de fabrication", icon: navIcon(Factory), module: "ordres_fabrication" },
