@@ -18,7 +18,7 @@ export async function getQuoteLinesWithColorConfig(quoteId: string): Promise<Quo
     supabase
       .from("quote_lines")
       .select(
-        "*,couleur_unique:couleur_unique_id(id,name,code),zone_colors:quote_line_zone_colors(zone_key,colors:color_id(id,name,code)),printable_zones:quote_line_printable_zones(printable_zone_id,nb_couleurs,product_printable_zones(zone_label,display_order))"
+        "*,couleur_unique:couleur_unique_id(id,name,code),zone_colors:quote_line_zone_colors(zone_key,colors:color_id(id,name,code)),printable_zones:quote_line_printable_zones(printable_zone_id,nb_couleurs,product_printable_zones(zone_label,display_order)),sizes:quote_line_sizes(taille,quantite)"
       )
       .eq("quote_id", quoteId),
     supabase.from("product_zone_templates").select("product_model_id,zone_key,zone_label"),
@@ -75,6 +75,9 @@ export async function getQuoteLinesWithColorConfig(quoteId: string): Promise<Quo
           display_order: z.product_printable_zones?.display_order ?? 0,
         }))
         .sort((a, b) => a.display_order - b.display_order),
+      sizes: Object.fromEntries(
+        ((l.sizes ?? []) as unknown as { taille: string; quantite: number }[]).map((z) => [z.taille, z.quantite])
+      ),
       visuels,
       maquette: maquette ? { ...maquette, previewUrl: maquettePreviewUrls.get(maquette.id) ?? null } : null,
     };

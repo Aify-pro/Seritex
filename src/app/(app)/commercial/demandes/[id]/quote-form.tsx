@@ -12,6 +12,8 @@ import { BASE_CURRENCY, currencyDecimals, formatMoney } from "@/lib/currency";
 import { DELAI_DEPARTS, DELAI_UNITES } from "@/lib/delivery";
 import type { DelaiDepart, DelaiUnite } from "@/lib/types/domain";
 import { MapPin, Phone, Mail, User } from "lucide-react";
+import { DispatchEditor, type SizeOption } from "@/components/quotes/dispatch-editor";
+import { generateDispatch, pickRule, type Dispatch, type DispatchRule } from "@/lib/dispatching";
 
 type ProductModel = { id: string; name: string; base_price: number | null };
 type ZoneTemplate = { zone_key: string; zone_label: string; display_order: number };
@@ -35,6 +37,10 @@ type LineDraft = {
   colorDraft: ZoneColorDraft;
   /** Impressions retenues : emplacement → nombre de couleurs (migration 0065). */
   printZones: Record<string, number>;
+  /** Répartition par taille (migration 0066). */
+  sizes: Dispatch;
+  /** Vrai tant que la répartition est celle proposée par la règle : elle suit alors la quantité. */
+  sizesAuto: boolean;
 };
 
 /** Valeurs par défaut des mentions de proforma, issues de Paramètres > Informations société (migration 0061). */
@@ -126,6 +132,7 @@ export type CorrectionLine = {
   couleurUniqueId: string | null;
   zoneColors: Record<string, string>;
   printZones: Record<string, number>;
+  sizes: Dispatch;
 };
 
 /** Devis renvoyé par la Direction, à corriger puis resoumettre (migration 0064). */
@@ -149,6 +156,8 @@ function lineFromCorrection(l: CorrectionLine): LineDraft {
       ? { isUni: true, couleurUniqueId: l.couleurUniqueId, zoneColors: {} }
       : { isUni: false, couleurUniqueId: null, zoneColors: l.zoneColors },
     printZones: l.printZones,
+    sizes: l.sizes,
+    sizesAuto: false,
   };
 }
 
@@ -162,6 +171,8 @@ function newLine(): LineDraft {
     remisePct: "0",
     colorDraft: EMPTY_ZONE_COLOR_DRAFT,
     printZones: {},
+    sizes: {},
+    sizesAuto: true,
   };
 }
 
@@ -182,6 +193,8 @@ export function QuoteForm({
   products,
   zoneTemplatesByModel,
   printableZonesByModel,
+  sizeOptionsByModel,
+  dispatchRules,
   colors,
   defaults,
   paymentTerms,
@@ -196,6 +209,9 @@ export function QuoteForm({
   zoneTemplatesByModel: Record<string, ZoneTemplate[]>;
   /** Emplacements imprimables par modèle — choix des impressions de chaque ligne (migration 0065). */
   printableZonesByModel: Record<string, PrintableZoneOption[]>;
+  /** Tailles proposables par modèle et règle de dispatching (migration 0066). */
+  sizeOptionsByModel: Record<string, SizeOption[]>;
+  dispatchRules: DispatchRule[];
   colors: ColorOption[];
   defaults: QuoteDefaults;
   paymentTerms: PaymentTermOption[];
@@ -229,6 +245,34 @@ export function QuoteForm({
     setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l)));
   }
 
+  /** Répartition proposée par la règle (Paramètres > Dispatching) pour un modèle, un groupe et une quantité. */
+  function proposeSizes(productModelId: string, quantity: number, groupe?: string): Dispatch {
+    const options = sizeOptionsByModel[productModelId] ?? [];
+    const g = groupe ?? options[0]?.groupe;
+    if (!g) return {};
+    const rule = pickRule(dispatchRules, g, quantity);
+    if (!rule) return {};
+    return generateDispatch(
+      quantity,
+      rule,
+      options.filter((o) => o.groupe === g).map((o) => o.cle)
+    );
+  }
+
+  /** Groupe de la répartition en cours, pour la recalculer dans le même groupe. */
+  function groupeOf(line: LineDraft): string | undefined {
+    return (sizeOptionsByModel[line.productModelId] ?? []).find((o) => (line.sizes[o.cle] ?? 0) > 0)?.groupe;
+  }
+
+  function changeQuantity(line: LineDraft, value: string) {
+    const q = Number(value);
+    const patch: Partial<LineDraft> = { quantity: value };
+    if (line.sizesAuto && line.productModelId && Number.isInteger(q) && q > 0) {
+      patch.sizes = proposeSizes(line.productModelId, q, groupeOf(line));
+    }
+    updateLine(line.key, patch);
+  }
+
   function chooseProduct(key: string, productModelId: string) {
     const opt = products.find((p) => p.id === productModelId);
     setLines((prev) =>
@@ -245,6 +289,9 @@ export function QuoteForm({
               colorDraft: EMPTY_ZONE_COLOR_DRAFT,
               // Les emplacements imprimables sont propres au modèle.
               printZones: {},
+              // Les tailles aussi : nouvelle proposition selon la règle.
+              sizes: productModelId && Number(l.quantity) > 0 ? proposeSizes(productModelId, Number(l.quantity)) : {},
+              sizesAuto: true,
             }
           : l
       )
@@ -306,6 +353,7 @@ export function QuoteForm({
         printable_zones: l.productModelId
           ? Object.entries(l.printZones).map(([printable_zone_id, nb_couleurs]) => ({ printable_zone_id, nb_couleurs }))
           : [],
+        sizes: l.productModelId ? l.sizes : {},
       };
     });
 
@@ -455,7 +503,7 @@ export function QuoteForm({
                 <label className="mb-1 block text-xs font-medium text-foreground">Quantité</label>
                 <input
                   value={line.quantity}
-                  onChange={(e) => updateLine(line.key, { quantity: e.target.value })}
+                  onChange={(e) => changeQuantity(line, e.target.value)}
                   type="number"
                   min={1}
                   className="h-9 w-full rounded-md border border-border bg-surface px-2 text-sm"
@@ -504,6 +552,29 @@ export function QuoteForm({
                   onChange={(next) => updateLine(line.key, { colorDraft: next })}
                   disabled={pending}
                 />
+              </div>
+            )}
+
+            {line.productModelId && (
+              <div className="rounded-md border border-border p-2">
+                <DispatchEditor
+                  sizes={sizeOptionsByModel[line.productModelId] ?? []}
+                  value={line.sizes}
+                  quantity={Number(line.quantity) || 0}
+                  disabled={pending}
+                  onChange={(next) => updateLine(line.key, { sizes: next, sizesAuto: false })}
+                  onPropose={(groupe) =>
+                    updateLine(line.key, {
+                      sizes: Number(line.quantity) > 0 ? proposeSizes(line.productModelId, Number(line.quantity), groupe) : {},
+                      sizesAuto: true,
+                    })
+                  }
+                />
+                {line.sizesAuto && Object.keys(line.sizes).length === 0 && Number(line.quantity) > 0 && (
+                  <p className="mt-1 text-xs text-foreground-muted">
+                    Aucune règle de dispatching pour ce groupe et cette quantité (Paramètres &gt; Dispatching) — saisissez la répartition.
+                  </p>
+                )}
               </div>
             )}
 

@@ -10,6 +10,7 @@ import { resolveContactEmailForRequest, resolveRoleEmails } from "@/lib/notifica
 import { computeQuoteTotals } from "@/lib/quote-totals";
 import { formatMoney } from "@/lib/currency";
 import { isQuoteValidator } from "@/lib/signatures";
+import { compactDispatch, dispatchTotal } from "@/lib/dispatching";
 
 export async function updateRequestStatus(requestId: string, status: RequestStatus) {
   await requireRole(["commercial", "administrateur"]);
@@ -60,7 +61,13 @@ const quoteLineSchema = z.object({
     )
     .default([])
     .refine((zones) => new Set(zones.map((z) => z.printable_zone_id)).size === zones.length, "Un emplacement d'impression est choisi deux fois"),
+  // Répartition par taille (migration 0066) : clé « Groupe/Libellé » → pièces.
+  // Obligatoire et complète pour un article de catalogue (contrôlé ci-dessous
+  // et, à la validation, en base).
+  sizes: z.record(z.string().min(1), z.number().int("Quantité par taille invalide").min(0, "Quantité par taille invalide")).default({}),
 });
+
+const sizesSchema = quoteLineSchema.shape.sizes;
 
 const optionalText = z.string().trim().max(2000).transform((v) => v || null);
 
@@ -101,7 +108,21 @@ const quoteTermsSchema = z
   });
 
 const createQuoteSchema = z.object({
-  lines: z.array(quoteLineSchema).min(1, "Au moins un article est requis"),
+  lines: z
+    .array(quoteLineSchema)
+    .min(1, "Au moins un article est requis")
+    .superRefine((lines, ctx) => {
+      for (const l of lines) {
+        if (!l.product_model_id) continue;
+        const total = dispatchTotal(l.sizes);
+        if (total !== l.quantity) {
+          ctx.addIssue({
+            code: "custom",
+            message: `« ${l.description} » : la répartition par taille totalise ${total} pièce(s) pour ${l.quantity} commandée(s)`,
+          });
+        }
+      }
+    }),
   // Date de livraison ferme (migration 0048) — optionnelle ; exclusive avec le
   // délai normalisé des mentions (0061) : l'un OU l'autre.
   date_livraison_prevue: z.string().date().nullable(),
@@ -191,6 +212,13 @@ async function insertPrintableZones(supabase: ServerSupabase, quoteLineId: strin
   return error ? { error: error.message } : {};
 }
 
+/** Répartition par taille (migration 0066) — seule voie d'écriture : set_quote_line_sizes(). */
+async function writeQuoteLineSizes(supabase: ServerSupabase, quoteLineId: string, line: QuoteLineInput) {
+  if (!line.product_model_id) return {};
+  const { error } = await supabase.rpc("set_quote_line_sizes", { p_quote_line_id: quoteLineId, p_sizes: compactDispatch(line.sizes) });
+  return error ? { error: error.message } : {};
+}
+
 async function insertQuoteLine(supabase: ServerSupabase, quoteId: string, line: QuoteLineInput) {
   const { data: quoteLine, error } = await supabase
     .from("quote_lines")
@@ -200,7 +228,9 @@ async function insertQuoteLine(supabase: ServerSupabase, quoteId: string, line: 
   if (error) return { error: error.message };
   const colors = await insertZoneColors(supabase, quoteLine.id as string, line);
   if (colors.error) return colors;
-  return insertPrintableZones(supabase, quoteLine.id as string, line);
+  const prints = await insertPrintableZones(supabase, quoteLine.id as string, line);
+  if (prints.error) return prints;
+  return writeQuoteLineSizes(supabase, quoteLine.id as string, line);
 }
 
 /**
@@ -326,6 +356,11 @@ export async function resubmitQuote(
     if (clearPrintError) return { error: clearPrintError.message };
     const printRes = await insertPrintableZones(supabase, line.id, line);
     if (printRes.error) return { error: printRes.error };
+    // Remplace toute la répartition ; un article devenu « hors catalogue » la perd.
+    const sizesRes = line.product_model_id
+      ? await writeQuoteLineSizes(supabase, line.id, line)
+      : await supabase.rpc("set_quote_line_sizes", { p_quote_line_id: line.id, p_sizes: {} }).then(({ error: e }) => (e ? { error: e.message } : {}));
+    if (sizesRes.error) return { error: sizesRes.error };
   }
 
   const { error } = await supabase
@@ -345,6 +380,27 @@ export async function resubmitQuote(
   revalidatePath(`/commercial/demandes/${quote.request_id}`);
   revalidateQuote(quoteId);
   revalidatePath("/commercial/devis");
+  return {};
+}
+
+/**
+ * Ajustement de la répartition d'un article sur un devis envoyé (migration
+ * 0066) : par le client avant d'accepter, ou par le commercial à sa demande.
+ * Le total doit rester égal à la quantité commandée ; droits, statut et tailles
+ * du modèle sont contrôlés en base par set_quote_line_sizes(), qui trace la
+ * modification. Le montant ne change pas tant qu'un article n'a qu'un prix
+ * unitaire (prix par taille : lot D).
+ */
+export async function updateQuoteLineSizes(quoteId: string, quoteLineId: string, sizes: Record<string, number>) {
+  await requireUser();
+  const parsed = sizesSchema.safeParse(sizes);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Répartition invalide" };
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("set_quote_line_sizes", { p_quote_line_id: quoteLineId, p_sizes: compactDispatch(parsed.data) });
+  if (error) return { error: error.message };
+
+  revalidateQuote(quoteId);
   return {};
 }
 
