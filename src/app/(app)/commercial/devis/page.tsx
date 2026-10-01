@@ -13,7 +13,7 @@ export default async function QuotesPage() {
 
   const { data: quotes } = await supabase
     .from("quotes")
-    .select("id,reference,status,total_amount,created_at,companies(name)")
+    .select("id,reference,status,total_amount,devise,created_at,companies(name)")
     .order("created_at", { ascending: false });
 
   return (
@@ -42,7 +42,7 @@ export default async function QuotesPage() {
                   <td className="px-5 py-3 text-foreground-muted">
                     {(q.companies as unknown as { name: string } | null)?.name}
                   </td>
-                  <td className="px-5 py-3 text-foreground-muted">{formatAmount(q.total_amount)}</td>
+                  <td className="px-5 py-3 text-foreground-muted">{formatAmount(q.total_amount, q.devise)}</td>
                   <td className="px-5 py-3">
                     <StatusBadge status={q.status} labels={QUOTE_STATUS_LABELS} kind="quote" />
                   </td>

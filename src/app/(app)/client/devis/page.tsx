@@ -14,7 +14,7 @@ export default async function ClientQuotesPage() {
 
   const { data: quotes } = await supabase
     .from("quotes")
-    .select("id,reference,status,total_amount,created_at")
+    .select("id,reference,status,total_amount,devise,created_at")
     .eq("company_id", profile.company_id!)
     .order("created_at", { ascending: false });
 
@@ -34,7 +34,7 @@ export default async function ClientQuotesPage() {
                     <p className="text-sm font-medium text-foreground">{q.reference}</p>
                     <p className="text-xs text-foreground-muted">{formatDate(q.created_at)}</p>
                   </div>
-                  <span className="text-sm font-medium text-foreground">{formatAmount(q.total_amount)}</span>
+                  <span className="text-sm font-medium text-foreground">{formatAmount(q.total_amount, q.devise)}</span>
                   <StatusBadge status={q.status} labels={QUOTE_STATUS_LABELS} kind="quote" />
                   <ArrowRight className="h-4 w-4 text-foreground-muted" />
                 </Link>

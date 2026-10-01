@@ -122,6 +122,9 @@ export interface Company {
   website?: string | null;
   vat_number?: string | null;
   ape_code?: string | null;
+  /** Identifiants légaux ivoiriens (migration 0061), éditables même pour une fiche Sage. */
+  ncc?: string | null;
+  rccm?: string | null;
 }
 
 export type ContactStatus = "actif" | "inactif";
@@ -302,6 +305,29 @@ export interface RequestRecord {
   companies?: Pick<Company, "id" | "name">;
 }
 
+export type DelaiUnite = "jours" | "jours_ouvres" | "semaines" | "mois";
+export type DelaiDepart = "commande" | "acompte" | "validation_echantillon";
+
+/** Condition de paiement proposée sur les devis (migration 0061, gérée dans Informations société). */
+export interface PaymentTerm {
+  id: string;
+  label: string;
+  is_system: boolean;
+  is_default: boolean;
+  active: boolean;
+  display_order: number;
+}
+
+/** Devise utilisable sur un devis (migration 0061) — rate_xof : F CFA pour 1 unité. */
+export interface Currency {
+  code: string;
+  label: string;
+  rate_xof: number | null;
+  is_base: boolean;
+  active: boolean;
+  display_order: number;
+}
+
 export interface Quote {
   id: string;
   reference: string;
@@ -314,6 +340,24 @@ export interface Quote {
   // (migration 0048) — affichée sur le PDF de l'ODF qui en hérite via
   // production_orders.quote_id. Nullable, aucune obligation de saisie.
   date_livraison_prevue: string | null;
+  // Mentions de la proforma (migration 0061). total_amount = TTC ; pour un
+  // devis antérieur à 0061 : tva_rate = 0 et total_ht/total_tva nuls.
+  objet?: string | null;
+  reference_client?: string | null;
+  remise_pct?: number;
+  tva_rate?: number;
+  tva_exoneration_motif?: string | null;
+  total_ht?: number | null;
+  total_tva?: number | null;
+  mode_reglement?: string | null;
+  conditions_paiement?: string | null;
+  acompte_pct?: number;
+  devise?: string;
+  taux_change?: number;
+  delai_valeur?: number | null;
+  delai_unite?: DelaiUnite | null;
+  delai_depart?: DelaiDepart | null;
+  notes?: string | null;
   created_at: string;
   companies?: Pick<Company, "id" | "name">;
 }
@@ -326,6 +370,8 @@ export interface QuoteLine {
   quantity: number;
   unit_price: number;
   line_total: number;
+  /** Remise propre à la ligne (migration 0061) ; line_total reste le brut. */
+  remise_pct?: number;
   // Configuration couleur (chantier config-produit-devis) — la « maquette »
   // que le client valide en acceptant le devis, héritée 1:1 dans la ligne
   // d'ODF correspondante par accept_quote() (chantier ODF multi-lignes).
@@ -787,6 +833,40 @@ export interface RolePermissionRecord {
 // d'acceptation par défaut du surplus tracé (section 11 du document de
 // logique) — appliqué à toute catégorie d'atelier requérant une fiche de
 // tracé sans taux propre (AtelierCategorie.taux_acceptation_surplus_trace).
+/** Fiche société de l'émetteur (migration 0061) — une seule ligne. */
+export interface CompanySettings {
+  id: string;
+  raison_sociale: string;
+  nom_commercial: string | null;
+  forme_juridique: string | null;
+  capital_social: number | null;
+  rccm: string | null;
+  ncc: string | null;
+  regime_imposition: string | null;
+  centre_impots: string | null;
+  numero_cnps: string | null;
+  assujetti_tva: boolean;
+  adresse: string | null;
+  boite_postale: string | null;
+  ville: string | null;
+  pays: string;
+  telephone: string | null;
+  email: string | null;
+  site_web: string | null;
+  banque_nom: string | null;
+  banque_compte: string | null;
+  banque_swift: string | null;
+  mobile_money: string | null;
+  signataire_nom: string | null;
+  signataire_fonction: string | null;
+  tva_taux_defaut: number;
+  validite_devis_jours: number;
+  acompte_pct_defaut: number;
+  mentions_devis: string | null;
+  updated_at: string;
+  updated_by: string | null;
+}
+
 export interface FabricationSettings {
   id: string;
   taux_acceptation_surplus_defaut: number;

@@ -13,9 +13,13 @@ const companySchema = z.object({
   phone: z.string().trim().optional(),
   email: z.string().trim().email().optional().or(z.literal("")),
   notes: z.string().trim().optional(),
+  // Identifiants légaux ivoiriens (migration 0061) : champs CRM, éditables
+  // même sur une fiche Sage (hors périmètre protégé du trigger 0059).
+  ncc: z.string().trim().max(50).optional(),
+  rccm: z.string().trim().max(50).optional(),
 });
 
-/** Met à jour la fiche entreprise (coordonnées, SIRET, notes CRM) — notes seules pour une fiche Sage. */
+/** Met à jour la fiche entreprise (coordonnées, SIRET, notes CRM) — notes et NCC/RCCM seuls pour une fiche Sage. */
 export async function updateCompany(formData: FormData) {
   await requireRole(["commercial", "administrateur"]);
   const parsed = companySchema.safeParse({
@@ -26,10 +30,13 @@ export async function updateCompany(formData: FormData) {
     phone: formData.get("phone"),
     email: formData.get("email"),
     notes: formData.get("notes"),
+    ncc: formData.get("ncc") ?? undefined,
+    rccm: formData.get("rccm") ?? undefined,
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message };
 
   const supabase = await createClient();
+  const legalIds = { ncc: parsed.data.ncc || null, rccm: parsed.data.rccm || null };
 
   // Fiche importée de Sage : identité et coordonnées appartiennent à Sage
   // (migration 0059, protégées aussi par un trigger) — seules les notes CRM
@@ -41,7 +48,7 @@ export async function updateCompany(formData: FormData) {
     .from("companies")
     .update(
       existing.origin === "sage"
-        ? { notes: parsed.data.notes || null }
+        ? { notes: parsed.data.notes || null, ...legalIds }
         : {
             name: parsed.data.name,
             siret: parsed.data.siret || null,
@@ -49,6 +56,7 @@ export async function updateCompany(formData: FormData) {
             phone: parsed.data.phone || null,
             email: parsed.data.email || null,
             notes: parsed.data.notes || null,
+            ...legalIds,
           }
     )
     .eq("id", parsed.data.company_id);

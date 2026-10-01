@@ -1,3 +1,4 @@
+import { formatMoney } from "@/lib/currency";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 
@@ -23,9 +24,9 @@ export function formatDateTime(value: string | null | undefined) {
   }).format(new Date(value));
 }
 
-export function formatAmount(value: number | null | undefined) {
-  if (value === null || value === undefined) return "—";
-  return new Intl.NumberFormat("fr-FR").format(value) + " F CFA";
+/** Montant dans sa devise (F CFA par défaut — voir `formatMoney` pour les devises étrangères). */
+export function formatAmount(value: number | null | undefined, currency: string = "XOF") {
+  return formatMoney(value, currency);
 }
 
 export function formatFileSize(bytes: number | null | undefined) {

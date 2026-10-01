@@ -7,6 +7,8 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { sendNotification } from "@/lib/notifications/send";
 import { resolveContactEmailForRequest, resolveRoleEmails } from "@/lib/notifications/recipients";
+import { computeQuoteTotals } from "@/lib/quote-totals";
+import { formatMoney } from "@/lib/currency";
 
 export async function updateRequestStatus(requestId: string, status: RequestStatus) {
   await requireRole(["commercial", "administrateur"]);
@@ -33,6 +35,8 @@ const quoteLineSchema = z.object({
   description: z.string().min(1, "Description requise"),
   quantity: z.coerce.number().int().positive("Quantité invalide"),
   unit_price: z.coerce.number().nonnegative("Prix invalide"),
+  // Remise propre à la ligne (migration 0061), en % du brut de la ligne.
+  remise_pct: z.coerce.number().min(0, "Remise invalide").max(100, "La remise d'une ligne ne peut pas dépasser 100 %"),
   product_model_id: z.string().uuid().nullable(),
   // Configuration couleur — la « maquette » que le client valide avec le
   // devis (chantier config-produit-devis). Jamais les deux ensemble :
@@ -41,14 +45,54 @@ const quoteLineSchema = z.object({
   zone_colors: z.array(z.object({ zone_key: z.string().min(1), color_id: z.string().uuid() })),
 });
 
+const optionalText = z.string().trim().max(2000).transform((v) => v || null);
+
+/**
+ * Mentions de la proforma (migration 0061) : TVA, remise, règlement, délais.
+ * Le taux de TVA vient du formulaire (pré-rempli depuis Paramètres >
+ * Informations société) ; un devis exonéré (tva_rate = 0) doit en donner le
+ * motif, mention exigée sur un document sans TVA pour une société assujettie.
+ */
+const quoteTermsSchema = z
+  .object({
+    objet: optionalText,
+    reference_client: optionalText,
+    remise_pct: z.coerce.number().min(0, "Remise invalide").max(100, "La remise ne peut pas dépasser 100 %"),
+    tva_rate: z.coerce.number().min(0, "Taux de TVA invalide").max(100, "Taux de TVA invalide"),
+    tva_exoneration_motif: optionalText,
+    mode_reglement: optionalText,
+    // Libellé d'une condition de la liste Paramètres > Informations société.
+    conditions_paiement: optionalText,
+    acompte_pct: z.coerce.number().min(0, "Acompte invalide").max(100, "L'acompte ne peut pas dépasser 100 %"),
+    // Devise du devis et taux figé (F CFA pour 1 unité) — 1 pour le F CFA.
+    devise: z.string().regex(/^[A-Z]{3}$/, "Devise invalide"),
+    taux_change: z.coerce.number().positive("Taux de change invalide"),
+    // Livraison normalisée : délai (valeur + unité + départ) OU date ferme.
+    delai_valeur: z.coerce.number().int("Délai invalide").positive("Délai invalide").nullable(),
+    delai_unite: z.enum(["jours", "jours_ouvres", "semaines", "mois"]).nullable(),
+    delai_depart: z.enum(["commande", "acompte", "validation_echantillon"]).nullable(),
+    notes: optionalText,
+    valid_until: z.string().date().nullable(),
+  })
+  .refine((t) => (t.delai_valeur === null) === (t.delai_unite === null), {
+    message: "Indiquez la valeur et l'unité du délai de livraison",
+    path: ["delai_valeur"],
+  })
+  .refine((t) => t.tva_rate > 0 || !!t.tva_exoneration_motif, {
+    message: "Indiquez le motif d'exonération de TVA (ou un taux de TVA)",
+    path: ["tva_exoneration_motif"],
+  });
+
 const createQuoteSchema = z.object({
   lines: z.array(quoteLineSchema).min(1, "Au moins un article est requis"),
-  // Date de livraison promise au client (migration 0048) — optionnelle,
-  // comme valid_until déjà sur cette table : aucune obligation de saisie.
+  // Date de livraison ferme (migration 0048) — optionnelle ; exclusive avec le
+  // délai normalisé des mentions (0061) : l'un OU l'autre.
   date_livraison_prevue: z.string().date().nullable(),
+  terms: quoteTermsSchema,
 });
 
 export type QuoteLineInput = z.infer<typeof quoteLineSchema>;
+export type QuoteTermsInput = z.input<typeof quoteTermsSchema>;
 
 /**
  * Un devis peut porter plusieurs articles (`quote_lines` est une vraie
@@ -61,15 +105,38 @@ export async function createQuote(
   requestId: string,
   companyId: string,
   lines: QuoteLineInput[],
-  dateLivraisonPrevue: string | null
+  dateLivraisonPrevue: string | null,
+  terms: QuoteTermsInput
 ) {
   await requireRole(["commercial", "administrateur"]);
-  const parsed = createQuoteSchema.safeParse({ lines, date_livraison_prevue: dateLivraisonPrevue });
+  const parsed = createQuoteSchema.safeParse({ lines, date_livraison_prevue: dateLivraisonPrevue, terms });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Devis invalide" };
 
   const supabase = await createClient();
-  const reference = "DEV-" + Date.now().toString(36).toUpperCase();
-  const totalAmount = parsed.data.lines.reduce((sum, l) => sum + l.quantity * l.unit_price, 0);
+  const t = parsed.data.terms;
+  if (parsed.data.date_livraison_prevue && t.delai_valeur !== null) {
+    return { error: "Choisissez soit une date de livraison, soit un délai — pas les deux" };
+  }
+
+  // Devise : active et connue ; F CFA toujours au taux 1 (le taux saisi côté
+  // client n'est pas digne de confiance pour la devise de base).
+  const { data: currency } = await supabase.from("currencies").select("code,is_base,active").eq("code", t.devise).maybeSingle();
+  if (!currency || !currency.active) return { error: "Devise indisponible" };
+  const tauxChange = currency.is_base ? 1 : t.taux_change;
+
+  if (t.conditions_paiement) {
+    const { data: term } = await supabase.from("payment_terms").select("id").eq("label", t.conditions_paiement).eq("active", true).maybeSingle();
+    if (!term) return { error: "Condition de paiement inconnue ou désactivée" };
+  }
+
+  const totals = computeQuoteTotals(parsed.data.lines, t.remise_pct, t.tva_rate, t.acompte_pct, t.devise);
+  const totalAmount = totals.ttc;
+
+  // Numéro attribué en dernier, une fois toutes les validations passées, pour
+  // ne pas « brûler » de numéros sur un devis refusé (numérotation continue).
+  // Numérotation continue DEV-AAAA-NNNN (migration 0061).
+  const { data: reference, error: refError } = await supabase.rpc("next_document_number", { p_prefix: "DEV" });
+  if (refError || !reference) return { error: refError?.message ?? "Numérotation du devis impossible" };
 
   const { data: quote, error } = await supabase
     .from("quotes")
@@ -79,7 +146,24 @@ export async function createQuote(
       company_id: companyId,
       status: "envoye",
       total_amount: totalAmount,
+      total_ht: totals.ht,
+      total_tva: totals.tva,
       date_livraison_prevue: parsed.data.date_livraison_prevue,
+      valid_until: t.valid_until,
+      objet: t.objet,
+      reference_client: t.reference_client,
+      remise_pct: t.remise_pct,
+      tva_rate: t.tva_rate,
+      tva_exoneration_motif: t.tva_rate > 0 ? null : t.tva_exoneration_motif,
+      mode_reglement: t.mode_reglement,
+      conditions_paiement: t.conditions_paiement,
+      acompte_pct: t.acompte_pct,
+      devise: t.devise,
+      taux_change: tauxChange,
+      delai_valeur: t.delai_valeur,
+      delai_unite: t.delai_unite,
+      delai_depart: t.delai_valeur !== null ? t.delai_depart : null,
+      notes: t.notes,
     })
     .select()
     .single();
@@ -95,6 +179,7 @@ export async function createQuote(
         description: line.description,
         quantity: line.quantity,
         unit_price: line.unit_price,
+        remise_pct: line.remise_pct,
         couleur_unique_id: line.couleur_unique_id,
       })
       .select("id")
@@ -117,7 +202,8 @@ export async function createQuote(
     variables: {
       numero_devis: reference,
       nom_client: company?.name ?? "",
-      montant_total: totalAmount.toFixed(2),
+      // Montant déjà formaté avec sa devise : le modèle d'e-mail n'y ajoute plus d'unité (migration 0061).
+      montant_total: formatMoney(totalAmount, t.devise),
       chemin_lien: `/client/devis/${quote.id}`,
     },
     relatedEntityType: "quote",
