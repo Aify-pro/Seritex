@@ -45,6 +45,22 @@ export interface QuotePdfClient {
   contactName: string | null;
 }
 
+/** Commercial attitré à l'offre (demande, à défaut créateur du devis). */
+export interface QuotePdfRepresentative {
+  name: string;
+  email: string | null;
+}
+
+/**
+ * Validation du devis (status_history « accepte ») : par le contact du client
+ * depuis le portail (`client`) ou enregistrée pour lui par l'équipe (`staff`).
+ */
+export interface QuotePdfAcceptance {
+  name: string;
+  by: "client" | "staff";
+  at: string;
+}
+
 export interface QuotePdfData {
   quote: Pick<
     Quote,
@@ -69,6 +85,8 @@ export interface QuotePdfData {
     | "notes"
   >;
   client: QuotePdfClient;
+  representative: QuotePdfRepresentative | null;
+  acceptance: QuotePdfAcceptance | null;
   issuer: CompanySettings | null;
   lines: QuotePdfLine[];
   logoPng: Uint8Array;
@@ -76,6 +94,8 @@ export interface QuotePdfData {
   quoteUrl: string;
 }
 
+/** Marge basse du pied de page : plus petite que M pour le descendre vers le bord. */
+const FOOT_BOTTOM = 18;
 const PAGE_W = 595.28;
 const PAGE_H = 841.89;
 const M = 40;
@@ -112,7 +132,7 @@ function pct(n: number): string {
 }
 
 export async function buildQuotePdf(data: QuotePdfData): Promise<Uint8Array> {
-  const { quote, client, issuer, lines } = data;
+  const { quote, client, issuer, lines, representative, acceptance } = data;
   const pdf = await PDFDocument.create();
   pdf.setTitle(`Proforma ${quote.reference}`);
   pdf.setProducer("Seritex");
@@ -202,10 +222,10 @@ export async function buildQuotePdf(data: QuotePdfData): Promise<Uint8Array> {
     else footerCoords.push(seg);
   }
   const mentionsH = footerMentions.length ? footerMentions.length * 10 + 4 : 0;
-  const footerH = 12 + mentionsH + footerCoords.length * 9 + 14;
+  const footerH = 12 + mentionsH + footerCoords.length * 9 + 6;
 
   function ensureSpace(height: number, onNewPage?: () => void) {
-    if (y - height < M + footerH) {
+    if (y - height < FOOT_BOTTOM + footerH + 8) {
       page = pdf.addPage([PAGE_W, PAGE_H]);
       pages.push(page);
       y = PAGE_H - M;
@@ -253,36 +273,52 @@ export async function buildQuotePdf(data: QuotePdfData): Promise<Uint8Array> {
   });
   y -= 46;
 
-  // ── Émetteur / Client ─────────────────────────────────────────────────────
-  const boxW = (CW - 14) / 2;
-  const issuerBox: string[] = [
-    issuer?.rccm ? `RCCM : ${issuer.rccm}` : "",
-    issuer?.ncc ? `N° CC : ${issuer.ncc}` : "",
-    issuer?.regime_imposition ? `Régime : ${issuer.regime_imposition}` : "",
-    issuer?.centre_impots ? `Centre des impôts : ${issuer.centre_impots}` : "",
-    issuer?.assujetti_tva === false ? "Non assujetti à la TVA" : "",
-  ].filter(Boolean);
+  // ── Client (identification + validation) / représentant Seritex ─────────────
+  const clientW = Math.round(CW * 0.6);
+  const repW = CW - clientW - 14;
   const clientAddress = [client.address, [client.postal_code, client.city].filter(Boolean).join(" "), client.country]
     .filter(Boolean)
     .join(", ");
-  const clientBox: string[] = [
-    ...wrap(clientAddress, boxW - 16, 8.5, font).filter(Boolean),
-    client.contactName ? `À l'attention de : ${client.contactName}` : "",
-    client.phone ? `Tél. ${client.phone}` : "",
-    client.email ?? "",
-    client.ncc ? `N° CC : ${client.ncc}` : "",
-    client.rccm ? `RCCM : ${client.rccm}` : "",
-  ].filter(Boolean);
-  const boxH = 38 + Math.max(issuerBox.length, clientBox.length, 1) * 11 + 4;
+  const clientRows: { t: string; strong?: boolean }[] = [
+    ...wrap(clientAddress, clientW - 16, 8.5, font).filter(Boolean).map((t) => ({ t })),
+    ...(client.contactName ? [{ t: `À l'attention de : ${client.contactName}` }] : []),
+    ...(client.phone ? [{ t: `Tél. ${client.phone}` }] : []),
+    ...(client.email ? [{ t: client.email }] : []),
+    ...(client.ncc ? [{ t: `N° CC : ${client.ncc}` }] : []),
+    ...(client.rccm ? [{ t: `RCCM : ${client.rccm}` }] : []),
+  ];
+  const clientValidation =
+    acceptance?.by === "client"
+      ? `Validé en ligne par ${acceptance.name}, le ${dateFr(acceptance.at)}`
+      : acceptance
+        ? `Validé le ${dateFr(acceptance.at)} (enregistré par ${acceptance.name})`
+        : "Validation du client : en attente";
+  const clientValidationLines = wrap(clientValidation, clientW - 16, 8, bold);
+
+  const repRows: string[] = [
+    ...(representative?.email ? wrap(representative.email, repW - 16, 8.5, font) : []),
+    `Offre établie le ${dateFr(quote.created_at)}`,
+    ...(acceptance?.by === "staff" ? wrap(`Acceptation saisie par ${acceptance.name}, le ${dateFr(acceptance.at)}`, repW - 16, 8, bold) : []),
+  ];
+
+  const clientH = 38 + clientRows.length * 11 + 8 + clientValidationLines.length * 10 + 6;
+  const repH = 38 + repRows.length * 11 + 6;
+  const boxH = Math.max(clientH, repH);
   ensureSpace(boxH + 10);
-  const drawBox = (x: number, title: string, head: string, rows: string[]) => {
-    page.drawRectangle({ x, y: y - boxH, width: boxW, height: boxH, borderColor: line, borderWidth: 0.8 });
+
+  const frame = (x: number, w: number, title: string, head: string) => {
+    page.drawRectangle({ x, y: y - boxH, width: w, height: boxH, borderColor: line, borderWidth: 0.8 });
     text(title, x + 8, y - 12, 6.5, bold, muted);
-    text(wrap(head, boxW - 16, 10, bold)[0] ?? "", x + 8, y - 25, 10, bold);
-    rows.forEach((r, i) => text(r, x + 8, y - 38 - i * 11, 8.5, font, ink));
+    text(wrap(head, w - 16, 10, bold)[0] ?? "", x + 8, y - 25, 10, bold);
   };
-  drawBox(M, "ÉMETTEUR", issuerName, issuerBox);
-  drawBox(M + boxW + 14, "CLIENT", client.name, clientBox);
+  frame(M, clientW, "CLIENT", client.name);
+  clientRows.forEach((r, i) => text(r.t, M + 8, y - 38 - i * 11, 8.5, font, ink));
+  const vy = y - 38 - clientRows.length * 11 - 2;
+  page.drawLine({ start: { x: M + 8, y: vy + 6 }, end: { x: M + clientW - 8, y: vy + 6 }, thickness: 0.5, color: line });
+  clientValidationLines.forEach((l, i) => text(l, M + 8, vy - 4 - i * 10, 8, bold, acceptance ? ink : muted));
+
+  frame(M + clientW + 14, repW, `REPRÉSENTANT ${issuerName.toUpperCase()}`, representative?.name ?? "Non renseigné");
+  repRows.forEach((r, i) => text(r, M + clientW + 14 + 8, y - 38 - i * 11, 8.5, font, ink));
   y -= boxH + 24;
 
   if (quote.objet) {
@@ -434,9 +470,9 @@ export async function buildQuotePdf(data: QuotePdfData): Promise<Uint8Array> {
   );
 
   // ── Pied de page de chaque page : mentions, coordonnées, pagination ──────
-  pages.forEach((p, idx) => {
+  pages.forEach((p) => {
     page = p;
-    const hrY = M + footerH - 6;
+    const hrY = FOOT_BOTTOM + footerH - 6;
     hr(hrY);
     let fy = hrY - 11;
     for (const l of footerMentions) {
@@ -448,8 +484,6 @@ export async function buildQuotePdf(data: QuotePdfData): Promise<Uint8Array> {
       text(l, (PAGE_W - font.widthOfTextAtSize(safe(l), 7)) / 2, fy, 7, font, muted);
       fy -= 9;
     }
-    text(`${quote.reference}  -  ${data.quoteUrl}`, M, M + 2, 6.5, font, muted);
-    textRight(`Page ${idx + 1} / ${pages.length}`, PAGE_W - M, M + 2, 6.5, font, muted);
   });
 
   return pdf.save();

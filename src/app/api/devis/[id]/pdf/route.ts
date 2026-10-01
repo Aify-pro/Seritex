@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import QRCode from "qrcode";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { getBaseUrl } from "@/lib/url";
 import { getLogoPngBytes } from "@/lib/pdf/logo";
 import { getCompanySettings } from "@/lib/company-settings";
@@ -24,7 +25,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   const { data: quote } = await supabase
     .from("quotes")
-    .select("*,companies(name,address,postal_code,city,country,phone,email,ncc,rccm),requests(contacts(first_name,last_name))")
+    .select("*,companies(name,address,postal_code,city,country,phone,email,ncc,rccm),requests(assigned_commercial_id,contacts(first_name,last_name))")
     .eq("id", id)
     .maybeSingle();
   if (!quote) return NextResponse.json({ error: "Devis introuvable" }, { status: 404 });
@@ -65,7 +66,34 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     ncc: string | null;
     rccm: string | null;
   } | null;
-  const contact = (quote.requests as unknown as { contacts: { first_name: string; last_name: string } | null } | null)?.contacts;
+  const request = quote.requests as unknown as {
+    assigned_commercial_id: string | null;
+    contacts: { first_name: string; last_name: string } | null;
+  } | null;
+  const contact = request?.contacts;
+
+  // Commercial attitré et validation : ni l'historique de statuts ni les profils
+  // du staff ne sont lisibles par un client (RLS). L'accès au devis vient d'être
+  // contrôlé ci-dessus avec la session de l'utilisateur ; on ne lit ici, avec le
+  // client d'administration, que des noms, un e-mail pro et une date.
+  const admin = createAdminClient();
+  const { data: accepted } = await admin
+    .from("status_history")
+    .select("changed_by,changed_at")
+    .eq("entity_type", "quote")
+    .eq("entity_id", id)
+    .eq("to_status", "accepte")
+    .order("changed_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const repId = request?.assigned_commercial_id ?? quote.created_by ?? null;
+  const userIds = [accepted?.changed_by, repId].filter((v): v is string => !!v);
+  const { data: people } = userIds.length
+    ? await admin.from("app_users").select("id,full_name,email,role").in("id", userIds)
+    : { data: [] };
+  const person = (uid: string | null | undefined) => (people ?? []).find((p) => p.id === uid);
+  const rep = person(repId);
+  const acceptedBy = person(accepted?.changed_by);
 
   const baseUrl = await getBaseUrl();
   const quoteUrl = `${baseUrl}/devis/${quote.reference}`;
@@ -85,6 +113,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       rccm: company?.rccm ?? null,
       contactName: contact ? `${contact.first_name} ${contact.last_name}` : null,
     },
+    representative: rep ? { name: rep.full_name, email: rep.email } : null,
+    acceptance:
+      accepted && acceptedBy
+        ? { name: acceptedBy.full_name, by: acceptedBy.role === "client" ? "client" : "staff", at: accepted.changed_at }
+        : null,
     issuer,
     lines,
     logoPng: await getLogoPngBytes(),
