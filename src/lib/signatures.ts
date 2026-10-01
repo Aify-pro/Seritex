@@ -40,15 +40,20 @@ export async function getDocumentSeal(userId: string | null | undefined): Promis
 }
 
 /**
- * Habilitation à valider les devis (migration 0063) : avoir une signature
- * ACTIVE enregistrée. Lecture avec le client d'administration (tables réservées
+ * Habilitation à valider les devis (migrations 0063 puis 0064) : signature
+ * ACTIVE enregistrée ET compte de la Direction ou administrateur (base_role
+ * administrateur). Lecture avec le client d'administration (tables réservées
  * à l'administrateur de plateforme) ; la règle est appliquée aussi en base par
  * is_quote_validator() — ce contrôle-ci sert à l'affichage et aux messages.
  */
 export async function isQuoteValidator(userId: string): Promise<boolean> {
   try {
-    const { data } = await createAdminClient().from("document_signatories").select("user_id").eq("user_id", userId).eq("active", true).maybeSingle();
-    return !!data;
+    const admin = createAdminClient();
+    const [{ data: sig }, { data: user }] = await Promise.all([
+      admin.from("document_signatories").select("user_id").eq("user_id", userId).eq("active", true).maybeSingle(),
+      admin.from("app_users").select("role,active").eq("id", userId).maybeSingle(),
+    ]);
+    return !!sig && !!user && user.active && user.role === "administrateur";
   } catch {
     return false;
   }
@@ -61,7 +66,13 @@ export async function listQuoteValidatorNames(): Promise<string[]> {
     const { data: sigs } = await admin.from("document_signatories").select("user_id").eq("active", true);
     const ids = (sigs ?? []).map((r) => r.user_id);
     if (!ids.length) return [];
-    const { data: users } = await admin.from("app_users").select("full_name").in("id", ids).eq("active", true).order("full_name");
+    const { data: users } = await admin
+      .from("app_users")
+      .select("full_name")
+      .in("id", ids)
+      .eq("active", true)
+      .eq("role", "administrateur")
+      .order("full_name");
     return (users ?? []).map((u) => u.full_name);
   } catch {
     return [];

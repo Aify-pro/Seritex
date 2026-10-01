@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { createQuote, type QuoteLineInput } from "../../actions";
+import { createQuote, resubmitQuote, type QuoteLineInput } from "../../actions";
 import { useRouter } from "next/navigation";
 import { ZoneColorPicker, EMPTY_ZONE_COLOR_DRAFT, type ZoneColorDraft } from "@/components/product/zone-color-picker";
 import { computeQuoteTotals, lineNet } from "@/lib/quote-totals";
@@ -20,6 +20,8 @@ type ColorOption = { id: string; name: string; code: string };
 type LineDraft = {
   /** Identité côté client (clé React / suppression) — jamais envoyée au serveur. */
   key: string;
+  /** Ligne déjà enregistrée (correction d'un devis renvoyé) — conservée telle quelle côté serveur. */
+  id?: string;
   productModelId: string;
   description: string;
   quantity: string;
@@ -55,7 +57,7 @@ type CurrencyOption = { code: string; label: string; rate_xof: number | null };
 
 const EXPORT_MOTIF = "Vente à l'exportation — exonérée de TVA";
 
-type TermsDraft = {
+export type TermsDraft = {
   objet: string;
   referenceClient: string;
   remisePct: string;
@@ -106,6 +108,41 @@ function newTerms(defaults: QuoteDefaults, paymentTerms: PaymentTermOption[]): T
   };
 }
 
+/** Ligne d'un devis renvoyé, telle qu'enregistrée — point de départ de la correction. */
+export type CorrectionLine = {
+  id: string;
+  productModelId: string | null;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  remisePct: number;
+  couleurUniqueId: string | null;
+  zoneColors: Record<string, string>;
+};
+
+/** Devis renvoyé par la Direction, à corriger puis resoumettre (migration 0064). */
+export type QuoteCorrection = {
+  quoteId: string;
+  reference: string;
+  lines: CorrectionLine[];
+  terms: TermsDraft;
+};
+
+function lineFromCorrection(l: CorrectionLine): LineDraft {
+  return {
+    key: l.id,
+    id: l.id,
+    productModelId: l.productModelId ?? "",
+    description: l.description,
+    quantity: String(l.quantity),
+    unitPrice: String(l.unitPrice),
+    remisePct: String(l.remisePct),
+    colorDraft: l.couleurUniqueId
+      ? { isUni: true, couleurUniqueId: l.couleurUniqueId, zoneColors: {} }
+      : { isUni: false, couleurUniqueId: null, zoneColors: l.zoneColors },
+  };
+}
+
 function newLine(): LineDraft {
   return {
     key: Math.random().toString(36).slice(2),
@@ -138,6 +175,7 @@ export function QuoteForm({
   defaults,
   paymentTerms,
   currencies,
+  correction,
 }: {
   requestId: string;
   companyId: string;
@@ -149,6 +187,8 @@ export function QuoteForm({
   defaults: QuoteDefaults;
   paymentTerms: PaymentTermOption[];
   currencies: CurrencyOption[];
+  /** Présent : le formulaire corrige ce devis renvoyé au lieu d'en créer un. */
+  correction?: QuoteCorrection;
 }) {
   const [pending, startTransition] = useTransition();
   const [open, setOpen] = useState(false);
@@ -162,12 +202,12 @@ export function QuoteForm({
         variant="secondary"
         size="sm"
         onClick={() => {
-          setLines([newLine()]);
-          setTerms(newTerms(defaults, paymentTerms));
+          setLines(correction ? correction.lines.map(lineFromCorrection) : [newLine()]);
+          setTerms(correction ? correction.terms : newTerms(defaults, paymentTerms));
           setOpen(true);
         }}
       >
-        Établir un devis
+        {correction ? `Corriger ${correction.reference} et resoumettre` : "Établir un devis"}
       </Button>
     );
   }
@@ -236,6 +276,7 @@ export function QuoteForm({
       const zoneTemplate = zoneTemplatesByModel[l.productModelId] ?? [];
       const uni = l.colorDraft.isUni || zoneTemplate.length === 0;
       return {
+        id: l.id ?? null,
         description: l.description,
         quantity: Number(l.quantity),
         unit_price: Number(l.unitPrice),
@@ -252,7 +293,8 @@ export function QuoteForm({
 
     startTransition(async () => {
       const delai = terms.livraisonMode === "delai" && terms.delaiValeur !== "";
-      const res = await createQuote(requestId, companyId, payload, terms.livraisonMode === "date" ? terms.dateLivraison || null : null, {
+      const dateLivraison = terms.livraisonMode === "date" ? terms.dateLivraison || null : null;
+      const termsInput = {
         objet: terms.objet,
         reference_client: terms.referenceClient,
         remise_pct: Number(terms.remisePct) || 0,
@@ -268,10 +310,13 @@ export function QuoteForm({
         delai_depart: delai ? terms.delaiDepart : null,
         notes: terms.notes,
         valid_until: terms.validUntil || null,
-      });
+      };
+      const res = correction
+        ? await resubmitQuote(correction.quoteId, payload, dateLivraison, termsInput)
+        : await createQuote(requestId, companyId, payload, dateLivraison, termsInput);
       if (res.error) toast.error(res.error);
       else {
-        toast.success("Devis créé — en attente de validation interne");
+        toast.success(correction ? "Devis corrigé — resoumis à la validation interne" : "Devis créé — en attente de validation interne");
         setOpen(false);
         router.refresh();
       }
@@ -590,7 +635,7 @@ export function QuoteForm({
 
       <div className="flex gap-2 border-t border-border pt-3">
         <Button type="button" size="sm" loading={pending} onClick={submit}>
-          Soumettre à la validation interne
+          {correction ? "Resoumettre à la validation interne" : "Soumettre à la validation interne"}
         </Button>
         <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(false)}>
           Annuler

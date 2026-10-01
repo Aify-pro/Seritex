@@ -7,6 +7,7 @@ import { delaiLabel } from "@/lib/delivery";
 import { BASE_CURRENCY } from "@/lib/currency";
 import { amountInWordsFr } from "@/lib/number-to-words-fr";
 import { FileDown } from "lucide-react";
+import Link from "next/link";
 import { AcceptQuoteButton } from "./accept-quote-button";
 import { ValidateQuoteCard } from "./validate-quote-card";
 import { ZoneColorSummary } from "@/components/product/zone-color-picker";
@@ -76,6 +77,9 @@ export function QuoteDetail({
           <CardBody className="text-sm">
             <p className="font-medium text-foreground">Renvoyé par le validateur{quote.rejet_at ? ` le ${formatDate(quote.rejet_at)}` : ""}</p>
             <p className="text-foreground-muted">{quote.rejet_motif}</p>
+            <Link href={`/commercial/demandes/${quote.request_id}`} className="mt-2 inline-block text-xs font-medium text-brand hover:underline">
+              Corriger et resoumettre depuis la demande →
+            </Link>
           </CardBody>
         </Card>
       )}

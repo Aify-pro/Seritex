@@ -8,7 +8,7 @@ import { rejectQuote, validateQuote } from "@/app/(app)/commercial/actions";
 
 /**
  * Validation interne d'une proforma (migration 0063) : la personne habilitée
- * (signature enregistrée) valide — ce qui envoie le devis au client — ou le
+ * (Direction ou administrateur, signature enregistrée — 0064) valide — ce qui envoie le devis au client — ou le
  * renvoie au commercial avec un motif. Les autres voient seulement l'attente.
  */
 export function ValidateQuoteCard({ quoteId, canValidate, validators }: { quoteId: string; canValidate: boolean; validators: string[] }) {
@@ -22,7 +22,7 @@ export function ValidateQuoteCard({ quoteId, canValidate, validators }: { quoteI
         <div>
           <p className="text-sm font-medium text-foreground">En attente de validation interne</p>
           <p className="text-xs text-foreground-muted">
-            Ce devis n&apos;est pas visible du client et ne lui a pas été envoyé. Seules les personnes habilitées (signature enregistrée) peuvent le valider
+            Ce devis n&apos;est pas visible du client et ne lui a pas été envoyé. Seules la Direction et l&apos;administrateur (signature enregistrée) peuvent le valider
             {validators.length > 0 ? ` : ${validators.join(", ")}.` : "."}
           </p>
         </div>

@@ -25,7 +25,7 @@ export default async function SocieteSettingsPage() {
     // Cachet et signatures (migration 0062) : lisibles par l'administrateur de plateforme uniquement.
     supabase.from("company_stamp").select("image_png").limit(1).maybeSingle(),
     supabase.from("document_signatories").select("user_id,fonction,active,signature_png,app_users!document_signatories_user_id_fkey(full_name,role)").order("created_at"),
-    supabase.from("app_users").select("id,full_name,role").in("role", ["commercial", "administrateur"]).eq("active", true).order("full_name"),
+    supabase.from("app_users").select("id,full_name,role").eq("role", "administrateur").eq("active", true).order("full_name"),
   ]);
   const signatories: SignatoryRow[] = (sigRows ?? []).map((r) => {
     const u = r.app_users as unknown as { full_name: string; role: string } | null;
@@ -76,7 +76,7 @@ export default async function SocieteSettingsPage() {
           <Card>
             <CardHeader
               title="Signatures des validateurs"
-              description="Une signature par compte (commercial ou administrateur). Avoir une signature active rend habilité à VALIDER les proformas avant leur envoi au client ; la signature, avec le cachet, est apposée sur les proformas que ce compte a validées. Sans validation, aucune signature."
+              description="Une signature par compte de la Direction ou administrateur. Avoir une signature active rend habilité à VALIDER les proformas avant leur envoi au client ; la signature, avec le cachet, est apposée sur les proformas que ce compte a validées. Sans validation, aucune signature."
             />
             <CardBody>
               <SignatoriesManager signatories={signatories} staff={(staffUsers ?? []) as StaffOption[]} />
