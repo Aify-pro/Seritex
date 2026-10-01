@@ -8,6 +8,7 @@ import type { Currency, PaymentTerm } from "@/lib/types/domain";
 import { CompanySettingsForm } from "./company-settings-form";
 import { PaymentTermsManager } from "./payment-terms-manager";
 import { CurrenciesManager } from "./currencies-manager";
+import { CompanyStampManager, SignatoriesManager, type SignatoryRow, type StaffOption } from "./seals-manager";
 
 /**
  * Paramètres > Informations société (migration 0061) : la fiche de
@@ -17,11 +18,19 @@ import { CurrenciesManager } from "./currencies-manager";
 export default async function SocieteSettingsPage() {
   await requirePlatformAdmin();
   const supabase = await createClient();
-  const [settings, { data: terms }, { data: currencies }] = await Promise.all([
+  const [settings, { data: terms }, { data: currencies }, { data: stamp }, { data: sigRows }, { data: staffUsers }] = await Promise.all([
     getCompanySettings(),
     supabase.from("payment_terms").select("*").order("display_order"),
     supabase.from("currencies").select("*").order("display_order"),
+    // Cachet et signatures (migration 0062) : lisibles par l'administrateur de plateforme uniquement.
+    supabase.from("company_stamp").select("image_png").limit(1).maybeSingle(),
+    supabase.from("document_signatories").select("user_id,fonction,active,signature_png,app_users(full_name,role)").order("created_at"),
+    supabase.from("app_users").select("id,full_name,role").neq("role", "client").eq("active", true).order("full_name"),
   ]);
+  const signatories: SignatoryRow[] = (sigRows ?? []).map((r) => {
+    const u = r.app_users as unknown as { full_name: string; role: string } | null;
+    return { user_id: r.user_id, full_name: u?.full_name ?? "Compte supprimé", role: u?.role ?? "", fonction: r.fonction, active: r.active, signature_png: r.signature_png };
+  });
 
   return (
     <div className="space-y-6">
@@ -51,6 +60,26 @@ export default async function SocieteSettingsPage() {
             />
             <CardBody>
               <CurrenciesManager currencies={(currencies ?? []) as Currency[]} />
+            </CardBody>
+          </Card>
+
+          <Card>
+            <CardHeader
+              title="Cachet de la société"
+              description="Apposé avec la signature sur les documents de vente. Le cachet n'apparaît jamais seul : uniquement sur un document dont l'auteur a une signature active."
+            />
+            <CardBody>
+              <CompanyStampManager stampPng={stamp?.image_png ?? null} />
+            </CardBody>
+          </Card>
+
+          <Card>
+            <CardHeader
+              title="Signatures des validateurs"
+              description="Une signature par compte utilisateur interne. Elle n'est apposée, avec le cachet, que sur les proformas établies par ce compte : un devis créé par quelqu'un d'autre garde sa case vide, à signer à la main."
+            />
+            <CardBody>
+              <SignatoriesManager signatories={signatories} staff={(staffUsers ?? []) as StaffOption[]} />
             </CardBody>
           </Card>
         </>

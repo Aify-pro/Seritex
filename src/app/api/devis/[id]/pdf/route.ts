@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getBaseUrl } from "@/lib/url";
 import { getLogoPngBytes } from "@/lib/pdf/logo";
 import { getCompanySettings } from "@/lib/company-settings";
+import { getDocumentSeal } from "@/lib/signatures";
 import { buildQuotePdf, type QuotePdfLine } from "@/lib/pdf/quote-pdf";
 
 /**
@@ -94,6 +95,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const person = (uid: string | null | undefined) => (people ?? []).find((p) => p.id === uid);
   const rep = person(repId);
   const acceptedBy = person(accepted?.changed_by);
+  // Signature + cachet : uniquement ceux de l'auteur du devis, s'il en a une active (migration 0062).
+  const seal = await getDocumentSeal(quote.created_by);
 
   const baseUrl = await getBaseUrl();
   const quoteUrl = `${baseUrl}/devis/${quote.reference}`;
@@ -118,6 +121,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       accepted && acceptedBy
         ? { name: acceptedBy.full_name, by: acceptedBy.role === "client" ? "client" : "staff", at: accepted.changed_at }
         : null,
+    seal,
     issuer,
     lines,
     logoPng: await getLogoPngBytes(),
