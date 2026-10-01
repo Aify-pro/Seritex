@@ -7,6 +7,7 @@ import type { StorageBackendType } from "@/lib/types/domain";
 import { formatDate } from "@/lib/utils";
 import { NewStorageTargetForm } from "./new-target-form";
 import { TargetActiveToggle } from "./target-active-toggle";
+import { TargetActions, type EditableTarget } from "./target-actions";
 import { Database } from "lucide-react";
 
 /**
@@ -24,7 +25,7 @@ export default async function StorageTargetsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Stockage de la médiathèque"
-        description="Supabase Storage reste toujours actif par défaut ; Google Drive et NAS/serveur local s'ajoutent comme cibles de réplication optionnelles."
+        description="Les nouveaux fichiers sont enregistrés sur les cibles actives. Dès qu'un NAS / serveur local est actif, il devient le stockage exclusif et Supabase n'est plus alimenté."
       />
 
       <NewStorageTargetForm />
@@ -45,7 +46,10 @@ export default async function StorageTargetsPage() {
                     </p>
                   </div>
                 </div>
-                <TargetActiveToggle targetId={t.id} active={t.active} />
+                <div className="flex items-center gap-4">
+                  <TargetActions target={editable(t)} />
+                  <TargetActiveToggle targetId={t.id} active={t.active} />
+                </div>
               </li>
             ))}
             {(!targets || targets.length === 0) && (
@@ -56,4 +60,19 @@ export default async function StorageTargetsPage() {
       </Card>
     </div>
   );
+}
+
+/** Ne transmet au navigateur que la configuration non secrète. */
+function editable(t: { id: string; name: string; type: string; config: unknown }): EditableTarget {
+  const c = (t.config ?? {}) as Record<string, string | undefined>;
+  return {
+    id: t.id,
+    name: t.name,
+    type: t.type as StorageBackendType,
+    bucket: c.bucket,
+    rootFolderId: c.rootFolderId,
+    url: c.url,
+    username: c.username,
+    basePath: c.basePath,
+  };
 }
