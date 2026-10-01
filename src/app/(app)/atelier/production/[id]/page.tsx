@@ -155,7 +155,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     // jointure que chosenLineSections pour filtrer par ODF.
     supabase
       .from("production_order_line_printable_zones")
-      .select("production_order_line_id,printable_zone_id,production_order_lines!inner(production_order_id)")
+      .select("production_order_line_id,printable_zone_id,nb_couleurs,production_order_lines!inner(production_order_id)")
       .eq("production_order_lines.production_order_id", id),
     supabase
       .from("production_order_media_files")
@@ -222,10 +222,10 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
   }
   const anySectionChosen = Object.values(sectionsByLine).some((sections) => sections.length > 0);
 
-  type ChosenLinePrintableZone = { production_order_line_id: string; printable_zone_id: string };
-  const printableZoneIdsByLine: Record<string, string[]> = {};
+  type ChosenLinePrintableZone = { production_order_line_id: string; printable_zone_id: string; nb_couleurs: number | null };
+  const printableZonesByLine: Record<string, { id: string; nb_couleurs: number | null }[]> = {};
   for (const z of (chosenLinePrintableZones ?? []) as unknown as ChosenLinePrintableZone[]) {
-    (printableZoneIdsByLine[z.production_order_line_id] ??= []).push(z.printable_zone_id);
+    (printableZonesByLine[z.production_order_line_id] ??= []).push({ id: z.printable_zone_id, nb_couleurs: z.nb_couleurs });
   }
 
   // Noms des personnes ayant validé le lancement / demandé ou confirmé la
@@ -308,7 +308,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     | "maquetteFromDevis"
     | "maquetteAttached"
     | "printableZoneOptions"
-    | "printableZoneIdsSelected"
+    | "printableZonesSelected"
     | "linkedSample"
   >;
   const lines: LineConfig[] = await Promise.all(
@@ -510,7 +510,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
       printableZoneOptions: (printableZonesAll ?? [])
         .filter((z) => z.product_model_id === line.productModelId)
         .map((z) => ({ id: z.id, zone_key: z.zone_key, zone_label: z.zone_label, display_order: z.display_order })),
-      printableZoneIdsSelected: printableZoneIdsByLine[line.id] ?? [],
+      printableZonesSelected: printableZonesByLine[line.id] ?? [],
       linkedSample: sampleByLine.get(line.id) ?? null,
     };
   });

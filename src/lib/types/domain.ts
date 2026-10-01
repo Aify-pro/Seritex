@@ -391,6 +391,18 @@ export interface QuoteLine {
   // n'est pas re-déposée là-bas (voir production-order-lines.tsx).
   visuels?: DownloadableMediaFile[];
   maquette?: MaquetteFile | null;
+  // Impressions par emplacement (migration 0065) — base du chiffrage, héritées
+  // dans la ligne d'ODF par accept_quote().
+  printable_zones?: QuoteLinePrintableZone[];
+}
+
+/** Emplacement imprimé d'une ligne de devis et son nombre de couleurs (migration 0065). */
+export interface QuoteLinePrintableZone {
+  printable_zone_id: string;
+  nb_couleurs: number;
+  /** Libellé résolu depuis product_printable_zones — attaché à l'affichage. */
+  zone_label?: string;
+  display_order?: number;
 }
 
 /** Couleur choisie pour une zone donnée, sur une ligne de devis donnée. */

@@ -29,7 +29,7 @@ export interface QuotePdfLine {
   quantity: number;
   unit_price: number;
   remise_pct: number;
-  /** « Couleur unique : Bleu » / « Col : Rouge · Manches : Blanc » — vide si aucune configuration. */
+  /** Configuration de la ligne : couleurs (« Couleur : Bleu » / « Col : Rouge | Manches : Blanc ») puis impressions — vide si aucune. */
   colors: string;
 }
 

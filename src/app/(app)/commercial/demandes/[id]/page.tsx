@@ -28,7 +28,19 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
 
   if (!request) notFound();
 
-  const [{ data: messages }, { data: quotes }, { data: products }, { data: zoneTemplates }, { data: colors }, { data: samples }, quoteLines, companySettings, { data: paymentTerms }, { data: currencies }] =
+  const [
+    { data: messages },
+    { data: quotes },
+    { data: products },
+    { data: zoneTemplates },
+    { data: colors },
+    { data: samples },
+    quoteLines,
+    companySettings,
+    { data: paymentTerms },
+    { data: currencies },
+    { data: printableZones },
+  ] =
     await Promise.all([
       supabase
         .from("messages")
@@ -40,7 +52,7 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
       supabase
         .from("quotes")
         .select(
-          "*,quote_lines(id,product_model_id,description,quantity,unit_price,remise_pct,couleur_unique_id,quote_line_zone_colors(zone_key,color_id))"
+          "*,quote_lines(id,product_model_id,description,quantity,unit_price,remise_pct,couleur_unique_id,quote_line_zone_colors(zone_key,color_id),quote_line_printable_zones(printable_zone_id,nb_couleurs))"
         )
         .eq("request_id", id),
       supabase.from("product_models").select("id,name,base_price").eq("active", true),
@@ -59,6 +71,8 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
       getCompanySettings(),
       supabase.from("payment_terms").select("label,is_default").eq("active", true).order("display_order"),
       supabase.from("currencies").select("code,label,rate_xof").eq("active", true).order("display_order"),
+      // Emplacements imprimables de tous les modèles — impressions de chaque ligne (migration 0065).
+      supabase.from("product_printable_zones").select("id,product_model_id,zone_label,display_order"),
     ]);
 
   const zoneTemplatesByModel = (zoneTemplates ?? []).reduce<Record<string, { zone_key: string; zone_label: string; display_order: number }[]>>(
@@ -81,6 +95,7 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
       remise_pct: number | null;
       couleur_unique_id: string | null;
       quote_line_zone_colors: { zone_key: string; color_id: string }[] | null;
+      quote_line_printable_zones: { printable_zone_id: string; nb_couleurs: number }[] | null;
     }[];
     corrections.set(q.id, {
       motif: q.rejet_motif ?? null,
@@ -96,6 +111,7 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
           remisePct: Number(l.remise_pct ?? 0),
           couleurUniqueId: l.couleur_unique_id,
           zoneColors: Object.fromEntries((l.quote_line_zone_colors ?? []).map((z) => [z.zone_key, z.color_id])),
+          printZones: Object.fromEntries((l.quote_line_printable_zones ?? []).map((z) => [z.printable_zone_id, z.nb_couleurs])),
         })),
         terms: {
           objet: q.objet ?? "",
@@ -120,6 +136,11 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
     });
   }
 
+  const printableZonesByModel = (printableZones ?? []).reduce<Record<string, { id: string; zone_label: string; display_order: number }[]>>((acc, z) => {
+    (acc[z.product_model_id] ??= []).push({ id: z.id, zone_label: z.zone_label, display_order: z.display_order });
+    return acc;
+  }, {});
+
   const company = request.companies as unknown as {
     id: string;
     name: string;
@@ -139,6 +160,7 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
     companyId: company.id,
     products: products ?? [],
     zoneTemplatesByModel,
+    printableZonesByModel,
     colors: colors ?? [],
     defaults: {
       tvaRate: companySettings?.assujetti_tva === false ? 0 : (companySettings?.tva_taux_defaut ?? 18),

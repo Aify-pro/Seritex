@@ -8,6 +8,7 @@ import { BASE_CURRENCY } from "@/lib/currency";
 import { amountInWordsFr } from "@/lib/number-to-words-fr";
 import { FileDown } from "lucide-react";
 import Link from "next/link";
+import { printableZoneLabel } from "@/lib/printable-zones";
 import { AcceptQuoteButton } from "./accept-quote-button";
 import { ValidateQuoteCard } from "./validate-quote-card";
 import { ZoneColorSummary } from "@/components/product/zone-color-picker";
@@ -127,6 +128,12 @@ export function QuoteDetail({
                           }))}
                         />
                       </div>
+                    )}
+                    {l.printable_zones && l.printable_zones.length > 0 && (
+                      <p className="mt-1 text-xs text-foreground-muted">
+                        <span className="font-medium text-foreground">Impressions :</span>{" "}
+                        {l.printable_zones.map((z) => printableZoneLabel(z.zone_label ?? "Emplacement", z.nb_couleurs)).join(" · ")}
+                      </p>
                     )}
                     <div className="mt-3 grid gap-3 sm:grid-cols-2">
                       <QuoteLineMaquettePicker

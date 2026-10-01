@@ -48,6 +48,18 @@ const quoteLineSchema = z.object({
   // couleur_unique_id pour un modèle « uni », zone_colors sinon.
   couleur_unique_id: z.string().uuid().nullable(),
   zone_colors: z.array(z.object({ zone_key: z.string().min(1), color_id: z.string().uuid() })),
+  // Impressions par emplacement (migration 0065) : base du chiffrage, et
+  // configuration que le client valide. L'appartenance de l'emplacement au
+  // modèle de la ligne est vérifiée en base.
+  printable_zones: z
+    .array(
+      z.object({
+        printable_zone_id: z.guid(),
+        nb_couleurs: z.coerce.number().int("Nombre de couleurs invalide").min(1, "Au moins 1 couleur par impression").max(12, "12 couleurs au plus par impression"),
+      })
+    )
+    .default([])
+    .refine((zones) => new Set(zones.map((z) => z.printable_zone_id)).size === zones.length, "Un emplacement d'impression est choisi deux fois"),
 });
 
 const optionalText = z.string().trim().max(2000).transform((v) => v || null);
@@ -170,6 +182,15 @@ async function insertZoneColors(supabase: ServerSupabase, quoteLineId: string, l
   return error ? { error: error.message } : {};
 }
 
+/** Impressions d'une ligne (migration 0065) — uniquement avec un modèle de produit, dont elles dépendent. */
+async function insertPrintableZones(supabase: ServerSupabase, quoteLineId: string, line: QuoteLineInput) {
+  if (!line.product_model_id || line.printable_zones.length === 0) return {};
+  const { error } = await supabase.from("quote_line_printable_zones").insert(
+    line.printable_zones.map((z) => ({ quote_line_id: quoteLineId, printable_zone_id: z.printable_zone_id, nb_couleurs: z.nb_couleurs }))
+  );
+  return error ? { error: error.message } : {};
+}
+
 async function insertQuoteLine(supabase: ServerSupabase, quoteId: string, line: QuoteLineInput) {
   const { data: quoteLine, error } = await supabase
     .from("quote_lines")
@@ -177,7 +198,9 @@ async function insertQuoteLine(supabase: ServerSupabase, quoteId: string, line: 
     .select("id")
     .single();
   if (error) return { error: error.message };
-  return insertZoneColors(supabase, quoteLine.id as string, line);
+  const colors = await insertZoneColors(supabase, quoteLine.id as string, line);
+  if (colors.error) return colors;
+  return insertPrintableZones(supabase, quoteLine.id as string, line);
 }
 
 /**
@@ -299,6 +322,10 @@ export async function resubmitQuote(
     if (clearError) return { error: clearError.message };
     const res = await insertZoneColors(supabase, line.id, line);
     if (res.error) return { error: res.error };
+    const { error: clearPrintError } = await supabase.from("quote_line_printable_zones").delete().eq("quote_line_id", line.id);
+    if (clearPrintError) return { error: clearPrintError.message };
+    const printRes = await insertPrintableZones(supabase, line.id, line);
+    if (printRes.error) return { error: printRes.error };
   }
 
   const { error } = await supabase

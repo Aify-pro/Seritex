@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { requireRole } from "@/lib/auth/current-user";
 import { revalidatePath } from "next/cache";
+import { z } from "zod";
 import { getSizes } from "@/lib/sizes";
 import { sendNotification } from "@/lib/notifications/send";
 import { resolveUserEmail, resolveContactEmailForProductionOrder } from "@/lib/notifications/recipients";
@@ -682,18 +683,29 @@ export async function detachMediaFileFromLine(lineId: string, productionOrderId:
   return {};
 }
 
+const linePrintableZonesSchema = z.array(
+  z.object({
+    printable_zone_id: z.guid(),
+    // Null : emplacement coché avant la migration 0065, nombre de couleurs inconnu.
+    nb_couleurs: z.number().int().min(1).max(12).nullable(),
+  })
+);
+
 /**
  * Zones imprimables cochées pour UN article de l'ODF (migration 0040), parmi
  * celles définies pour son modèle de produit (product_printable_zones,
- * migration 0039). Même pattern que `setProductionOrderLineSections` —
- * remplace tout à chaque appel, pas d'ordre à préserver ici.
+ * migration 0039), avec leur nombre de couleurs (migration 0065 — hérité du
+ * devis, corrigeable ici par la production). Même pattern que
+ * `setProductionOrderLineSections` — remplace tout à chaque appel.
  */
 export async function setProductionOrderLinePrintableZones(
   lineId: string,
   productionOrderId: string,
-  printableZoneIds: string[]
+  printableZones: { printable_zone_id: string; nb_couleurs: number | null }[]
 ) {
   await requireRole(["administrateur", "responsable_production"]);
+  const parsed = linePrintableZonesSchema.safeParse(printableZones);
+  if (!parsed.success) return { error: "Impressions invalides" };
   const supabase = await createClient();
 
   const { error: delError } = await supabase
@@ -702,11 +714,12 @@ export async function setProductionOrderLinePrintableZones(
     .eq("production_order_line_id", lineId);
   if (delError) return { error: delError.message };
 
-  if (printableZoneIds.length > 0) {
+  if (parsed.data.length > 0) {
     const { error: insError } = await supabase.from("production_order_line_printable_zones").insert(
-      printableZoneIds.map((printableZoneId) => ({
+      parsed.data.map((z) => ({
         production_order_line_id: lineId,
-        printable_zone_id: printableZoneId,
+        printable_zone_id: z.printable_zone_id,
+        nb_couleurs: z.nb_couleurs,
       }))
     );
     if (insError) return { error: insError.message };

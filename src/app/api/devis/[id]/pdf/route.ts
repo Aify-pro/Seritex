@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { printableZoneLabel } from "@/lib/printable-zones";
 import QRCode from "qrcode";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -34,7 +35,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const [{ data: rawLines }, { data: zoneTemplates }, issuer] = await Promise.all([
     supabase
       .from("quote_lines")
-      .select("id,description,quantity,unit_price,remise_pct,product_model_id,couleur_unique:couleur_unique_id(name),zone_colors:quote_line_zone_colors(zone_key,colors:color_id(name))")
+      .select("id,description,quantity,unit_price,remise_pct,product_model_id,couleur_unique:couleur_unique_id(name),zone_colors:quote_line_zone_colors(zone_key,colors:color_id(name)),printable_zones:quote_line_printable_zones(nb_couleurs,product_printable_zones(zone_label,display_order))")
       .eq("quote_id", id)
       .order("id"),
     supabase.from("product_zone_templates").select("product_model_id,zone_key,zone_label"),
@@ -53,7 +54,13 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
           .filter((z) => z.colors)
           .map((z) => `${zoneLabel(l.product_model_id, z.zone_key)} : ${z.colors!.name}`)
           .join("  |  ");
-    return { description: l.description, quantity: l.quantity, unit_price: Number(l.unit_price), remise_pct: Number(l.remise_pct ?? 0), colors };
+    // Impressions (migration 0065) : partie de la configuration que le client valide.
+    const prints = ((l.printable_zones ?? []) as unknown as { nb_couleurs: number; product_printable_zones: { zone_label: string; display_order: number } | null }[])
+      .filter((z) => z.product_printable_zones)
+      .sort((a, b) => a.product_printable_zones!.display_order - b.product_printable_zones!.display_order)
+      .map((z) => printableZoneLabel(z.product_printable_zones!.zone_label, z.nb_couleurs));
+    const config = [colors, prints.length > 0 ? `Impressions : ${prints.join(", ")}` : ""].filter(Boolean).join("  |  ");
+    return { description: l.description, quantity: l.quantity, unit_price: Number(l.unit_price), remise_pct: Number(l.remise_pct ?? 0), colors: config };
   });
 
   const company = quote.companies as unknown as {
