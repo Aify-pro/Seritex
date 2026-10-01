@@ -9,6 +9,7 @@ import { sendNotification } from "@/lib/notifications/send";
 import { resolveContactEmailForRequest, resolveRoleEmails } from "@/lib/notifications/recipients";
 import { computeQuoteTotals } from "@/lib/quote-totals";
 import { formatMoney } from "@/lib/currency";
+import { isQuoteValidator } from "@/lib/signatures";
 
 export async function updateRequestStatus(requestId: string, status: RequestStatus) {
   await requireRole(["commercial", "administrateur"]);
@@ -145,7 +146,8 @@ export async function createQuote(
       request_id: requestId,
       company_id: companyId,
       created_by: authId,
-      status: "envoye",
+      // Validation interne obligatoire avant envoi au client (migration 0063).
+      status: "en_validation_interne",
       total_amount: totalAmount,
       total_ht: totals.ht,
       total_tva: totals.tva,
@@ -195,20 +197,13 @@ export async function createQuote(
     }
   }
 
-  await supabase.from("requests").update({ status: "devis_envoye" }).eq("id", requestId);
-
-  const { data: company } = await supabase.from("companies").select("name").eq("id", companyId).maybeSingle();
-  await sendNotification("devis_envoye", {
-    to: await resolveContactEmailForRequest(requestId, companyId),
-    variables: {
-      numero_devis: reference,
-      nom_client: company?.name ?? "",
-      // Montant déjà formaté avec sa devise : le modèle d'e-mail n'y ajoute plus d'unité (migration 0061).
-      montant_total: formatMoney(totalAmount, t.devise),
-      chemin_lien: `/client/devis/${quote.id}`,
-    },
-    relatedEntityType: "quote",
-    relatedEntityId: quote.id as string,
+  await supabase.from("requests").update({ status: "devis_en_preparation" }).eq("id", requestId);
+  await supabase.from("status_history").insert({
+    entity_type: "quote",
+    entity_id: quote.id,
+    from_status: null,
+    to_status: "en_validation_interne",
+    changed_by: authId,
   });
 
   revalidatePath(`/commercial/demandes/${requestId}`);
@@ -325,6 +320,62 @@ export async function detachMediaFileFromQuoteLine(quoteLineId: string, quoteId:
     .eq("media_file_id", mediaFileId);
   if (error) return { error: error.message };
   revalidateQuote(quoteId);
+  return {};
+}
+
+/**
+ * Validation interne (migration 0063) : réservée aux personnes ayant une
+ * signature active. Le contrôle fait foi en base (validate_quote + trigger) ;
+ * celui d'ici donne un message clair. C'est ICI, à la validation, que le client
+ * est prévenu : plus à la création du devis.
+ */
+export async function validateQuote(quoteId: string) {
+  const { authId } = await requireUser();
+  if (!(await isQuoteValidator(authId))) return { error: "Seules les personnes habilitées (signature enregistrée) peuvent valider un devis." };
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("validate_quote", { p_quote_id: quoteId });
+  if (error) return { error: error.message };
+
+  const { data: quote } = await supabase
+    .from("quotes")
+    .select("id,reference,request_id,company_id,total_amount,devise,companies(name)")
+    .eq("id", quoteId)
+    .maybeSingle();
+  if (quote) {
+    await sendNotification("devis_envoye", {
+      to: await resolveContactEmailForRequest(quote.request_id, quote.company_id),
+      variables: {
+        numero_devis: quote.reference,
+        nom_client: (quote.companies as unknown as { name: string } | null)?.name ?? "",
+        // Montant déjà formaté avec sa devise : le modèle d'e-mail n'y ajoute plus d'unité (migration 0061).
+        montant_total: formatMoney(Number(quote.total_amount), quote.devise ?? "XOF"),
+        chemin_lien: `/client/devis/${quote.id}`,
+      },
+      relatedEntityType: "quote",
+      relatedEntityId: quote.id as string,
+    });
+    revalidatePath(`/commercial/demandes/${quote.request_id}`);
+  }
+  revalidateQuote(quoteId);
+  revalidatePath("/commercial/devis");
+  revalidatePath("/client/devis");
+  return {};
+}
+
+/** Renvoie un devis en validation interne au commercial, avec motif obligatoire. */
+export async function rejectQuote(quoteId: string, motif: string) {
+  const { authId } = await requireUser();
+  if (!(await isQuoteValidator(authId))) return { error: "Seules les personnes habilitées (signature enregistrée) peuvent renvoyer un devis." };
+  const parsed = z.string().trim().min(3, "Indiquez le motif du renvoi").max(1000).safeParse(motif);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message };
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("reject_quote", { p_quote_id: quoteId, p_motif: parsed.data });
+  if (error) return { error: error.message };
+
+  revalidateQuote(quoteId);
+  revalidatePath("/commercial/devis");
   return {};
 }
 
