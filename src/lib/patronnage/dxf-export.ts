@@ -3,6 +3,9 @@ import QRCode from "qrcode";
 import { centroid, type Point } from "@/lib/patronnage/geometry";
 import type { DxfContour } from "@/lib/patronnage/dxf";
 import { MM_PAR_UNITE, type LignePieceDetail } from "@/lib/patronnage/detail";
+import { construireContenuCartouche, type CartoucheInfo, type LigneCartouche, type OrientationCartouche } from "@/lib/patronnage/cartouche";
+
+export type { CartoucheInfo, OrientationCartouche };
 
 /**
  * Génère le DXF « marqué » d'un tracé déjà déposé : texte au centre de chaque
@@ -52,29 +55,16 @@ const QR_TAILLE_MM = 32;
 const COULEUR_VERT = 3; // ACI — vert : tout reconnu
 const COULEUR_ROUGE = 1; // ACI — rouge : au moins une pièce non reconnue
 
-export interface CartoucheInfo {
-  traceReference: string;
-  numeroOt: string;
-  odfReference: string | null;
-  clientLabel: string | null;
-  articleLabel: string | null;
-  dateLabel: string;
-  /** URL absolue de la fiche (deep-link `?trace=`) — encodée dans le QR. */
-  url: string;
-  /**
-   * Facteur d'échelle retenu par la pré-passe de reconnaissance (1 = aucune
-   * correction). Information seule, mentionnée dans le cartouche si ≠ 1 :
-   * jamais appliqué à la géométrie dessinée (cf. en-tête du fichier) — le
-   * dessin garde l'échelle physique exacte du fichier déposé par la PAO.
-   */
-  facteurEchelle: number;
-}
+// Cartouche vertical : largeur FIXE (pas liée à la largeur du tracé, à
+// l'inverse de l'horizontal) — une colonne étroite, pas un bandeau.
+const CARTOUCHE_V_LARGEUR_MM = 120;
 
 export function genererDxfMarque(
   dxfOriginal: string,
   contours: DxfContour[],
   lignes: LignePieceDetail[],
-  info: CartoucheInfo
+  info: CartoucheInfo,
+  orientation: OrientationCartouche = "horizontal"
 ): { dxf: string } | { error: string } {
   if (contours.length === 0 || lignes.length === 0) {
     return { error: "Aucune pièce à marquer dans ce tracé." };
@@ -117,58 +107,57 @@ export function genererDxfMarque(
     entites += entiteCroix(point, mm(DEMI_CROIX_MM), COUCHE_MARQUAGE);
   }
 
-  // --- Cartouche : sous le tracé, pleine largeur du tracé (jamais plus
-  // large que la laize déjà respectée par la PAO pour exporter ce fichier).
-  const largeurCartouche = Math.max(maxX - minX, mm(CARTOUCHE_LARGEUR_MIN_MM));
-  const hauteurCartouche = mm(CARTOUCHE_HAUTEUR_MM);
+  // --- Cartouche : sous le tracé. En horizontal, un bandeau pleine largeur
+  // (jamais plus étroit que la laize déjà respectée par la PAO) avec le QR à
+  // gauche et le texte à droite ; en vertical, une colonne étroite de
+  // largeur fixe avec le QR en haut et le texte empilé dessous.
+  const contenu = construireContenuCartouche(lignes, info);
+  const pad = mm(CARTOUCHE_PADDING_MM);
+  const qrTaille = mm(QR_TAILLE_MM);
+  const hauteurLigne = (l: LigneCartouche) => (l.accent === "titre" ? 6.5 : l.accent ? 5 : 4.5);
+  const hauteurTexteTotal = contenu.lignes.reduce((s, l) => s + hauteurLigne(l) + 1.5, 0);
+
   const x0 = minX;
+  const largeurCartouche =
+    orientation === "horizontal" ? Math.max(maxX - minX, mm(CARTOUCHE_LARGEUR_MIN_MM)) : mm(CARTOUCHE_V_LARGEUR_MM);
+  const hauteurCartouche =
+    orientation === "horizontal" ? mm(CARTOUCHE_HAUTEUR_MM) : pad * 3 + qrTaille + mm(hauteurTexteTotal);
   const x1 = x0 + largeurCartouche;
   const y1 = minY - mm(CARTOUCHE_MARGE_MM);
   const y0 = y1 - hauteurCartouche;
-  const pad = mm(CARTOUCHE_PADDING_MM);
 
   entites += entiteRectangle(x0, y0, x1, y1, COUCHE_CARTOUCHE);
 
-  const qrTaille = mm(QR_TAILLE_MM);
-  entites += dessinerQr(info.url, x0 + pad, y0 + pad, qrTaille, COUCHE_QR);
-  // Repli lisible à l'œil sous le QR, si le scan ne passe pas — même
-  // convention que les étiquettes de sacs de déchets (waste-bag-label.ts).
-  entites += entiteTexteCentre([x0 + pad + qrTaille / 2, y0 + pad / 2], mm(3.5), info.traceReference, COUCHE_CARTOUCHE);
+  const couleurAccent = (l: LigneCartouche) =>
+    l.accent === "verdict_ok" ? COULEUR_VERT : l.accent === "verdict_ko" ? COULEUR_ROUGE : undefined;
 
-  const totalPieces = lignes.length;
-  const totalReconnues = lignes.filter((l) => l.reconnue).length;
-  const complet = totalReconnues === totalPieces;
-  const verdict = complet
-    ? `TOUTES LES PIÈCES RECONNUES (${totalReconnues}/${totalPieces})`
-    : `${totalPieces - totalReconnues} PIÈCE(S) NON RECONNUE(S) SUR ${totalPieces} — VOIR MARQUAGE CI-DESSUS`;
+  if (orientation === "horizontal") {
+    entites += dessinerQr(contenu.qrUrl, x0 + pad, y0 + pad, qrTaille, COUCHE_QR);
+    // Repli lisible à l'œil sous le QR, si le scan ne passe pas — même
+    // convention que les étiquettes de sacs de déchets (waste-bag-label.ts).
+    entites += entiteTexteCentre([x0 + pad + qrTaille / 2, y0 + pad / 2], mm(3.5), contenu.qrLegende, COUCHE_CARTOUCHE);
 
-  const xTexte = x0 + pad + qrTaille + pad;
-  let curY = y1 - pad;
-  const ecrireLigne = (texte: string, hauteurMm: number, couleur?: number) => {
-    curY -= mm(hauteurMm);
-    entites += entiteTexteGauche([xTexte, curY], mm(hauteurMm), texte, COUCHE_CARTOUCHE, couleur);
-    curY -= mm(1.5);
-  };
+    const xTexte = x0 + pad + qrTaille + pad;
+    let curY = y1 - pad;
+    for (const l of contenu.lignes) {
+      curY -= mm(hauteurLigne(l));
+      entites += entiteTexteGauche([xTexte, curY], mm(hauteurLigne(l)), l.texte, COUCHE_CARTOUCHE, couleurAccent(l));
+      curY -= mm(1.5);
+    }
+  } else {
+    const xCentre = x0 + largeurCartouche / 2;
+    entites += dessinerQr(contenu.qrUrl, xCentre - qrTaille / 2, y1 - pad - qrTaille, qrTaille, COUCHE_QR);
+    entites += entiteTexteCentre([xCentre, y1 - pad - qrTaille - mm(4)], mm(3.5), contenu.qrLegende, COUCHE_CARTOUCHE);
 
-  ecrireLigne(`SERITEX — Tracé ${tronque(info.traceReference, 40)}`, 6.5);
-  ecrireLigne(verdict, 5, complet ? COULEUR_VERT : COULEUR_ROUGE);
-  ecrireLigne(`OT ${tronque(info.numeroOt, 30)} · ODF ${tronque(info.odfReference ?? "—", 40)}`, 4.5);
-  ecrireLigne(`Client : ${tronque(info.clientLabel ?? "—", 50)}`, 4.5);
-  if (info.articleLabel) ecrireLigne(tronque(info.articleLabel, 60), 4.5);
-  ecrireLigne(
-    info.facteurEchelle !== 1
-      ? `Généré le ${info.dateLabel} · échelle fichier ×${info.facteurEchelle} (reconnaissance seule, dessin inchangé)`
-      : `Généré le ${info.dateLabel}`,
-    4
-  );
+    let curY = y1 - pad - qrTaille - mm(4) - mm(5.5);
+    for (const l of contenu.lignes) {
+      curY -= mm(hauteurLigne(l));
+      entites += entiteTexteGauche([x0 + pad, curY], mm(hauteurLigne(l)), l.texte, COUCHE_CARTOUCHE, couleurAccent(l));
+      curY -= mm(1.5);
+    }
+  }
 
-  const resultat = insererDansEntites(dxfOriginal, entites);
-  return resultat;
-}
-
-function tronque(texte: string, max: number): string {
-  const t = texte.trim();
-  return t.length > max ? `${t.slice(0, max - 1)}…` : t;
+  return insererDansEntites(dxfOriginal, entites);
 }
 
 /** Une valeur de groupe DXF tient sur une seule ligne : un retour à la ligne dans un texte saisi par un humain casserait l'appariement code/valeur du reste du fichier. */

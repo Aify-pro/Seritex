@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
-import { AlertTriangle, Loader2 } from "lucide-react";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { AlertTriangle, ChevronDown, Download, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PieceOverlay } from "@/components/atelier/patronnage/piece-overlay";
@@ -520,6 +520,78 @@ function TableauPieces({ lignes }: { lignes: LignePieceDetail[] }) {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+const OPTIONS_TELECHARGEMENT: { format: "dxf" | "pdf"; marquage: "aucun" | "horizontal" | "vertical"; label: string }[] = [
+  { format: "dxf", marquage: "aucun", label: "Sans marquage (DXF)" },
+  { format: "pdf", marquage: "aucun", label: "Sans marquage (PDF)" },
+  { format: "dxf", marquage: "horizontal", label: "Marquage H (DXF)" },
+  { format: "pdf", marquage: "horizontal", label: "Marquage H (PDF)" },
+  { format: "dxf", marquage: "vertical", label: "Marquage V (DXF)" },
+  { format: "pdf", marquage: "vertical", label: "Marquage V (PDF)" },
+];
+
+/**
+ * Menu « Télécharger » d'un tracé déposé — six combinaisons (format × mise en
+ * page), toutes servies par la même route (`/api/patronnage/traces/[id]/
+ * telecharger`). Les options « Marquage » (texte sur les pièces + cartouche
+ * QR, horizontal ou vertical) ne sont proposées que si une analyse existe
+ * déjà pour ce tracé (`marquageDisponible`) — avant ça, il n'y a rien à
+ * marquer. Même patron d'ouverture/fermeture que le menu utilisateur
+ * (shell/user-menu.tsx) : clic extérieur ou Échap referment le menu.
+ */
+export function TraceDownloadMenu({ traceId, marquageDisponible }: { traceId: string; marquageDisponible: boolean }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function onClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", onClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, []);
+
+  const options = marquageDisponible ? OPTIONS_TELECHARGEMENT : OPTIONS_TELECHARGEMENT.filter((o) => o.marquage === "aucun");
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-xs font-medium text-foreground hover:bg-surface-muted"
+      >
+        <Download className="h-3.5 w-3.5" /> Télécharger <ChevronDown className="h-3 w-3 text-foreground-muted" />
+      </button>
+
+      {open && (
+        <div role="menu" className="absolute right-0 top-full z-20 mt-1 w-52 rounded-md border border-border bg-surface py-1 shadow-lg">
+          {options.map((o) => (
+            <a
+              key={`${o.format}-${o.marquage}`}
+              href={`/api/patronnage/traces/${traceId}/telecharger?format=${o.format}&marquage=${o.marquage}`}
+              target="_blank"
+              rel="noreferrer"
+              role="menuitem"
+              onClick={() => setOpen(false)}
+              className="block px-3 py-2 text-sm text-foreground hover:bg-surface-muted"
+            >
+              {o.label}
+            </a>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
