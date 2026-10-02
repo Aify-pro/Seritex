@@ -13,7 +13,8 @@
  * Lancer : npm run test:pricing
  */
 import assert from "node:assert/strict";
-import { coefficient, printCostPerPiece, priceGrid, roundUpTo, type CostComponent, type PricingParams } from "../src/lib/pricing";
+import { coefficient, printCostPerPiece, printSignature, priceGrid, roundUpTo, salePriceForSize, type CostComponent, type PricingParams } from "../src/lib/pricing";
+import { averageUnitPrice, computeQuoteTotals, lineNet } from "../src/lib/quote-totals";
 
 let n = 0;
 function test(name: string, fn: () => void) {
@@ -100,6 +101,36 @@ test("impressions : frais d'écran amortis et données manquantes signalées", (
 test("modèle sans composant : signalé, pas de prix à 0 silencieux", () => {
   const g = priceGrid([], [M], jersey);
   assert.ok(g.warnings.some((w) => w.includes("Aucun composant")));
+});
+
+test("prix d'une taille avec impressions : calculé, ou forcé + impressions majorées", () => {
+  // Calculé : (668,39 + 110) × 1,9608 = 1 526,25 → 1 600, identique à l'Excel.
+  assert.deepEqual(salePriceForSize(modele1, M, jersey, 110).pv, 1600);
+  // Forcé à 1 300 sur l'article nu : 1 300 + 110 × 1,9608 = 1 515,69 → 1 600.
+  assert.equal(salePriceForSize(modele1, M, jersey, 110, 1300).pv, 1600);
+  // Forcé, sans impression : le prix forcé tel quel.
+  assert.equal(salePriceForSize(modele1, M, jersey, 0, 1300).pv, 1300);
+});
+
+test("signature d'impression : indépendante de l'ordre de saisie", () => {
+  const a = printSignature([{ printable_zone_id: "b-dos", nb_couleurs: 1 }, { printable_zone_id: "a-devant", nb_couleurs: 2 }]);
+  const b = printSignature([{ printable_zone_id: "a-devant", nb_couleurs: 2 }, { printable_zone_id: "b-dos", nb_couleurs: 1 }]);
+  assert.equal(a, "a-devant:2,b-dos:1");
+  assert.equal(a, b);
+  assert.equal(printSignature([]), "");
+});
+
+test("montants d'un devis chiffré par taille : le total suit la répartition", () => {
+  const prix = { [M]: 1600, [XXL]: 1800 };
+  const ligne = { quantity: 100, unit_price: 0, sizes: { [M]: 80, [XXL]: 20 }, size_prices: prix };
+  assert.equal(lineNet(ligne), 80 * 1600 + 20 * 1800);
+  // Le client déplace 10 pièces vers le XXL : +2 000 F CFA.
+  const modifiee = { ...ligne, sizes: { [M]: 70, [XXL]: 30 } };
+  assert.equal(lineNet(modifiee) - lineNet(ligne), 2000);
+  assert.equal(averageUnitPrice(modifiee), 1660);
+  const t = computeQuoteTotals([modifiee, { quantity: 2, unit_price: 500 }], 0, 18);
+  assert.equal(t.ht, 166000 + 1000);
+  assert.equal(t.tva, Math.round(167000 * 0.18));
 });
 
 console.log(`\n${n} tests OK`);

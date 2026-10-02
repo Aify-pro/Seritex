@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { printableZoneLabel } from "@/lib/printable-zones";
 import { getSizeOptionsByModel } from "@/lib/quote-dispatch";
+import { BASE_CURRENCY, formatMoney } from "@/lib/currency";
 import QRCode from "qrcode";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -36,7 +37,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const [{ data: rawLines }, { data: zoneTemplates }, issuer] = await Promise.all([
     supabase
       .from("quote_lines")
-      .select("id,description,quantity,unit_price,remise_pct,product_model_id,couleur_unique:couleur_unique_id(name),zone_colors:quote_line_zone_colors(zone_key,colors:color_id(name)),printable_zones:quote_line_printable_zones(nb_couleurs,product_printable_zones(zone_label,display_order)),sizes:quote_line_sizes(taille,quantite)")
+      .select("id,description,quantity,unit_price,remise_pct,product_model_id,couleur_unique:couleur_unique_id(name),zone_colors:quote_line_zone_colors(zone_key,colors:color_id(name)),printable_zones:quote_line_printable_zones(nb_couleurs,product_printable_zones(zone_label,display_order)),sizes:quote_line_sizes(taille,quantite),size_prices:quote_line_size_prices(taille,prix)")
       .eq("quote_id", id)
       .order("id"),
     supabase.from("product_zone_templates").select("product_model_id,zone_key,zone_label"),
@@ -65,15 +66,29 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       .map((z) => printableZoneLabel(z.product_printable_zones!.zone_label, z.nb_couleurs));
     // Répartition par taille (migration 0066) : validée par le client avec le devis.
     const qtyBySize = new Map(((l.sizes ?? []) as unknown as { taille: string; quantite: number }[]).map((z) => [z.taille, z.quantite]));
+    // Prix par taille (migration 0068) : « M 30 × 1 600 F CFA ».
+    const priceBySize = new Map(((l.size_prices ?? []) as unknown as { taille: string; prix: number }[]).map((z) => [z.taille, Number(z.prix)]));
+    const withPrice = (cle: string, label: string) => {
+      const p = priceBySize.get(cle);
+      return `${label} ${qtyBySize.get(cle)}${p !== undefined ? ` × ${formatMoney(p, quote.devise ?? BASE_CURRENCY)}` : ""}`;
+    };
     const ordered = (sizeOptionsByModel[l.product_model_id as string] ?? []).filter((o) => qtyBySize.has(o.cle));
     const sizesText = [
-      ...ordered.map((o) => `${o.libelle} ${qtyBySize.get(o.cle)}`),
-      ...[...qtyBySize.entries()].filter(([cle]) => !ordered.some((o) => o.cle === cle)).map(([cle, q]) => `${cle.split("/").pop()} ${q}`),
+      ...ordered.map((o) => withPrice(o.cle, o.libelle)),
+      ...[...qtyBySize.keys()].filter((cle) => !ordered.some((o) => o.cle === cle)).map((cle) => withPrice(cle, cle.split("/").pop() ?? cle)),
     ].join(", ");
     const config = [colors, prints.length > 0 ? `Impressions : ${prints.join(", ")}` : "", sizesText ? `Tailles : ${sizesText}` : ""]
       .filter(Boolean)
       .join("  |  ");
-    return { description: l.description, quantity: l.quantity, unit_price: Number(l.unit_price), remise_pct: Number(l.remise_pct ?? 0), colors: config };
+    return {
+      description: l.description,
+      quantity: l.quantity,
+      unit_price: Number(l.unit_price),
+      remise_pct: Number(l.remise_pct ?? 0),
+      sizes: Object.fromEntries(qtyBySize),
+      size_prices: Object.fromEntries(priceBySize),
+      colors: config,
+    };
   });
 
   const company = quote.companies as unknown as {

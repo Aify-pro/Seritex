@@ -11,6 +11,9 @@ import { computeQuoteTotals } from "@/lib/quote-totals";
 import { formatMoney } from "@/lib/currency";
 import { isQuoteValidator } from "@/lib/signatures";
 import { compactDispatch, dispatchTotal } from "@/lib/dispatching";
+import { averageUnitPrice } from "@/lib/quote-totals";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { simulateQuote, suggestLinePrices } from "@/lib/quote-pricing";
 
 export async function updateRequestStatus(requestId: string, status: RequestStatus) {
   await requireRole(["commercial", "administrateur"]);
@@ -65,6 +68,10 @@ const quoteLineSchema = z.object({
   // Obligatoire et complète pour un article de catalogue (contrôlé ci-dessous
   // et, à la validation, en base).
   sizes: z.record(z.string().min(1), z.number().int("Quantité par taille invalide").min(0, "Quantité par taille invalide")).default({}),
+  // Prix par taille (migration 0068) : toutes les tailles du modèle, pour que
+  // le client puisse redistribuer ; obligatoire pour un article de catalogue.
+  size_prices: z.record(z.string().min(1), z.number().min(0, "Prix par taille invalide")).default({}),
+  size_price_sources: z.record(z.string().min(1), z.enum(["client", "grille", "saisie"])).default({}),
 });
 
 const sizesSchema = quoteLineSchema.shape.sizes;
@@ -119,6 +126,13 @@ const createQuoteSchema = z.object({
           ctx.addIssue({
             code: "custom",
             message: `« ${l.description} » : la répartition par taille totalise ${total} pièce(s) pour ${l.quantity} commandée(s)`,
+          });
+        }
+        const sansPrix = Object.entries(l.sizes).filter(([cle, q]) => q > 0 && !(l.size_prices[cle] > 0));
+        if (sansPrix.length > 0) {
+          ctx.addIssue({
+            code: "custom",
+            message: `« ${l.description} » : prix manquant pour ${sansPrix.map(([cle]) => cle.split("/").pop()).join(", ")}`,
           });
         }
       }
@@ -188,7 +202,8 @@ function quoteLineFields(line: QuoteLineInput) {
     product_model_id: line.product_model_id,
     description: line.description,
     quantity: line.quantity,
-    unit_price: line.unit_price,
+    // Ligne chiffrée par taille : PU moyen (le montant fait foi par taille).
+    unit_price: line.product_model_id ? averageUnitPrice(line) : line.unit_price,
     remise_pct: line.remise_pct,
     couleur_unique_id: line.couleur_unique_id,
   };
@@ -212,6 +227,22 @@ async function insertPrintableZones(supabase: ServerSupabase, quoteLineId: strin
   return error ? { error: error.message } : {};
 }
 
+/** Prix par taille (migration 0068) — écrits AVANT la répartition, qui exige un prix par taille commandée. */
+async function replaceSizePrices(supabase: ServerSupabase, quoteLineId: string, line: QuoteLineInput) {
+  const { error: delError } = await supabase.from("quote_line_size_prices").delete().eq("quote_line_id", quoteLineId);
+  if (delError) return { error: delError.message };
+  if (!line.product_model_id) return {};
+  const rows = Object.entries(line.size_prices).map(([taille, prix]) => ({
+    quote_line_id: quoteLineId,
+    taille,
+    prix,
+    source: line.size_price_sources[taille] ?? "saisie",
+  }));
+  if (rows.length === 0) return {};
+  const { error } = await supabase.from("quote_line_size_prices").insert(rows);
+  return error ? { error: error.message } : {};
+}
+
 /** Répartition par taille (migration 0066) — seule voie d'écriture : set_quote_line_sizes(). */
 async function writeQuoteLineSizes(supabase: ServerSupabase, quoteLineId: string, line: QuoteLineInput) {
   if (!line.product_model_id) return {};
@@ -230,6 +261,8 @@ async function insertQuoteLine(supabase: ServerSupabase, quoteId: string, line: 
   if (colors.error) return colors;
   const prints = await insertPrintableZones(supabase, quoteLine.id as string, line);
   if (prints.error) return prints;
+  const prices = await replaceSizePrices(supabase, quoteLine.id as string, line);
+  if (prices.error) return prices;
   return writeQuoteLineSizes(supabase, quoteLine.id as string, line);
 }
 
@@ -356,6 +389,8 @@ export async function resubmitQuote(
     if (clearPrintError) return { error: clearPrintError.message };
     const printRes = await insertPrintableZones(supabase, line.id, line);
     if (printRes.error) return { error: printRes.error };
+    const pricesRes = await replaceSizePrices(supabase, line.id, line);
+    if (pricesRes.error) return { error: pricesRes.error };
     // Remplace toute la répartition ; un article devenu « hors catalogue » la perd.
     const sizesRes = line.product_model_id
       ? await writeQuoteLineSizes(supabase, line.id, line)
@@ -388,8 +423,8 @@ export async function resubmitQuote(
  * 0066) : par le client avant d'accepter, ou par le commercial à sa demande.
  * Le total doit rester égal à la quantité commandée ; droits, statut et tailles
  * du modèle sont contrôlés en base par set_quote_line_sizes(), qui trace la
- * modification. Le montant ne change pas tant qu'un article n'a qu'un prix
- * unitaire (prix par taille : lot D).
+ * modification. Sur un article chiffré par taille (migration 0068), le
+ * montant suit : les totaux du devis sont recalculés aussitôt.
  */
 export async function updateQuoteLineSizes(quoteId: string, quoteLineId: string, sizes: Record<string, number>) {
   await requireUser();
@@ -400,6 +435,99 @@ export async function updateQuoteLineSizes(quoteId: string, quoteLineId: string,
   const { error } = await supabase.rpc("set_quote_line_sizes", { p_quote_line_id: quoteLineId, p_sizes: compactDispatch(parsed.data) });
   if (error) return { error: error.message };
 
+  // Le client n'a pas le droit d'écrire sur quotes : les totaux sont recalculés
+  // avec le client d'administration, UNIQUEMENT à partir des données en base
+  // (lignes, prix, répartition qui vient d'être acceptée par set_quote_line_sizes)
+  // — aucune valeur fournie par l'appelant n'y entre.
+  const totals = await recomputeQuoteTotals(createAdminClient(), quoteId);
+  if (totals.error) return totals;
+
+  revalidateQuote(quoteId);
+  return {};
+}
+
+/**
+ * Totaux du devis recalculés depuis la base (src/lib/quote-totals.ts, seule
+ * source des arrondis et remises) — après un changement de répartition ou de
+ * prix par taille.
+ */
+async function recomputeQuoteTotals(db: ServerSupabase | ReturnType<typeof createAdminClient>, quoteId: string): Promise<{ error?: string }> {
+  const [{ data: quote }, { data: lines }] = await Promise.all([
+    db.from("quotes").select("remise_pct,tva_rate,acompte_pct,devise").eq("id", quoteId).maybeSingle(),
+    db.from("quote_lines").select("quantity,unit_price,remise_pct,quote_line_sizes(taille,quantite),quote_line_size_prices(taille,prix)").eq("quote_id", quoteId),
+  ]);
+  if (!quote) return { error: "Devis introuvable" };
+  const totals = computeQuoteTotals(
+    (lines ?? []).map((l) => ({
+      quantity: l.quantity as number,
+      unit_price: Number(l.unit_price),
+      remise_pct: Number(l.remise_pct ?? 0),
+      sizes: Object.fromEntries(((l.quote_line_sizes ?? []) as { taille: string; quantite: number }[]).map((x) => [x.taille, x.quantite])),
+      size_prices: Object.fromEntries(((l.quote_line_size_prices ?? []) as { taille: string; prix: number }[]).map((x) => [x.taille, Number(x.prix)])),
+    })),
+    Number(quote.remise_pct ?? 0),
+    Number(quote.tva_rate ?? 0),
+    Number(quote.acompte_pct ?? 0),
+    (quote.devise as string | null) ?? "XOF"
+  );
+  const { error } = await db.from("quotes").update({ total_amount: totals.ttc, total_ht: totals.ht, total_tva: totals.tva }).eq("id", quoteId);
+  return error ? { error: error.message } : {};
+}
+
+/**
+ * Prix proposés par taille pour un article (lot E) : dernier prix accordé à ce
+ * client pour ce modèle et ces impressions, sinon grille tarifaire du modèle.
+ * Le commercial ne reçoit que des prix de vente — jamais un coût ni une marge.
+ */
+export async function suggestQuoteLinePrices(input: {
+  companyId: string;
+  productModelId: string;
+  quantity: number;
+  printZones: { printable_zone_id: string; nb_couleurs: number }[];
+  devise: string;
+  tauxChange: number;
+}) {
+  await requireRole(["commercial", "administrateur"]);
+  const parsed = z
+    .object({
+      companyId: z.guid(),
+      productModelId: z.guid(),
+      quantity: z.number().int().min(0),
+      printZones: z.array(z.object({ printable_zone_id: z.guid(), nb_couleurs: z.number().int().min(1).max(12) })),
+      devise: z.string().regex(/^[A-Z]{3}$/),
+      tauxChange: z.number().positive(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Demande de prix invalide" };
+  return { suggestion: await suggestLinePrices(parsed.data) };
+}
+
+/**
+ * Rehausse (ou ajuste) les prix par taille d'un article pendant la validation
+ * interne — Direction / administrateur. La base refuse toute modification une
+ * fois le devis envoyé ; PU moyen et totaux sont recalculés.
+ */
+export async function updateQuoteSizePrices(quoteId: string, quoteLineId: string, prices: Record<string, number>) {
+  await requireRole(["administrateur"]);
+  const parsed = z.record(z.string().min(1), z.number().positive("Un prix doit être positif")).safeParse(prices);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Prix invalides" };
+
+  const supabase = await createClient();
+  const { data: line } = await supabase.from("quote_lines").select("id,quote_id,quote_line_sizes(taille,quantite)").eq("id", quoteLineId).maybeSingle();
+  if (!line || line.quote_id !== quoteId) return { error: "Ligne de devis introuvable" };
+
+  const { error } = await supabase
+    .from("quote_line_size_prices")
+    .upsert(Object.entries(parsed.data).map(([taille, prix]) => ({ quote_line_id: quoteLineId, taille, prix, source: "saisie" })));
+  if (error) return { error: error.message };
+
+  // Ré-appliquer la répartition recalcule le PU moyen de la ligne (set_quote_line_sizes, 0068).
+  const sizes = Object.fromEntries(((line.quote_line_sizes ?? []) as { taille: string; quantite: number }[]).map((x) => [x.taille, x.quantite]));
+  const { error: rpcError } = await supabase.rpc("set_quote_line_sizes", { p_quote_line_id: quoteLineId, p_sizes: sizes });
+  if (rpcError) return { error: rpcError.message };
+
+  const totals = await recomputeQuoteTotals(supabase, quoteId);
+  if (totals.error) return totals;
   revalidateQuote(quoteId);
   return {};
 }
@@ -527,7 +655,10 @@ export async function validateQuote(quoteId: string) {
   if (!(await isQuoteValidator(authId))) return { error: "Seules la Direction et l'administrateur, avec une signature enregistrée, peuvent valider un devis." };
 
   const supabase = await createClient();
-  const { error } = await supabase.rpc("validate_quote", { p_quote_id: quoteId });
+  // Prix de revient théorique figé à la validation (migration 0068) : la
+  // simulation que la Direction vient de voir, recalculée au moment même.
+  const simulation = await simulateQuote(quoteId);
+  const { error } = await supabase.rpc("validate_quote", { p_quote_id: quoteId, p_snapshot: simulation?.snapshot ?? [] });
   if (error) return { error: error.message };
 
   const { data: quote } = await supabase

@@ -14,6 +14,8 @@ import type { DelaiDepart, DelaiUnite } from "@/lib/types/domain";
 import { MapPin, Phone, Mail, User } from "lucide-react";
 import { DispatchEditor, type SizeOption } from "@/components/quotes/dispatch-editor";
 import { generateDispatch, pickRule, type Dispatch, type DispatchRule } from "@/lib/dispatching";
+import { averageUnitPrice } from "@/lib/quote-totals";
+import { LinePricesEditor, type PriceSource } from "./line-prices-editor";
 
 type ProductModel = { id: string; name: string; base_price: number | null };
 type ZoneTemplate = { zone_key: string; zone_label: string; display_order: number };
@@ -41,6 +43,10 @@ type LineDraft = {
   sizes: Dispatch;
   /** Vrai tant que la répartition est celle proposée par la règle : elle suit alors la quantité. */
   sizesAuto: boolean;
+  /** Prix par taille (migration 0068), saisis en texte ; leur provenance ; suivent-ils la proposition ? */
+  sizePrices: Record<string, string>;
+  sizePriceSources: Record<string, PriceSource>;
+  pricesAuto: boolean;
 };
 
 /** Valeurs par défaut des mentions de proforma, issues de Paramètres > Informations société (migration 0061). */
@@ -133,6 +139,8 @@ export type CorrectionLine = {
   zoneColors: Record<string, string>;
   printZones: Record<string, number>;
   sizes: Dispatch;
+  sizePrices: Record<string, number>;
+  sizePriceSources: Record<string, PriceSource>;
 };
 
 /** Devis renvoyé par la Direction, à corriger puis resoumettre (migration 0064). */
@@ -158,7 +166,20 @@ function lineFromCorrection(l: CorrectionLine): LineDraft {
     printZones: l.printZones,
     sizes: l.sizes,
     sizesAuto: false,
+    sizePrices: Object.fromEntries(Object.entries(l.sizePrices).map(([k, v]) => [k, String(v)])),
+    sizePriceSources: l.sizePriceSources,
+    pricesAuto: false,
   };
+}
+
+/** Prix saisis en texte → nombres valides (virgule décimale acceptée). */
+function numericPrices(prices: Record<string, string>): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [cle, v] of Object.entries(prices)) {
+    const n = Number(String(v).replace(",", "."));
+    if (String(v).trim() !== "" && Number.isFinite(n) && n >= 0) out[cle] = n;
+  }
+  return out;
 }
 
 function newLine(): LineDraft {
@@ -173,6 +194,9 @@ function newLine(): LineDraft {
     printZones: {},
     sizes: {},
     sizesAuto: true,
+    sizePrices: {},
+    sizePriceSources: {},
+    pricesAuto: true,
   };
 }
 
@@ -245,6 +269,18 @@ export function QuoteForm({
     setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l)));
   }
 
+  /** Ligne sous la forme du calcul des montants : chiffrée par taille pour un article de catalogue. */
+  function totalsLine(l: LineDraft) {
+    const priced = !!l.productModelId;
+    return {
+      quantity: Number(l.quantity) || 0,
+      unit_price: Number(l.unitPrice) || 0,
+      remise_pct: Number(l.remisePct) || 0,
+      sizes: priced ? l.sizes : undefined,
+      size_prices: priced ? numericPrices(l.sizePrices) : undefined,
+    };
+  }
+
   /** Répartition proposée par la règle (Paramètres > Dispatching) pour un modèle, un groupe et une quantité. */
   function proposeSizes(productModelId: string, quantity: number, groupe?: string): Dispatch {
     const options = sizeOptionsByModel[productModelId] ?? [];
@@ -292,6 +328,10 @@ export function QuoteForm({
               // Les tailles aussi : nouvelle proposition selon la règle.
               sizes: productModelId && Number(l.quantity) > 0 ? proposeSizes(productModelId, Number(l.quantity)) : {},
               sizesAuto: true,
+              // Prix propres au modèle : nouvelle proposition.
+              sizePrices: {},
+              sizePriceSources: {},
+              pricesAuto: true,
             }
           : l
       )
@@ -305,7 +345,7 @@ export function QuoteForm({
   const isBase = terms.devise === BASE_CURRENCY;
   const decimals = currencyDecimals(terms.devise);
   const totals = computeQuoteTotals(
-    lines.map((l) => ({ quantity: Number(l.quantity) || 0, unit_price: Number(l.unitPrice) || 0, remise_pct: Number(l.remisePct) || 0 })),
+    lines.map(totalsLine),
     Number(terms.remisePct) || 0,
     Number(terms.tvaRate) || 0,
     Number(terms.acomptePct) || 0,
@@ -341,7 +381,7 @@ export function QuoteForm({
         id: l.id ?? null,
         description: l.description,
         quantity: Number(l.quantity),
-        unit_price: Number(l.unitPrice),
+        unit_price: l.productModelId ? averageUnitPrice(totalsLine(l)) : Number(l.unitPrice),
         remise_pct: Number(l.remisePct) || 0,
         product_model_id: l.productModelId || null,
         couleur_unique_id: uni ? l.colorDraft.couleurUniqueId : null,
@@ -354,6 +394,8 @@ export function QuoteForm({
           ? Object.entries(l.printZones).map(([printable_zone_id, nb_couleurs]) => ({ printable_zone_id, nb_couleurs }))
           : [],
         sizes: l.productModelId ? l.sizes : {},
+        size_prices: l.productModelId ? numericPrices(l.sizePrices) : {},
+        size_price_sources: l.productModelId ? l.sizePriceSources : {},
       };
     });
 
@@ -509,17 +551,24 @@ export function QuoteForm({
                   className="h-9 w-full rounded-md border border-border bg-surface px-2 text-sm"
                 />
               </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-foreground">Prix unitaire HT ({isBase ? "F CFA" : terms.devise})</label>
-                <input
-                  value={line.unitPrice}
-                  onChange={(e) => updateLine(line.key, { unitPrice: e.target.value })}
-                  type="number"
-                  min={0}
-                  step={decimals === 0 ? "1" : "0.01"}
-                  className="h-9 w-full rounded-md border border-border bg-surface px-2 text-sm"
-                />
-              </div>
+              {line.productModelId ? (
+                // Article de catalogue : chiffré taille par taille (ci-dessous) — PU moyen affiché.
+                <p className="self-end pb-2 text-sm text-foreground-muted">
+                  PU moyen HT : <span className="font-medium text-foreground">{money(averageUnitPrice(totalsLine(line)))}</span>
+                </p>
+              ) : (
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-foreground">Prix unitaire HT ({isBase ? "F CFA" : terms.devise})</label>
+                  <input
+                    value={line.unitPrice}
+                    onChange={(e) => updateLine(line.key, { unitPrice: e.target.value })}
+                    type="number"
+                    min={0}
+                    step={decimals === 0 ? "1" : "0.01"}
+                    className="h-9 w-full rounded-md border border-border bg-surface px-2 text-sm"
+                  />
+                </div>
+              )}
               <div>
                 <label className="mb-1 block text-xs font-medium text-foreground">Remise sur cette ligne (%)</label>
                 <input
@@ -535,7 +584,7 @@ export function QuoteForm({
               <p className="self-end pb-2 text-sm text-foreground-muted">
                 Total HT de la ligne :{" "}
                 <span className="font-medium text-foreground">
-                  {money(lineNet({ quantity: Number(line.quantity) || 0, unit_price: Number(line.unitPrice) || 0, remise_pct: Number(line.remisePct) || 0 }, terms.devise))}
+                  {money(lineNet(totalsLine(line), terms.devise))}
                 </span>
               </p>
             </div>
@@ -575,6 +624,23 @@ export function QuoteForm({
                     Aucune règle de dispatching pour ce groupe et cette quantité (Paramètres &gt; Dispatching) — saisissez la répartition.
                   </p>
                 )}
+                <div className="mt-3 border-t border-border pt-3">
+                  <LinePricesEditor
+                    companyId={companyId}
+                    productModelId={line.productModelId}
+                    quantity={Number(line.quantity) || 0}
+                    printZones={line.printZones}
+                    devise={terms.devise}
+                    tauxChange={Number(terms.tauxChange) || 1}
+                    sizes={sizeOptionsByModel[line.productModelId] ?? []}
+                    dispatch={line.sizes}
+                    prices={line.sizePrices}
+                    sources={line.sizePriceSources}
+                    auto={line.pricesAuto}
+                    disabled={pending}
+                    onChange={(next) => updateLine(line.key, { sizePrices: next.prices, sizePriceSources: next.sources, pricesAuto: next.auto })}
+                  />
+                </div>
               </div>
             )}
 

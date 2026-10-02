@@ -142,3 +142,38 @@ export function priceGrid(
   });
   return { sizes, coefficient: coef, warnings };
 }
+
+/**
+ * Prix d'une taille pour une configuration de devis (lot E) : article nu +
+ * impressions. Sans prix forcé : (PR nu + impressions) × coefficient, arrondi.
+ * Avec un prix forcé sur l'article nu : ce prix, plus les impressions
+ * majorées du même coefficient, arrondi — la Direction fixe le prix du
+ * T-shirt, les impressions s'y ajoutent au même taux de marque.
+ */
+export function salePriceForSize(
+  components: CostComponent[],
+  cle: string,
+  params: PricingParams,
+  printCost: number,
+  forced: number | null = null
+): { pr: number; pv: number | null } {
+  const coef = coefficient(params);
+  const pr = baseCostForSize(components, cle) + printCost;
+  if (coef === null) return { pr, pv: null };
+  if (forced !== null) return { pr, pv: printCost > 0 ? roundUpTo(forced + printCost * coef, params.arrondi) : forced };
+  return { pr, pv: roundUpTo(pr * coef, params.arrondi) };
+}
+
+/**
+ * Signature d'une configuration d'impression — clé de la mémoire des prix
+ * client (migration 0068) : un prix accordé pour « devant 2 couleurs » ne vaut
+ * pas pour « devant + dos 4 couleurs ». Doit rester identique à celle calculée
+ * en base (print_signature()) : emplacements triés, « id:couleurs » joints par
+ * des virgules ; chaîne vide sans impression.
+ */
+export function printSignature(zones: { printable_zone_id: string; nb_couleurs: number }[]): string {
+  return [...zones]
+    .sort((a, b) => (a.printable_zone_id < b.printable_zone_id ? -1 : a.printable_zone_id > b.printable_zone_id ? 1 : 0))
+    .map((z) => `${z.printable_zone_id}:${z.nb_couleurs}`)
+    .join(",");
+}

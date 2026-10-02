@@ -5,10 +5,12 @@ import { getQuoteLinesWithColorConfig } from "@/lib/quotes";
 import { notFound } from "next/navigation";
 import { QuoteDetail } from "@/components/quotes/quote-detail";
 import { getSizeOptionsByModel } from "@/lib/quote-dispatch";
+import { simulateQuote } from "@/lib/quote-pricing";
+import { QuoteSimulationCard } from "@/components/quotes/quote-simulation-card";
 import type { AttachableMediaFile } from "@/lib/types/domain";
 
 export default async function CommercialQuoteDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { authId } = await requireRole(["commercial", "administrateur"]);
+  const { authId, profile } = await requireRole(["commercial", "administrateur"]);
   const { id } = await params;
   const supabase = await createClient();
 
@@ -36,12 +38,19 @@ export default async function CommercialQuoteDetailPage({ params }: { params: Pr
       : Promise.resolve(null),
   ]);
   const sizeOptionsByModel = await getSizeOptionsByModel(lines.map((l) => l.product_model_id));
+  // Simulation du prix de revient (lot E) : Direction et administrateur
+  // uniquement (base_role administrateur ; la RLS des tables de coût l'impose
+  // aussi), tant que le devis n'est pas envoyé au client.
+  const enPreparation = quote.status === "brouillon" || quote.status === "en_validation_interne";
+  const simulation = profile.role === "administrateur" && enPreparation ? await simulateQuote(id) : null;
   const availableMediaFiles = (requestMedia ?? [])
     .map((m) => m.media_files as unknown as AttachableMediaFile | null)
     .filter((f): f is AttachableMediaFile => !!f);
 
   return (
-    <QuoteDetail
+    <div className="space-y-6">
+      {simulation && <QuoteSimulationCard quoteId={id} simulation={simulation} editable />}
+      <QuoteDetail
       quote={quote}
       lines={lines}
       companyName={(quote.companies as unknown as { name: string } | null)?.name}
@@ -53,6 +62,7 @@ export default async function CommercialQuoteDetailPage({ params }: { params: Pr
       validators={validators}
       validatedBy={validator}
       sizeOptionsByModel={sizeOptionsByModel}
-    />
+      />
+    </div>
   );
 }
