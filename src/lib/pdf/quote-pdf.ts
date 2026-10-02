@@ -232,11 +232,30 @@ export async function buildQuotePdf(data: QuotePdfData): Promise<Uint8Array> {
   const mentionsH = footerMentions.length ? footerMentions.length * 10 + 4 : 0;
   const footerH = 12 + mentionsH + footerCoords.length * 9 + 6;
 
+  /**
+   * En-tête des pages suivantes : même identité que la première page (logo,
+   * QR code, type de document, n° de devis), en plus compact pour laisser la
+   * place au contenu. Le pied de page est dessiné sur toutes les pages à la fin.
+   */
+  function drawContinuationHeader() {
+    const lh = 34;
+    page.drawImage(logo, { x: M, y: y - lh, width: lh * (logo.width / logo.height), height: lh });
+    const qs = 50;
+    page.drawImage(qr, { x: PAGE_W - M - qs, y: y - qs, width: qs, height: qs });
+    y -= qs + 10;
+    hr(y + 4, accent);
+    y -= 16;
+    text("FACTURE PROFORMA", M, y, 13, bold);
+    textRight(`N° ${quote.reference}`, PAGE_W - M, y, 11, bold);
+    y -= 22;
+  }
+
   function ensureSpace(height: number, onNewPage?: () => void) {
     if (y - height < FOOT_BOTTOM + footerH + 8) {
       page = pdf.addPage([PAGE_W, PAGE_H]);
       pages.push(page);
       y = PAGE_H - M;
+      drawContinuationHeader();
       onNewPage?.();
     }
   }
