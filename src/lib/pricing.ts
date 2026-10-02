@@ -29,6 +29,8 @@ export interface CostComponent {
   base: number;
   /** Supplément par clé de taille (« Groupe/Libellé ») — absent = 0. */
   supplements: Record<string, number>;
+  /** Composant tissu : remplacé par le tissu pesé dans le prix de revient réel (migration 0070). */
+  estTissu?: boolean;
 }
 
 export interface PricingParams {

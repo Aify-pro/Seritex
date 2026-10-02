@@ -240,7 +240,7 @@ export async function simulateQuote(quoteId: string): Promise<QuoteSimulation | 
             marge_cible_pct: params.margePct,
             cout_impression: Math.round(prints.cost * 100) / 100,
             impressions: specs,
-            composants: pricing.components.map((c) => ({ libelle: c.libelle, cout: c.base + (c.supplements[s.taille] ?? 0) })),
+            composants: pricing.components.map((c) => ({ libelle: c.libelle, cout: c.base + (c.supplements[s.taille] ?? 0), est_tissu: !!c.estTissu })),
             prix_force: pricing.forced[s.taille] ?? null,
             prix_grille: calc?.pv ?? null,
             taux_change: taux,

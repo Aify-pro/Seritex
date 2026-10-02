@@ -11,7 +11,7 @@ import { saveModelPricing } from "../actions";
 
 type SizeOption = { cle: string; libelle: string; groupe: string };
 
-type ComponentDraft = { key: string; libelle: string; base: string; supplements: Record<string, string> };
+type ComponentDraft = { key: string; libelle: string; base: string; supplements: Record<string, string>; estTissu: boolean };
 
 const PRESETS = ["Tissu", "Col", "Confection", "Fournitures", "Charges fixes"];
 
@@ -48,6 +48,7 @@ export function ModelPricingEditor({
       libelle: c.libelle,
       base: String(c.base),
       supplements: Object.fromEntries(Object.entries(c.supplements).map(([k, v]) => [k, String(v)])),
+      estTissu: !!c.estTissu,
     }))
   );
   const [forced, setForced] = useState<Record<string, string>>(Object.fromEntries(Object.entries(initial.forced).map(([k, v]) => [k, String(v)])));
@@ -63,6 +64,7 @@ export function ModelPricingEditor({
     libelle: c.libelle,
     base: isNum(c.base) ? num(c.base) : 0,
     supplements: Object.fromEntries(Object.entries(c.supplements).filter(([, v]) => isNum(v)).map(([k, v]) => [k, num(v)])),
+    estTissu: c.estTissu,
   }));
   const parsedForced = Object.fromEntries(Object.entries(forced).filter(([, v]) => isNum(v) && num(v) > 0).map(([k, v]) => [k, num(v)]));
   const grid = priceGrid(parsedComponents, visibles.map((s) => s.cle), params, { forced: parsedForced });
@@ -72,7 +74,10 @@ export function ModelPricingEditor({
   }
 
   function addComponent(libelle = "") {
-    setComponents((prev) => [...prev, { key: Math.random().toString(36).slice(2), libelle, base: "", supplements: {} }]);
+    setComponents((prev) => [
+      ...prev,
+      { key: Math.random().toString(36).slice(2), libelle, base: "", supplements: {}, estTissu: libelle.toLowerCase().startsWith("tissu") },
+    ]);
   }
 
   function save() {
@@ -81,7 +86,7 @@ export function ModelPricingEditor({
         charges_pct: isNum(charges) ? num(charges) : null,
         marge_pct: isNum(marge) ? num(marge) : null,
         notes,
-        components: parsedComponents.map((c) => ({ libelle: c.libelle, base: c.base, supplements: c.supplements })),
+        components: parsedComponents.map((c) => ({ libelle: c.libelle, base: c.base, supplements: c.supplements, est_tissu: !!c.estTissu })),
         forced: parsedForced,
       });
       if (res.error) toast.error("Grille non enregistrée", { description: res.error });
@@ -141,12 +146,16 @@ export function ModelPricingEditor({
 
       <div>
         <p className="mb-1 text-xs font-medium text-foreground">Composants du prix de revient (F CFA par pièce)</p>
-        <p className="mb-2 text-xs text-foreground-muted">« Base » s&apos;applique à toutes les tailles ; une case de taille ajoute un supplément (vide = 0, négatif possible).</p>
+        <p className="mb-2 text-xs text-foreground-muted">
+          « Base » s&apos;applique à toutes les tailles ; une case de taille ajoute un supplément (vide = 0, négatif possible). Cochez « Tissu » sur le composant
+          tissu : c&apos;est la part que remplace le tissu pesé dans le prix de revient réel.
+        </p>
         <div className="overflow-x-auto rounded-md border border-border">
           <table className="w-full text-sm">
             <thead className="bg-surface-muted text-xs text-foreground-muted">
               <tr>
                 <th className="px-2 py-2 text-left font-medium">Composant</th>
+                <th className="px-2 py-2 font-medium" title="Part remplacée par le tissu pesé dans le prix de revient réel">Tissu</th>
                 <th className="px-2 py-2 font-medium">Base</th>
                 {visibles.map((s) => (
                   <th key={s.cle} className="px-1 py-2 font-medium">
@@ -165,6 +174,16 @@ export function ModelPricingEditor({
                       disabled={pending}
                       onChange={(e) => updateComponent(c.key, { libelle: e.target.value })}
                       className="h-8 w-36 rounded-md border border-border bg-surface px-2 text-sm"
+                    />
+                  </td>
+                  <td className="px-2 py-1.5 text-center">
+                    <input
+                      type="checkbox"
+                      checked={c.estTissu}
+                      disabled={pending}
+                      onChange={(e) => updateComponent(c.key, { estTissu: e.target.checked })}
+                      aria-label={`${c.libelle || "Composant"} : tissu`}
+                      className="h-4 w-4 rounded border-border text-brand"
                     />
                   </td>
                   <td className="px-2 py-1.5">

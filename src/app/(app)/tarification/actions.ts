@@ -70,6 +70,7 @@ const modelPricingSchema = z.object({
       z.object({
         libelle: z.string().trim().min(1, "Chaque composant doit avoir un libellé").max(120),
         base: money,
+        est_tissu: z.boolean().default(false),
         // Supplément par taille : peut être négatif (taille moins coûteuse que la base).
         supplements: z.record(z.string().min(1), z.number()),
       })
@@ -108,7 +109,7 @@ export async function saveModelPricing(productModelId: string, input: ModelPrici
   for (const [i, c] of g.components.entries()) {
     const { data: comp, error } = await supabase
       .from("model_cost_components")
-      .insert({ product_model_id: productModelId, libelle: c.libelle, base: c.base, display_order: i })
+      .insert({ product_model_id: productModelId, libelle: c.libelle, base: c.base, est_tissu: c.est_tissu, display_order: i })
       .select("id")
       .single();
     if (error) return { error: error.message };
@@ -129,6 +130,50 @@ export async function saveModelPricing(productModelId: string, input: ModelPrici
     if (error) return { error: error.message };
   }
 
+  revalidatePath("/tarification", "layout");
+  return {};
+}
+
+/** Prix du tissu au kg, rendu, d'un textile (migration 0070) ; null retire le prix. */
+export async function saveTextilePrice(textileId: string, prixKg: number | null) {
+  const { profile } = await requireRole(["administrateur"]);
+  const parsed = z.object({ id: z.guid(), prix: z.number().positive("Prix au kg invalide").nullable() }).safeParse({ id: textileId, prix: prixKg });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Prix invalide" };
+
+  const supabase = await createClient();
+  const { error } =
+    parsed.data.prix === null
+      ? await supabase.from("textile_prices").delete().eq("textile_id", textileId)
+      : await supabase
+          .from("textile_prices")
+          .upsert({ textile_id: textileId, prix_kg: parsed.data.prix, updated_at: new Date().toISOString(), updated_by: profile.id });
+  if (error) return { error: error.message };
+  revalidatePath("/tarification", "layout");
+  return {};
+}
+
+/**
+ * Paramètres de l'analyse du prix de revient réel d'un ODF (migration 0070) :
+ * prix du tissu au kg propre à cet ODF (null = prix du textile) et notes.
+ */
+export async function saveOdfRealCost(productionOrderId: string, input: { prix_tissu_kg: number | null; notes: string }) {
+  const { profile } = await requireRole(["administrateur"]);
+  const parsed = z
+    .object({
+      prix_tissu_kg: z.number().positive("Prix au kg invalide").nullable(),
+      notes: z.string().trim().max(2000).transform((v) => v || null),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Paramètres invalides" };
+
+  const supabase = await createClient();
+  const { error } = await supabase.from("production_order_real_costs").upsert({
+    production_order_id: productionOrderId,
+    ...parsed.data,
+    updated_at: new Date().toISOString(),
+    updated_by: profile.id,
+  });
+  if (error) return { error: error.message };
   revalidatePath("/tarification", "layout");
   return {};
 }
