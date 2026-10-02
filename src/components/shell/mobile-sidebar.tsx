@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import Image from "next/image";
 import { Menu, X } from "lucide-react";
-import type { NavItem } from "@/lib/auth/nav";
+import type { SidebarEntry } from "@/lib/auth/nav";
 import { SidebarNav } from "@/components/shell/sidebar-nav";
 
 /**
@@ -16,7 +16,7 @@ import { SidebarNav } from "@/components/shell/sidebar-nav";
  * l'en-tête mobile et le tiroir de navigation lui-même, réutilisant
  * `SidebarNav` pour rester identique au menu desktop.
  */
-export function MobileSidebar({ items }: { items: NavItem[] }) {
+export function MobileSidebar({ items }: { items: SidebarEntry[] }) {
   const [open, setOpen] = useState(false);
 
   useEffect(() => {

@@ -4,6 +4,7 @@ import { requireUser } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server";
 import { getPermissionMap } from "@/lib/auth/permissions";
 import { NAV_BY_ROLE } from "@/lib/auth/nav";
+import { buildSidebarEntries } from "@/lib/auth/parametres-hubs";
 import { SidebarNav } from "@/components/shell/sidebar-nav";
 import { MobileSidebar } from "@/components/shell/mobile-sidebar";
 import { UserMenu } from "@/components/shell/user-menu";
@@ -23,8 +24,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // l'arrivée, il n'existe simplement pas dans le menu. Les entrées sans
   // module (tableau de bord, portail client, écrans commerciaux, modèles de
   // produits, couleurs) restent commandées par le seul base_role.
-  const items = NAV_BY_ROLE[profile.role].filter(
-    (item) => !item.module || permissions[item.module]?.view === true
+  // Les écrans de Paramètres sont regroupés en un volet repliable, un menu
+  // par thème (voir parametres-hubs.ts).
+  const items = buildSidebarEntries(
+    NAV_BY_ROLE[profile.role].filter((item) => !item.module || permissions[item.module]?.view === true)
   );
 
   return (

@@ -29,7 +29,7 @@ function freshnessBadge(lastSyncAt: string | null) {
 
 async function getMirrorStatus(
   supabase: Awaited<ReturnType<typeof createClient>>,
-  table: "sage_customers_view" | "sage_articles_view" | "stock_item_view",
+  table: "sage_customers_view" | "sage_articles_view" | "stock_item_view" | "sage_quotes_view",
   label: string,
   href: string
 ): Promise<MirrorTableStatus> {
@@ -52,17 +52,18 @@ export default async function SageSettingsPage() {
   await requirePlatformAdmin();
   const supabase = await createClient();
 
-  const [clients, articles, stock] = await Promise.all([
+  const [clients, articles, stock, devis] = await Promise.all([
     getMirrorStatus(supabase, "sage_customers_view", "Clients", "/parametres/clients-sage"),
     getMirrorStatus(supabase, "sage_articles_view", "Articles", "/parametres/articles-sage"),
     getMirrorStatus(supabase, "stock_item_view", "Stock (lignes, tous dépôts)", "/parametres/stock"),
+    getMirrorStatus(supabase, "sage_quotes_view", "Devis en cours", "/parametres/devis-sage"),
   ]);
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Intégration Sage"
-        description="Stock, clients et articles proviennent de Sage, via un pont Sage -> NAS -> Supabase alimenté par un job externe (compte technique à droits restreints). Seritex n'écrit jamais dans ces tables."
+        description="Stock, clients, articles et devis proviennent de Sage, via un pont Sage -> NAS -> Supabase alimenté par un job externe (compte technique à droits restreints). Seritex n'écrit jamais dans ces tables."
       />
 
       <div className="flex items-start gap-2 rounded-md bg-info-soft px-3 py-2 text-xs text-info">
@@ -72,8 +73,8 @@ export default async function SageSettingsPage() {
         dépôt.
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        {[clients, articles, stock].map((s) => (
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {[clients, articles, stock, devis].map((s) => (
           <Card key={s.label}>
             <CardHeader title={s.label} action={freshnessBadge(s.lastSyncAt)} />
             <CardBody className="space-y-1">
