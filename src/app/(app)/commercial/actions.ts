@@ -278,13 +278,33 @@ export async function createQuote(
   companyId: string,
   lines: QuoteLineInput[],
   dateLivraisonPrevue: string | null,
-  terms: QuoteTermsInput
+  terms: QuoteTermsInput,
+  /** N° du devis Sage dont ce devis est récupéré (migration 0071), le cas échéant. */
+  sagePiece: string | null = null
 ) {
   const { authId } = await requireRole(["commercial", "administrateur"]);
   const parsed = createQuoteSchema.safeParse({ lines, date_livraison_prevue: dateLivraisonPrevue, terms });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Devis invalide" };
 
   const supabase = await createClient();
+
+  // Devis récupéré de Sage : il doit exister dans le miroir, appartenir au client
+  // de la demande et ne pas avoir déjà été importé (index unique en filet).
+  let sagePieceChecked: string | null = null;
+  if (sagePiece) {
+    const piece = sagePiece.trim();
+    const [{ data: header }, { data: company }, { data: already }] = await Promise.all([
+      supabase.from("sage_quotes_view").select("client_sage_code").eq("sage_piece", piece).maybeSingle(),
+      supabase.from("companies").select("sage_code").eq("id", companyId).maybeSingle(),
+      supabase.from("quotes").select("reference").eq("sage_piece", piece).maybeSingle(),
+    ]);
+    if (!header) return { error: `Le devis Sage ${piece} n'existe plus (transformé ou purgé) : impossible de le rattacher.` };
+    if (!company?.sage_code || header.client_sage_code !== company.sage_code) {
+      return { error: `Le devis Sage ${piece} n'appartient pas au client de cette demande.` };
+    }
+    if (already) return { error: `Le devis Sage ${piece} a déjà été récupéré (${already.reference}).` };
+    sagePieceChecked = piece;
+  }
   const prepared = await prepareQuoteFields(supabase, parsed.data);
   if ("error" in prepared) return { error: prepared.error };
 
@@ -301,6 +321,9 @@ export async function createQuote(
       request_id: requestId,
       company_id: companyId,
       created_by: authId,
+      // Colonne envoyée seulement si utilisée : le code reste sans effet sur les devis ordinaires
+      // tant que la migration 0071 n'est pas appliquée.
+      ...(sagePieceChecked ? { sage_piece: sagePieceChecked } : {}),
       // Validation interne obligatoire avant envoi au client (migration 0063).
       status: "en_validation_interne",
       ...prepared.fields,
