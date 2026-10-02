@@ -29,6 +29,9 @@ export interface QuotePdfLine {
   quantity: number;
   unit_price: number;
   remise_pct: number;
+  /** Répartition et prix par taille (migration 0068) — montant = Σ pièces × prix de la taille. */
+  sizes?: Record<string, number>;
+  size_prices?: Record<string, number>;
   /** Configuration de la ligne : couleurs (« Couleur : Bleu » / « Col : Rouge | Manches : Blanc ») puis impressions — vide si aucune. */
   colors: string;
 }
@@ -158,7 +161,7 @@ export async function buildQuotePdf(data: QuotePdfData): Promise<Uint8Array> {
   const remisePct = Number(quote.remise_pct ?? 0);
   const acomptePct = Number(quote.acompte_pct ?? 0);
   const totals = computeQuoteTotals(
-    lines.map((l) => ({ quantity: l.quantity, unit_price: l.unit_price, remise_pct: l.remise_pct })),
+    lines.map((l) => ({ quantity: l.quantity, unit_price: l.unit_price, remise_pct: l.remise_pct, sizes: l.sizes, size_prices: l.size_prices })),
     remisePct,
     tvaRate,
     acomptePct,

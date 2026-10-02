@@ -3,6 +3,14 @@ import { createClient } from "@/lib/supabase/server";
 import type { CostComponent, PricingParams, PrintGrid } from "@/lib/pricing";
 
 /**
+ * Client de lecture : par défaut celui de l'utilisateur (RLS : Direction et
+ * administrateur seulement). Le calcul des prix proposés au commercial passe
+ * le client d'administration (src/lib/quote-pricing.ts) et ne renvoie que des
+ * prix de vente, jamais un coût.
+ */
+type Db = Awaited<ReturnType<typeof createClient>> | ReturnType<typeof import("@/lib/supabase/admin").createAdminClient>;
+
+/**
  * Lecture des données de tarification (migration 0067) — tables réservées à
  * la Direction et à l'administrateur par la RLS (is_admin()) : appelé pour un
  * autre rôle, tout revient vide plutôt que d'exposer un coût.
@@ -13,8 +21,8 @@ export interface PricingSettings extends PricingParams {
   updatedAt: string | null;
 }
 
-export async function getPricingSettings(): Promise<PricingSettings> {
-  const supabase = await createClient();
+export async function getPricingSettings(db?: Db): Promise<PricingSettings> {
+  const supabase = db ?? (await createClient());
   const { data } = await supabase.from("pricing_settings").select("*").maybeSingle();
   return {
     chargesPct: Number(data?.charges_pct ?? 40),
@@ -25,11 +33,11 @@ export async function getPricingSettings(): Promise<PricingSettings> {
   };
 }
 
-export async function getPrintGrid(): Promise<PrintGrid> {
-  const supabase = await createClient();
+export async function getPrintGrid(db?: Db): Promise<PrintGrid> {
+  const supabase = db ?? (await createClient());
   const [{ data: rows }, settings] = await Promise.all([
     supabase.from("print_costs").select("nb_couleurs,cout_piece").order("nb_couleurs"),
-    getPricingSettings(),
+    getPricingSettings(supabase),
   ]);
   return {
     coutParNbCouleurs: Object.fromEntries((rows ?? []).map((r) => [r.nb_couleurs as number, Number(r.cout_piece)])),
@@ -48,9 +56,9 @@ export interface ModelPricing {
 }
 
 /** Grilles de plusieurs modèles en trois requêtes — page de synthèse comme fiche modèle. */
-export async function getModelPricings(modelIds: string[]): Promise<Record<string, ModelPricing>> {
+export async function getModelPricings(modelIds: string[], db?: Db): Promise<Record<string, ModelPricing>> {
   if (modelIds.length === 0) return {};
-  const supabase = await createClient();
+  const supabase = db ?? (await createClient());
   const [{ data: overrides }, { data: comps }, { data: forced }] = await Promise.all([
     supabase.from("model_pricing").select("*").in("product_model_id", modelIds),
     supabase

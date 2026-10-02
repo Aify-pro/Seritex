@@ -18,7 +18,7 @@ export async function getQuoteLinesWithColorConfig(quoteId: string): Promise<Quo
     supabase
       .from("quote_lines")
       .select(
-        "*,couleur_unique:couleur_unique_id(id,name,code),zone_colors:quote_line_zone_colors(zone_key,colors:color_id(id,name,code)),printable_zones:quote_line_printable_zones(printable_zone_id,nb_couleurs,product_printable_zones(zone_label,display_order)),sizes:quote_line_sizes(taille,quantite)"
+        "*,couleur_unique:couleur_unique_id(id,name,code),zone_colors:quote_line_zone_colors(zone_key,colors:color_id(id,name,code)),printable_zones:quote_line_printable_zones(printable_zone_id,nb_couleurs,product_printable_zones(zone_label,display_order)),sizes:quote_line_sizes(taille,quantite),size_prices:quote_line_size_prices(taille,prix)"
       )
       .eq("quote_id", quoteId),
     supabase.from("product_zone_templates").select("product_model_id,zone_key,zone_label"),
@@ -77,6 +77,9 @@ export async function getQuoteLinesWithColorConfig(quoteId: string): Promise<Quo
         .sort((a, b) => a.display_order - b.display_order),
       sizes: Object.fromEntries(
         ((l.sizes ?? []) as unknown as { taille: string; quantite: number }[]).map((z) => [z.taille, z.quantite])
+      ),
+      size_prices: Object.fromEntries(
+        ((l.size_prices ?? []) as unknown as { taille: string; prix: number }[]).map((z) => [z.taille, Number(z.prix)])
       ),
       visuels,
       maquette: maquette ? { ...maquette, previewUrl: maquettePreviewUrls.get(maquette.id) ?? null } : null,

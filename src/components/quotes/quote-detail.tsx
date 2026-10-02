@@ -2,7 +2,7 @@ import { Card, CardHeader, CardBody } from "@/components/ui/card";
 import { StatusBadge } from "@/components/ui/badge";
 import { QUOTE_STATUS_LABELS, type AttachableMediaFile, type Quote, type QuoteLine } from "@/lib/types/domain";
 import { formatAmount, formatDate } from "@/lib/utils";
-import { computeQuoteTotals, lineNet } from "@/lib/quote-totals";
+import { computeQuoteTotals, hasSizePrices, lineNet } from "@/lib/quote-totals";
 import { delaiLabel } from "@/lib/delivery";
 import { BASE_CURRENCY } from "@/lib/currency";
 import { amountInWordsFr } from "@/lib/number-to-words-fr";
@@ -140,6 +140,9 @@ export function QuoteDetail({
                         quoteLineId={l.id}
                         sizes={sizeOptionsByModel[l.product_model_id] ?? []}
                         initial={l.sizes ?? {}}
+                        prices={l.size_prices ?? {}}
+                        devise={devise}
+                        remisePct={Number(l.remise_pct ?? 0)}
                         quantity={l.quantity}
                         // Ajustable une fois le devis envoyé, avant acceptation (client, ou commercial à sa demande).
                         editable={canAccept && quote.status === "envoye"}
@@ -181,6 +184,7 @@ export function QuoteDetail({
                   <td className="px-5 py-3 text-foreground-muted">{l.quantity}</td>
                   <td className="px-5 py-3 text-foreground-muted">
                     {money(l.unit_price)}
+                    {hasSizePrices(l) && <span className="block text-[11px] text-foreground-muted">moyen, selon taille</span>}
                     {Number(l.remise_pct ?? 0) > 0 && <span className="block text-xs">remise {l.remise_pct} %</span>}
                   </td>
                   <td className="px-5 py-3 font-medium text-foreground">{money(lineNet(l, devise))}</td>

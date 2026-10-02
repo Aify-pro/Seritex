@@ -396,6 +396,8 @@ export interface QuoteLine {
   printable_zones?: QuoteLinePrintableZone[];
   // Répartition par taille (migration 0066) — clé « Groupe/Libellé » → pièces.
   sizes?: Record<string, number>;
+  // Prix unitaire par taille (migration 0068) — absent : prix unique unit_price.
+  size_prices?: Record<string, number>;
 }
 
 /** Emplacement imprimé d'une ligne de devis et son nombre de couleurs (migration 0065). */
