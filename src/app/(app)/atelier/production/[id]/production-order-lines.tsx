@@ -65,9 +65,10 @@ export interface LineData {
   /**
    * Sections d'atelier retenues sur cet article (migration 0037), dans
    * l'ordre de passage, avec leur quantité de pièces (migration 0052 ;
-   * null = quantité totale de l'article).
+   * null = quantité totale de l'article) et leur éventuelle partie de la
+   * pièce (migration 0069, ex. « Manches »).
    */
-  sections: { sectionId: string; quantite: number | null }[];
+  sections: { sectionId: string; quantite: number | null; partie: string | null }[];
   /** Une section de catégorie Coupe est-elle retenue ? Conditionne l'affichage de la fiche Patronnage. */
   coupeSelected: boolean;
   fiche: { id: string; numeroOt: string; statut: StatutFiche } | null;
@@ -82,6 +83,8 @@ export interface LineData {
   visuelsFromDevis: DownloadableMediaFile[];
   /** Visuel(s) déposés directement sur cet article d'ODF — détachables ici. */
   visuelAttached: DownloadableMediaFile[];
+  /** Visuel(s) affecté(s) à un atelier d'impression précis (migration 0069). */
+  visuelAffectations: { sectionId: string; mediaFileId: string }[];
   /** Maquette déposée au devis pour la ligne d'origine (migration 0041) — fait foi, lecture seule sur l'ODF ; null si le devis n'en avait pas. */
   maquetteFromDevis: MaquetteFile | null;
   /** Maquette déposée directement sur cet article d'ODF — rattrapage, seulement pertinent si maquetteFromDevis est null. */
@@ -126,7 +129,7 @@ export function ProductionOrderLines({
   productModels: { id: string; name: string }[];
   colors: ColorOption[];
   /** Toutes les sections d'atelier actives, pour le sélecteur de sections retenues de chaque article. */
-  allSections: { id: string; name: string; categorieNom: string | null }[];
+  allSections: { id: string; name: string; categorieNom: string | null; requiertVisuel: boolean }[];
   /** Fichiers de la médiathèque déjà affiliés à la demande de cet ODF, pour le sélecteur de visuel/maquette de chaque article. */
   availableMediaFiles: AttachableMediaFile[];
   /** Disponibilité couleurs, commentaire libre — jamais validé par le logiciel (section 9), reste au niveau de l'ODF entier. */
@@ -229,7 +232,7 @@ function LineCard({
   line: LineData;
   productModels: { id: string; name: string }[];
   colors: ColorOption[];
-  allSections: { id: string; name: string; categorieNom: string | null }[];
+  allSections: { id: string; name: string; categorieNom: string | null; requiertVisuel: boolean }[];
   availableMediaFiles: AttachableMediaFile[];
 }) {
   const [pending, startTransition] = useTransition();
@@ -468,6 +471,11 @@ function LineCard({
             attached={line.visuelAttached}
             available={availableMediaFiles}
             required={line.impressionSectionSelected}
+            impressionSections={line.sections
+              .map((chosen) => allSections.find((s) => s.id === chosen.sectionId))
+              .filter((s): s is NonNullable<typeof s> => !!s?.requiertVisuel)
+              .map((s) => ({ id: s.id, name: s.name }))}
+            affectations={line.visuelAffectations}
           />
         )}
 

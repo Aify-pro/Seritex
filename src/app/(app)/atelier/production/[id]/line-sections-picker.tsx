@@ -24,8 +24,14 @@ import { setProductionOrderLineSections } from "../actions";
  * total ne correspond pas à la quantité de l'article : soit le travail est
  * partagé et il faut répartir les pièces, soit une section est de trop.
  * Avertissement seulement, pas un blocage de validation.
+ *
+ * Le travail peut aussi être réparti par PARTIE de la pièce plutôt que par
+ * quantité (migration 0069) : une partie du T-shirt en DTF et l'autre en
+ * sérigraphie, les manches à la bonneterie et le col au bunker. Une section
+ * qui porte une partie travaille sur toutes les pièces de l'article, pour
+ * cette partie seulement : elle sort du contrôle de quantité ci-dessus.
  */
-type ChosenSection = { sectionId: string; quantite: number | null };
+type ChosenSection = { sectionId: string; quantite: number | null; partie: string | null };
 
 export function LineSectionsPicker({
   lineId,
@@ -36,7 +42,7 @@ export function LineSectionsPicker({
 }: {
   lineId: string;
   productionOrderId: string;
-  allSections: { id: string; name: string; categorieNom: string | null }[];
+  allSections: { id: string; name: string; categorieNom: string | null; requiertVisuel: boolean }[];
   lineQuantity: number;
   initialSections: ChosenSection[];
 }) {
@@ -48,10 +54,11 @@ export function LineSectionsPicker({
   const availableSections = allSections.filter((s) => !sectionIds.includes(s.id));
   const quantiteEffective = (s: ChosenSection) => s.quantite ?? lineQuantity;
 
-  // Catégories où plusieurs ateliers sont retenus et dont le total ne
-  // correspond pas à la quantité de l'article.
+  // Catégories où plusieurs ateliers se partagent les PIÈCES (sans partie
+  // renseignée) et dont le total ne correspond pas à la quantité de l'article.
   const byCategorie = new Map<string, ChosenSection[]>();
   for (const s of sections) {
+    if (s.partie) continue;
     const categorie = allSections.find((a) => a.id === s.sectionId)?.categorieNom;
     if (categorie) byCategorie.set(categorie, [...(byCategorie.get(categorie) ?? []), s]);
   }
@@ -77,7 +84,7 @@ export function LineSectionsPicker({
   }
 
   function addSection(id: string) {
-    persist([...sections, { sectionId: id, quantite: null }]);
+    persist([...sections, { sectionId: id, quantite: null, partie: null }]);
   }
 
   function removeSection(id: string) {
@@ -104,6 +111,13 @@ export function LineSectionsPicker({
     persist(sections.map((s) => (s.sectionId === id ? { ...s, quantite } : s)));
   }
 
+  function setPartie(id: string, raw: string) {
+    const partie = raw.trim() || null;
+    const current = sections.find((s) => s.sectionId === id);
+    if (!current || current.partie === partie) return;
+    persist(sections.map((s) => (s.sectionId === id ? { ...s, partie } : s)));
+  }
+
   // Partage à parts égales entre les ateliers d'une catégorie ; le reste de
   // la division va aux premiers dans l'ordre de passage (ex. 101 → 51 / 50).
   function repartirEgalement(group: ChosenSection[]) {
@@ -122,8 +136,20 @@ export function LineSectionsPicker({
     <div className="space-y-2">
       <div>
         <p className="text-xs font-medium text-foreground-muted">Sections retenues</p>
-        <p className="text-[11px] text-foreground-muted">Dans l&apos;ordre de passage de cet article.</p>
+        <p className="text-[11px] text-foreground-muted">
+          Dans l&apos;ordre de passage de cet article. Si deux ateliers se partagent les pièces d&apos;une même
+          catégorie, répartissez les quantités ; s&apos;ils se partagent la pièce elle-même (ex. manches / col),
+          indiquez la partie de chacun.
+        </p>
       </div>
+      <datalist id="parties-suggestions">
+        <option value="Manches" />
+        <option value="Col" />
+        <option value="Poitrine" />
+        <option value="Dos" />
+        <option value="Devant" />
+        <option value="Poche" />
+      </datalist>
       {sectionIds.length === 0 ? (
           <p className="rounded-md border border-dashed border-border bg-surface-muted px-3 py-2 text-xs text-foreground-muted">
             Aucune section retenue pour l&apos;instant.
@@ -147,6 +173,21 @@ export function LineSectionsPicker({
                       <span className="ml-1.5 text-[11px] text-foreground-muted">{section.categorieNom}</span>
                     )}
                   </span>
+                  <input
+                    key={`${id}-partie-${chosen.partie ?? ""}`}
+                    type="text"
+                    maxLength={80}
+                    list="parties-suggestions"
+                    defaultValue={chosen.partie ?? ""}
+                    disabled={pending}
+                    placeholder="Partie (ex. manches)"
+                    aria-label={`Partie de la pièce — ${section?.name ?? "section"}`}
+                    onBlur={(e) => setPartie(id, e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") e.currentTarget.blur();
+                    }}
+                    className="h-7 w-36 shrink-0 rounded-md border border-border bg-surface px-1.5 text-xs text-foreground outline-none placeholder:text-foreground-muted/70 focus:ring-2 focus:ring-brand/30 disabled:opacity-60"
+                  />
                   <label className="flex shrink-0 items-center gap-1 text-xs text-foreground-muted">
                     <input
                       key={`${id}-${chosen.quantite ?? "total"}`}
