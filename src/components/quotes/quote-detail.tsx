@@ -231,8 +231,13 @@ export function QuoteDetail({
       )}
 
       <p className="text-xs text-foreground-muted">
-        {quote.valid_until ? `Valable jusqu'au ${formatDate(quote.valid_until)}` : ""}
-        {validatedBy && quote.validated_at ? `${quote.valid_until ? " · " : ""}Validé en interne par ${validatedBy} le ${formatDate(quote.validated_at)}` : ""}
+        {[
+          quote.valid_until ? `Valable jusqu'au ${formatDate(quote.valid_until)}` : null,
+          editable && quote.sage_piece ? `Devis Sage ${quote.sage_piece}` : null,
+          validatedBy && quote.validated_at ? `Validé en interne par ${validatedBy} le ${formatDate(quote.validated_at)}` : null,
+        ]
+          .filter(Boolean)
+          .join(" · ")}
       </p>
 
       {quote.status === "envoye" && canAccept && (

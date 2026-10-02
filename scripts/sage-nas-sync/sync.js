@@ -13,6 +13,9 @@
 //   - sage_articles_view   (articles des familles MP/SF/PF uniquement)
 //   - stock_item_view      (stock reel/reserve par article ET par depot,
 //                            migration 0058)
+//   - sage_quotes_view / sage_quote_lines_view (devis Sage EN COURS : documents
+//                            de vente de type devis, pas encore transformes ;
+//                            migration 0071)
 //
 // Remplacement complet a chaque passage (upsert + suppression des lignes
 // disparues cote Sage) : volumes modestes (quelques milliers de lignes),
@@ -214,12 +217,132 @@ async function syncStock(pool) {
   console.log(`Stock : ${rows.length} ligne(s) synchronisee(s).`);
 }
 
+// Devis Sage en cours : documents de vente (DO_Domaine = 0) de type devis
+// (DO_Type = 0) qui existent encore comme devis. Une fois transforme en
+// commande/BL/facture, ou purge apres un refus, le devis disparait de Sage et
+// donc du miroir (meme logique de remplacement complet que le reste).
+//
+// Les colonnes obligatoires sont verifiees avant la requete, avec un message
+// qui les nomme : un ecart de version Sage ne doit pas se traduire par une
+// erreur SQL opaque. Les colonnes facultatives (reference client, commercial,
+// devise, livraison, statut, taxe) sont simplement ignorees si absentes.
+async function colonnesDe(pool, table) {
+  const r = await pool
+    .request()
+    .input("t", sql.VarChar, table)
+    .query("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = @t");
+  return new Set(r.recordset.map((x) => x.COLUMN_NAME));
+}
+
+function exigerColonnes(table, presentes, requises) {
+  const manquantes = requises.filter((c) => !presentes.has(c));
+  if (manquantes.length > 0) {
+    throw new Error(`${table} : colonne(s) introuvable(s) sur le NAS : ${manquantes.join(", ")}`);
+  }
+}
+
+function dateJour(v) {
+  const iso = dateOrNull(v);
+  return iso ? iso.slice(0, 10) : null;
+}
+
+async function syncDevis(pool) {
+  const enteteCols = await colonnesDe(pool, "F_DOCENTETE");
+  const ligneCols = await colonnesDe(pool, "F_DOCLIGNE");
+  if (enteteCols.size === 0 || ligneCols.size === 0) {
+    throw new Error("F_DOCENTETE / F_DOCLIGNE absentes de la base miroir du NAS (documents de vente non copies).");
+  }
+  exigerColonnes("F_DOCENTETE", enteteCols, ["DO_Domaine", "DO_Type", "DO_Piece", "DO_Date", "DO_Tiers", "DO_TotalHT", "DO_TotalTTC"]);
+  exigerColonnes("F_DOCLIGNE", ligneCols, ["DO_Domaine", "DO_Type", "DO_Piece", "DL_Ligne", "DL_Design", "DL_Qte", "DL_PrixUnitaire", "DL_MontantHT", "AR_Ref"]);
+
+  const optE = ["DO_Ref", "CO_No", "DO_Devise", "DO_DateLivr", "DO_Statut"].filter((c) => enteteCols.has(c));
+  const entetes = await pool.request().query(`
+    SELECT DO_Piece, DO_Date, DO_Tiers, DO_TotalHT, DO_TotalTTC${optE.map((c) => `, ${c}`).join("")}
+    FROM F_DOCENTETE
+    WHERE DO_Domaine = 0 AND DO_Type = 0
+  `);
+
+  const now = new Date().toISOString();
+  const piecesEntete = new Set();
+  const headerRows = [];
+  for (const r of entetes.recordset) {
+    const piece = trimOrNull(r.DO_Piece);
+    const tiers = trimOrNull(r.DO_Tiers);
+    if (!piece || !tiers) continue;
+    piecesEntete.add(piece);
+    headerRows.push({
+      sage_piece: piece,
+      doc_date: dateJour(r.DO_Date),
+      client_ref: trimOrNull(r.DO_Ref),
+      client_sage_code: tiers,
+      representant_no: r.CO_No !== null && r.CO_No !== undefined && Number(r.CO_No) > 0 ? Number(r.CO_No) : null,
+      devise_no: r.DO_Devise !== null && r.DO_Devise !== undefined ? Number(r.DO_Devise) : null,
+      total_ht: Number(r.DO_TotalHT) || 0,
+      total_ttc: Number(r.DO_TotalTTC) || 0,
+      date_livraison: dateJour(r.DO_DateLivr),
+      statut: r.DO_Statut !== null && r.DO_Statut !== undefined ? Number(r.DO_Statut) : null,
+      last_sync_at: now,
+    });
+  }
+
+  // Cle de ligne : DL_No (identifiant unique Sage) si present, sinon DL_Ligne.
+  const cleLigne = ligneCols.has("DL_No") ? "DL_No" : "DL_Ligne";
+  const optL = ["DL_No", "DL_Taxe1"].filter((c) => ligneCols.has(c));
+  // Hors lignes de commentaire / titre : quantite nulle ou designation vide.
+  const lignes = await pool.request().query(`
+    SELECT DO_Piece, DL_Ligne, DL_Design, DL_Qte, DL_PrixUnitaire, DL_MontantHT, AR_Ref${optL.map((c) => `, ${c}`).join("")}
+    FROM F_DOCLIGNE
+    WHERE DO_Domaine = 0 AND DO_Type = 0 AND DL_Qte > 0 AND LTRIM(RTRIM(ISNULL(DL_Design, ''))) <> ''
+  `);
+
+  const lineRows = [];
+  const dejaVues = new Set();
+  for (const r of lignes.recordset) {
+    const piece = trimOrNull(r.DO_Piece);
+    if (!piece || !piecesEntete.has(piece)) continue;
+    const quantite = Number(r.DL_Qte) || 0;
+    const pu = Number(r.DL_PrixUnitaire) || 0;
+    const montant = Number(r.DL_MontantHT) || 0;
+    // Remise effective, quel que soit son type Sage (pourcentage, montant, remises
+    // cumulees) : ecart entre le brut et le montant HT de la ligne.
+    const brut = quantite * pu;
+    let remise = brut > 0 ? (1 - montant / brut) * 100 : 0;
+    remise = Math.min(100, Math.max(0, Math.round(remise * 100) / 100));
+    const numero = Number(r[cleLigne]);
+    const cle = `${piece}|${numero}`;
+    if (dejaVues.has(cle)) continue;
+    dejaVues.add(cle);
+    lineRows.push({
+      sage_piece: piece,
+      line_no: numero,
+      position: Number(r.DL_Ligne) || 0,
+      ar_ref: trimOrNull(r.AR_Ref),
+      designation: trimOrNull(r.DL_Design) || "(sans designation)",
+      quantity: quantite,
+      unit_price: pu,
+      remise_pct: remise,
+      tva_rate: r.DL_Taxe1 !== null && r.DL_Taxe1 !== undefined ? Number(r.DL_Taxe1) : null,
+      total_ht: montant,
+    });
+  }
+
+  // En-tetes d'abord (cle etrangere), lignes ensuite ; la suppression d'un
+  // en-tete disparu emporte ses lignes (on delete cascade), puis on retire les
+  // lignes disparues d'un devis qui existe toujours.
+  await upsertAndPrune("sage_quotes_view", ["sage_piece"], headerRows);
+  await upsertAndPrune("sage_quote_lines_view", ["sage_piece", "line_no"], lineRows);
+  console.log(`Devis Sage en cours : ${headerRows.length} devis, ${lineRows.length} ligne(s) synchronises.`);
+}
+
 // Upsert de toutes les lignes actuelles, puis suppression des lignes
 // existantes en base qui n'apparaissent plus dans le resultat Sage
 // (remplacement complet, pas de suivi incremental pour ce volume).
 async function upsertAndPrune(table, keyColumns, rows) {
-  if (rows.length > 0) {
-    const { error } = await supabase.from(table).upsert(rows, { onConflict: keyColumns.join(",") });
+  // Par paquets : les lignes de devis se comptent en dizaines de milliers, une
+  // seule requete depasserait la taille acceptee par l'API.
+  const CHUNK = 500;
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const { error } = await supabase.from(table).upsert(rows.slice(i, i + CHUNK), { onConflict: keyColumns.join(",") });
     if (error) throw new Error(`Upsert ${table} : ${error.message}`);
   }
 
@@ -250,6 +373,15 @@ async function main() {
     await syncClients(pool);
     await syncArticles(pool);
     await syncStock(pool);
+    // Isole : un probleme sur les devis (colonne absente, documents de vente
+    // non copies sur le NAS) ne doit pas empecher clients / articles / stock.
+    // Le code de sortie signale quand meme l'echec (alerte e-mail DSM).
+    try {
+      await syncDevis(pool);
+    } catch (err) {
+      console.error("ERREUR devis Sage :", err.message);
+      process.exitCode = 1;
+    }
   } finally {
     await pool.close();
   }

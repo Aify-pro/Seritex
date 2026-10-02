@@ -8,6 +8,8 @@ import { notFound } from "next/navigation";
 import { StatusSelect } from "./status-select";
 import { MessageThread, type Message } from "./message-thread";
 import { QuoteForm, type QuoteCorrection } from "./quote-form";
+import { SageQuotesPanel } from "@/components/quotes/sage-quotes-panel";
+import { getSagePrefill, getSageQuotesForClient, getSageQuotesLastSync, searchSageQuotesByNumber } from "@/lib/sage-quotes";
 import { postMessage } from "@/lib/actions/requests";
 import Link from "next/link";
 import { formatDate } from "@/lib/utils";
@@ -16,14 +18,22 @@ import { getSampleQuoteLineOptions } from "@/lib/samples";
 import { getCompanySettings } from "@/lib/company-settings";
 import { getDispatchRules, getSizeOptionsByModel } from "@/lib/quote-dispatch";
 
-export default async function RequestDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function RequestDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  /** `sage` : n° d'un devis Sage à récupérer (préremplit le devis) ; `sage_q` : recherche par numéro (migration 0071). */
+  searchParams: Promise<{ sage?: string; sage_q?: string }>;
+}) {
   const { authId } = await requireRole(["commercial", "administrateur"]);
   const { id } = await params;
+  const { sage: sageParam, sage_q: sageQuery } = await searchParams;
   const supabase = await createClient();
 
   const { data: request } = await supabase
     .from("requests")
-    .select("*,companies(id,name,email,phone,address,postal_code,city,country,ncc,rccm),contacts(first_name,last_name,email)")
+    .select("*,companies(id,name,email,phone,address,postal_code,city,country,ncc,rccm,sage_code),contacts(first_name,last_name,email)")
     .eq("id", id)
     .single();
 
@@ -198,6 +208,18 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
     },
   };
 
+  // Devis Sage en cours du client (migration 0071) : liste, recherche par numéro
+  // et, si `?sage=` est présent, préremplissage du formulaire de devis.
+  const sageCode = (request.companies as unknown as { sage_code: string | null } | null)?.sage_code ?? null;
+  const [sageList, sageSearch, sageLastSync, sagePrefillResult] = await Promise.all([
+    sageCode ? getSageQuotesForClient(sageCode) : Promise.resolve({ quotes: [], total: 0 }),
+    sageQuery ? searchSageQuotesByNumber(sageQuery, sageCode) : Promise.resolve(null),
+    getSageQuotesLastSync(),
+    sageParam ? getSagePrefill(sageParam.trim(), sageCode) : Promise.resolve(null),
+  ]);
+  const sagePrefill = sagePrefillResult && "prefill" in sagePrefillResult ? sagePrefillResult.prefill : undefined;
+  const sagePrefillError = sagePrefillResult && "error" in sagePrefillResult ? sagePrefillResult.error : null;
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -232,7 +254,10 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
                             <Link href={`/commercial/devis/${q.id}`} className="text-sm font-medium text-foreground hover:text-brand">
                               {q.reference}
                             </Link>
-                            <p className="text-xs text-foreground-muted">{formatDate(q.created_at)}</p>
+                            <p className="text-xs text-foreground-muted">
+                              {formatDate(q.created_at)}
+                              {q.sage_piece ? ` · Devis Sage ${q.sage_piece}` : ""}
+                            </p>
                           </div>
                           <StatusBadge status={q.status} labels={QUOTE_STATUS_LABELS} kind="quote" />
                         </div>
@@ -251,7 +276,18 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
                   })}
                 </ul>
               )}
-              <QuoteForm {...quoteFormProps} />
+              <SageQuotesPanel
+                requestId={request.id}
+                hasSageCode={!!sageCode}
+                quotes={sageList.quotes}
+                total={sageList.total}
+                searchQuery={sageQuery ?? ""}
+                searchResults={sageSearch}
+                lastSync={sageLastSync}
+                prefillError={sagePrefillError}
+              />
+              {/* key : changer de devis Sage remonte un formulaire neuf (état initial = préremplissage). */}
+              <QuoteForm key={sagePrefill?.sagePiece ?? "nouveau"} {...quoteFormProps} prefill={sagePrefill} />
             </CardBody>
           </Card>
 

@@ -358,6 +358,8 @@ export interface Quote {
   delai_unite?: DelaiUnite | null;
   delai_depart?: DelaiDepart | null;
   notes?: string | null;
+  /** N° du devis Sage d'origine (migration 0071) — jamais imprimé sur le PDF. */
+  sage_piece?: string | null;
   // Validation interne avant envoi au client (migration 0063).
   validated_by?: string | null;
   validated_at?: string | null;

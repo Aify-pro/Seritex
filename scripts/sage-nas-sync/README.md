@@ -11,7 +11,7 @@ Ne modifie jamais Sage ni le NAS — lecture seule côté NAS, écriture côté
 Supabase uniquement (via la clé `service_role`, qui contourne le RLS —
 jamais utilisée côté client).
 
-**Préalable** : les migrations `0058_stock_item_view_multi_depot.sql` et
+**Préalable** : la migration `0071_sage_devis_miroir_et_recuperation.sql` (devis Sage en cours) doit aussi être appliquée avant de reconstruire l'image, comme les migrations `0058_stock_item_view_multi_depot.sql` et
 `0059_clients_sage_source_de_verite.sql` et
 `0060_clients_liste_recherche_filtres.sql` doivent être appliquées sur le projet
 Supabase **avant** de reconstruire l'image et de relancer la synchro
@@ -19,6 +19,16 @@ Supabase **avant** de reconstruire l'image et de relancer la synchro
 `sage_customers_view` et fonction `sync_companies_from_sage()`).
 
 ## Périmètre synchronisé
+- **Devis Sage en cours** (`F_DOCENTETE` / `F_DOCLIGNE`, `DO_Domaine = 0` et
+  `DO_Type = 0`) : tous les devis qui existent encore comme devis dans Sage,
+  c'est-à-dire pas encore transformés en commande ou autre. Un devis refusé par
+  le client reste listé tant que le service commercial ne l'a pas purgé ou
+  changé d'état dans Sage. Écrits dans `sage_quotes_view` et
+  `sage_quote_lines_view`, utilisés par « Récupérer un devis Sage » dans une
+  demande. Les lignes de commentaire (quantité nulle ou désignation vide) sont
+  ignorées. Cette partie est isolée : si elle échoue (colonne absente, tables de
+  documents de vente non copiées sur le NAS), clients, articles et stock sont
+  quand même synchronisés, mais le script se termine en erreur.
 - **Clients** (`F_COMPTET`) : uniquement les comptes dont `CG_NumPrinc`
   commence par `411` (convention comptable = clients, pas fournisseurs).
   Écrits dans `sage_customers_view` (miroir), puis rattachés à `companies`

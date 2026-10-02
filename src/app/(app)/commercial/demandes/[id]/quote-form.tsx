@@ -16,6 +16,7 @@ import { DispatchEditor, type SizeOption } from "@/components/quotes/dispatch-ed
 import { generateDispatch, pickRule, type Dispatch, type DispatchRule } from "@/lib/dispatching";
 import { averageUnitPrice } from "@/lib/quote-totals";
 import { LinePricesEditor, type PriceSource } from "./line-prices-editor";
+import type { SagePrefill } from "@/lib/sage-quotes";
 
 type ProductModel = { id: string; name: string; base_price: number | null };
 type ZoneTemplate = { zone_key: string; zone_label: string; display_order: number };
@@ -172,6 +173,28 @@ function lineFromCorrection(l: CorrectionLine): LineDraft {
   };
 }
 
+/** Ligne d'un devis Sage récupéré : texte libre (le modèle se choisit ensuite), prix et remise de Sage conservés. */
+function lineFromSage(l: SagePrefill["lines"][number]): LineDraft {
+  return {
+    ...newLine(),
+    description: l.description,
+    quantity: String(l.quantity),
+    unitPrice: String(l.unit_price),
+    remisePct: String(l.remise_pct),
+  };
+}
+
+/** Mentions reprises de Sage : référence client, TVA, date de livraison ; le reste suit les valeurs par défaut. */
+function termsFromSage(base: TermsDraft, p: SagePrefill): TermsDraft {
+  return {
+    ...base,
+    referenceClient: p.clientRef ?? "",
+    tvaRate: p.tvaRate !== null ? String(p.tvaRate) : base.tvaRate,
+    livraisonMode: p.dateLivraison ? "date" : base.livraisonMode,
+    dateLivraison: p.dateLivraison ?? "",
+  };
+}
+
 /** Prix saisis en texte → nombres valides (virgule décimale acceptée). */
 function numericPrices(prices: Record<string, string>): Record<string, number> {
   const out: Record<string, number> = {};
@@ -224,6 +247,7 @@ export function QuoteForm({
   paymentTerms,
   currencies,
   correction,
+  prefill,
 }: {
   requestId: string;
   companyId: string;
@@ -242,11 +266,15 @@ export function QuoteForm({
   currencies: CurrencyOption[];
   /** Présent : le formulaire corrige ce devis renvoyé au lieu d'en créer un. */
   correction?: QuoteCorrection;
+  /** Présent : le formulaire s'ouvre prérempli depuis ce devis Sage (migration 0071). */
+  prefill?: SagePrefill;
 }) {
   const [pending, startTransition] = useTransition();
-  const [open, setOpen] = useState(false);
-  const [lines, setLines] = useState<LineDraft[]>([newLine()]);
-  const [terms, setTerms] = useState<TermsDraft>(() => newTerms(defaults, paymentTerms));
+  const [open, setOpen] = useState(!!prefill);
+  const [lines, setLines] = useState<LineDraft[]>(() => (prefill ? prefill.lines.map(lineFromSage) : [newLine()]));
+  const [terms, setTerms] = useState<TermsDraft>(() =>
+    prefill ? termsFromSage(newTerms(defaults, paymentTerms), prefill) : newTerms(defaults, paymentTerms)
+  );
   const router = useRouter();
 
   if (!open) {
@@ -421,18 +449,41 @@ export function QuoteForm({
       };
       const res = correction
         ? await resubmitQuote(correction.quoteId, payload, dateLivraison, termsInput)
-        : await createQuote(requestId, companyId, payload, dateLivraison, termsInput);
+        : await createQuote(requestId, companyId, payload, dateLivraison, termsInput, prefill?.sagePiece ?? null);
       if (res.error) toast.error(res.error);
       else {
         toast.success(correction ? "Devis corrigé — resoumis à la validation interne" : "Devis créé — en attente de validation interne");
         setOpen(false);
-        router.refresh();
+        // Un devis récupéré de Sage : on quitte `?sage=` (le devis est désormais lié, il ne se récupère plus).
+        if (prefill) router.replace(`/commercial/demandes/${requestId}`);
+        else router.refresh();
       }
     });
   }
 
   return (
     <div className="space-y-3 rounded-md border border-border bg-surface-muted/50 p-4">
+      {prefill && (
+        <div className="space-y-1 rounded-md border border-info/30 bg-info-soft/50 px-3 py-2 text-sm">
+          <p className="font-medium text-foreground">Prérempli depuis le devis Sage {prefill.sagePiece}</p>
+          <p className="text-xs text-foreground-muted">
+            Quantités, prix, remises, TVA, référence client et livraison sont repris de Sage (total Sage : {formatMoney(prefill.totalHt, BASE_CURRENCY)} HT,{" "}
+            {formatMoney(prefill.totalTtc, BASE_CURRENCY)} TTC). Les articles arrivent en texte libre : choisissez le modèle, les couleurs et les impressions de chaque ligne avant de
+            soumettre. Le devis suivra la validation interne.
+          </p>
+          {Math.abs(totals.ht - prefill.totalHt) > 1 && (
+            <p className="text-xs font-medium text-warning">
+              Attention : le total HT calculé ici ({formatMoney(totals.ht, terms.devise)}) diffère de celui de Sage ({formatMoney(prefill.totalHt, BASE_CURRENCY)}) — remise globale ou
+              arrondi dans Sage ? Vérifiez avant de soumettre.
+            </p>
+          )}
+          {prefill.deviseNo ? (
+            <p className="text-xs font-medium text-warning">
+              Ce devis est en devise étrangère dans Sage (n° {prefill.deviseNo}) : les prix repris sont ceux convertis en F CFA par Sage. Changez la devise du devis ci-dessous si besoin.
+            </p>
+          ) : null}
+        </div>
+      )}
       <div className="space-y-2 rounded-md border border-border bg-surface p-3">
         <p className="text-xs font-medium text-foreground-muted">Client</p>
         <p className="text-sm font-semibold text-foreground">{client.name}</p>
