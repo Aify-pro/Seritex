@@ -502,8 +502,14 @@ export async function buildQuotePdf(data: QuotePdfData): Promise<Uint8Array> {
     drawSig(sx, `Pour ${issuerName}`, "Établi et signé par");
     if (seal.stampPng) {
       const stamp = await pdf.embedPng(seal.stampPng);
-      const st = 70;
-      page.drawImage(stamp, { x: sx + sigW - st - 14, y: y - sigH + 14, width: st, height: st, opacity: 0.92 });
+      // Proportions de l'image respectées (cachet rond, ovale ou rectangulaire) :
+      // elle tient dans 70 pt de haut et 60 % de la largeur de la case, sans jamais être déformée.
+      const maxH = 70;
+      const maxW = sigW * 0.6;
+      const k = Math.min(maxW / stamp.width, maxH / stamp.height);
+      const sw = stamp.width * k;
+      const sh = stamp.height * k;
+      page.drawImage(stamp, { x: sx + sigW - sw - 14, y: y - sigH + 14 + (maxH - sh) / 2, width: sw, height: sh, opacity: 0.92 });
     }
     const sigImg = await pdf.embedPng(seal.signaturePng);
     const scale = Math.min((sigW * 0.55) / sigImg.width, 42 / sigImg.height);
