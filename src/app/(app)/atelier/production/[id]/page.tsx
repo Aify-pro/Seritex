@@ -78,6 +78,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     { data: chosenLinePrintableZones },
     { data: attachedGeneralMedia },
     { data: attachedLineMedia },
+    { data: visuelAffectations },
     { data: availableMedia },
     { data: stockMovements },
     { data: stockExportFiches },
@@ -97,7 +98,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     // tables n'ayant pas de production_order_id en commun.
     supabase
       .from("production_order_line_sections")
-      .select("production_order_line_id,section_id,ordre,quantite,production_order_lines!inner(production_order_id)")
+      .select("production_order_line_id,section_id,ordre,quantite,partie,production_order_lines!inner(production_order_id)")
       .eq("production_order_lines.production_order_id", id)
       .order("ordre"),
     // ODF multi-lignes : une ligne par article du devis accepté, avec sa
@@ -168,6 +169,11 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
       .select("production_order_line_id,media_file_id,media_files(id,file_name,category)")
       .eq("production_order_id", id)
       .not("production_order_line_id", "is", null),
+    // Visuel affecté à un atelier d'impression précis (migration 0069).
+    supabase
+      .from("production_order_line_section_visuels")
+      .select("production_order_line_id,section_id,media_file_id")
+      .eq("production_order_id", id),
     // Médiathèque proposable pour visuel/maquette/documents généraux
     // (migration 0043) : plus toute la médiathèque du client, seulement ce
     // qui est déjà affilié à la demande d'origine de cet ODF — un fichier
@@ -211,12 +217,18 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
       .filter((s) => (s.atelier_categories as unknown as { requiert_visuel: boolean } | null)?.requiert_visuel)
       .map((s) => s.id)
   );
-  type ChosenLineSection = { production_order_line_id: string; section_id: string; ordre: number; quantite: number | null };
-  const sectionsByLine: Record<string, { sectionId: string; quantite: number | null }[]> = {};
+  type ChosenLineSection = {
+    production_order_line_id: string;
+    section_id: string;
+    ordre: number;
+    quantite: number | null;
+    partie: string | null;
+  };
+  const sectionsByLine: Record<string, { sectionId: string; quantite: number | null; partie: string | null }[]> = {};
   const coupeSelectedByLine: Record<string, boolean> = {};
   const impressionSectionSelectedByLine: Record<string, boolean> = {};
   for (const s of (chosenLineSections ?? []) as unknown as ChosenLineSection[]) {
-    (sectionsByLine[s.production_order_line_id] ??= []).push({ sectionId: s.section_id, quantite: s.quantite });
+    (sectionsByLine[s.production_order_line_id] ??= []).push({ sectionId: s.section_id, quantite: s.quantite, partie: s.partie });
     if (coupeSectionIds.has(s.section_id)) coupeSelectedByLine[s.production_order_line_id] = true;
     if (impressionSectionIds.has(s.section_id)) impressionSectionSelectedByLine[s.production_order_line_id] = true;
   }
@@ -305,6 +317,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     | "impressionSectionSelected"
     | "visuelsFromDevis"
     | "visuelAttached"
+    | "visuelAffectations"
     | "maquetteFromDevis"
     | "maquetteAttached"
     | "printableZoneOptions"
@@ -503,6 +516,9 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
         downloadUrl: visuelDownloadUrls.get(f.id) ?? null,
       })) ?? [],
       visuelAttached: visuelWithUrlByLine[line.id] ?? [],
+      visuelAffectations: (visuelAffectations ?? [])
+        .filter((a) => a.production_order_line_id === line.id)
+        .map((a) => ({ sectionId: a.section_id as string, mediaFileId: a.media_file_id as string })),
       maquetteFromDevis: maquetteFromDevisFile
         ? { ...maquetteFromDevisFile, previewUrl: maquettePreviewUrls.get(maquetteFromDevisFile.id) ?? null }
         : null,
@@ -696,6 +712,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
           id: s.id,
           name: s.name,
           categorieNom: (s.atelier_categories as unknown as { nom: string } | null)?.nom ?? null,
+          requiertVisuel: !!(s.atelier_categories as unknown as { requiert_visuel: boolean } | null)?.requiert_visuel,
         }))}
         availableMediaFiles={availableMediaFiles}
         initialNote={order.note_disponibilite_couleurs}

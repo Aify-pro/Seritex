@@ -45,17 +45,25 @@ function revalidateOdf(productionOrderId: string) {
  * quantité totale de l'article. Utile quand plusieurs ateliers d'une même
  * catégorie se partagent le travail — reprise comme quantité planifiée du
  * sous-ODF à la validation.
+ *
+ * Chaque section peut aussi porter une `partie` de la pièce (migration 0069,
+ * ex. « Manches » / « Col ») : l'atelier travaille alors sur toutes les
+ * pièces, pour cette partie seulement — la quantité reste celle de l'article.
  */
 export async function setProductionOrderLineSections(
   lineId: string,
   productionOrderId: string,
-  sections: { sectionId: string; quantite: number | null }[]
+  sections: { sectionId: string; quantite: number | null; partie: string | null }[]
 ) {
   await requireRole(["administrateur", "responsable_production"]);
   const supabase = await createClient();
 
   if (sections.some((s) => s.quantite !== null && (!Number.isInteger(s.quantite) || s.quantite < 0))) {
     return { error: "La quantité d'une section doit être un nombre entier positif." };
+  }
+  const partieDe = (s: { partie: string | null }) => s.partie?.trim() || null;
+  if (sections.some((s) => (partieDe(s)?.length ?? 0) > 80)) {
+    return { error: "La partie d'une section ne peut pas dépasser 80 caractères." };
   }
 
   const { error: delError } = await supabase
@@ -71,9 +79,26 @@ export async function setProductionOrderLineSections(
         section_id: s.sectionId,
         ordre: i + 1,
         quantite: s.quantite,
+        partie: partieDe(s),
       }))
     );
     if (insError) return { error: insError.message };
+  }
+
+  // Une section retirée de l'article ne doit pas garder de visuel affecté.
+  const { data: affectations } = await supabase
+    .from("production_order_line_section_visuels")
+    .select("section_id")
+    .eq("production_order_line_id", lineId);
+  const keptIds = new Set(sections.map((s) => s.sectionId));
+  const orphanIds = [...new Set((affectations ?? []).map((a) => a.section_id as string))].filter((id) => !keptIds.has(id));
+  if (orphanIds.length > 0) {
+    const { error: orphanError } = await supabase
+      .from("production_order_line_section_visuels")
+      .delete()
+      .eq("production_order_line_id", lineId)
+      .in("section_id", orphanIds);
+    if (orphanError) return { error: orphanError.message };
   }
 
   revalidateOdf(productionOrderId);
@@ -637,9 +662,36 @@ export async function detachMediaFileFromProductionOrder(productionOrderId: stri
  * (pas de contrainte d'unicité sur production_order_media_files) — le
  * rattachement passe toujours par ce point d'entrée unique.
  */
-export async function attachMediaFileToLine(lineId: string, productionOrderId: string, mediaFileId: string) {
+export async function attachMediaFileToLine(
+  lineId: string,
+  productionOrderId: string,
+  mediaFileId: string,
+  sectionId?: string
+) {
   const { authId } = await requireRole(["administrateur", "responsable_production"]);
   const supabase = await createClient();
+
+  // Depuis la zone d'un atelier d'impression : le fichier est joint à
+  // l'article s'il ne l'est pas déjà (il peut déjà y être, ou venir du
+  // devis), puis affecté à cet atelier.
+  if (sectionId) {
+    const { data: already } = await supabase
+      .from("production_order_media_files")
+      .select("id")
+      .eq("production_order_line_id", lineId)
+      .eq("media_file_id", mediaFileId)
+      .maybeSingle();
+    if (!already) {
+      const { error: attachError } = await supabase.from("production_order_media_files").insert({
+        production_order_id: productionOrderId,
+        production_order_line_id: lineId,
+        media_file_id: mediaFileId,
+        added_by: authId,
+      });
+      if (attachError) return { error: attachError.message };
+    }
+    return assignVisuelToSection(lineId, productionOrderId, sectionId, mediaFileId);
+  }
 
   const { data: media } = await supabase.from("media_files").select("category").eq("id", mediaFileId).maybeSingle();
   if (media?.category === "maquette") {
@@ -670,9 +722,73 @@ export async function attachMediaFileToLine(lineId: string, productionOrderId: s
   return {};
 }
 
+/**
+ * Affecte un visuel de l'article (joint à l'ODF ou hérité du devis) à un
+ * atelier précis (migration 0069) — utile quand plusieurs ateliers
+ * d'impression sont retenus (DTF, sérigraphie…), chacun avec son visuel.
+ */
+export async function assignVisuelToSection(
+  lineId: string,
+  productionOrderId: string,
+  sectionId: string,
+  mediaFileId: string
+) {
+  const { authId } = await requireRole(["administrateur", "responsable_production"]);
+  const supabase = await createClient();
+
+  const { data: chosen } = await supabase
+    .from("production_order_line_sections")
+    .select("id")
+    .eq("production_order_line_id", lineId)
+    .eq("section_id", sectionId)
+    .maybeSingle();
+  if (!chosen) return { error: "Cette section n'est pas retenue sur cet article." };
+
+  const { error } = await supabase.from("production_order_line_section_visuels").upsert(
+    {
+      production_order_id: productionOrderId,
+      production_order_line_id: lineId,
+      section_id: sectionId,
+      media_file_id: mediaFileId,
+      added_by: authId,
+    },
+    { onConflict: "production_order_line_id,section_id,media_file_id", ignoreDuplicates: true }
+  );
+  if (error) return { error: error.message };
+  revalidateOdf(productionOrderId);
+  return {};
+}
+
+export async function unassignVisuelFromSection(
+  lineId: string,
+  productionOrderId: string,
+  sectionId: string,
+  mediaFileId: string
+) {
+  await requireRole(["administrateur", "responsable_production"]);
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("production_order_line_section_visuels")
+    .delete()
+    .eq("production_order_line_id", lineId)
+    .eq("section_id", sectionId)
+    .eq("media_file_id", mediaFileId);
+  if (error) return { error: error.message };
+  revalidateOdf(productionOrderId);
+  return {};
+}
+
 export async function detachMediaFileFromLine(lineId: string, productionOrderId: string, mediaFileId: string) {
   await requireRole(["administrateur", "responsable_production"]);
   const supabase = await createClient();
+
+  // Un visuel détaché de l'article ne reste affecté à aucun atelier.
+  const { error: unassignError } = await supabase
+    .from("production_order_line_section_visuels")
+    .delete()
+    .eq("production_order_line_id", lineId)
+    .eq("media_file_id", mediaFileId);
+  if (unassignError) return { error: unassignError.message };
   const { error } = await supabase
     .from("production_order_media_files")
     .delete()

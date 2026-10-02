@@ -49,14 +49,20 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   if (!order) return NextResponse.json({ error: "Ordre de fabrication introuvable" }, { status: 404 });
 
-  const [{ data: lines }, { data: workOrders }, { data: zoneTemplatesAll }, { data: mediaFiles }] = await Promise.all([
+  const [
+    { data: lines },
+    { data: workOrders },
+    { data: zoneTemplatesAll },
+    { data: mediaFiles },
+    { data: visuelAffectations },
+  ] = await Promise.all([
     // ODF multi-lignes : modèle/tissu/couleur/tailles/sections par article
     // (migrations 0035/0037) — même jointure que la Configuration produit
     // écran (/atelier/production/[id]/page.tsx).
     supabase
       .from("production_order_lines")
       .select(
-        "id,description,quantity,product_model_id,quote_line_id,couleur_unique_id,product_models(name,textiles(nom,composition,grammage,laize_cm)),couleur_unique:couleur_unique_id(name,code),zone_colors:production_order_line_zone_colors(zone_key,colors:color_id(name,code)),sizes:production_order_sizes(taille,quantite_demandee),line_sections:production_order_line_sections(ordre,sections(name,atelier_categories(requiert_visuel)))"
+        "id,description,quantity,product_model_id,quote_line_id,couleur_unique_id,product_models(name,textiles(nom,composition,grammage,laize_cm)),couleur_unique:couleur_unique_id(name,code),zone_colors:production_order_line_zone_colors(zone_key,colors:color_id(name,code)),sizes:production_order_sizes(taille,quantite_demandee),line_sections:production_order_line_sections(ordre,partie,sections(id,name,atelier_categories(requiert_visuel)))"
       )
       .eq("production_order_id", id)
       .order("created_at"),
@@ -74,6 +80,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       .select("production_order_line_id,media_file_id,media_files(file_name,category,mime_type)")
       .eq("production_order_id", id)
       .not("production_order_line_id", "is", null),
+    // Visuel affecté à un atelier d'impression précis (migration 0069).
+    supabase
+      .from("production_order_line_section_visuels")
+      .select("production_order_line_id,section_id,media_file_id,sections(name),media_files(file_name)")
+      .eq("production_order_id", id),
   ]);
 
   // Une fiche par article passant en Coupe (migration 0037, plus une seule
@@ -257,10 +268,23 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     }
 
     const ficheForLine = (fiches ?? []).find((f) => f.production_order_line_id === line.id);
+    // Un visuel affecté à un atelier d'impression s'annote de cet atelier
+    // (« fichier.ai (DTF) ») — sinon on ne saurait pas lequel part où.
+    const ateliersByVisuel = new Map<string, string[]>();
+    for (const a of visuelAffectations ?? []) {
+      if (a.production_order_line_id !== line.id) continue;
+      const atelier = (a.sections as unknown as { name: string } | null)?.name;
+      const fileName = (a.media_files as unknown as { file_name: string } | null)?.file_name;
+      if (!atelier || !fileName) continue;
+      ateliersByVisuel.set(fileName, [...(ateliersByVisuel.get(fileName) ?? []), atelier]);
+    }
     const visuels = [
       ...(line.quote_line_id ? visuelsByQuoteLine.get(line.quote_line_id) ?? [] : []),
       ...(visuelsByLine.get(line.id) ?? []),
-    ];
+    ].map((fileName) => {
+      const ateliers = ateliersByVisuel.get(fileName);
+      return ateliers ? `${fileName} (${ateliers.join(", ")})` : fileName;
+    });
     const maquette = resolvedMaquetteByLine.get(line.id);
     const maquetteBuffer = maquette ? maquetteBuffers.get(maquette.id) : undefined;
     const maquetteFormat: "png" | "jpg" | null =
@@ -292,15 +316,21 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         (line.line_sections ?? [])
           .slice()
           .sort((a, b) => a.ordre - b.ordre)
-          .map((s) => (s.sections as unknown as { name: string; atelier_categories: { requiert_visuel: boolean } | null } | null)?.name)
-          .filter((name): name is string => !!name)
-          .map((name) => {
-            if (name === "Coupe" && ficheForLine) return `${name} (${ficheForLine.numero_ot})`;
+          .map((s) => ({
+            name: (s.sections as unknown as { name: string } | null)?.name,
+            partie: (s.partie as string | null)?.trim() || null,
+          }))
+          .filter((s): s is { name: string; partie: string | null } => !!s.name)
+          .map(({ name, partie }) => {
+            // Partie de la pièce confiée à l'atelier (migration 0069) :
+            // « Bonneterie — manches ».
+            const label = partie ? `${name} — ${partie}` : name;
+            if (name === "Coupe" && ficheForLine) return `${label} (${ficheForLine.numero_ot})`;
             if (name === "Sérigraphie") {
               const zones = printableZonesByLine.get(line.id) ?? [];
-              return zones.length > 0 ? `${name} (${zones.join(", ")})` : name;
+              return zones.length > 0 ? `${label} (${zones.join(", ")})` : label;
             }
-            return name;
+            return label;
           })
           .join(", ") || null,
       visuels: visuels.length > 0 ? visuels.join(", ") : null,
