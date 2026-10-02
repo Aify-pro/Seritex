@@ -41,6 +41,7 @@ import { parseDxfContours } from "../src/lib/patronnage/dxf";
 import { normalizeShape, type Point } from "../src/lib/patronnage/geometry";
 import { construireAnalyseDetaillee } from "../src/lib/patronnage/detail";
 import { genererDxfMarque } from "../src/lib/patronnage/dxf-export";
+import { genererTracePdf } from "../src/lib/patronnage/trace-pdf";
 import { reconnaitreTrace, type ReferencePiece } from "../src/lib/patronnage/reconnaissance";
 
 /* ---------- Génération de contours de pièces plausibles ---------- */
@@ -498,6 +499,21 @@ console.log("\n15. DXF marqué (texte au centre des pièces + cartouche QR)");
     );
   }
 
+  // Orientation du cartouche (2026-10-02) : vertical = colonne étroite,
+  // largeur fixe, QR en haut — jamais la largeur (quasi toujours très large)
+  // du bandeau horizontal.
+  const resultatV = genererDxfMarque(dxfText, contours, detailComplet.lignes, cartouche(), "vertical");
+  check("marquage vertical réussi (pas d'erreur)", "dxf" in resultatV);
+  if ("dxf" in resultatV) {
+    const relu = new DxfParser().parseSync(resultatV.dxf) as unknown as {
+      entities: { type: string; vertices?: { x: number; y: number }[]; layer?: string }[];
+    };
+    const cadre = relu.entities.find((e) => e.type === "POLYLINE" && e.layer === "SERITEX_CARTOUCHE");
+    const xs = cadre?.vertices?.map((v) => v.x) ?? [];
+    const largeurCadre = xs.length ? Math.max(...xs) - Math.min(...xs) : 0;
+    check("cartouche vertical nettement plus étroit que le cartouche horizontal", largeurCadre > 0 && largeurCadre < 1300, `largeur=${largeurCadre}`);
+  }
+
   // Tracé partiellement reconnu : Devant reconnu, pièce étrangère non reconnue.
   const dxfPartiel = toDxf([
     { layer: "1", points: devantTshirt() },
@@ -525,7 +541,55 @@ console.log("\n15. DXF marqué (texte au centre des pièces + cartouche QR)");
   check("échoue proprement sans section ENTITIES (jamais un fichier à moitié marqué)", "error" in echec);
 }
 
-console.log(
-  failures === 0 ? "\n✅ Tous les cas passent.\n" : `\n❌ ${failures} assertion(s) en échec.\n`
-);
-process.exit(failures === 0 ? 0 : 1);
+// --- 16. PDF du tracé : une page, proportionné, jamais à l'échelle 1:1
+// (décision du 2026-10-02 — document de consultation, jamais un support de
+// coupe, qui le dit explicitement). Sans marquage : contours seuls. Marqué :
+// + étiquettes par pièce (rétrécies pour tenir, jamais de chevauchement) et
+// cartouche QR, en horizontal ou vertical.
+async function testerPdf() {
+  console.log("\n16. PDF du tracé (sans marquage / marqué H / marqué V)");
+
+  const dxfText = toDxf([
+    { layer: "1", points: devantTshirt() },
+    { layer: "1", points: translate(manche(), 1500, 0) },
+  ]);
+  const contours = parseDxfContours(dxfText);
+  const detail = construireAnalyseDetaillee(contours, biblio);
+  const info = {
+    traceReference: "OT-2026-0004-T1",
+    numeroOt: "OT-2026-0004",
+    odfReference: "OF-38906 — T-shirt col rond",
+    clientLabel: "Client Test SARL",
+    articleLabel: "T-shirt col rond 180g — Blanc",
+    dateLabel: "02/10/2026",
+    url: "https://seritex.example/atelier/patronnage/abc?trace=def",
+    facteurEchelle: detail.scaleFactor,
+  };
+
+  const sansMarquage = await genererTracePdf(contours, null);
+  check("sans marquage : généré sans erreur", "pdf" in sansMarquage, "pdf" in sansMarquage ? "" : sansMarquage.error);
+  if ("pdf" in sansMarquage) {
+    check("sans marquage : commence bien par l'en-tête PDF", Buffer.from(sansMarquage.pdf.slice(0, 5)).toString() === "%PDF-");
+  }
+
+  const marqueH = await genererTracePdf(contours, { lignes: detail.lignes, info, orientation: "horizontal" });
+  check("marqué horizontal : généré sans erreur", "pdf" in marqueH, "pdf" in marqueH ? "" : marqueH.error);
+
+  const marqueV = await genererTracePdf(contours, { lignes: detail.lignes, info, orientation: "vertical" });
+  check("marqué vertical : généré sans erreur", "pdf" in marqueV, "pdf" in marqueV ? "" : marqueV.error);
+
+  if ("pdf" in marqueH && "pdf" in marqueV) {
+    check("H et V produisent des fichiers différents (l'orientation change bien la mise en page)", Buffer.compare(marqueH.pdf, marqueV.pdf) !== 0);
+  }
+
+  // Tracé vide : jamais une exception, une erreur propre.
+  const vide = await genererTracePdf([], null);
+  check("tracé vide : échoue proprement (pas d'exception)", "error" in vide);
+}
+
+testerPdf().then(() => {
+  console.log(
+    failures === 0 ? "\n✅ Tous les cas passent.\n" : `\n❌ ${failures} assertion(s) en échec.\n`
+  );
+  process.exit(failures === 0 ? 0 : 1);
+});

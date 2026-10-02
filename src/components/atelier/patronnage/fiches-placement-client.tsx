@@ -8,7 +8,6 @@ import {
   Plus,
   Eye,
   Upload,
-  Download,
   Trash2,
   AlertTriangle,
   CheckCircle2,
@@ -27,7 +26,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { cn, formatDate, formatDateTime } from "@/lib/utils";
 import { QrScannerButton } from "@/components/atelier/patronnage/qr-scanner-button";
-import { SelecteurEchelle, TracePiecesPanel } from "@/components/atelier/patronnage/trace-pieces-panel";
+import { SelecteurEchelle, TraceDownloadMenu, TracePiecesPanel } from "@/components/atelier/patronnage/trace-pieces-panel";
 import type { FichePlacement, RepartitionTailles, StatutFiche, TracePlacement } from "@/lib/patronnage/types";
 import { createContext, useContext } from "react";
 import type { Size } from "@/lib/sizes";
@@ -1265,25 +1264,7 @@ function TraceDetailBody({
                 <p className="text-xs text-foreground-muted">déposé le {formatDateTime(trace.chargeLe)}</p>
               </div>
               <div className="flex flex-wrap justify-end gap-2">
-                <a
-                  href={`/api/patronnage/traces/${trace.id}/dxf`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-xs font-medium text-foreground hover:bg-surface-muted"
-                >
-                  <Download className="h-3.5 w-3.5" /> Télécharger
-                </a>
-                {a && (
-                  <a
-                    href={`/api/patronnage/traces/${trace.id}/dxf-marque`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-xs font-medium text-foreground hover:bg-surface-muted"
-                    title="Texte au centre des pièces reconnues + cartouche (QR, OT, ODF, client)"
-                  >
-                    <Download className="h-3.5 w-3.5" /> Télécharger marqué
-                  </a>
-                )}
+                <TraceDownloadMenu traceId={trace.id} marquageDisponible={!!a} />
                 {!effectiveLocked && canModify && (
                   <>
                     <Button size="sm" variant="secondary" type="button" onClick={() => fileInputRef.current?.click()} loading={pending}>
