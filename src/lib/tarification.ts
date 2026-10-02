@@ -63,7 +63,7 @@ export async function getModelPricings(modelIds: string[], db?: Db): Promise<Rec
     supabase.from("model_pricing").select("*").in("product_model_id", modelIds),
     supabase
       .from("model_cost_components")
-      .select("id,product_model_id,libelle,base,display_order,model_cost_supplements(taille,supplement)")
+      .select("id,product_model_id,libelle,base,est_tissu,display_order,model_cost_supplements(taille,supplement)")
       .in("product_model_id", modelIds)
       .order("display_order"),
     supabase.from("model_forced_prices").select("product_model_id,taille,prix").in("product_model_id", modelIds),
@@ -83,6 +83,7 @@ export async function getModelPricings(modelIds: string[], db?: Db): Promise<Rec
           id: c.id as string,
           libelle: c.libelle as string,
           base: Number(c.base),
+          estTissu: !!c.est_tissu,
           supplements: Object.fromEntries(
             ((c.model_cost_supplements ?? []) as { taille: string; supplement: number }[]).map((s) => [s.taille, Number(s.supplement)])
           ),

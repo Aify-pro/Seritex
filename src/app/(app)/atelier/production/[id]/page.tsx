@@ -638,6 +638,15 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
             >
               <Printer className="h-3.5 w-3.5" /> PDF
             </a>
+            {/* Prix de revient réel (lot F) : Direction et administrateur seulement. */}
+            {profile.role === "administrateur" && order.quote_id && (
+              <Link
+                href={`/tarification/realise/${order.id}`}
+                className="inline-flex h-8 items-center rounded-md border border-border bg-surface px-3 text-xs font-medium text-foreground hover:bg-surface-muted"
+              >
+                Prix de revient réel
+              </Link>
+            )}
             {canArchive && <ArchiveButton productionOrderId={order.id} archived={!!order.archived_at} />}
           </div>
         }

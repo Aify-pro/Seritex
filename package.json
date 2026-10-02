@@ -12,6 +12,7 @@
     "test:patronnage": "tsx --require ./scripts/allow-server-only.cjs scripts/test-moteur-patronnage.ts",
     "test:dispatching": "tsx scripts/test-dispatching.ts",
     "test:pricing": "tsx scripts/test-pricing.ts",
+    "test:real-cost": "tsx scripts/test-real-cost.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

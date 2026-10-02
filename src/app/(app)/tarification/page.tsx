@@ -8,6 +8,7 @@ import { priceGrid } from "@/lib/pricing";
 import { getSizeOptionsByModel } from "@/lib/quote-dispatch";
 import { effectiveParams, getModelPricings, getPricingSettings, getPrintGrid } from "@/lib/tarification";
 import { PricingSettingsForm, PrintCostsForm } from "./settings-forms";
+import { TextilePricesForm } from "./textile-prices-form";
 
 /**
  * Tarification (migration 0067) — Direction et administrateur uniquement.
@@ -17,10 +18,12 @@ import { PricingSettingsForm, PrintCostsForm } from "./settings-forms";
 export default async function TarificationPage() {
   await requireRole(["administrateur"]);
   const supabase = await createClient();
-  const [{ data: models }, settings, printGrid] = await Promise.all([
+  const [{ data: models }, settings, printGrid, { data: textiles }, { data: textilePrices }] = await Promise.all([
     supabase.from("product_models").select("id,name,category").eq("active", true).order("name"),
     getPricingSettings(),
     getPrintGrid(),
+    supabase.from("textiles").select("id,nom,grammage").eq("active", true).order("nom"),
+    supabase.from("textile_prices").select("textile_id,prix_kg"),
   ]);
   const ids = (models ?? []).map((m) => m.id as string);
   const [pricings, sizesByModel] = await Promise.all([getModelPricings(ids), getSizeOptionsByModel(ids)]);
@@ -38,6 +41,11 @@ export default async function TarificationPage() {
       <PageHeader
         title="Tarification"
         description="Prix de revient et prix de vente par modèle de produit. Visible uniquement de la Direction et de l'administrateur — les commerciaux n'y ont pas accès."
+        action={
+          <Link href="/tarification/realise" className="text-sm font-medium text-brand hover:underline">
+            Prix de revient réel des ODF →
+          </Link>
+        }
       />
 
       <Card>
@@ -86,6 +94,26 @@ export default async function TarificationPage() {
         <CardHeader title="Paramètres généraux" description="Valeurs par défaut de tous les modèles ; un modèle peut avoir ses propres charges et marge." />
         <CardBody>
           <PricingSettingsForm initial={settings} />
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader
+          title="Prix du tissu au kg"
+          description="Prix rendu (douane comprise), par textile. Il valorise le tissu pesé dans le prix de revient réel des ODF ; un ODF peut avoir son propre prix (famille de couleur, nouveau prix fournisseur)."
+        />
+        <CardBody>
+          <TextilePricesForm
+            textiles={(textiles ?? []).map((t) => ({
+              id: t.id as string,
+              nom: t.nom as string,
+              grammage: (t.grammage as number | null) ?? null,
+              prixKg: (() => {
+                const p = (textilePrices ?? []).find((x) => x.textile_id === t.id);
+                return p ? Number(p.prix_kg) : null;
+              })(),
+            }))}
+          />
         </CardBody>
       </Card>
 
