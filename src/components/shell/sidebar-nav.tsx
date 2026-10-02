@@ -3,59 +3,80 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-import type { NavItem } from "@/lib/auth/nav";
+import type { NavItem, SidebarEntry } from "@/lib/auth/nav";
 import { motion } from "framer-motion";
-import { Fragment } from "react";
+import { useState } from "react";
+import { ChevronDown } from "lucide-react";
 
-// Calculée en dehors du composant (pure fonction de `items`) : évite de
-// muter une variable pendant le rendu, ce que la règle react-hooks
-// (immutability) refuse à raison — un composant de rendu doit rester une
-// fonction pure de ses props.
-function withSectionHeaders(items: NavItem[]): (NavItem & { showHeader: boolean })[] {
-  let lastSection: string | undefined;
-  return items.map((item) => {
-    const showHeader = Boolean(item.section && item.section !== lastSection);
-    lastSection = item.section;
-    return { ...item, showHeader };
-  });
+function isActive(pathname: string, item: NavItem) {
+  const prefixes = [item.href, ...(item.matchPrefixes ?? [])];
+  return prefixes.some((prefix) => pathname === prefix || pathname.startsWith(prefix + "/"));
 }
 
-export function SidebarNav({ items }: { items: NavItem[] }) {
+function NavLink({ item, pathname, nested = false }: { item: NavItem; pathname: string; nested?: boolean }) {
+  const active = isActive(pathname, item);
+  return (
+    <Link
+      href={item.href}
+      className={cn(
+        "relative flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+        active ? "text-brand" : "text-foreground-muted hover:bg-surface-muted hover:text-foreground"
+      )}
+    >
+      {active && (
+        <motion.span
+          layoutId="active-nav-pill"
+          className="absolute inset-0 rounded-md bg-brand-soft"
+          transition={{ type: "spring", stiffness: 500, damping: 40 }}
+        />
+      )}
+      {item.icon}
+      <span className={cn("relative z-10", nested && "truncate")}>{item.label}</span>
+    </Link>
+  );
+}
+
+export function SidebarNav({ items }: { items: SidebarEntry[] }) {
   const pathname = usePathname();
-  const itemsWithHeaders = withSectionHeaders(items);
+  // Choix explicite de l'utilisateur (ouvrir/replier) par volet ; tant qu'il
+  // n'a rien choisi, le volet est ouvert s'il contient la page affichée.
+  const [toggled, setToggled] = useState<Record<string, boolean>>({});
 
   return (
     <nav className="flex flex-col gap-0.5 px-3">
-      {itemsWithHeaders.map((item) => {
-        const active = pathname === item.href || pathname.startsWith(item.href + "/");
+      {items.map((entry) => {
+        if (!("children" in entry)) return <NavLink key={entry.href} item={entry} pathname={pathname} />;
 
+        const containsActive = entry.children.some((child) => isActive(pathname, child));
+        const open = toggled[entry.label] ?? containsActive;
         return (
-          <Fragment key={item.href}>
-            {item.showHeader && (
-              <div className="mb-1 mt-4 px-3 text-[11px] font-semibold uppercase tracking-wide text-foreground-muted/70 first:mt-1">
-                {item.section}
-              </div>
-            )}
-            <Link
-              href={item.href}
+          <div key={entry.label} className="mt-3 border-t border-border pt-3">
+            <button
+              type="button"
+              aria-expanded={open}
+              // Le tiroir mobile se referme au moindre clic : ouvrir un volet
+              // ne doit pas le fermer.
+              onClick={(e) => {
+                e.stopPropagation();
+                setToggled((prev) => ({ ...prev, [entry.label]: !open }));
+              }}
               className={cn(
-                "relative flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                active
-                  ? "text-brand"
-                  : "text-foreground-muted hover:bg-surface-muted hover:text-foreground"
+                "flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-surface-muted hover:text-foreground",
+                containsActive ? "text-foreground" : "text-foreground-muted"
               )}
             >
-              {active && (
-                <motion.span
-                  layoutId="active-nav-pill"
-                  className="absolute inset-0 rounded-md bg-brand-soft"
-                  transition={{ type: "spring", stiffness: 500, damping: 40 }}
-                />
-              )}
-              {item.icon}
-              <span className="relative z-10">{item.label}</span>
-            </Link>
-          </Fragment>
+              {entry.icon}
+              <span className="relative z-10 flex-1 text-left">{entry.label}</span>
+              <ChevronDown className={cn("h-4 w-4 shrink-0 transition-transform", open && "rotate-180")} />
+            </button>
+            {open && (
+              <div className="ml-3 mt-0.5 flex flex-col gap-0.5 border-l border-border pl-2">
+                {entry.children.map((child) => (
+                  <NavLink key={child.href} item={child} pathname={pathname} nested />
+                ))}
+              </div>
+            )}
+          </div>
         );
       })}
     </nav>

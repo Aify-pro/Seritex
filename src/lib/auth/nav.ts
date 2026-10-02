@@ -53,7 +53,26 @@ export type NavItem = {
    * celles-là restent commandées par le seul `base_role`.
    */
   module?: string;
+  /**
+   * Préfixes d'URL qui rendent l'entrée active en plus de `href` — pour une
+   * entrée qui regroupe plusieurs pages (ex. « Intégration Sage » couvre
+   * clients, articles, stock et devis).
+   */
+  matchPrefixes?: string[];
 };
+
+/**
+ * Entrée repliable de la barre latérale (le volet « Paramètres ») : un titre
+ * qui s'ouvre sur ses propres entrées. Construite par buildSidebarEntries()
+ * à partir des entrées `section: PARAMETRES` du rôle.
+ */
+export type NavGroup = {
+  label: string;
+  icon: ReactNode;
+  children: NavItem[];
+};
+
+export type SidebarEntry = NavItem | NavGroup;
 
 // Les icônes doivent être rendues ici, côté serveur, plutôt que transmises en
 // tant que référence de composant : un composant "use client" (SidebarNav)
@@ -64,7 +83,7 @@ function navIcon(Icon: LucideIcon): ReactNode {
   return createElement(Icon, { className: "relative z-10 h-4 w-4 shrink-0" });
 }
 
-const PARAMETRES = "Paramètres";
+export const PARAMETRES = "Paramètres";
 
 export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
   client: [
@@ -91,6 +110,7 @@ export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
       module: "clients_sage",
     },
     { href: "/parametres/articles-sage", label: "Articles Sage (lecture)", icon: navIcon(Package), section: PARAMETRES, module: "articles_sage" },
+    { href: "/parametres/devis-sage", label: "Devis Sage (lecture)", icon: navIcon(FileText), section: PARAMETRES },
   ],
   // Base de cloisonnement partagée par l'infographiste et la PAO : chacun ne
   // voit que l'entrée dont il a le droit `view`. L'infographiste a
@@ -123,6 +143,7 @@ export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
       module: "clients_sage",
     },
     { href: "/parametres/articles-sage", label: "Articles Sage (lecture)", icon: navIcon(Package), section: PARAMETRES, module: "articles_sage" },
+    { href: "/parametres/devis-sage", label: "Devis Sage (lecture)", icon: navIcon(FileText), section: PARAMETRES },
   ],
   chef_section: [
     { href: "/dashboard", label: "Tableau de bord", icon: navIcon(LayoutDashboard) },
@@ -182,6 +203,7 @@ export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
       module: "clients_sage",
     },
     { href: "/parametres/articles-sage", label: "Articles Sage (lecture)", icon: navIcon(Package), section: PARAMETRES, module: "articles_sage" },
+    { href: "/parametres/devis-sage", label: "Devis Sage (lecture)", icon: navIcon(FileText), section: PARAMETRES },
     { href: "/parametres/audit", label: "Journal d'audit", icon: navIcon(ScrollText), section: PARAMETRES, module: "audit" },
     { href: "/parametres/notifications", label: "Notifications", icon: navIcon(Mail), section: PARAMETRES, module: "notifications" },
   ],

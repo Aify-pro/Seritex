@@ -31,6 +31,7 @@ const ROUTE_ACCESS: { prefix: string; roles: string[] }[] = [
   { prefix: "/parametres/stock", roles: ["responsable_production", "chef_section", "administrateur", "gestionnaire_stock"] },
   { prefix: "/parametres/clients-sage", roles: ["commercial", "responsable_production", "administrateur", "gestionnaire_stock"] },
   { prefix: "/parametres/articles-sage", roles: ["commercial", "responsable_production", "administrateur", "gestionnaire_stock"] },
+  { prefix: "/parametres/devis-sage", roles: ["commercial", "responsable_production", "administrateur"] },
   { prefix: "/parametres", roles: ["administrateur"] },
   // Prix de revient et marges (migration 0067) : Direction et administrateur
   // seulement (base_role administrateur) — jamais les commerciaux.
