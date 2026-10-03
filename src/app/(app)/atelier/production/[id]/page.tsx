@@ -512,12 +512,22 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
   // produit ») plutôt qu'en cartes séparées en bas de page (demande Ayman,
   // 15/09, étendue 16/09) — regroupe ici les données calculées ci-dessus
   // par article.
+  // Parcours types des modèles de l'ODF (ART-H) — « appliquer un parcours type ».
+  const lineModelIds = [...new Set(lines.map((l) => l.productModelId).filter((v): v is string => !!v))];
+  const { data: modelRoutes } =
+    lineModelIds.length > 0
+      ? await supabase.from("model_routes").select("id,nom,par_defaut,product_model_id").in("product_model_id", lineModelIds).order("nom")
+      : { data: [] };
+
   const linesWithConfig: LineData[] = lines.map((line) => {
     const quoteLineId = quoteLineIdByLine[line.id];
     const maquetteFromDevisFile = quoteLineId ? maquetteByQuoteLine[quoteLineId] : undefined;
     return {
       ...line,
       sections: sectionsByLine[line.id] ?? [],
+      routes: (modelRoutes ?? [])
+        .filter((r) => r.product_model_id === line.productModelId)
+        .map((r) => ({ id: r.id as string, nom: r.nom as string, parDefaut: !!r.par_defaut })),
       coupeSelected: !!coupeSelectedByLine[line.id],
       fiche: fichesByLine[line.id] ?? null,
       impressionSectionSelected: !!impressionSectionSelectedByLine[line.id],

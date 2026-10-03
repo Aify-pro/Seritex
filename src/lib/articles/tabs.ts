@@ -13,4 +13,5 @@ export const ARTICLE_DETAIL_TABS: ArticleTabDef[] = [
   { slug: "general", label: "Général" },
   { slug: "technique", label: "Technique" },
   { slug: "declinaisons", label: "Déclinaisons" },
+  { slug: "fabrication", label: "Fabrication" },
 ];

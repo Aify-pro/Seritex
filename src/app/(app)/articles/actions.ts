@@ -384,3 +384,95 @@ export async function setStockArticleSageReference(
   const found = (data as { trouvee: boolean } | null)?.trouvee;
   return found ? {} : { warning: `La référence ${ref} est absente du miroir Sage : vérifiez-la.` };
 }
+
+/* ============================================================
+   Parcours types de fabrication (ART-H, migration 0077)
+============================================================ */
+
+export async function createModelRoute(productModelId: string, nom: string) {
+  const { authId } = await requireRole(["administrateur", "responsable_production"]);
+  const name = nom.trim();
+  if (!name) return { error: "Donnez un nom au parcours." };
+  const supabase = await createClient();
+  const { count } = await supabase.from("model_routes").select("id", { count: "exact", head: true }).eq("product_model_id", productModelId);
+  const { error } = await supabase
+    .from("model_routes")
+    .insert({ product_model_id: productModelId, nom: name, par_defaut: (count ?? 0) === 0, created_by: authId });
+  if (error) return { error: error.code === "23505" ? "Un parcours porte déjà ce nom." : error.message };
+  revalidateArticles();
+  return {};
+}
+
+export async function deleteModelRoute(routeId: string) {
+  await requireRole(["administrateur", "responsable_production"]);
+  const supabase = await createClient();
+  const { error } = await supabase.from("model_routes").delete().eq("id", routeId);
+  if (error) return { error: error.message };
+  revalidateArticles();
+  return {};
+}
+
+export async function setDefaultModelRoute(productModelId: string, routeId: string) {
+  await requireRole(["administrateur", "responsable_production"]);
+  const supabase = await createClient();
+  const { error: resetError } = await supabase
+    .from("model_routes")
+    .update({ par_defaut: false })
+    .eq("product_model_id", productModelId)
+    .neq("id", routeId);
+  if (resetError) return { error: resetError.message };
+  const { error } = await supabase.from("model_routes").update({ par_defaut: true }).eq("id", routeId);
+  if (error) return { error: error.message };
+  revalidateArticles();
+  return {};
+}
+
+const stepSchema = z.object({
+  etape: z.number().int().min(1).max(30),
+  sectionId: z.string().uuid().nullable(),
+  categorie: z.string().nullable(),
+  mode: z.enum(["quantite", "partie"]),
+  partie: z.string().trim().max(80).nullable(),
+});
+
+/** Ajoute une étape (section précise ou catégorie) ; le parcours est contrôlé ensuite. */
+export async function addModelRouteStep(routeId: string, input: z.infer<typeof stepSchema>) {
+  await requireRole(["administrateur", "responsable_production"]);
+  const parsed = stepSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message };
+  const s = parsed.data;
+  if (!s.sectionId === !s.categorie) return { error: "Choisissez une section ou une catégorie d'atelier." };
+  if (s.mode === "partie" && !s.partie) return { error: "Indiquez la partie de la pièce confiée à cette section." };
+  const supabase = await createClient();
+  const { data: last } = await supabase.from("model_route_steps").select("ordre").eq("route_id", routeId).order("ordre", { ascending: false }).limit(1);
+  const { data: step, error } = await supabase
+    .from("model_route_steps")
+    .insert({
+      route_id: routeId,
+      etape: s.etape,
+      ordre: (last?.[0]?.ordre ?? 0) + 1,
+      section_id: s.sectionId,
+      atelier_category: s.categorie,
+      mode_parallelisme: s.mode,
+      partie: s.mode === "partie" ? s.partie : null,
+    })
+    .select("id")
+    .single();
+  if (error) return { error: error.message.includes("pas_de_finition") ? "La Finition est imposée en dernier : inutile de l'ajouter." : error.message };
+  const { error: checkError } = await supabase.rpc("check_model_route", { p_route_id: routeId });
+  if (checkError) {
+    await supabase.from("model_route_steps").delete().eq("id", step.id);
+    return { error: checkError.message };
+  }
+  revalidateArticles();
+  return {};
+}
+
+export async function removeModelRouteStep(stepId: string) {
+  await requireRole(["administrateur", "responsable_production"]);
+  const supabase = await createClient();
+  const { error } = await supabase.from("model_route_steps").delete().eq("id", stepId);
+  if (error) return { error: error.message };
+  revalidateArticles();
+  return {};
+}

@@ -1,5 +1,11 @@
 import { boot } from "./harness.mjs";
 
+// Un échec affiche son seul message (pas la pile de PGlite, illisible).
+process.on("unhandledRejection", (e) => {
+  console.error("✗", e?.message ?? e, e?.where ? `\n  ${e.where}` : "");
+  process.exit(1);
+});
+
 export async function setup(opts = {}) {
   const db = await boot({ quiet: true, ...opts });
   const q = async (sql, params) => (await db.query(sql, params)).rows;

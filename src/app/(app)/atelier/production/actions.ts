@@ -111,6 +111,20 @@ export async function setProductionOrderLineSections(
 }
 
 /**
+ * Applique un parcours type du modèle à un article d'ODF modifiable (ART-H) :
+ * ses sections sont remplacées, la Finition ajoutée en dernier ; le parcours
+ * reste ensuite modifiable. Autorité : apply_model_route (base).
+ */
+export async function applyModelRoute(lineId: string, productionOrderId: string, routeId: string) {
+  await requireRole(["administrateur", "responsable_production"]);
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("apply_model_route", { p_line_id: lineId, p_route_id: routeId });
+  if (error) return { error: error.message };
+  revalidateOdf(productionOrderId);
+  return {};
+}
+
+/**
  * Quantités demandées par taille, pour une ligne d'ODF (un article) —
  * remplace intégralement la liste de cette ligne (saisie simple, pas
  * d'édition ligne à ligne). Chaque article a son propre dispatching depuis

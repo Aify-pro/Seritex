@@ -15,6 +15,7 @@ import {
 } from "../actions";
 import type { Size } from "@/lib/sizes";
 import { LineSectionsPicker } from "./line-sections-picker";
+import { RouteApplier } from "./route-applier";
 import { FichePatronnageLink } from "./fiche-patronnage-link";
 import { LineVisuelPicker } from "./line-visuel-picker";
 import { LineMaquettePicker } from "./line-maquette-picker";
@@ -69,6 +70,8 @@ export interface LineData {
    * pièce (migration 0069, ex. « Manches »).
    */
   sections: { sectionId: string; quantite: number | null; partie: string | null; etape: number }[];
+  /** Parcours types du modèle de l'article (ART-H). */
+  routes?: { id: string; nom: string; parDefaut: boolean }[];
   /** Une section de catégorie Coupe est-elle retenue ? Conditionne l'affichage de la fiche Patronnage. */
   coupeSelected: boolean;
   fiche: { id: string; numeroOt: string; statut: StatutFiche } | null;
@@ -441,8 +444,13 @@ function LineCard({
       )}
 
       <div className="space-y-3 border-t border-border pt-3">
+        {editable && (line.routes?.length ?? 0) > 0 && (
+          <RouteApplier lineId={line.id} productionOrderId={productionOrderId} routes={line.routes ?? []} />
+        )}
         {editable && (
           <LineSectionsPicker
+            // Remonté quand le parcours change côté serveur (parcours type appliqué).
+            key={line.sections.map((x) => `${x.sectionId}:${x.etape}`).join(",")}
             lineId={line.id}
             productionOrderId={productionOrderId}
             allSections={allSections}
