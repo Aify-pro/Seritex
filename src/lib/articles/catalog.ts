@@ -29,7 +29,7 @@ function countOptions(values: (string | null | undefined)[], label?: (v: string)
 
 export async function loadArticleCatalog({ canSeeCosts }: { canSeeCosts: boolean }): Promise<ArticleCatalog> {
   const supabase = await createClient();
-  const [{ data: models }, { data: modelColors }, { data: colors }, { data: costs }, { data: variants }, { data: allowed }] = await Promise.all([
+  const [{ data: models }, { data: modelColors }, { data: colors }, { data: costs }, { data: variants }, { data: allowed }, { data: figures }] = await Promise.all([
     supabase
       .from("product_models")
       .select("id,code,name,category,active,sage_reference,textile_id,textiles!product_models_textile_id_fkey(nom,grammage),matieres(nom)")
@@ -39,7 +39,12 @@ export async function loadArticleCatalog({ canSeeCosts }: { canSeeCosts: boolean
     canSeeCosts ? supabase.from("model_cost_components").select("product_model_id") : Promise.resolve({ data: [] }),
     supabase.from("product_variants").select("model_id,actif,sage_reference,variant_stock_articles(sage_reference)"),
     supabase.from("product_model_textiles").select("product_model_id,textiles(grammage)"),
+    // ART-E (migration 0084) : stock disponible vierge et plus petit prix de vente, sans aucun coût.
+    supabase.rpc("article_catalog_figures"),
   ]);
+  const figuresByModel = new Map(
+    ((figures ?? []) as { product_model_id: string; stock_disponible: number | null; prix_a_partir_de: number | null }[]).map((f) => [f.product_model_id, f])
+  );
   const variantsByModel = new Map<string, { actif: boolean; sage: boolean }[]>();
   for (const v of variants ?? []) {
     const sage = !!v.sage_reference || ((v.variant_stock_articles ?? []) as { sage_reference: string | null }[]).some((a) => !!a.sage_reference);
@@ -74,8 +79,8 @@ export async function loadArticleCatalog({ canSeeCosts }: { canSeeCosts: boolean
       grille: canSeeCosts ? avecGrille.has(m.id as string) : null,
       sage: !!m.sage_reference || modelVariants.some((v) => v.sage),
       declinaisons: modelVariants.filter((v) => v.actif).length,
-      stockDisponible: null,
-      prixAPartirDe: null,
+      stockDisponible: figuresByModel.get(m.id as string)?.stock_disponible != null ? Number(figuresByModel.get(m.id as string)!.stock_disponible) : null,
+      prixAPartirDe: figuresByModel.get(m.id as string)?.prix_a_partir_de != null ? Number(figuresByModel.get(m.id as string)!.prix_a_partir_de) : null,
       vignetteUrl: null,
       searchText: articleSearchText([
         m.name as string,
