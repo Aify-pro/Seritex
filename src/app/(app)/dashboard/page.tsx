@@ -6,10 +6,14 @@ import { REQUEST_STATUS_LABELS, PRODUCTION_ORDER_STATUS_LABELS } from "@/lib/typ
 import Link from "next/link";
 import { formatDate } from "@/lib/utils";
 import { PageHeader } from "@/components/shell/page-header";
+import { redirect } from "next/navigation";
 
 export default async function DashboardPage() {
   const { profile } = await requireUser();
   const supabase = await createClient();
+
+  // Le livreur n'a que son écran mobile (LIV-0, L4).
+  if (profile.role === "livreur") redirect("/livreur");
 
   if (profile.role === "client") {
     const [{ data: requests }, { data: quotes }, { data: samples }, { data: production }] =
@@ -272,6 +276,17 @@ export default async function DashboardPage() {
         </div>
         <Link href="/atelier/production" className="text-sm font-medium text-brand hover:underline">
           Ouvrir les ordres de fabrication →
+        </Link>
+      </div>
+    );
+  }
+
+  if (profile.role === "responsable_livraison") {
+    return (
+      <div className="space-y-6">
+        <PageHeader title="Service livraison" description="Préparation, validation, planification et suivi des livraisons." />
+        <Link href="/parametres/livraison" className="text-sm font-medium text-brand hover:underline">
+          Zones, transporteurs et véhicules →
         </Link>
       </div>
     );

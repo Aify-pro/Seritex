@@ -28,6 +28,8 @@ import {
   ChartPie,
   Calculator,
   Tags,
+  Truck,
+  MapPinned,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { createElement, type ReactNode } from "react";
@@ -171,6 +173,16 @@ export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
     { href: "/dashboard", label: "Tableau de bord", icon: navIcon(LayoutDashboard) },
     { href: "/atelier/production", label: "Ordres de fabrication", icon: navIcon(Factory), module: "ordres_fabrication" },
   ],
+  // Livraison (LIV-0) : le livreur n'a que son écran mobile ; le responsable
+  // livraison pilote le service et ses référentiels.
+  livreur: [
+    { href: "/livreur", label: "Mes livraisons", icon: navIcon(Truck) },
+  ],
+  responsable_livraison: [
+    { href: "/dashboard", label: "Tableau de bord", icon: navIcon(LayoutDashboard) },
+    { href: "/commercial/clients", label: "Clients", icon: navIcon(Contact) },
+    { href: "/parametres/livraison", label: "Livraison", icon: navIcon(MapPinned), section: PARAMETRES, module: "livraisons" },
+  ],
   administrateur: [
     { href: "/dashboard", label: "Tableau de bord", icon: navIcon(LayoutDashboard) },
     { href: "/commercial/clients", label: "Clients", icon: navIcon(Contact) },
@@ -191,6 +203,7 @@ export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
     { href: "/parametres/societe", label: "Informations société", icon: navIcon(Landmark), section: PARAMETRES, module: "societe" },
     { href: "/parametres/fabrication", label: "Fabrication", icon: navIcon(Gauge), section: PARAMETRES, module: "fabrication" },
     { href: "/parametres/dispatching", label: "Dispatching des tailles", icon: navIcon(ChartPie), section: PARAMETRES, module: "dispatching" },
+    { href: "/parametres/livraison", label: "Livraison", icon: navIcon(MapPinned), section: PARAMETRES, module: "livraisons" },
     { href: "/parametres/stockage", label: "Stockage médiathèque", icon: navIcon(Database), section: PARAMETRES, module: "stockage_cibles" },
     { href: "/parametres/sage", label: "Intégration Sage", icon: navIcon(Plug), section: PARAMETRES, module: "parametres_sage" },
     { href: "/parametres/stock", label: "Stock Sage (lecture)", icon: navIcon(Warehouse), section: PARAMETRES, module: "stock_sage" },

@@ -19,7 +19,12 @@ export type UserRole =
   // compte du client est en règle avant qu'un ODF puisse être soumis à
   // validation — attestation manuelle, aucune donnée financière rattachée
   // pour l'instant.
-  | "comptabilite";
+  | "comptabilite"
+  // Livraison (LIV-0, migrations 0074/0075) : le livreur n'accède qu'à SES
+  // livraisons (écran mobile individuel) ; le responsable livraison pilote le
+  // service (préparation, planification, tournées, lieux, transporteurs).
+  | "livreur"
+  | "responsable_livraison";
 
 export type RequestStatus =
   | "nouvelle"
@@ -775,6 +780,8 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   administrateur: "Administrateur",
   gestionnaire_stock: "Gestionnaire de stock",
   comptabilite: "Comptabilité",
+  livreur: "Livreur",
+  responsable_livraison: "Responsable livraison",
 };
 
 export const REQUEST_STATUS_LABELS: Record<RequestStatus, string> = {
@@ -1026,3 +1033,76 @@ export const SAMPLE_STATUS_LABELS: Record<SampleRequestStatus, string> = {
   refuse: "Refusé",
   sans_suite: "Sans suite",
 };
+
+// ----------------------------------------------------------------------------
+// Livraison — référentiels (LIV-0, migration 0075)
+// ----------------------------------------------------------------------------
+
+export type DeliveryZoneType = "commune" | "interieur" | "international";
+
+export interface DeliveryZone {
+  id: string;
+  nom: string;
+  type: DeliveryZoneType;
+  ordre: number;
+  actif: boolean;
+}
+
+export type PositionSource = "gps_terrain" | "carte" | "approximative";
+
+export const POSITION_SOURCE_LABELS: Record<PositionSource, string> = {
+  gps_terrain: "GPS pris sur place",
+  carte: "Pointé sur la carte",
+  approximative: "Approximative",
+};
+
+/** Lieu de livraison d'un client, géolocalisé, géré dans Seritex (indépendant de Sage). */
+export interface DeliveryPlace {
+  id: string;
+  company_id: string;
+  contact_id: string | null;
+  libelle: string;
+  zone_id: string | null;
+  quartier: string | null;
+  repere: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  position_source: PositionSource | null;
+  position_confirmee_at: string | null;
+  position_confirmee_by: string | null;
+  contact_nom: string | null;
+  contact_tel: string | null;
+  horaires: string | null;
+  consignes: string | null;
+  photo_path: string | null;
+  par_defaut: boolean;
+  actif: boolean;
+  created_at: string;
+}
+
+export interface Carrier {
+  id: string;
+  nom: string;
+  type: "interne" | "prestataire";
+  integration: "manuel" | "yango" | "dhl";
+  actif: boolean;
+}
+
+export type VehicleType = "camion" | "fourgonnette" | "voiture" | "moto" | "tricycle";
+
+export const VEHICLE_TYPE_LABELS: Record<VehicleType, string> = {
+  camion: "Camion",
+  fourgonnette: "Fourgonnette",
+  voiture: "Voiture",
+  moto: "Moto",
+  tricycle: "Tricycle",
+};
+
+export interface Vehicle {
+  id: string;
+  type: VehicleType;
+  immatriculation: string | null;
+  libelle: string;
+  capacite_note: string | null;
+  actif: boolean;
+}
