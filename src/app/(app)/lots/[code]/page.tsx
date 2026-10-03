@@ -3,10 +3,12 @@ import { getCurrentUser } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server";
 import { getBaseUrl } from "@/lib/url";
 import { PageHeader } from "@/components/shell/page-header";
-import { Card, CardBody } from "@/components/ui/card";
+import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { SampleQrCode } from "@/components/samples/sample-qr-code";
 import { formatDateTime } from "@/lib/utils";
+import { LotTraceView, type LotTrace } from "@/components/atelier/lot-trace";
+import { LotTools } from "./lot-tools";
 
 const CATEGORIE_LABELS: Record<string, string> = { semi_fini: "Semi-fini", fini: "Fini", dechet: "Déchet" };
 
@@ -28,7 +30,7 @@ export default async function ArticleLotPage({ params }: { params: Promise<{ cod
   const supabase = await createClient();
   const { data: lot } = await supabase
     .from("article_lots")
-    .select("id,code,categorie,composition_taille,created_at,production_orders(reference,companies(name)),traces_placement(reference)")
+    .select("id,code,categorie,statut,composition_taille,created_at,production_orders(reference,companies(name)),traces_placement(reference)")
     .eq("code", code)
     .maybeSingle();
 
@@ -38,6 +40,11 @@ export default async function ArticleLotPage({ params }: { params: Promise<{ cod
   const productionOrder = lot.production_orders as unknown as { reference: string; companies: { name: string } | null } | null;
   const trace = lot.traces_placement as unknown as { reference: string } | null;
   const composition = (lot.composition_taille ?? {}) as Record<string, number>;
+  // Traçabilité de bout en bout (SF-5, migration 0086).
+  const { data: lotTrace } = await supabase.rpc("article_lot_trace", { p_code: lot.code });
+  const canEdit =
+    ["administrateur", "responsable_production", "chef_section"].includes(current.profile.role) &&
+    ["en_cours", "termine"].includes((lot.statut as string) ?? "en_cours");
 
   return (
     <div className="space-y-6">
@@ -77,6 +84,24 @@ export default async function ArticleLotPage({ params }: { params: Promise<{ cod
           <SampleQrCode url={`${baseUrl}/lots/${lot.code}`} label={lot.code} size={140} />
         </CardBody>
       </Card>
+
+      {lotTrace && (
+        <Card>
+          <CardHeader title="Traçabilité" description="Origines du lot jusqu'au matelas de coupe, puis chaque section traversée (scans et déclarations)." />
+          <CardBody>
+            <LotTraceView trace={lotTrace as LotTrace} />
+          </CardBody>
+        </Card>
+      )}
+
+      {canEdit && (
+        <Card>
+          <CardHeader title="Découper ou regrouper" description="Un lot qui se sépare entre deux sections, ou plusieurs lots réunis : la traçabilité suit." />
+          <CardBody>
+            <LotTools code={lot.code} composition={composition} />
+          </CardBody>
+        </Card>
+      )}
     </div>
   );
 }

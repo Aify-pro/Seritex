@@ -22,6 +22,7 @@ import {
   uploadShipmentDocument,
   validateShipmentAccounting,
 } from "../actions";
+import { LotCodeInput } from "@/components/atelier/lot-code-input";
 
 type Option = { id: string; label: string };
 
@@ -207,8 +208,8 @@ export function PreparationForm({
   const [date, setDate] = useState(shipment.datePromise ?? "");
   const [colis, setColis] = useState(
     shipment.packages.length
-      ? shipment.packages.map((p) => ({ poidsKg: p.poidsKg, dimensions: p.dimensions, contenu: p.contenu }))
-      : [{ poidsKg: null as number | null, dimensions: null as string | null, contenu: null as string | null }]
+      ? shipment.packages.map((p) => ({ poidsKg: p.poidsKg, dimensions: p.dimensions, contenu: p.contenu, lotCode: p.lotCode ?? "" }))
+      : [{ poidsKg: null as number | null, dimensions: null as string | null, contenu: null as string | null, lotCode: "" }]
   );
 
   return (
@@ -275,12 +276,20 @@ export function PreparationForm({
                 onChange={(e) => setColis((all) => all.map((x, j) => (j === i ? { ...x, contenu: e.target.value } : x)))}
                 className={`${input} w-56`}
               />
+              {/* Lot du colis (SF-5) : son QR est imprimé sur l'étiquette du colis. */}
+              <div className="w-56">
+                <LotCodeInput
+                  value={c.lotCode}
+                  onChange={(code) => setColis((all) => all.map((x, j) => (j === i ? { ...x, lotCode: code } : x)))}
+                  placeholder="Lot (facultatif)"
+                />
+              </div>
               <button type="button" onClick={() => setColis((all) => all.filter((_, j) => j !== i))} className="text-foreground-muted hover:text-danger" aria-label="Retirer">
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
             </div>
           ))}
-          <Button size="sm" variant="ghost" onClick={() => setColis((all) => [...all, { poidsKg: null, dimensions: null, contenu: null }])}>
+          <Button size="sm" variant="ghost" onClick={() => setColis((all) => [...all, { poidsKg: null, dimensions: null, contenu: null, lotCode: "" }])}>
             <Plus className="h-3.5 w-3.5" /> Colis
           </Button>
         </div>

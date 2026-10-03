@@ -58,7 +58,7 @@ export interface ShipmentDetail {
     odfId: string;
     odfReference: string;
   }[];
-  packages: { id: string; numero: number; poidsKg: number | null; dimensions: string | null; contenu: string | null; codeQr: string | null }[];
+  packages: { id: string; numero: number; poidsKg: number | null; dimensions: string | null; contenu: string | null; codeQr: string | null; lotCode: string | null }[];
   events: { id: string; statut: string; auteur: string | null; occurredAt: string; source: string; commentaire: string | null }[];
 }
 
@@ -158,6 +158,8 @@ export async function loadShipment(id: string): Promise<ShipmentDetail | null> {
       dimensions: p.dimensions,
       contenu: p.contenu,
       codeQr: p.code_qr,
+      // Lot du colis (SF-5) : code_qr porte alors le code du lot.
+      lotCode: p.article_lot_id ? p.code_qr : null,
     })),
     events: (events ?? []).map((e) => ({
       id: e.id,

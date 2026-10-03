@@ -14,6 +14,7 @@ import { loadShipment } from "@/lib/delivery/shipment-data";
 import { REGLEMENT_LABELS, SHIPMENT_STATUS_LABELS, type ShipmentStatus } from "@/lib/delivery/status";
 import { AccountingForm, PlanningForm, PreparationForm, ShipmentLines, StatusActions } from "./shipment-workbench";
 import { ShipmentSageExport } from "./sage-export";
+import { LotTraceView, type LotTrace } from "@/components/atelier/lot-trace";
 
 /** Fiche d'une expédition (LIV-1) : préparation, BL, validation comptable, planification, suivi, journal. */
 export default async function ShipmentPage({ params }: { params: Promise<{ id: string }> }) {
@@ -55,6 +56,11 @@ export default async function ShipmentPage({ params }: { params: Promise<{ id: s
       : [];
   const hasDecharge = (documents ?? []).some((d) => d.type === "decharge_bl");
 
+  // Traçabilité des lots mis en colis (SF-5) : BL → lot → coupe → matelas → sections.
+  const { data: lotTraces } = shipment.packages.some((p) => p.lotCode)
+    ? await supabase.rpc("shipment_lot_trace", { p_shipment_id: id })
+    : { data: [] };
+
   // Sortie PF au BL (LIV-3) : visible de la Direction et de la production, qui génèrent la fiche Sage.
   const canExportStock = profile.role === "administrateur" || profile.role === "responsable_production";
   const [{ data: blMovements }, { data: blFiches }] = canExportStock
@@ -88,6 +94,16 @@ export default async function ShipmentPage({ params }: { params: Promise<{ id: s
                 className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-xs font-medium hover:bg-surface-muted"
               >
                 <Printer className="h-3.5 w-3.5" /> BL (2 exemplaires)
+              </a>
+            )}
+            {shipment.reference && shipment.packages.length > 0 && (
+              <a
+                href={`/api/livraisons/${id}/etiquettes`}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-xs font-medium hover:bg-surface-muted"
+              >
+                <Printer className="h-3.5 w-3.5" /> Étiquettes colis
               </a>
             )}
           </div>
@@ -199,6 +215,20 @@ export default async function ShipmentPage({ params }: { params: Promise<{ id: s
       )}
 
       {isManager && <StatusActions shipment={shipment} hasDecharge={hasDecharge} />}
+
+      {((lotTraces ?? []) as { colis: number; trace: LotTrace }[]).length > 0 && (
+        <Card>
+          <CardHeader title="Traçabilité des colis" description="Pour chaque colis : son lot, le lot de coupe et le matelas d'origine, les sections traversées." />
+          <CardBody className="space-y-5">
+            {((lotTraces ?? []) as { colis: number; trace: LotTrace }[]).map((t) => (
+              <div key={t.colis}>
+                <p className="mb-1 text-xs font-medium text-foreground">Colis n°{t.colis}</p>
+                <LotTraceView trace={t.trace} />
+              </div>
+            ))}
+          </CardBody>
+        </Card>
+      )}
 
       {canExportStock && (
         <ShipmentSageExport

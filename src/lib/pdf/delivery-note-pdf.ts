@@ -66,7 +66,7 @@ const band = rgb(0.95, 0.94, 0.92);
 const accent = rgb(0.1, 0.1, 0.1);
 const alert = rgb(0.7, 0.1, 0.1);
 
-function safe(input: string | null | undefined): string {
+export function safe(input: string | null | undefined): string {
   return (input ?? "")
     .replace(/[   ]/g, " ")
     .replace(/[‘’]/g, "'")

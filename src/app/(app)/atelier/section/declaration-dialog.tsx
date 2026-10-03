@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { allowedDeclarationTypes, DECLARATION_TYPE_LABELS, type DeclarationType } from "@/lib/production/flow";
 import type { WorkOrderFlowRow } from "@/lib/types/domain";
 import { declareProduction } from "./actions";
+import { LotCodeInput } from "@/components/atelier/lot-code-input";
 import { useSizes } from "./types";
 
 /**
@@ -41,6 +42,8 @@ export function DeclarationDialog({
   const [pending, startTransition] = useTransition();
   const [saisie, setSaisie] = useState<Record<string, Partial<Record<DeclarationType, number>>>>({});
   const [motif, setMotif] = useState("");
+  // Lot QR cité par la déclaration (SF-5), facultatif.
+  const [lotCode, setLotCode] = useState("");
   const types = allowedDeclarationTypes(categorie);
   const libelle = (cle: string) => sizes.find((s) => s.cle === cle)?.libelle ?? cle.split("/").pop() ?? cle;
 
@@ -79,7 +82,7 @@ export function DeclarationDialog({
         .filter((l) => l.quantite > 0)
     );
     startTransition(async () => {
-      const res = await declareProduction(workOrderId, lignes, motif || undefined);
+      const res = await declareProduction(workOrderId, lignes, motif || undefined, lotCode.trim() || undefined);
       if (res.error) {
         toast.error("Déclaration refusée", { description: res.error });
         return;
@@ -179,6 +182,11 @@ export function DeclarationDialog({
             />
           </div>
         )}
+
+        <div>
+          <p className="mb-1 text-xs text-foreground-muted">Lot concerné (facultatif) — scannez son étiquette</p>
+          <LotCodeInput value={lotCode} onChange={setLotCode} disabled={pending} />
+        </div>
 
         <div className="flex flex-col gap-2 sm:flex-row-reverse">
           <Button

@@ -155,23 +155,34 @@ export async function uploadShipmentDocument(id: string, formData: FormData): Pr
 /** Colis de l'expédition — remplace la liste (tant qu'elle n'est pas validée). */
 export async function saveShipmentPackages(
   id: string,
-  colis: { poidsKg: number | null; dimensions: string | null; contenu: string | null }[]
+  colis: { poidsKg: number | null; dimensions: string | null; contenu: string | null; lotCode?: string }[]
 ): Promise<Result> {
   await requireUser();
   const supabase = await createClient();
   const { error: delError } = await supabase.from("shipment_packages").delete().eq("shipment_id", id);
   if (delError) return { error: delError.message };
   if (colis.length > 0) {
-    const { error } = await supabase.from("shipment_packages").insert(
-      colis.map((c, i) => ({
-        shipment_id: id,
-        numero: i + 1,
-        poids_kg: c.poidsKg && c.poidsKg > 0 ? c.poidsKg : null,
-        dimensions: c.dimensions?.trim() || null,
-        contenu: c.contenu?.trim() || null,
-      }))
-    );
+    const { data: inserted, error } = await supabase
+      .from("shipment_packages")
+      .insert(
+        colis.map((c, i) => ({
+          shipment_id: id,
+          numero: i + 1,
+          poids_kg: c.poidsKg && c.poidsKg > 0 ? c.poidsKg : null,
+          dimensions: c.dimensions?.trim() || null,
+          contenu: c.contenu?.trim() || null,
+        }))
+      )
+      .select("id,numero");
     if (error) return { error: error.message };
+    // Lot de chaque colis (SF-5) : contrôlé en base (même article que l'expédition).
+    for (const [i, c] of colis.entries()) {
+      const code = c.lotCode?.trim();
+      const pkg = (inserted ?? []).find((p) => p.numero === i + 1);
+      if (!code || !pkg) continue;
+      const { error: lotError } = await supabase.rpc("assign_package_lot", { p_package_id: pkg.id, p_lot_code: code });
+      if (lotError) return { error: `Colis n°${i + 1} : ${lotError.message}` };
+    }
   }
   done(id);
   return {};

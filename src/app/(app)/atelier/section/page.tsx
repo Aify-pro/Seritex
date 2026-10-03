@@ -20,6 +20,7 @@ import { SectionSwitcher } from "./section-switcher";
 import type { WorkOrderFlowRow } from "@/lib/types/domain";
 import { Card, CardBody } from "@/components/ui/card";
 import Link from "next/link";
+import { LotScanPanel } from "./lot-scan-panel";
 
 export default async function SectionQueuePage({
   searchParams,
@@ -371,6 +372,8 @@ export default async function SectionQueuePage({
         }
         action={sections.length > 0 ? <SectionSwitcher sections={sections} value={sectionId} /> : undefined}
       />
+
+      {!isStockManager && <LotScanPanel sectionId={sectionId} />}
 
       {odfFilterId && (
         <Card>
