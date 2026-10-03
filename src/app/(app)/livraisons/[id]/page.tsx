@@ -4,6 +4,7 @@ import { ArrowLeft, Printer, MapPin } from "lucide-react";
 import { requireRole } from "@/lib/auth/current-user";
 import { can } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -45,6 +46,14 @@ export default async function ShipmentPage({ params }: { params: Promise<{ id: s
       : Promise.resolve({ data: [] }),
     canValidate && s === "preparee" ? supabase.rpc("shipment_amount_hint", { p_shipment_id: id }).maybeSingle() : Promise.resolve({ data: null }),
   ]);
+  // Preuves de livraison (LIV-2) : lisibles sous la RLS, servies par URL signée.
+  const { data: documents } = await supabase.from("shipment_documents").select("id,type,path,created_at").eq("shipment_id", id).order("created_at");
+  const signedDocs =
+    (documents ?? []).length > 0
+      ? ((await createAdminClient().storage.from("livraisons").createSignedUrls((documents ?? []).map((d) => d.path), 3600)).data ?? [])
+      : [];
+  const hasDecharge = (documents ?? []).some((d) => d.type === "decharge_bl");
+
   const remaining = ((remainingRes.data ?? []) as { a_livrer: number }[]).reduce((t, r) => t + Math.max(0, r.a_livrer), 0);
   const hint = hintRes.data as { devis_reference: string; devis_total: number; devise: string; conditions_paiement: string | null; mode_reglement: string | null } | null;
 
@@ -179,7 +188,25 @@ export default async function ShipmentPage({ params }: { params: Promise<{ id: s
         />
       )}
 
-      {isManager && <StatusActions shipment={shipment} />}
+      {isManager && <StatusActions shipment={shipment} hasDecharge={hasDecharge} />}
+
+      {(documents ?? []).length > 0 && (
+        <Card>
+          <CardHeader title="Preuves de livraison" description="Photo du BL signé (décharge manuscrite du client) et photos déposées." />
+          <CardBody className="flex flex-wrap gap-3">
+            {(documents ?? []).map((d) => {
+              const url = signedDocs.find((x) => x.path === d.path)?.signedUrl;
+              return url ? (
+                <a key={d.id} href={url} target="_blank" rel="noreferrer" className="block w-32 space-y-1 text-xs">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={url} alt="" className="h-32 w-32 rounded-md border border-border object-cover" />
+                  <span className="text-foreground-muted">{d.type === "decharge_bl" ? "BL signé" : "Photo"} · {formatDateTime(d.created_at)}</span>
+                </a>
+              ) : null;
+            })}
+          </CardBody>
+        </Card>
+      )}
 
       <Card>
         <CardHeader title="Journal" />

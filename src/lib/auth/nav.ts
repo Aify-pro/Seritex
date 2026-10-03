@@ -95,6 +95,7 @@ export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
     { href: "/client/echantillons", label: "Échantillons", icon: navIcon(FlaskConical) },
     { href: "/client/mediatheque", label: "Médiathèque", icon: navIcon(FolderOpen) },
     { href: "/client/production", label: "Suivi commande", icon: navIcon(Eye) },
+    { href: "/client/livraisons", label: "Mes livraisons", icon: navIcon(Truck) },
   ],
   commercial: [
     { href: "/dashboard", label: "Tableau de bord", icon: navIcon(LayoutDashboard) },

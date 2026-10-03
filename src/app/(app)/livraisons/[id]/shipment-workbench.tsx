@@ -19,6 +19,7 @@ import {
   setShipmentLineQuantity,
   setShipmentStatus,
   splitShipment,
+  uploadShipmentDocument,
   validateShipmentAccounting,
 } from "../actions";
 
@@ -435,8 +436,9 @@ export function PlanningForm({
 }
 
 /** Gestes de statut proposés au service livraison selon l'état de l'expédition. */
-export function StatusActions({ shipment }: { shipment: ShipmentDetail }) {
+export function StatusActions({ shipment, hasDecharge }: { shipment: ShipmentDetail; hasDecharge: boolean }) {
   const { pending, run } = useRun();
+  const [photo, setPhoto] = useState<File | null>(null);
   const [motif, setMotif] = useState("");
   const [receptionnaire, setReceptionnaire] = useState("");
   const s: ShipmentStatus = shipment.statut;
@@ -459,7 +461,23 @@ export function StatusActions({ shipment }: { shipment: ShipmentDetail }) {
           )}
           {s === "en_route" && (
             <>
-              <Button loading={pending} onClick={() => run(() => setShipmentStatus(shipment.id, "livree", { receptionnaire }), "Livrée")}>
+              <Button
+                loading={pending}
+                disabled={!photo && !hasDecharge}
+                title="La photo du BL signé est obligatoire"
+                onClick={() =>
+                  run(async () => {
+                    if (photo) {
+                      const fd = new FormData();
+                      fd.set("photo", photo);
+                      fd.set("type", "decharge_bl");
+                      const up = await uploadShipmentDocument(shipment.id, fd);
+                      if (up.error) return up;
+                    }
+                    return setShipmentStatus(shipment.id, "livree", { receptionnaire });
+                  }, "Livrée")
+                }
+              >
                 Livrée
               </Button>
               <Button variant="danger" disabled={!motif.trim() || pending} onClick={() => run(() => setShipmentStatus(shipment.id, "echec", { commentaire: motif }), "Échec enregistré")}>
@@ -487,6 +505,12 @@ export function StatusActions({ shipment }: { shipment: ShipmentDetail }) {
             </Button>
           )}
         </div>
+        {s === "en_route" && (
+          <label className="block text-xs text-foreground-muted">
+            Photo du BL signé {hasDecharge ? "(déjà déposée)" : "(obligatoire pour « Livrée »)"}
+            <input type="file" accept="image/*" className="mt-1 block text-xs" onChange={(e) => setPhoto(e.target.files?.[0] ?? null)} />
+          </label>
+        )}
         {(s === "prete_a_enlever" || s === "en_route") && (
           <input value={receptionnaire} onChange={(e) => setReceptionnaire(e.target.value)} placeholder="Nom de la personne qui réceptionne / enlève" className={`${input} w-80`} />
         )}

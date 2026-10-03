@@ -74,6 +74,13 @@ export default async function LivraisonsPage({ searchParams }: { searchParams: P
       <PageHeader
         title="Livraisons"
         description="Les pièces de 1er choix entrent ici dès la finition. Préparation, validation comptable, planification, livraison ou retrait."
+        action={
+          ["administrateur", "responsable_livraison"].includes(profile.role) ? (
+            <Link href="/livraisons/tournees" className="text-sm font-medium text-brand hover:underline">
+              Tournées du jour →
+            </Link>
+          ) : undefined
+        }
       />
 
       <nav aria-label="Étapes" className="-mx-1 flex gap-1 overflow-x-auto border-b border-border px-1">
