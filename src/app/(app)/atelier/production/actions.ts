@@ -12,9 +12,11 @@ async function notifyCommandeTerminee(productionOrderId: string) {
   const supabase = await createClient();
   const { data: po } = await supabase
     .from("production_orders")
-    .select("reference, companies(name)")
+    .select("reference, company_id, companies(name)")
     .eq("id", productionOrderId)
     .maybeSingle();
+  // ODF de stock (SF-3) : pas de notification client.
+  if (!po?.company_id) return;
   await sendNotification("commande_terminee", {
     to: await resolveContactEmailForProductionOrder(productionOrderId),
     variables: {

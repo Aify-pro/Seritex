@@ -88,7 +88,7 @@ export default async function DashboardPage() {
 
   if (profile.role === "commercial" || profile.role === "administrateur") {
     const [{ data: requests }, { data: quotesEnvoyes }, { data: samples }] = await Promise.all([
-      supabase.from("requests").select("id,status,reference,created_at,companies(id,name)").order(
+      supabase.from("requests").select("id,status,reference,created_at,companies(id,name)").not("company_id", "is", null).order(
         "created_at",
         { ascending: false }
       ).limit(6),

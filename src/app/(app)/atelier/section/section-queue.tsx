@@ -1,5 +1,6 @@
 "use client";
 
+import { odfClientLabel } from "@/lib/production/client-label";
 import { useCallback, useDeferredValue, useEffect, useMemo, useState, useTransition } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { createClient } from "@/lib/supabase/client";
@@ -148,14 +149,14 @@ export function SectionQueue({
           fields: {
             sousOdf: wo.reference,
             odf: wo.production_orders?.reference ?? null,
-            client: wo.production_orders?.companies?.name ?? null,
+            client: wo.production_orders ? odfClientLabel(wo.production_orders.company_id, wo.production_orders.companies?.name) : null,
             article: ctx?.articleDescription ?? null,
             ot: ctx?.numeroOt ?? null,
           },
           normalized: {
             sousOdf: normalizeSearch(wo.reference),
             odf: normalizeSearch(wo.production_orders?.reference ?? ""),
-            client: normalizeSearch(wo.production_orders?.companies?.name ?? ""),
+            client: normalizeSearch(wo.production_orders ? odfClientLabel(wo.production_orders.company_id, wo.production_orders.companies?.name) : ""),
             article: normalizeSearch(ctx?.articleDescription ?? ""),
             ot: normalizeSearch(ctx?.numeroOt ?? ""),
           },
@@ -439,7 +440,7 @@ function WorkOrderAccordionRow({
 
   const atteinte = wo.quantity_done >= wo.quantity_planned;
   const progress = wo.quantity_planned > 0 ? Math.min(100, (wo.quantity_done / wo.quantity_planned) * 100) : 0;
-  const client = wo.production_orders?.companies?.name;
+  const client = wo.production_orders ? odfClientLabel(wo.production_orders.company_id, wo.production_orders.companies?.name) : null;
   const article = context?.articleDescription;
 
   return (

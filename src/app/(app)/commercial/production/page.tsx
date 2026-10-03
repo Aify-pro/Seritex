@@ -32,7 +32,7 @@ export default async function CommercialProductionPage() {
                 <div>
                   <p className="text-sm font-medium text-foreground">{o.reference}</p>
                   <p className="text-xs text-foreground-muted">
-                    {(o as unknown as { companies?: { name: string } }).companies?.name} · {o.total_quantity} pièces
+                    {o.company_id ? (o as unknown as { companies?: { name: string } }).companies?.name : "Stock"} · {o.total_quantity} pièces
                     {o.section_en_cours ? ` · en ${o.section_en_cours}` : ""}
                   </p>
                 </div>

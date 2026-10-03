@@ -15,6 +15,8 @@ export default async function RequestsPage() {
   const { data: requests } = await supabase
     .from("requests")
     .select("id,reference,status,description,created_at,companies(name)")
+    // Les demandes pour le stock (sans client, SF-3) ont leur propre écran.
+    .not("company_id", "is", null)
     .order("created_at", { ascending: false });
 
   return (

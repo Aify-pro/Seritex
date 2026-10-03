@@ -60,7 +60,8 @@ export async function resolveContactEmailForProductionOrder(productionOrderId: s
     .select("company_id, quotes(request_id)")
     .eq("id", productionOrderId)
     .maybeSingle();
-  if (!po) return [];
+  // ODF de stock (SF-3) : pas de client, donc aucune notification client.
+  if (!po || !po.company_id) return [];
 
   const requestId = (po.quotes as unknown as { request_id: string } | null)?.request_id;
   if (requestId) return resolveContactEmailForRequest(requestId, po.company_id);

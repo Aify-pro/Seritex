@@ -35,7 +35,7 @@ export async function recordWorkOrderQuantity(
   // migration 0036 — un sous-ODF ne porte plus de statut distinct).
   const { data: before } = await supabase
     .from("work_orders")
-    .select("actual_start, production_order_id, sections(name, atelier_categories(cle)), production_orders(reference, companies(name))")
+    .select("actual_start, production_order_id, sections(name, atelier_categories(cle)), production_orders(reference, company_id, companies(name))")
     .eq("id", workOrderId)
     .maybeSingle();
 
@@ -50,7 +50,8 @@ export async function recordWorkOrderQuantity(
   }
 
   const categorieCle = (before?.sections as unknown as { atelier_categories: { cle: string } | null } | null)?.atelier_categories?.cle;
-  if (before && !before.actual_start && categorieCle === "impression") {
+  const avecClient = !!(before?.production_orders as unknown as { company_id: string | null } | null)?.company_id;
+  if (before && !before.actual_start && categorieCle === "impression" && avecClient) {
     const po = before.production_orders as unknown as { reference: string; companies: { name: string } | null } | null;
     await sendNotification("commande_en_impression", {
       to: await resolveContactEmailForProductionOrder(before.production_order_id),
@@ -381,7 +382,7 @@ export async function declareProduction(
 
   const { data: before } = await supabase
     .from("work_orders")
-    .select("actual_start, production_order_id, sections(atelier_categories(cle)), production_orders(reference, companies(name))")
+    .select("actual_start, production_order_id, sections(atelier_categories(cle)), production_orders(reference, company_id, companies(name))")
     .eq("id", workOrderId)
     .maybeSingle();
 
@@ -395,7 +396,8 @@ export async function declareProduction(
   // Même notification que la saisie globale : première déclaration d'un
   // atelier d'impression = commande partie en impression.
   const categorieCle = (before?.sections as unknown as { atelier_categories: { cle: string } | null } | null)?.atelier_categories?.cle;
-  if (before && !before.actual_start && categorieCle === "impression") {
+  const avecClient = !!(before?.production_orders as unknown as { company_id: string | null } | null)?.company_id;
+  if (before && !before.actual_start && categorieCle === "impression" && avecClient) {
     const po = before.production_orders as unknown as { reference: string; companies: { name: string } | null } | null;
     await sendNotification("commande_en_impression", {
       to: await resolveContactEmailForProductionOrder(before.production_order_id),

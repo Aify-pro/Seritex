@@ -1,4 +1,5 @@
 import { requireRole } from "@/lib/auth/current-user";
+import { odfClientLabel } from "@/lib/production/client-label";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
@@ -44,7 +45,7 @@ export default async function StockManagementPage({
       // ODF clôturé n'a plus de mouvement à enregistrer.
       supabase
         .from("production_orders")
-        .select("id,reference,total_quantity,companies(name)")
+        .select("id,reference,total_quantity,company_id,companies(name)")
         .not("status", "in", "(terminee,annulee)")
         .order("created_at", { ascending: false }),
       supabase.from("stock_movements").select("id", { count: "exact", head: true }).is("exported_in_fiche_id", null),
@@ -63,7 +64,7 @@ export default async function StockManagementPage({
   const odfOptions = (orders ?? []).map((o) => ({
     id: o.id as string,
     reference: o.reference as string,
-    companyName: (o.companies as unknown as { name: string } | null)?.name ?? null,
+    companyName: odfClientLabel(o.company_id as string | null, (o.companies as unknown as { name: string } | null)?.name),
     totalQuantity: o.total_quantity as number,
   }));
 

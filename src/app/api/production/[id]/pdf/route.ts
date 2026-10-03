@@ -397,7 +397,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     statusLabel: PRODUCTION_ORDER_STATUS_LABELS[order.status as ProductionOrderStatus],
     sheetUrl: `${baseUrl}/atelier/production/${order.id}`,
     generatedAt: formatFr(new Date().toISOString()),
-    client: company,
+    // ODF de stock (SF-3) : « Stock » à la place du client.
+    client: order.company_id ? company : { name: "Stock (fabrication pour le stock)", address: null },
     dateValidation: order.launched_at ? formatFr(order.launched_at) : null,
     dateLivraison: quote?.date_livraison_prevue ? formatFr(quote.date_livraison_prevue) : null,
     devis: quote?.reference ?? null,

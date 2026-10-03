@@ -303,7 +303,8 @@ export interface ProductionOrderMediaFile {
 export interface RequestRecord {
   id: string;
   reference: string;
-  company_id: string;
+  /** Null : demande pour le stock (SF-3). */
+  company_id: string | null;
   contact_id: string | null;
   assigned_commercial_id: string | null;
   status: RequestStatus;
@@ -438,7 +439,10 @@ export interface ProductionOrder {
   id: string;
   reference: string;
   quote_id: string | null;
-  company_id: string;
+  /** Null : ODF de stock, fabrication sans client (SF-3, D4). */
+  company_id: string | null;
+  /** Demande d'origine (SF-3) — reprise via le devis pour un ODF client. */
+  request_id?: string | null;
   status: ProductionOrderStatus;
   total_quantity: number;
   planned_start_date: string | null;

@@ -33,7 +33,8 @@ export function ValidationCircuitPanel({
 }: {
   productionOrderId: string;
   modifiable: boolean;
-  comptabilite: { valideLe: string | null; validePar: string | null };
+  /** `requise: false` : ODF de stock (SF-3), sans client donc sans attestation comptable. */
+  comptabilite: { valideLe: string | null; validePar: string | null; requise?: boolean };
   infographie: { requise: boolean; valideLe: string | null; validePar: string | null };
   soumis: { le: string | null; par: string | null };
   canAttesterComptabilite: boolean;
@@ -61,12 +62,13 @@ export function ValidationCircuitPanel({
       <CardBody className="space-y-3">
         <CircuitRow
           label="Comptabilité"
-          detail="Compte client en règle"
-          done={!!comptabilite.valideLe}
+          detail={comptabilite.requise === false ? "Non requis — ODF de stock, sans client" : "Compte client en règle"}
+          done={comptabilite.requise === false || !!comptabilite.valideLe}
           doneAt={comptabilite.valideLe}
           doneBy={comptabilite.validePar}
+          notRequired={comptabilite.requise === false}
           action={
-            modifiable && canAttesterComptabilite && !comptabilite.valideLe ? (
+            modifiable && comptabilite.requise !== false && canAttesterComptabilite && !comptabilite.valideLe ? (
               <Button size="sm" loading={pending} onClick={() => attester(attesterComptabiliteOdf, "Validation comptabilité")}>
                 Compte client clean
               </Button>

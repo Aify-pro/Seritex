@@ -23,6 +23,7 @@ import type { DownloadableMediaFile, MaquetteFile, StockMovement, StockExportFic
 import { ValidationCircuitPanel } from "./validation-circuit-panel";
 import { WhereArePieces, type WhereArePiecesLine } from "./where-are-pieces";
 import { ClosureBalance, type ClosureBalanceData } from "./closure-balance";
+import { odfClientLabel } from "@/lib/production/client-label";
 import { SHIPMENT_STATUS_LABELS, type ShipmentStatus } from "@/lib/delivery/status";
 import { stageRowFromDb } from "@/lib/production/flow";
 import { CheckCircle2, ChevronRight, Package, Printer, QrCode } from "lucide-react";
@@ -658,7 +659,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
         description={
           <span className="flex flex-wrap items-center gap-x-1.5">
             <span>
-              {company?.name ?? ""} · {order.total_quantity} pièces
+              {odfClientLabel(order.company_id, company?.name)} · {order.total_quantity} pièces
             </span>
             <span>·</span>
             <span>
@@ -776,7 +777,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
 
       <ProductionOrderLines
         productionOrderId={order.id}
-        companyId={order.company_id}
+        companyId={order.company_id ?? ""}
         requestId={requestId}
         editable={modifiable}
         mediaEditable={mediaEditable}
@@ -797,7 +798,11 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
       <ValidationCircuitPanel
         productionOrderId={order.id}
         modifiable={modifiable}
-        comptabilite={{ valideLe: order.comptabilite_validee_le, validePar: order.comptabilite_validee_par ? nameOf(order.comptabilite_validee_par) : null }}
+        comptabilite={{
+          valideLe: order.comptabilite_validee_le,
+          validePar: order.comptabilite_validee_par ? nameOf(order.comptabilite_validee_par) : null,
+          requise: !!order.company_id,
+        }}
         infographie={{
           requise: requiresInfographie,
           valideLe: order.infographie_validee_le,
@@ -814,7 +819,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
           productionOrderId={order.id}
           anySectionChosen={anySectionChosen}
           linesConfigured={linesConfigured}
-          comptabiliteOk={!!order.comptabilite_validee_le}
+          comptabiliteOk={!order.company_id || !!order.comptabilite_validee_le}
           infographieOk={!requiresInfographie || !!order.infographie_validee_le}
           echantillonsOk={echantillonsCircuit.every((e) => e.statuses.includes("valide"))}
         />
