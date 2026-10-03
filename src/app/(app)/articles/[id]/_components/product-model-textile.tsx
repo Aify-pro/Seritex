@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { setProductModelTextile } from "../textiles/actions";
+import { setProductModelTextile } from "../../matieres/actions";
 
 /**
  * Tissu principal du modèle. C'est lui qui décidera dans quel ordre de tracé
@@ -52,7 +52,7 @@ export function ProductModelTextile({
         ))}
       </select>
       {textiles.length === 0 && (
-        <span className="text-xs text-foreground-muted">Aucun textile actif — créez-en dans Paramètres &gt; Textiles.</span>
+        <span className="text-xs text-foreground-muted">Aucun textile actif — créez-en dans Articles, onglet Matières premières.</span>
       )}
     </div>
   );

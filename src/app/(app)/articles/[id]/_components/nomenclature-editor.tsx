@@ -4,7 +4,7 @@ import { useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { addNomenclatureLine, removeNomenclatureLine } from "../actions";
+import { addNomenclatureLine, removeNomenclatureLine } from "../../actions";
 import { Plus, Trash2 } from "lucide-react";
 
 interface NomenclatureRow {

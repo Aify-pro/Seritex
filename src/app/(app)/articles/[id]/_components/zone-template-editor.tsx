@@ -4,24 +4,18 @@ import { useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { addProductPrintableZone, removeProductPrintableZone } from "../actions";
+import { addProductZoneTemplate, removeProductZoneTemplate } from "../../actions";
 import { ArrowRight, Plus, Trash2 } from "lucide-react";
 
-interface PrintableZoneRow {
+interface ZoneRow {
   id: string;
   zone_key: string;
   zone_label: string;
   display_order: number;
 }
 
-/** Zones imprimables d'un modèle de produit — référentiel distinct du gabarit de zones couleur, pour les sections de catégorie Impression. */
-export function PrintableZoneEditor({
-  productModelId,
-  zones,
-}: {
-  productModelId: string;
-  zones: PrintableZoneRow[];
-}) {
+/** Gabarit de zones d'un modèle de produit (section 8) — liste de zones nommées, pas de visuel cliquable (V1 actée). */
+export function ZoneTemplateEditor({ productModelId, zones }: { productModelId: string; zones: ZoneRow[] }) {
   const [pending, startTransition] = useTransition();
   const [open, setOpen] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
@@ -29,7 +23,7 @@ export function PrintableZoneEditor({
 
   function remove(zoneId: string) {
     startTransition(async () => {
-      const res = await removeProductPrintableZone(zoneId);
+      const res = await removeProductZoneTemplate(zoneId);
       if (res?.error) toast.error(res.error);
       else router.refresh();
     });
@@ -37,12 +31,6 @@ export function PrintableZoneEditor({
 
   return (
     <div className="space-y-3">
-      <div>
-        <p className="text-xs font-medium text-foreground-muted">Zone imprimable</p>
-        <p className="text-[11px] text-foreground-muted">
-          Surfaces du produit où une impression peut être réalisée (sections de catégorie Impression).
-        </p>
-      </div>
       <div className="flex flex-wrap items-center gap-2">
         {zones.map((z, i) => (
           <span key={z.id} className="flex items-center gap-1.5">
@@ -60,22 +48,22 @@ export function PrintableZoneEditor({
             {i < zones.length - 1 && <ArrowRight className="h-3.5 w-3.5 text-foreground-muted" />}
           </span>
         ))}
-        {zones.length === 0 && <p className="text-xs text-foreground-muted">Aucune zone imprimable définie.</p>}
+        {zones.length === 0 && <p className="text-xs text-foreground-muted">Aucune zone définie.</p>}
       </div>
 
       {!open ? (
         <Button variant="secondary" size="sm" onClick={() => setOpen(true)}>
-          <Plus className="h-3.5 w-3.5" /> Ajouter une zone imprimable
+          <Plus className="h-3.5 w-3.5" /> Ajouter une zone
         </Button>
       ) : (
         <form
           ref={formRef}
           action={(formData) =>
             startTransition(async () => {
-              const res = await addProductPrintableZone(formData);
+              const res = await addProductZoneTemplate(formData);
               if (res?.error) toast.error(res.error);
               else {
-                toast.success("Zone imprimable ajoutée");
+                toast.success("Zone ajoutée");
                 formRef.current?.reset();
                 setOpen(false);
                 router.refresh();
@@ -90,7 +78,7 @@ export function PrintableZoneEditor({
             <input
               name="zone_key"
               required
-              placeholder="poitrine"
+              placeholder="col"
               className="h-9 w-32 rounded-md border border-border bg-surface px-2 font-mono text-sm"
             />
           </div>
@@ -99,7 +87,7 @@ export function PrintableZoneEditor({
             <input
               name="zone_label"
               required
-              placeholder="Poitrine"
+              placeholder="Col"
               className="h-9 w-40 rounded-md border border-border bg-surface px-2 text-sm"
             />
           </div>

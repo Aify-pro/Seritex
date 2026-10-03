@@ -4,7 +4,7 @@ import { useRef, useTransition } from "react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { createProductModel } from "../actions";
+import { createProductModel } from "./actions";
 import { Plus } from "lucide-react";
 
 export function NewProductModelForm() {

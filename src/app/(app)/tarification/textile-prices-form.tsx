@@ -16,7 +16,7 @@ export function TextilePricesForm({ textiles }: { textiles: { id: string; nom: s
   const [pending, startTransition] = useTransition();
   const [values, setValues] = useState<Record<string, string>>(Object.fromEntries(textiles.map((t) => [t.id, t.prixKg === null ? "" : String(t.prixKg)])));
 
-  if (textiles.length === 0) return <p className="text-sm text-foreground-muted">Aucun textile actif — Paramètres &gt; Textiles.</p>;
+  if (textiles.length === 0) return <p className="text-sm text-foreground-muted">Aucun textile actif — Articles, onglet Matières premières.</p>;
 
   function save(id: string) {
     const raw = values[id].trim();

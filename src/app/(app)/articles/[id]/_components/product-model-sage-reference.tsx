@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { setProductModelSageReference } from "../actions";
+import { setProductModelSageReference } from "../../actions";
 
 /**
  * Lot 10 : référence Sage d'un modèle de produit — colonne présente depuis

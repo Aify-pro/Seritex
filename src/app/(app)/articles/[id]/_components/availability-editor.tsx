@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { setProductModelSizes, setProductModelColors } from "../actions";
+import { setProductModelSizes, setProductModelColors } from "../../actions";
 
 type Option = { id: string; label: string; groupe?: string };
 

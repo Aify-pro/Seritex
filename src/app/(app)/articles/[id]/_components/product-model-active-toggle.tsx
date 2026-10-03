@@ -2,7 +2,7 @@
 
 import { useTransition } from "react";
 import { toast } from "sonner";
-import { toggleProductModelActive } from "../actions";
+import { toggleProductModelActive } from "../../actions";
 
 export function ProductModelActiveToggle({ productModelId, active }: { productModelId: string; active: boolean }) {
   const [pending, startTransition] = useTransition();

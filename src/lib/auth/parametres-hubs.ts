@@ -42,9 +42,7 @@ const HUBS: HubDefinition[] = [
     label: "Produits",
     icon: Shirt,
     tabs: [
-      { href: "/parametres/produits", label: "Modèles de produits" },
       { href: "/parametres/couleurs", label: "Couleurs et tailles" },
-      { href: "/parametres/textiles", label: "Textiles" },
     ],
   },
   {

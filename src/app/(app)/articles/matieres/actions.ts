@@ -40,7 +40,32 @@ export async function createTextile(formData: FormData) {
     return { error: error.message };
   }
 
-  revalidatePath("/parametres/textiles");
+  revalidatePath("/articles", "layout");
+  return {};
+}
+
+/** Caractéristiques d'un textile (fiche matière première). */
+export async function updateTextile(textileId: string, formData: FormData) {
+  await requireRole(["administrateur", "responsable_production"]);
+  const parsed = newTextileSchema.safeParse({
+    nom: formData.get("nom"),
+    composition: formData.get("composition") || null,
+    grammage: formData.get("grammage") || null,
+    laize_cm: formData.get("laize_cm") || null,
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message };
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("textiles")
+    .update({
+      nom: parsed.data.nom,
+      composition: parsed.data.composition || null,
+      grammage: parsed.data.grammage ?? null,
+      laize_cm: parsed.data.laize_cm ?? null,
+    })
+    .eq("id", textileId);
+  if (error) return { error: error.code === "23505" ? `Le textile « ${parsed.data.nom} » existe déjà.` : error.message };
+  revalidatePath("/articles", "layout");
   return {};
 }
 
@@ -49,7 +74,7 @@ export async function toggleTextileActive(textileId: string, active: boolean) {
   const supabase = await createClient();
   const { error } = await supabase.from("textiles").update({ active }).eq("id", textileId);
   if (error) return { error: error.message };
-  revalidatePath("/parametres/textiles");
+  revalidatePath("/articles", "layout");
   return {};
 }
 
@@ -79,7 +104,7 @@ export async function linkSageArticleToTextile(
     return { error: error.message };
   }
 
-  revalidatePath("/parametres/textiles");
+  revalidatePath("/articles", "layout");
   return {};
 }
 
@@ -92,7 +117,7 @@ export async function unlinkSageArticle(textileId: string, sageReference: string
     .eq("textile_id", textileId)
     .eq("sage_reference", sageReference);
   if (error) return { error: error.message };
-  revalidatePath("/parametres/textiles");
+  revalidatePath("/articles", "layout");
   return {};
 }
 
@@ -105,7 +130,6 @@ export async function setProductModelTextile(productModelId: string, textileId: 
     .update({ textile_id: textileId || null })
     .eq("id", productModelId);
   if (error) return { error: error.message };
-  revalidatePath("/parametres/produits");
-  revalidatePath("/parametres/textiles");
+  revalidatePath("/articles", "layout");
   return {};
 }

@@ -140,7 +140,7 @@ export function ModelPricingEditor({
               </option>
             ))}
           </select>
-          <span className="text-xs text-foreground-muted">— ce modèle ne déclare pas ses tailles : toutes sont proposées (Paramètres &gt; Modèles de produits).</span>
+          <span className="text-xs text-foreground-muted">— ce modèle ne déclare pas ses tailles : toutes sont proposées (fiche article, onglet Général).</span>
         </label>
       )}
 
