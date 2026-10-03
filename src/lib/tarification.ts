@@ -28,6 +28,7 @@ export async function getPricingSettings(db?: Db): Promise<PricingSettings> {
     chargesPct: Number(data?.charges_pct ?? 40),
     margePct: Number(data?.marge_pct ?? 15),
     arrondi: Number(data?.arrondi ?? 100),
+    coefPrixVente: data?.coef_prix_vente != null ? Number(data.coef_prix_vente) : null,
     fraisEcranParCouleur: Number(data?.frais_ecran_par_couleur ?? 0),
     updatedAt: (data?.updated_at as string | undefined) ?? null,
   };
@@ -96,12 +97,18 @@ export async function getModelPricings(modelIds: string[], db?: Db): Promise<Rec
   return out;
 }
 
-/** Paramètres effectifs d'un modèle : les siens, sinon les généraux. */
+/**
+ * Paramètres effectifs d'un modèle : les siens, sinon les généraux. Le
+ * coefficient général imposé (A8) ne s'applique qu'aux modèles sans charges ni
+ * marge propres — même règle que model_sale_prices() (migration 0083).
+ */
 export function effectiveParams(settings: PricingSettings, model: Pick<ModelPricing, "chargesPct" | "margePct">): PricingParams {
+  const ownParams = model.chargesPct != null || model.margePct != null;
   return {
     chargesPct: model.chargesPct ?? settings.chargesPct,
     margePct: model.margePct ?? settings.margePct,
     arrondi: settings.arrondi,
+    coefPrixVente: ownParams ? null : settings.coefPrixVente ?? null,
   };
 }
 

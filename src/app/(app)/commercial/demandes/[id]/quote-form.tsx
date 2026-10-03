@@ -18,7 +18,8 @@ import { averageUnitPrice } from "@/lib/quote-totals";
 import { LinePricesEditor, type PriceSource } from "./line-prices-editor";
 import type { SagePrefill } from "@/lib/sage-quotes";
 
-type ProductModel = { id: string; name: string; base_price: number | null };
+/** Modèle proposé au devis ; `textiles` : grammages autorisés (ART-D), le premier est le principal. */
+type ProductModel = { id: string; name: string; base_price: number | null; textiles: { id: string; nom: string }[] };
 type ZoneTemplate = { zone_key: string; zone_label: string; display_order: number };
 type ColorOption = { id: string; name: string; code: string };
 /** Emplacement imprimable d'un modèle (Paramètres > Produits, migration 0039). */
@@ -33,6 +34,8 @@ type LineDraft = {
   /** Ligne déjà enregistrée (correction d'un devis renvoyé) — conservée telle quelle côté serveur. */
   id?: string;
   productModelId: string;
+  /** Grammage (textile) choisi — vide si le modèle n'en déclare aucun (ART-D). */
+  textileId: string;
   description: string;
   quantity: string;
   unitPrice: string;
@@ -132,6 +135,7 @@ function newTerms(defaults: QuoteDefaults, paymentTerms: PaymentTermOption[]): T
 export type CorrectionLine = {
   id: string;
   productModelId: string | null;
+  textileId: string | null;
   description: string;
   quantity: number;
   unitPrice: number;
@@ -157,6 +161,7 @@ function lineFromCorrection(l: CorrectionLine): LineDraft {
     key: l.id,
     id: l.id,
     productModelId: l.productModelId ?? "",
+    textileId: l.textileId ?? "",
     description: l.description,
     quantity: String(l.quantity),
     unitPrice: String(l.unitPrice),
@@ -209,6 +214,7 @@ function newLine(): LineDraft {
   return {
     key: Math.random().toString(36).slice(2),
     productModelId: "",
+    textileId: "",
     description: "",
     quantity: "",
     unitPrice: "",
@@ -345,6 +351,8 @@ export function QuoteForm({
           ? {
               ...l,
               productModelId,
+              // Grammage : le principal du modèle, à changer si le client en veut un autre.
+              textileId: opt?.textiles[0]?.id ?? "",
               unitPrice: l.unitPrice || String(opt?.base_price ?? ""),
               description: l.description || opt?.name || "",
               // Le gabarit de zones change avec le modèle — repartir d'une
@@ -412,6 +420,7 @@ export function QuoteForm({
         unit_price: l.productModelId ? averageUnitPrice(totalsLine(l)) : Number(l.unitPrice),
         remise_pct: Number(l.remisePct) || 0,
         product_model_id: l.productModelId || null,
+        textile_id: l.productModelId ? l.textileId || null : null,
         couleur_unique_id: uni ? l.colorDraft.couleurUniqueId : null,
         zone_colors: uni
           ? []
@@ -584,6 +593,25 @@ export function QuoteForm({
                   ))}
                 </select>
               </div>
+              {(products.find((p) => p.id === line.productModelId)?.textiles.length ?? 0) > 1 && (
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-foreground">Grammage</label>
+                  <select
+                    value={line.textileId}
+                    // Le prix dépend du grammage : nouvelle proposition.
+                    onChange={(e) => updateLine(line.key, { textileId: e.target.value, sizePrices: {}, sizePriceSources: {}, pricesAuto: true })}
+                    className="h-9 w-full rounded-md border border-border bg-surface px-2 text-sm"
+                  >
+                    {products
+                      .find((p) => p.id === line.productModelId)!
+                      .textiles.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.nom}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              )}
               <div>
                 <label className="mb-1 block text-xs font-medium text-foreground">Description de la ligne</label>
                 <input
@@ -679,6 +707,7 @@ export function QuoteForm({
                   <LinePricesEditor
                     companyId={companyId}
                     productModelId={line.productModelId}
+                    textileId={line.textileId || null}
                     quantity={Number(line.quantity) || 0}
                     printZones={line.printZones}
                     devise={terms.devise}

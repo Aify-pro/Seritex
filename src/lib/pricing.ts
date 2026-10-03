@@ -98,6 +98,8 @@ export interface PricingParams {
   margePct: number;
   /** Pas d'arrondi du prix de vente (ex. 100 F CFA). */
   arrondi: number;
+  /** Coefficient PV / PR imposé (A8) ; absent ou null = calculé depuis charges et marge. */
+  coefPrixVente?: number | null;
 }
 
 /** Impression retenue : nombre de couleurs d'un emplacement. */
@@ -120,7 +122,8 @@ export function roundUpTo(value: number, step: number): number {
 }
 
 /** Coefficient PV / PR ; null si charges ou marge atteignent 100 % (prix infini). */
-export function coefficient(p: Pick<PricingParams, "chargesPct" | "margePct">): number | null {
+export function coefficient(p: Pick<PricingParams, "chargesPct" | "margePct" | "coefPrixVente">): number | null {
+  if (p.coefPrixVente != null && p.coefPrixVente > 0) return p.coefPrixVente;
   if (p.chargesPct >= 100 || p.margePct >= 100 || p.chargesPct < 0 || p.margePct < 0) return null;
   return 1 / ((1 - p.chargesPct / 100) * (1 - p.margePct / 100));
 }

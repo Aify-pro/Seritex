@@ -178,4 +178,11 @@ test("tissu calculé : donnée manquante signalée, jamais comptée 0 en silence
   assert.deepEqual(resolveComponents(modele1, [M], null).components, modele1);
 });
 
+test("coefficient de vente imposé (A8) : remplace la formule charges / marge", () => {
+  close(coefficient({ chargesPct: 40, margePct: 15, coefPrixVente: 2 })!, 2);
+  close(coefficient({ chargesPct: 40, margePct: 15, coefPrixVente: null })!, 1 / (0.6 * 0.85));
+  const g = priceGrid([{ id: "c", libelle: "Confection", base: 1000, supplements: {} }], [M], { ...jersey, coefPrixVente: 1.75 });
+  assert.equal(g.sizes[0].pvCalcule, 1800);
+});
+
 console.log(`\n${n} tests OK`);

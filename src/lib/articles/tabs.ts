@@ -14,5 +14,6 @@ export const ARTICLE_DETAIL_TABS: ArticleTabDef[] = [
   { slug: "technique", label: "Technique" },
   { slug: "declinaisons", label: "Déclinaisons" },
   { slug: "fabrication", label: "Fabrication" },
+  { slug: "ventes", label: "Ventes" },
   { slug: "prix-de-revient", label: "Prix de revient", costsOnly: true },
 ];

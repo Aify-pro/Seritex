@@ -18,6 +18,8 @@ const settingsSchema = z.object({
   marge_pct: pct,
   arrondi: z.number().int().min(1, "Arrondi invalide"),
   frais_ecran_par_couleur: money,
+  // A8 : vide = coefficient calculé depuis charges et marge.
+  coef_prix_vente: z.number().gt(0, "Coefficient invalide").max(99, "Coefficient invalide").nullable().optional(),
 });
 
 export async function updatePricingSettings(input: z.input<typeof settingsSchema>) {

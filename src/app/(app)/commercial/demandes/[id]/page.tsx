@@ -63,10 +63,13 @@ export default async function RequestDetailPage({
       supabase
         .from("quotes")
         .select(
-          "*,quote_lines(id,product_model_id,description,quantity,unit_price,remise_pct,couleur_unique_id,quote_line_zone_colors(zone_key,color_id),quote_line_printable_zones(printable_zone_id,nb_couleurs),quote_line_sizes(taille,quantite),quote_line_size_prices(taille,prix,source))"
+          "*,quote_lines(id,product_model_id,textile_id,description,quantity,unit_price,remise_pct,couleur_unique_id,quote_line_zone_colors(zone_key,color_id),quote_line_printable_zones(printable_zone_id,nb_couleurs),quote_line_sizes(taille,quantite),quote_line_size_prices(taille,prix,source))"
         )
         .eq("request_id", id),
-      supabase.from("product_models").select("id,name,base_price").eq("active", true),
+      supabase
+        .from("product_models")
+        .select("id,name,base_price,textile_id,product_model_textiles(textile_id,textiles(id,nom,grammage))")
+        .eq("active", true),
       // Gabarits de zones de tous les modèles — nécessaire au sélecteur de
       // couleur du devis (chantier config-produit-devis) dès qu'une ligne
       // choisit un modèle, sans aller-retour supplémentaire par ligne.
@@ -100,6 +103,7 @@ export default async function RequestDetailPage({
     const lines = (q.quote_lines ?? []) as unknown as {
       id: string;
       product_model_id: string | null;
+      textile_id: string | null;
       description: string;
       quantity: number;
       unit_price: number;
@@ -118,6 +122,7 @@ export default async function RequestDetailPage({
         lines: lines.map((l) => ({
           id: l.id,
           productModelId: l.product_model_id,
+          textileId: l.textile_id,
           description: l.description,
           quantity: l.quantity,
           unitPrice: Number(l.unit_price),
@@ -180,7 +185,17 @@ export default async function RequestDetailPage({
   const quoteFormProps = {
     requestId: request.id,
     companyId: company.id,
-    products: products ?? [],
+    // Grammages autorisés (ART-D) : le principal du modèle d'abord, puis par grammage.
+    products: (products ?? []).map((pm) => ({
+      id: pm.id as string,
+      name: pm.name as string,
+      base_price: pm.base_price as number | null,
+      textiles: ((pm.product_model_textiles ?? []) as unknown as { textiles: { id: string; nom: string; grammage: number | null } | null }[])
+        .map((t) => t.textiles)
+        .filter((t): t is { id: string; nom: string; grammage: number | null } => !!t)
+        .sort((x, y) => Number(y.id === pm.textile_id) - Number(x.id === pm.textile_id) || (x.grammage ?? 0) - (y.grammage ?? 0))
+        .map((t) => ({ id: t.id, nom: t.nom })),
+    })),
     zoneTemplatesByModel,
     printableZonesByModel,
     sizeOptionsByModel,

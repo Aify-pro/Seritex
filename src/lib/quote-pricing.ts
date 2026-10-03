@@ -174,7 +174,7 @@ export async function simulateQuote(quoteId: string): Promise<QuoteSimulation | 
   const { data: rawLines } = await supabase
     .from("quote_lines")
     .select(
-      "id,description,quantity,unit_price,product_model_id,quote_line_sizes(taille,quantite),quote_line_size_prices(taille,prix),quote_line_printable_zones(printable_zone_id,nb_couleurs,product_printable_zones(zone_label))"
+      "id,description,quantity,unit_price,product_model_id,textile_id,quote_line_sizes(taille,quantite),quote_line_size_prices(taille,prix),quote_line_printable_zones(printable_zone_id,nb_couleurs,product_printable_zones(zone_label))"
     )
     .eq("quote_id", quoteId);
 
@@ -184,6 +184,7 @@ export async function simulateQuote(quoteId: string): Promise<QuoteSimulation | 
     quantity: number;
     unit_price: number;
     product_model_id: string | null;
+    textile_id: string | null;
     quote_line_sizes: { taille: string; quantite: number }[];
     quote_line_size_prices: { taille: string; prix: number }[];
     quote_line_printable_zones: { printable_zone_id: string; nb_couleurs: number; product_printable_zones: { zone_label: string } | null }[];
@@ -211,8 +212,8 @@ export async function simulateQuote(quoteId: string): Promise<QuoteSimulation | 
 
   for (const l of lines) {
     if (!l.product_model_id) continue;
-    // Tissu calculé (ART-C) : résolu pour le tissu principal du modèle.
-    const fabric = (await getFabricContexts([l.product_model_id]))[l.product_model_id] ?? null;
+    // Tissu calculé (ART-C) : résolu pour le grammage de la ligne (ART-D), sinon le tissu principal du modèle.
+    const fabric = (await getFabricContexts([l.product_model_id], undefined, { [l.product_model_id]: l.textile_id }))[l.product_model_id] ?? null;
     const resolved = resolveComponents(pricings[l.product_model_id].components, (sizesByModel[l.product_model_id] ?? []).map((o) => o.cle), fabric);
     const pricing = { ...pricings[l.product_model_id], components: resolved.components };
     const params = effectiveParams(settings, pricing);
