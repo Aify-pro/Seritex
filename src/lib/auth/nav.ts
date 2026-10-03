@@ -105,6 +105,7 @@ export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
     { href: "/commercial/echantillons", label: "Échantillons", icon: navIcon(FlaskConical) },
     { href: "/mediatheque", label: "Médiathèque", icon: navIcon(FolderOpen), module: "mediatheque" },
     { href: "/commercial/production", label: "Avancement production", icon: navIcon(Factory) },
+    { href: "/livraisons", label: "Livraisons", icon: navIcon(Truck), module: "livraisons" },
     {
       href: "/parametres/clients-sage",
       label: "Clients Sage (lecture)",
@@ -134,6 +135,7 @@ export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
     { href: "/atelier/patronnage", label: "Patronnage", icon: navIcon(Ruler), module: "patronnage" },
     { href: "/atelier/section", label: "Terminaux de section", icon: navIcon(ClipboardList), module: "ordres_travail" },
     { href: "/atelier/stock", label: "Gestion de stock", icon: navIcon(ArrowLeftRight) },
+    { href: "/livraisons", label: "Livraisons", icon: navIcon(Truck), module: "livraisons" },
     { href: "/mediatheque", label: "Médiathèque", icon: navIcon(FolderOpen), module: "mediatheque" },
     { href: "/parametres/couleurs", label: "Couleurs et tailles", icon: navIcon(SwatchBook), section: PARAMETRES },
     { href: "/parametres/codification", label: "Codification", icon: navIcon(Barcode), section: PARAMETRES },
@@ -174,6 +176,7 @@ export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
   // compte client, aucun autre droit sur l'atelier.
   comptabilite: [
     { href: "/dashboard", label: "Tableau de bord", icon: navIcon(LayoutDashboard) },
+    { href: "/livraisons?onglet=a_valider", label: "Livraisons à valider", icon: navIcon(Truck), module: "livraisons", matchPrefixes: ["/livraisons"] },
     { href: "/atelier/production", label: "Ordres de fabrication", icon: navIcon(Factory), module: "ordres_fabrication" },
   ],
   // Livraison (LIV-0) : le livreur n'a que son écran mobile ; le responsable
@@ -183,6 +186,8 @@ export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
   ],
   responsable_livraison: [
     { href: "/dashboard", label: "Tableau de bord", icon: navIcon(LayoutDashboard) },
+    { href: "/livraisons", label: "Livraisons", icon: navIcon(Truck), module: "livraisons" },
+
     { href: "/commercial/clients", label: "Clients", icon: navIcon(Contact) },
     { href: "/parametres/livraison", label: "Livraison", icon: navIcon(MapPinned), section: PARAMETRES, module: "livraisons" },
   ],
@@ -199,6 +204,7 @@ export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
     { href: "/atelier/patronnage", label: "Patronnage", icon: navIcon(Ruler), module: "patronnage" },
     { href: "/atelier/section", label: "Terminaux de section", icon: navIcon(ClipboardList), module: "ordres_travail" },
     { href: "/atelier/stock", label: "Gestion de stock", icon: navIcon(ArrowLeftRight) },
+    { href: "/livraisons", label: "Livraisons", icon: navIcon(Truck), module: "livraisons" },
     { href: "/parametres/utilisateurs", label: "Utilisateurs", icon: navIcon(Users), section: PARAMETRES, module: "utilisateurs" },
     { href: "/parametres/roles", label: "Rôles & permissions", icon: navIcon(ShieldCheck), section: PARAMETRES, module: "roles" },
     { href: "/parametres/sections", label: "Sections d'atelier", icon: navIcon(Boxes), section: PARAMETRES, module: "sections" },

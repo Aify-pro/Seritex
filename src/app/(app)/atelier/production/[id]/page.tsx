@@ -23,6 +23,7 @@ import type { DownloadableMediaFile, MaquetteFile, StockMovement, StockExportFic
 import { ValidationCircuitPanel } from "./validation-circuit-panel";
 import { WhereArePieces, type WhereArePiecesLine } from "./where-are-pieces";
 import { ClosureBalance, type ClosureBalanceData } from "./closure-balance";
+import { SHIPMENT_STATUS_LABELS, type ShipmentStatus } from "@/lib/delivery/status";
 import { stageRowFromDb } from "@/lib/production/flow";
 import { CheckCircle2, ChevronRight, Package, Printer, QrCode } from "lucide-react";
 import Link from "next/link";
@@ -616,6 +617,19 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
   }
   const bilanCloture = (order.bilan_cloture ?? null) as ClosureBalanceData | null;
 
+  // Livraison (LIV-1) : état non livré / partiel / livré, et les BL de l'ODF.
+  const [{ data: deliverySummary }, { data: odfShipments }] = showFlow
+    ? await Promise.all([
+        supabase.rpc("production_order_delivery_summary", { p_production_order_id: order.id }),
+        supabase
+          .from("shipments")
+          .select("id,reference,statut,mode,date_promise,date_planifiee,shipment_lines(quantite)")
+          .eq("production_order_id", order.id)
+          .order("created_at"),
+      ])
+    : [{ data: null }, { data: [] }];
+  const delivery = deliverySummary as { premier_choix: number; en_expedition: number; livre: number; etat: string } | null;
+
   // Sous-ODF groupés par section (demande Ayman, 17/09) : un chef de section
   // scanne le QR d'en-tête de l'ODF depuis /atelier/section et doit
   // retrouver directement les sous-ODF de SA section — même regroupement
@@ -835,6 +849,31 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
       )}
 
       <WhereArePieces lines={whereArePiecesLines} sizes={allSizes} />
+
+      {delivery && (delivery.premier_choix > 0 || (odfShipments ?? []).length > 0) && (
+        <Card>
+          <CardHeader
+            title="Livraison"
+            description={`${delivery.etat === "livre" ? "Livré" : delivery.etat === "partiel" ? "Livraison partielle" : "Non livré"} — ${delivery.premier_choix} pièce(s) de 1er choix, ${delivery.en_expedition} en expédition, ${delivery.livre} livrée(s).`}
+          />
+          <CardBody className="p-0">
+            <ul className="divide-y divide-border">
+              {(odfShipments ?? []).map((sh) => (
+                <li key={sh.id} className="flex items-center justify-between gap-3 px-5 py-2.5 text-sm">
+                  <Link href={`/livraisons/${sh.id}`} className="font-medium text-brand hover:underline">
+                    {sh.reference ?? "À préparer"}
+                  </Link>
+                  <span className="text-xs text-foreground-muted">
+                    {((sh.shipment_lines ?? []) as { quantite: number }[]).reduce((t, l) => t + l.quantite, 0)} pcs ·{" "}
+                    {sh.mode === "retrait" ? "retrait" : formatDate(sh.date_planifiee ?? sh.date_promise)} ·{" "}
+                    {SHIPMENT_STATUS_LABELS[sh.statut as ShipmentStatus]}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </CardBody>
+        </Card>
+      )}
 
       <Card>
         <CardHeader

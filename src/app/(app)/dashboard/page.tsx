@@ -282,12 +282,25 @@ export default async function DashboardPage() {
   }
 
   if (profile.role === "responsable_livraison") {
+    const { data: shipments } = await supabase.from("shipments").select("statut").not("statut", "in", "(annulee,reception_confirmee)");
+    const n = (...statuts: string[]) => (shipments ?? []).filter((x) => statuts.includes(x.statut)).length;
     return (
       <div className="space-y-6">
         <PageHeader title="Service livraison" description="Préparation, validation, planification et suivi des livraisons." />
-        <Link href="/parametres/livraison" className="text-sm font-medium text-brand hover:underline">
-          Zones, transporteurs et véhicules →
-        </Link>
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <StatCard label="À préparer" value={n("a_preparer")} tone="brand" />
+          <StatCard label="À valider (compta)" value={n("preparee")} tone="warning" />
+          <StatCard label="À planifier" value={n("validee_compta")} tone="info" />
+          <StatCard label="Échecs et litiges" value={n("echec", "litige")} tone="danger" />
+        </div>
+        <div className="flex gap-4 text-sm">
+          <Link href="/livraisons" className="font-medium text-brand hover:underline">
+            Ouvrir les livraisons →
+          </Link>
+          <Link href="/parametres/livraison" className="font-medium text-brand hover:underline">
+            Zones, transporteurs et véhicules →
+          </Link>
+        </div>
       </div>
     );
   }

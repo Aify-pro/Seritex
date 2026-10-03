@@ -16,7 +16,8 @@
     "typecheck": "tsc --noEmit",
     "test:en-cours": "tsx scripts/test-en-cours.ts",
     "test:sql": "node scripts/sql-bench/run-all.mjs",
-    "test:codification": "tsx scripts/test-codification.ts"
+    "test:codification": "tsx scripts/test-codification.ts",
+    "test:livraison": "tsx scripts/test-livraison.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",
