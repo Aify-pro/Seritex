@@ -90,14 +90,18 @@ await test("correction motivée ; l'aval ne peut pas dépasser l'amont corrigé"
   await expectFail(() => q(`delete from production_declarations where id=$1`, [decl.id]), /ne se modifient/);
 });
 
-await test("demande de clôture : bilan, motif exigé s'il reste de l'en-cours", async () => {
+await test("demande de clôture : bilan par taille ; refusée tant qu'il reste de l'en-cours (règle SF-4)", async () => {
   await as(admin);
-  await expectFail(() => q(`select request_closure($1::uuid)`, [odf.po.id]), /motif est obligatoire/);
-  const bilan = (await one(`select request_closure($1::uuid, 'reste en atelier') b`, [odf.po.id])).b;
-  assert.ok(bilan.en_cours > 0);
+  await expectFail(() => q(`select request_closure($1::uuid)`, [odf.po.id]), /pièce\(s\) en cours/);
+  await expectFail(() => q(`select request_closure($1::uuid, 'reste en atelier')`, [odf.po.id]), /donnez une destination/);
+  // Chaque reste mis en déchet (SF-4), puis la clôture passe.
+  const rows = await q(`select w.id work_order_id, f.taille, f.reste from work_orders w, work_order_flow(w.id) f where w.production_order_id=$1 and f.reste > 0 order by w.etape`, [odf.po.id]);
+  for (const r of rows) await q(`select settle_en_cours($1,$2,$3,'dechet','fin de série')`, [r.work_order_id, r.taille, r.reste]);
+  const bilan = (await one(`select request_closure($1::uuid, null) b`, [odf.po.id])).b;
+  assert.equal(bilan.en_cours, 0);
   const l = bilan.lignes[0].tailles.find((t) => t.taille === M);
   assert.deepEqual([l.demande, l.premier_choix, l.deuxieme_choix], [30, 20, 3]);
-  const po = await one(`select status, motif_cloture_en_cours from production_orders where id=$1`, [odf.po.id]);
+  const po = await one(`select status from production_orders where id=$1`, [odf.po.id]);
   assert.equal(po.status, "demande_cloture");
 });
 
@@ -136,9 +140,11 @@ await test("étape mixte interdite ; parallèle par partie = minimum, par quanti
 });
 
 await test("create_article_lot ne crée plus de mouvement", async () => {
+  // Les déclarations de finition en créent (SF-4) ; le lot, aucun.
+  const avant = await one(`select count(*)::int n from stock_movements`);
   await q(`select * from create_article_lot($1, null, 'fini', '{"Homme/M": 5}'::jsonb)`, [odf.po.id]);
   const m = await one(`select count(*)::int n from stock_movements`);
-  assert.equal(m.n, 0);
+  assert.equal(m.n, avant.n);
 });
 
 await test("record_work_order_quantity (compatibilité) bornée par l'en-cours", async () => {

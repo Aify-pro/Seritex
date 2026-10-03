@@ -34,7 +34,7 @@ export function LifecycleActions({
   canValidate: boolean;
   canRequestClosure: boolean;
   isAdmin: boolean;
-  /** Pièces encore en cours, toutes étapes (production_order_balance, SF-1) : motif exigé à la demande de clôture. */
+  /** Pièces encore en cours, toutes étapes (production_order_balance) : la clôture est refusée tant qu'il en reste (SF-4). */
   enCoursTotal?: number;
 }) {
   const [pending, startTransition] = useTransition();
@@ -128,31 +128,20 @@ export function LifecycleActions({
                   <p className="text-sm font-medium text-foreground">En production</p>
                   <p className="text-xs text-foreground-muted">
                     {enCoursTotal > 0
-                      ? `Il reste ${enCoursTotal} pièce(s) en cours dans les ateliers : un motif est exigé pour demander la clôture.`
+                      ? `Il reste ${enCoursTotal} pièce(s) en cours dans les ateliers : terminez-les ou donnez une destination à chaque reste (« Restes à clôturer ») avant de demander la clôture.`
                       : "Plus aucune pièce en cours : la clôture peut être demandée. Le bilan par taille est figé à la demande."}
                   </p>
                 </div>
                 <Button
                   loading={pending}
-                  disabled={enCoursTotal > 0 && !reason.trim()}
+                  disabled={enCoursTotal > 0}
                   onClick={() =>
-                    call("Clôture demandée — en attente de validation par la direction", () =>
-                      requestClosure(productionOrderId, reason)
-                    )
+                    call("Clôture demandée — en attente de validation par la direction", () => requestClosure(productionOrderId))
                   }
                 >
                   <Flag className="h-4 w-4" /> Demander la clôture
                 </Button>
               </div>
-              {enCoursTotal > 0 && (
-                <textarea
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                  placeholder="Motif : pourquoi clôturer avec de l'en-cours ?"
-                  className="w-full rounded-md border border-border bg-surface p-2 text-xs outline-none focus:ring-2 focus:ring-brand/30"
-                  rows={2}
-                />
-              )}
             </CardBody>
           </Card>
         )}

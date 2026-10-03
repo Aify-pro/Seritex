@@ -24,6 +24,8 @@ import { ValidationCircuitPanel } from "./validation-circuit-panel";
 import { WhereArePieces, type WhereArePiecesLine } from "./where-are-pieces";
 import type { StockAvailabilityRow } from "./line-stock-tools";
 import { ClosureBalance, type ClosureBalanceData } from "./closure-balance";
+import type { WorkOrderFlowRow } from "@/lib/types/domain";
+import { RemaindersPanel, type RemainderRow } from "./remainders-panel";
 import { odfClientLabel } from "@/lib/production/client-label";
 import { SHIPMENT_STATUS_LABELS, type ShipmentStatus } from "@/lib/delivery/status";
 import { stageRowFromDb } from "@/lib/production/flow";
@@ -194,7 +196,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     // jamais saisis directement (migration 0020).
     supabase
       .from("stock_movements")
-      .select("id,production_order_id,type,article_ref,quantite_ou_poids,unite,exported_in_fiche_id,created_by,created_at")
+      .select("id,production_order_id,type,article_ref,quantite_ou_poids,unite,exported_in_fiche_id,created_by,created_at,depot,taille,commentaire,shipment_id")
       .eq("production_order_id", id)
       .order("created_at", { ascending: false }),
     supabase
@@ -639,6 +641,31 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
   }
   const bilanCloture = (order.bilan_cloture ?? null) as ClosureBalanceData | null;
 
+  // Restes à clôturer (SF-4) : chaque sous-ODF × taille encore en cours.
+  let remainders: RemainderRow[] = [];
+  if (enCoursTotal > 0 && (workOrders ?? []).length > 0) {
+    const { data: flows } = await supabase.rpc("work_orders_flow", { p_work_order_ids: (workOrders ?? []).map((w) => w.id as string) });
+    const catBySection = new Map(
+      (allSections ?? []).map((s) => [s.id as string, (s.atelier_categories as unknown as { cle: string } | null)?.cle ?? null])
+    );
+    remainders = ((flows ?? []) as (WorkOrderFlowRow & { work_order_id: string })[])
+      .filter((f) => f.reste > 0)
+      .map((f) => {
+        const wo = (workOrders ?? []).find((w) => w.id === f.work_order_id)!;
+        return {
+          workOrderId: f.work_order_id,
+          lineDescription: (productionOrderLines ?? []).find((l) => l.id === wo.production_order_line_id)?.description ?? "Article",
+          etape: (wo.etape as number | null) ?? 0,
+          section: (wo.sections as unknown as { name: string } | null)?.name ?? "—",
+          categorie: catBySection.get(wo.section_id as string) ?? null,
+          taille: f.taille,
+          libelleTaille: allSizes.find((s) => s.cle === f.taille)?.libelle ?? f.taille,
+          reste: f.reste,
+        };
+      })
+      .sort((a, b) => a.lineDescription.localeCompare(b.lineDescription) || a.etape - b.etape);
+  }
+
   // Livraison (LIV-1) : état non livré / partiel / livré, et les BL de l'ODF.
   const [{ data: deliverySummary }, { data: odfShipments }] = showFlow
     ? await Promise.all([
@@ -869,6 +896,10 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
         isAdmin={isAdmin}
         enCoursTotal={enCoursTotal}
       />
+
+      {canRequestClosure && order.status === "en_production" && (
+        <RemaindersPanel productionOrderId={order.id} rows={remainders} hasClient={!!order.company_id} />
+      )}
 
       {bilanCloture && (
         <ClosureBalance bilan={bilanCloture} motif={order.motif_cloture_en_cours ?? null} sizes={allSizes} />

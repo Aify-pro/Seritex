@@ -13,6 +13,7 @@ import { StockEntryForm } from "../production/[id]/stock-entry-form";
 import { StockMovementsPanel } from "../production/[id]/stock-movements-panel";
 import { GlobalExportButton } from "./global-export-button";
 import { PickingList, type PickingRow } from "./picking-list";
+import { DepotEditor } from "./depot-editor";
 import { getSizes } from "@/lib/sizes";
 import type { WorkOrderFlowRow } from "@/lib/types/domain";
 import type { StockMovement, StockExportFiche } from "@/lib/types/domain";
@@ -47,12 +48,12 @@ export default async function StockManagementPage({
       supabase.from("stock_movements").select("id", { count: "exact", head: true }).is("exported_in_fiche_id", null),
       supabase
         .from("stock_export_fiches")
-        .select("id,numero,production_order_id,generated_at,production_orders(reference),sage_numero")
+        .select("id,numero,production_order_id,generated_at,production_orders(reference),shipments(reference),sage_numero")
         .order("generated_at", { ascending: false })
         .limit(50),
       supabase
         .from("stock_movements")
-        .select("id,type,article_ref,quantite_ou_poids,unite,created_at,exported_in_fiche_id,production_orders(reference)")
+        .select("id,type,article_ref,quantite_ou_poids,unite,created_at,exported_in_fiche_id,depot,production_orders(reference)")
         .order("created_at", { ascending: false })
         .limit(100),
     ]);
@@ -107,7 +108,7 @@ export default async function StockManagementPage({
         supabase.from("stock_item_view").select("sage_reference,designation").order("designation"),
         supabase
           .from("stock_movements")
-          .select("id,production_order_id,type,article_ref,quantite_ou_poids,unite,exported_in_fiche_id,created_by,created_at")
+          .select("id,production_order_id,type,article_ref,quantite_ou_poids,unite,exported_in_fiche_id,created_by,created_at,depot,taille,commentaire,shipment_id")
           .eq("production_order_id", productionOrderId)
           .order("created_at", { ascending: false }),
         supabase
@@ -156,7 +157,7 @@ export default async function StockManagementPage({
       <Card>
         <CardHeader
           title="Export Sage"
-          description="Génère un CSV au format d'import Sage à partir des mouvements pas encore exportés."
+          description="Génère un CSV (format provisoire, avec dépôt) à partir des mouvements pas encore exportés. Chaque mouvement doit porter un dépôt : pré-rempli selon la nature (Paramètres > Codification), modifiable ci-dessous."
           action={<GlobalExportButton unexportedCount={unexportedCount ?? 0} />}
         />
         <CardBody className="p-0">
@@ -175,6 +176,7 @@ export default async function StockManagementPage({
               <Tbody>
                 {allFiches.map((f) => {
                   const po = f.production_orders as unknown as { reference: string } | null;
+                  const bl = (f.shipments as unknown as { reference: string | null } | null)?.reference ?? null;
                   return (
                     <Tr key={f.id}>
                       <Td>
@@ -182,7 +184,7 @@ export default async function StockManagementPage({
                           {f.numero}
                         </Link>
                       </Td>
-                      <Td>{po ? po.reference : "Global"}</Td>
+                      <Td>{bl ? `BL ${bl}` : po ? po.reference : "Global"}</Td>
                       <Td>{formatDate(f.generated_at)}</Td>
                       <Td>
                         <Badge tone={f.sage_numero ? "success" : "warning"}>
@@ -209,6 +211,7 @@ export default async function StockManagementPage({
                 <Th>ODF</Th>
                 <Th>Référence Sage</Th>
                 <Th align="right">Quantité</Th>
+                <Th>Dépôt</Th>
                 <Th>Export</Th>
               </Tr>
             </Thead>
@@ -223,13 +226,16 @@ export default async function StockManagementPage({
                     {m.quantite_ou_poids} {m.unite === "kg" ? "kg" : "pièce(s)"}
                   </Td>
                   <Td>
+                    <DepotEditor movementId={m.id} depot={(m.depot as string | null) ?? null} editable={!m.exported_in_fiche_id} />
+                  </Td>
+                  <Td>
                     <Badge tone={m.exported_in_fiche_id ? "neutral" : "warning"}>
                       {m.exported_in_fiche_id ? "Exporté" : "Non exporté"}
                     </Badge>
                   </Td>
                 </Tr>
               ))}
-              {(!recentMovements || recentMovements.length === 0) && <EmptyRow colSpan={6}>Aucun mouvement pour le moment.</EmptyRow>}
+              {(!recentMovements || recentMovements.length === 0) && <EmptyRow colSpan={7}>Aucun mouvement pour le moment.</EmptyRow>}
             </Tbody>
           </Table>
         </CardBody>

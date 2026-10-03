@@ -316,10 +316,40 @@ export async function refuseProductionOrder(productionOrderId: string, reason?: 
 export async function requestClosure(productionOrderId: string, motif?: string) {
   await requireRole(["administrateur", "responsable_production"]);
   const supabase = await createClient();
-  // SF-1 : renvoie le bilan par taille ; motif exigé s'il reste de l'en-cours.
+  // SF-4 : refusée tant qu'il reste de l'en-cours (destinations à donner d'abord).
   const { error } = await supabase.rpc("request_closure", {
     p_production_order_id: productionOrderId,
     p_motif: motif?.trim() || null,
+  });
+  if (error) return { error: error.message };
+  revalidateOdf(productionOrderId);
+  return {};
+}
+
+const settleSchema = z.object({
+  workOrderId: z.guid(),
+  taille: z.string().min(1),
+  quantite: z.number().int().positive("Quantité invalide"),
+  destination: z.enum(["dechet", "abandon", "stock_vierge", "stock_personnalise", "livre_client"]),
+  motif: z.string().trim().min(1, "Un motif est obligatoire"),
+});
+
+/**
+ * Destination d'un reste d'en-cours avant la clôture (SF-4, settle_en_cours) :
+ * déchet, abandon (reste non prélevé au stock), ou terminé jusqu'à la
+ * finition puis entré en stock vierge / personnalisé ou livré au client.
+ */
+export async function settleEnCours(productionOrderId: string, input: z.input<typeof settleSchema>) {
+  await requireRole(["administrateur", "responsable_production"]);
+  const parsed = settleSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Saisie invalide" };
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("settle_en_cours", {
+    p_work_order_id: parsed.data.workOrderId,
+    p_taille: parsed.data.taille,
+    p_quantite: parsed.data.quantite,
+    p_destination: parsed.data.destination,
+    p_motif: parsed.data.motif,
   });
   if (error) return { error: error.message };
   revalidateOdf(productionOrderId);

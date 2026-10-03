@@ -749,6 +749,11 @@ export interface StockMovement {
   exported_in_fiche_id: string | null;
   created_by: string | null;
   created_at: string;
+  /** Dépôt Sage de la ligne d'export (LIV-3, migration 0085). */
+  depot?: string | null;
+  taille?: string | null;
+  commentaire?: string | null;
+  shipment_id?: string | null;
 }
 
 /**

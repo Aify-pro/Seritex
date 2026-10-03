@@ -13,6 +13,7 @@ import { DELIVERY_MANAGER_ROLES, DELIVERY_ROLES } from "@/lib/delivery/access";
 import { loadShipment } from "@/lib/delivery/shipment-data";
 import { REGLEMENT_LABELS, SHIPMENT_STATUS_LABELS, type ShipmentStatus } from "@/lib/delivery/status";
 import { AccountingForm, PlanningForm, PreparationForm, ShipmentLines, StatusActions } from "./shipment-workbench";
+import { ShipmentSageExport } from "./sage-export";
 
 /** Fiche d'une expédition (LIV-1) : préparation, BL, validation comptable, planification, suivi, journal. */
 export default async function ShipmentPage({ params }: { params: Promise<{ id: string }> }) {
@@ -53,6 +54,15 @@ export default async function ShipmentPage({ params }: { params: Promise<{ id: s
       ? ((await createAdminClient().storage.from("livraisons").createSignedUrls((documents ?? []).map((d) => d.path), 3600)).data ?? [])
       : [];
   const hasDecharge = (documents ?? []).some((d) => d.type === "decharge_bl");
+
+  // Sortie PF au BL (LIV-3) : visible de la Direction et de la production, qui génèrent la fiche Sage.
+  const canExportStock = profile.role === "administrateur" || profile.role === "responsable_production";
+  const [{ data: blMovements }, { data: blFiches }] = canExportStock
+    ? await Promise.all([
+        supabase.from("stock_movements").select("id,article_ref,taille,quantite_ou_poids,depot,exported_in_fiche_id").eq("shipment_id", id).order("created_at"),
+        supabase.from("stock_export_fiches").select("numero,generated_at").eq("shipment_id", id).order("generated_at"),
+      ])
+    : [{ data: [] }, { data: [] }];
 
   const remaining = ((remainingRes.data ?? []) as { a_livrer: number }[]).reduce((t, r) => t + Math.max(0, r.a_livrer), 0);
   const hint = hintRes.data as { devis_reference: string; devis_total: number; devise: string; conditions_paiement: string | null; mode_reglement: string | null } | null;
@@ -189,6 +199,21 @@ export default async function ShipmentPage({ params }: { params: Promise<{ id: s
       )}
 
       {isManager && <StatusActions shipment={shipment} hasDecharge={hasDecharge} />}
+
+      {canExportStock && (
+        <ShipmentSageExport
+          shipmentId={id}
+          movements={(blMovements ?? []).map((m) => ({
+            id: m.id as string,
+            article: (m.article_ref as string | null) ?? null,
+            taille: (m.taille as string | null) ?? null,
+            quantite: Number(m.quantite_ou_poids),
+            depot: (m.depot as string | null) ?? null,
+            exported: !!m.exported_in_fiche_id,
+          }))}
+          fiches={(blFiches ?? []).map((f) => ({ numero: f.numero as string, generatedAt: f.generated_at as string }))}
+        />
+      )}
 
       {(documents ?? []).length > 0 && (
         <Card>

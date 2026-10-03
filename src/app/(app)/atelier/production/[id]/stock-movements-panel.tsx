@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { generateStockExportFiche } from "../actions";
 import { formatDateTime } from "@/lib/utils";
 import type { StockMovement, StockExportFiche } from "@/lib/types/domain";
+import { DepotEditor } from "../../stock/depot-editor";
 
 /**
  * Lot 10 — mouvements de stock & fiches d'import Sage (section 19 du
@@ -67,12 +68,18 @@ export function StockMovementsPanel({
                   {STOCK_MOVEMENT_TYPE_LABELS[m.type] ?? m.type} · {m.quantite_ou_poids} {m.unite === "kg" ? "kg" : "pièce(s)"}
                 </p>
                 <p className="text-xs text-foreground-muted">
-                  {m.article_ref ? `Article ${m.article_ref}` : "Référence Sage non renseignée"} · {formatDateTime(m.created_at)}
+                  {m.article_ref ? `Article ${m.article_ref}` : "Référence Sage non renseignée"}
+                  {m.taille ? ` · ${m.taille.split("/").pop()}` : ""} · {formatDateTime(m.created_at)}
                 </p>
+                {m.commentaire && <p className="text-xs text-foreground-muted">{m.commentaire}</p>}
               </div>
-              <Badge tone={m.exported_in_fiche_id ? "neutral" : "warning"}>
-                {m.exported_in_fiche_id ? "Exporté" : "Non exporté"}
-              </Badge>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-foreground-muted">Dépôt</span>
+                <DepotEditor movementId={m.id} depot={m.depot ?? null} editable={canGenerate && !m.exported_in_fiche_id} />
+                <Badge tone={m.exported_in_fiche_id ? "neutral" : "warning"}>
+                  {m.exported_in_fiche_id ? "Exporté" : "Non exporté"}
+                </Badge>
+              </div>
             </li>
           ))}
         </ul>
