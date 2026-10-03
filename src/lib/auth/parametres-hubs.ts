@@ -44,6 +44,7 @@ const HUBS: HubDefinition[] = [
     icon: Shirt,
     tabs: [
       { href: "/parametres/couleurs", label: "Couleurs et tailles" },
+      { href: "/parametres/codification", label: "Codification" },
     ],
   },
   {

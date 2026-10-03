@@ -266,10 +266,11 @@ export async function updateProductModelIdentity(productModelId: string, formDat
   const parsed = identitySchema.safeParse({ name: formData.get("name"), category: formData.get("category") ?? undefined });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message };
   const supabase = await createClient();
-  const { error } = await supabase
-    .from("product_models")
-    .update({ name: parsed.data.name, category: parsed.data.category || null })
-    .eq("id", productModelId);
+  // La catégorie se choisit désormais dans le référentiel (COM-0) ; le champ
+  // libre n'est écrit que s'il est transmis.
+  const update: Record<string, string | null> = { name: parsed.data.name };
+  if (formData.has("category")) update.category = parsed.data.category || null;
+  const { error } = await supabase.from("product_models").update(update).eq("id", productModelId);
   if (error) return { error: error.message };
   revalidateArticles();
   return {};
@@ -292,4 +293,94 @@ export async function attachPatternArticle(patternArticleId: string, productMode
   revalidateArticles();
   revalidatePath("/atelier/patronnage/bibliotheque");
   return {};
+}
+
+/**
+ * Catégorie et matière du modèle (COM-0). La catégorie donne le code du
+ * modèle (TS012), attribué une fois pour toutes par la base ; la matière
+ * borne les textiles autorisés (A6).
+ */
+export async function setProductModelClassification(
+  productModelId: string,
+  patch: { categorieId?: string | null; matiereId?: string | null }
+) {
+  await requireRole(["administrateur", "responsable_production"]);
+  const supabase = await createClient();
+  const update: Record<string, string | null> = {};
+  if (patch.categorieId !== undefined) update.categorie_id = patch.categorieId;
+  if (patch.matiereId !== undefined) update.matiere_id = patch.matiereId;
+  const { error } = await supabase.from("product_models").update(update).eq("id", productModelId);
+  if (error) return { error: error.message };
+  revalidateArticles();
+  return {};
+}
+
+/** Textiles autorisés (axe grammage des déclinaisons) — remplace la liste. */
+export async function setProductModelTextiles(productModelId: string, textileIds: string[]) {
+  await requireRole(["administrateur", "responsable_production"]);
+  const supabase = await createClient();
+  const { data: current } = await supabase.from("product_model_textiles").select("textile_id").eq("product_model_id", productModelId);
+  const before = new Set((current ?? []).map((r) => r.textile_id as string));
+  const toRemove = [...before].filter((id) => !textileIds.includes(id));
+  const toAdd = textileIds.filter((id) => !before.has(id));
+  if (toRemove.length > 0) {
+    const { error } = await supabase
+      .from("product_model_textiles")
+      .delete()
+      .eq("product_model_id", productModelId)
+      .in("textile_id", toRemove);
+    if (error) return { error: error.message };
+  }
+  if (toAdd.length > 0) {
+    const { error } = await supabase
+      .from("product_model_textiles")
+      .insert(toAdd.map((textile_id) => ({ product_model_id: productModelId, textile_id })));
+    if (error) return { error: error.message };
+  }
+  revalidateArticles();
+  return {};
+}
+
+/** Génère les déclinaisons cochées (textiles × couleurs × tailles) — ensure_variants. */
+export async function generateVariants(productModelId: string) {
+  await requireRole(["administrateur", "responsable_production"]);
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("ensure_variants", { p_model_id: productModelId });
+  if (error) return { error: error.message };
+  revalidateArticles();
+  return { created: data as number };
+}
+
+export async function setVariantActive(variantId: string, actif: boolean) {
+  await requireRole(["administrateur", "responsable_production"]);
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("product_variants")
+    .update({ actif, archived_at: actif ? null : new Date().toISOString() })
+    .eq("id", variantId);
+  if (error) return { error: error.message };
+  revalidateArticles();
+  return {};
+}
+
+/**
+ * Référence Sage d'un article stockable (vierge, P, D) ou de la déclinaison.
+ * Une référence absente du miroir Sage n'est pas bloquante : elle est
+ * signalée (check_sage_reference).
+ */
+export async function setStockArticleSageReference(
+  target: { kind: "stock_article" | "variant"; id: string },
+  reference: string
+): Promise<{ error?: string; warning?: string }> {
+  await requireRole(["administrateur", "responsable_production"]);
+  const supabase = await createClient();
+  const ref = reference.trim() || null;
+  const table = target.kind === "variant" ? "product_variants" : "variant_stock_articles";
+  const { error } = await supabase.from(table).update({ sage_reference: ref }).eq("id", target.id);
+  if (error) return { error: error.message };
+  revalidateArticles();
+  if (!ref) return {};
+  const { data } = await supabase.rpc("check_sage_reference", { p_reference: ref }).maybeSingle();
+  const found = (data as { trouvee: boolean } | null)?.trouvee;
+  return found ? {} : { warning: `La référence ${ref} est absente du miroir Sage : vérifiez-la.` };
 }

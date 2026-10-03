@@ -29,37 +29,59 @@ function countOptions(values: (string | null | undefined)[], label?: (v: string)
 
 export async function loadArticleCatalog({ canSeeCosts }: { canSeeCosts: boolean }): Promise<ArticleCatalog> {
   const supabase = await createClient();
-  const [{ data: models }, { data: modelColors }, { data: colors }, { data: costs }] = await Promise.all([
-    supabase.from("product_models").select("id,name,category,active,sage_reference,textile_id,textiles(nom,grammage)").order("name"),
+  const [{ data: models }, { data: modelColors }, { data: colors }, { data: costs }, { data: variants }, { data: allowed }] = await Promise.all([
+    supabase
+      .from("product_models")
+      .select("id,code,name,category,active,sage_reference,textile_id,textiles!product_models_textile_id_fkey(nom,grammage),matieres(nom)")
+      .order("name"),
     supabase.from("product_model_colors").select("product_model_id,color_id"),
     supabase.from("colors").select("id,name").order("name"),
     canSeeCosts ? supabase.from("model_cost_components").select("product_model_id") : Promise.resolve({ data: [] }),
+    supabase.from("product_variants").select("model_id,actif,sage_reference,variant_stock_articles(sage_reference)"),
+    supabase.from("product_model_textiles").select("product_model_id,textiles(grammage)"),
   ]);
+  const variantsByModel = new Map<string, { actif: boolean; sage: boolean }[]>();
+  for (const v of variants ?? []) {
+    const sage = !!v.sage_reference || ((v.variant_stock_articles ?? []) as { sage_reference: string | null }[]).some((a) => !!a.sage_reference);
+    variantsByModel.set(v.model_id as string, [...(variantsByModel.get(v.model_id as string) ?? []), { actif: !!v.actif, sage }]);
+  }
 
   const avecGrille = new Set((costs ?? []).map((c) => c.product_model_id as string));
   const colorName = new Map((colors ?? []).map((c) => [c.id as string, c.name as string]));
 
   const rows: ArticleRow[] = (models ?? []).map((m) => {
     const textile = m.textiles as unknown as { nom: string; grammage: number | null } | null;
+    const matiere = (m.matieres as unknown as { nom: string } | null)?.nom ?? null;
+    const modelVariants = variantsByModel.get(m.id as string) ?? [];
+    const grammages = [
+      ...new Set(
+        (allowed ?? [])
+          .filter((a) => a.product_model_id === m.id)
+          .map((a) => Number((a.textiles as unknown as { grammage: number | null } | null)?.grammage ?? 0))
+          .filter((g) => g > 0)
+      ),
+    ];
     const couleurIds = (modelColors ?? []).filter((c) => c.product_model_id === m.id).map((c) => c.color_id as string);
     return {
       id: m.id as string,
-      code: null,
+      code: (m.code as string | null) ?? null,
       name: m.name as string,
       category: (m.category as string | null) ?? null,
       active: !!m.active,
-      matiere: textile?.nom ?? null,
-      grammages: textile?.grammage ? [Number(textile.grammage)] : [],
+      matiere: matiere ?? textile?.nom ?? null,
+      grammages: grammages.length ? grammages : textile?.grammage ? [Number(textile.grammage)] : [],
       couleurIds,
       grille: canSeeCosts ? avecGrille.has(m.id as string) : null,
-      sage: !!m.sage_reference,
-      declinaisons: 0,
+      sage: !!m.sage_reference || modelVariants.some((v) => v.sage),
+      declinaisons: modelVariants.filter((v) => v.actif).length,
       stockDisponible: null,
       prixAPartirDe: null,
       vignetteUrl: null,
       searchText: articleSearchText([
         m.name as string,
+        m.code as string | null,
         m.category as string | null,
+        matiere,
         textile?.nom,
         m.sage_reference as string | null,
         ...couleurIds.map((id) => colorName.get(id)),

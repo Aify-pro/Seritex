@@ -27,6 +27,7 @@ import {
   Mail,
   ChartPie,
   Calculator,
+  Barcode,
   Tags,
   Truck,
   MapPinned,
@@ -135,6 +136,7 @@ export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
     { href: "/atelier/stock", label: "Gestion de stock", icon: navIcon(ArrowLeftRight) },
     { href: "/mediatheque", label: "Médiathèque", icon: navIcon(FolderOpen), module: "mediatheque" },
     { href: "/parametres/couleurs", label: "Couleurs et tailles", icon: navIcon(SwatchBook), section: PARAMETRES },
+    { href: "/parametres/codification", label: "Codification", icon: navIcon(Barcode), section: PARAMETRES },
     { href: "/parametres/stock", label: "Stock Sage (lecture)", icon: navIcon(Warehouse), section: PARAMETRES, module: "stock_sage" },
     {
       href: "/parametres/clients-sage",
@@ -153,6 +155,7 @@ export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
   ],
   gestionnaire_stock: [
     { href: "/dashboard", label: "Tableau de bord", icon: navIcon(LayoutDashboard) },
+    { href: "/parametres/codification", label: "Codification", icon: navIcon(Barcode), section: PARAMETRES },
     { href: "/atelier/stock", label: "Gestion de stock", icon: navIcon(ArrowLeftRight) },
     { href: "/articles", label: "Articles", icon: navIcon(Tags), module: "articles" },
     { href: "/atelier/section", label: "Terminaux de section", icon: navIcon(ClipboardList) },
@@ -200,6 +203,7 @@ export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
     { href: "/parametres/roles", label: "Rôles & permissions", icon: navIcon(ShieldCheck), section: PARAMETRES, module: "roles" },
     { href: "/parametres/sections", label: "Sections d'atelier", icon: navIcon(Boxes), section: PARAMETRES, module: "sections" },
     { href: "/parametres/couleurs", label: "Couleurs et tailles", icon: navIcon(SwatchBook), section: PARAMETRES },
+    { href: "/parametres/codification", label: "Codification", icon: navIcon(Barcode), section: PARAMETRES },
     { href: "/parametres/societe", label: "Informations société", icon: navIcon(Landmark), section: PARAMETRES, module: "societe" },
     { href: "/parametres/fabrication", label: "Fabrication", icon: navIcon(Gauge), section: PARAMETRES, module: "fabrication" },
     { href: "/parametres/dispatching", label: "Dispatching des tailles", icon: navIcon(ChartPie), section: PARAMETRES, module: "dispatching" },

@@ -6,16 +6,16 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { updateProductModelIdentity } from "../../actions";
 
-/** Nom et catégorie du modèle — enregistrés ensemble. */
+/** Nom du modèle (la catégorie se choisit dans le référentiel, voir ModelClassification). */
 export function IdentityForm({
   productModelId,
   name,
-  category,
   editable,
 }: {
   productModelId: string;
   name: string;
-  category: string | null;
+  /** Conservée pour l'appelant ; affichée par ModelClassification. */
+  category?: string | null;
   editable: boolean;
 }) {
   const router = useRouter();
@@ -42,15 +42,6 @@ export function IdentityForm({
           required
           disabled={!editable}
           className="h-9 w-64 rounded-md border border-border bg-surface px-2 text-sm disabled:opacity-70"
-        />
-      </label>
-      <label className="block">
-        <span className="mb-1 block text-xs font-medium text-foreground-muted">Catégorie</span>
-        <input
-          name="category"
-          defaultValue={category ?? ""}
-          disabled={!editable}
-          className="h-9 w-48 rounded-md border border-border bg-surface px-2 text-sm disabled:opacity-70"
         />
       </label>
       {editable && (

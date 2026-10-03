@@ -194,6 +194,11 @@ export interface ProductModel {
   // que les mouvements de stock entree_semi_fini/entree_fini portent une
   // référence Sage exploitable.
   sage_reference: string | null;
+  /** Code Seritex du modèle (COM-0) : catégorie + numéro, ex. TS012 — figé une fois attribué. */
+  code?: string | null;
+  categorie_id?: string | null;
+  /** Matière portée par le modèle (A6). */
+  matiere_id?: string | null;
   // Lot C1 (référentiel textiles, migration 0032) — tissu de patronnage du
   // modèle, distinct de sa disponibilité tailles/couleurs (lot B2).
   textile_id: string | null;
@@ -1105,4 +1110,43 @@ export interface Vehicle {
   libelle: string;
   capacite_note: string | null;
   actif: boolean;
+}
+
+// ----------------------------------------------------------------------------
+// Codification et déclinaisons (COM-0, migration 0076)
+// ----------------------------------------------------------------------------
+
+export interface ProductCategory {
+  id: string;
+  nom: string;
+  code_court: string;
+}
+
+export interface Matiere {
+  id: string;
+  nom: string;
+  code_court: string;
+  actif: boolean;
+}
+
+/** Déclinaison = modèle × textile (grammage) × couleur × taille — code figé, jamais réutilisé. */
+export interface ProductVariant {
+  id: string;
+  model_id: string;
+  textile_id: string;
+  color_id: string;
+  size_id: string;
+  code: string;
+  sage_reference: string | null;
+  actif: boolean;
+  archived_at: string | null;
+}
+
+/** Article stockable d'une déclinaison, par état : vierge, personnalisé (P), 2e choix (D). */
+export interface VariantStockArticle {
+  id: string;
+  variant_id: string;
+  etat: "vierge" | "personnalise" | "deuxieme_choix";
+  code: string;
+  sage_reference: string | null;
 }
