@@ -1,14 +1,7 @@
+import { STOCK_MOVEMENT_TYPE_LABELS } from "@/lib/stock/movements";
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server";
-
-const STOCK_MOVEMENT_TYPE_LABELS: Record<string, string> = {
-  sortie_mp: "Sortie MP",
-  entree_semi_fini: "Entrée semi-fini",
-  sortie_semi_fini: "Sortie semi-fini",
-  entree_fini: "Entrée fini",
-  retour_mp: "Retour MP",
-};
 
 /**
  * Colonnes PLACEHOLDER (migration 0038) : aucune spec Sage réelle fournie à

@@ -933,3 +933,17 @@ export async function generateStockExportFiche(productionOrderId: string): Promi
   const fiche = data as { id: string; numero: string };
   return { id: fiche.id, numero: fiche.numero };
 }
+
+/**
+ * Découpe un article d'ODF modifiable (SF-2) : les quantités par taille
+ * données passent sur une nouvelle ligne du même article — typiquement une
+ * partie prise en stock, une partie fabriquée. Autorité : la base.
+ */
+export async function splitProductionOrderLine(lineId: string, productionOrderId: string, tailles: Record<string, number>) {
+  await requireRole(["administrateur", "responsable_production"]);
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("split_production_order_line", { p_line_id: lineId, p_tailles: tailles });
+  if (error) return { error: error.message };
+  revalidateOdf(productionOrderId);
+  return {};
+}

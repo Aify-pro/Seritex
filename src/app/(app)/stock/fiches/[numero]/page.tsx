@@ -1,3 +1,4 @@
+import { STOCK_MOVEMENT_TYPE_LABELS } from "@/lib/stock/movements";
 import { redirect, notFound } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server";
@@ -7,14 +8,6 @@ import { Badge } from "@/components/ui/badge";
 import { formatDateTime } from "@/lib/utils";
 import { Download } from "lucide-react";
 import { SageReconciliationForm } from "./sage-reconciliation-form";
-
-const STOCK_MOVEMENT_TYPE_LABELS: Record<string, string> = {
-  sortie_mp: "Sortie MP",
-  entree_semi_fini: "Entrée semi-fini",
-  sortie_semi_fini: "Sortie semi-fini",
-  entree_fini: "Entrée fini",
-  retour_mp: "Retour MP",
-};
 
 const STOCK_MANAGER_ROLES = ["administrateur", "responsable_production", "gestionnaire_stock"];
 

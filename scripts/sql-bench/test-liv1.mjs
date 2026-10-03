@@ -69,6 +69,8 @@ await test("pas de départ sans validation de la comptabilité", async () => {
 await test("le livreur : en route puis livrée ; il voit le lieu", async () => {
   await as(livreur);
   await q(`select set_shipment_status($1,'en_route')`, [ship.id]);
+  // Depuis LIV-2 (0079), « livrée » exige la photo du BL signé.
+  await q(`select record_shipment_document($1,'decharge_bl',$2)`, [ship.id, `expeditions/${ship.id}/bl.jpg`]);
   await q(`select set_shipment_status($1,'livree',null,5.33,-4.02,'M. Koné')`, [ship.id]);
   const s = await one(`select statut, receptionnaire_nom from shipments where id=$1`, [ship.id]);
   assert.deepEqual([s.statut, s.receptionnaire_nom], ["livree", "M. Koné"]);

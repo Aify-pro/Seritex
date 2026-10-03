@@ -1,5 +1,6 @@
 "use client";
 
+import { STOCK_MOVEMENT_TYPE_LABELS } from "@/lib/stock/movements";
 import { useTransition } from "react";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -9,14 +10,6 @@ import { Button } from "@/components/ui/button";
 import { generateStockExportFiche } from "../actions";
 import { formatDateTime } from "@/lib/utils";
 import type { StockMovement, StockExportFiche } from "@/lib/types/domain";
-
-const STOCK_MOVEMENT_TYPE_LABELS: Record<string, string> = {
-  sortie_mp: "Sortie MP",
-  entree_semi_fini: "Entrée semi-fini",
-  sortie_semi_fini: "Sortie semi-fini",
-  entree_fini: "Entrée fini",
-  retour_mp: "Retour MP",
-};
 
 /**
  * Lot 10 — mouvements de stock & fiches d'import Sage (section 19 du

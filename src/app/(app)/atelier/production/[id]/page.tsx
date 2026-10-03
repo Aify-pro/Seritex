@@ -22,6 +22,7 @@ import type { StatutFiche } from "@/lib/patronnage/types";
 import type { DownloadableMediaFile, MaquetteFile, StockMovement, StockExportFiche, SampleRequestStatus } from "@/lib/types/domain";
 import { ValidationCircuitPanel } from "./validation-circuit-panel";
 import { WhereArePieces, type WhereArePiecesLine } from "./where-are-pieces";
+import type { StockAvailabilityRow } from "./line-stock-tools";
 import { ClosureBalance, type ClosureBalanceData } from "./closure-balance";
 import { odfClientLabel } from "@/lib/production/client-label";
 import { SHIPMENT_STATUS_LABELS, type ShipmentStatus } from "@/lib/delivery/status";
@@ -521,6 +522,25 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
       ? await supabase.from("model_routes").select("id,nom,par_defaut,product_model_id").in("product_model_id", lineModelIds).order("nom")
       : { data: [] };
 
+  // Disponible en stock par taille des articles qui partent du Stock (SF-2).
+  const stockSectionIds = new Set(
+    (allSections ?? []).filter((x) => (x.atelier_categories as unknown as { cle: string } | null)?.cle === "stock").map((x) => x.id as string)
+  );
+  const stockLineIds = lines.filter((l) => (sectionsByLine[l.id] ?? []).some((x) => stockSectionIds.has(x.sectionId))).map((l) => l.id);
+  const sizesRef = await getSizes();
+  const stockAvailabilityByLine: Record<string, StockAvailabilityRow[]> = {};
+  for (const lineId of stockLineIds) {
+    const { data: av } = await supabase.rpc("line_stock_availability", { p_line_id: lineId });
+    stockAvailabilityByLine[lineId] = ((av ?? []) as { taille: string; code: string | null; demande: number; en_stock: number | null; disponible: number | null }[]).map((r) => ({
+      taille: r.taille,
+      libelle: sizesRef.find((x) => x.cle === r.taille)?.libelle ?? r.taille.split("/").pop() ?? r.taille,
+      code: r.code,
+      demande: r.demande,
+      enStock: r.en_stock === null ? null : Number(r.en_stock),
+      disponible: r.disponible === null ? null : Number(r.disponible),
+    }));
+  }
+
   const linesWithConfig: LineData[] = lines.map((line) => {
     const quoteLineId = quoteLineIdByLine[line.id];
     const maquetteFromDevisFile = quoteLineId ? maquetteByQuoteLine[quoteLineId] : undefined;
@@ -530,6 +550,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
       routes: (modelRoutes ?? [])
         .filter((r) => r.product_model_id === line.productModelId)
         .map((r) => ({ id: r.id as string, nom: r.nom as string, parDefaut: !!r.par_defaut })),
+      stockAvailability: stockAvailabilityByLine[line.id],
       coupeSelected: !!coupeSelectedByLine[line.id],
       fiche: fichesByLine[line.id] ?? null,
       impressionSectionSelected: !!impressionSectionSelectedByLine[line.id],

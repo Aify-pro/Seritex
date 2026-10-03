@@ -16,6 +16,7 @@ import {
 import type { Size } from "@/lib/sizes";
 import { LineSectionsPicker } from "./line-sections-picker";
 import { RouteApplier } from "./route-applier";
+import { SplitLineButton, StockAvailability, type StockAvailabilityRow } from "./line-stock-tools";
 import { FichePatronnageLink } from "./fiche-patronnage-link";
 import { LineVisuelPicker } from "./line-visuel-picker";
 import { LineMaquettePicker } from "./line-maquette-picker";
@@ -72,6 +73,8 @@ export interface LineData {
   sections: { sectionId: string; quantite: number | null; partie: string | null; etape: number }[];
   /** Parcours types du modèle de l'article (ART-H). */
   routes?: { id: string; nom: string; parDefaut: boolean }[];
+  /** Disponible en stock par taille, si l'article part du Stock (SF-2). */
+  stockAvailability?: StockAvailabilityRow[];
   /** Une section de catégorie Coupe est-elle retenue ? Conditionne l'affichage de la fiche Patronnage. */
   coupeSelected: boolean;
   fiche: { id: string; numeroOt: string; statut: StatutFiche } | null;
@@ -444,6 +447,18 @@ function LineCard({
       )}
 
       <div className="space-y-3 border-t border-border pt-3">
+        {line.stockAvailability && <StockAvailability rows={line.stockAvailability} />}
+        {editable && line.initialSizes.length > 0 && (
+          <SplitLineButton
+            lineId={line.id}
+            productionOrderId={productionOrderId}
+            sizes={line.initialSizes.map((s) => ({
+              cle: s.taille,
+              libelle: line.referentielTailles.find((t) => t.cle === s.taille)?.libelle ?? s.taille.split("/").pop() ?? s.taille,
+              quantite: s.quantite_demandee,
+            }))}
+          />
+        )}
         {editable && (line.routes?.length ?? 0) > 0 && (
           <RouteApplier lineId={line.id} productionOrderId={productionOrderId} routes={line.routes ?? []} />
         )}
