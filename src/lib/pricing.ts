@@ -31,6 +31,64 @@ export interface CostComponent {
   supplements: Record<string, number>;
   /** Composant tissu : remplacé par le tissu pesé dans le prix de revient réel (migration 0070). */
   estTissu?: boolean;
+  /**
+   * « tissu_calcule » (ART-C, A9) : coût = surface de la taille × (1 + perte)
+   * × grammage × prix au kg du textile — base et suppléments ignorés. Résolu
+   * par resolveComponents() avant tout calcul de prix.
+   */
+  mode?: "saisi" | "tissu_calcule";
+  /** Chutes de coupe, en % de la surface (composant calculé). */
+  pertePct?: number;
+}
+
+/** Contexte tissu d'un modèle pour une déclinaison : grammage et prix du textile, surface par taille. */
+export interface FabricContext {
+  textileNom: string | null;
+  /** g/m² */
+  grammage: number | null;
+  /** F CFA le kg, rendu. */
+  prixKg: number | null;
+  /** m² par pièce, par clé de taille. */
+  surfaces: Record<string, number>;
+}
+
+/** Coût tissu d'une pièce : surface × (1 + perte) × grammage (kg/m²) × prix au kg. */
+export function fabricCostPerPiece(surfaceM2: number, grammage: number, prixKg: number, pertePct = 0): number {
+  return surfaceM2 * (1 + pertePct / 100) * (grammage / 1000) * prixKg;
+}
+
+/**
+ * Remplace chaque composant « tissu calculé » par un composant concret :
+ * base 0 et un supplément par taille égal au coût tissu de la taille. Toutes
+ * les autres fonctions de ce module travaillent ensuite sans rien savoir du
+ * calcul. Une donnée manquante (grammage, prix au kg, surface d'une taille)
+ * est signalée, jamais comptée 0 en silence.
+ */
+export function resolveComponents(
+  components: CostComponent[],
+  cles: string[],
+  fabric: FabricContext | null
+): { components: CostComponent[]; warnings: string[] } {
+  const warnings: string[] = [];
+  const resolved = components.map((c) => {
+    if (c.mode !== "tissu_calcule") return c;
+    if (!fabric || !fabric.grammage || !fabric.prixKg) {
+      warnings.push(
+        `« ${c.libelle} » calculé : ${!fabric ? "aucun textile pour ce modèle" : !fabric.grammage ? `grammage du textile ${fabric.textileNom ?? ""} inconnu` : `prix au kg du textile ${fabric.textileNom ?? ""} non saisi`}`
+      );
+      return { ...c, base: 0, supplements: {} };
+    }
+    const supplements: Record<string, number> = {};
+    const manquantes: string[] = [];
+    for (const cle of cles) {
+      const surface = fabric.surfaces[cle];
+      if (surface === undefined) manquantes.push(cle.split("/").pop() ?? cle);
+      else supplements[cle] = fabricCostPerPiece(surface, fabric.grammage, fabric.prixKg, c.pertePct ?? 0);
+    }
+    if (manquantes.length) warnings.push(`« ${c.libelle} » calculé : surface de tissu non renseignée pour ${manquantes.join(", ")}`);
+    return { ...c, base: 0, supplements };
+  });
+  return { components: resolved, warnings };
 }
 
 export interface PricingParams {

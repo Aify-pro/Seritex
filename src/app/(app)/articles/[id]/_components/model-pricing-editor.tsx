@@ -6,12 +6,23 @@ import { toast } from "sonner";
 import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatMoney } from "@/lib/currency";
-import { priceGrid, type CostComponent } from "@/lib/pricing";
-import { saveModelPricing } from "../actions";
+import { priceGrid, resolveComponents, type CostComponent, type FabricContext } from "@/lib/pricing";
+import { proposeFabricAreaFromPlacement, saveFabricAreas, saveModelPricing } from "../../../tarification/actions";
 
 type SizeOption = { cle: string; libelle: string; groupe: string };
 
-type ComponentDraft = { key: string; libelle: string; base: string; supplements: Record<string, string>; estTissu: boolean };
+type ComponentDraft = {
+  key: string;
+  libelle: string;
+  base: string;
+  supplements: Record<string, string>;
+  estTissu: boolean;
+  mode: "saisi" | "tissu_calcule";
+  perte: string;
+};
+
+/** Textile proposé pour l'aperçu : grammage et prix au kg (Tarification). */
+export type FabricOption = { id: string; nom: string; grammage: number | null; prixKg: number | null };
 
 const PRESETS = ["Tissu", "Col", "Confection", "Fournitures", "Charges fixes"];
 
@@ -23,17 +34,27 @@ const isNum = (v: string) => v.trim() !== "" && Number.isFinite(num(v));
  * supplément par taille », calcul en direct du prix de revient, du prix de
  * vente arrondi et de la marge réelle, prix forcés taille par taille. Les
  * impressions ne figurent pas ici : elles dépendent de chaque devis.
+ *
+ * Tissu calculé (ART-C, A9) : un composant peut être calculé — surface de la
+ * taille × (1 + chutes) × grammage × prix au kg du textile. L'aperçu se fait
+ * pour le grammage choisi ; le coût suit le grammage sans grille à saisir.
  */
 export function ModelPricingEditor({
   productModelId,
   sizes,
   defaults,
   initial,
+  fabrics,
+  initialSurfaces,
 }: {
   productModelId: string;
   sizes: SizeOption[];
   defaults: { chargesPct: number; margePct: number; arrondi: number };
   initial: { chargesPct: number | null; margePct: number | null; notes: string | null; components: CostComponent[]; forced: Record<string, number> };
+  /** Grammages (textiles) autorisés du modèle, avec leur prix au kg. */
+  fabrics: FabricOption[];
+  /** Surface de tissu par pièce et par taille (m²). */
+  initialSurfaces: Record<string, number>;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -49,7 +70,13 @@ export function ModelPricingEditor({
       base: String(c.base),
       supplements: Object.fromEntries(Object.entries(c.supplements).map(([k, v]) => [k, String(v)])),
       estTissu: !!c.estTissu,
+      mode: c.mode ?? "saisi",
+      perte: c.pertePct ? String(c.pertePct) : "",
     }))
+  );
+  const [fabricId, setFabricId] = useState(fabrics[0]?.id ?? "");
+  const [surfaces, setSurfaces] = useState<Record<string, string>>(
+    Object.fromEntries(Object.entries(initialSurfaces).map(([k, v]) => [k, String(v)]))
   );
   const [forced, setForced] = useState<Record<string, string>>(Object.fromEntries(Object.entries(initial.forced).map(([k, v]) => [k, String(v)])));
 
@@ -65,9 +92,22 @@ export function ModelPricingEditor({
     base: isNum(c.base) ? num(c.base) : 0,
     supplements: Object.fromEntries(Object.entries(c.supplements).filter(([, v]) => isNum(v)).map(([k, v]) => [k, num(v)])),
     estTissu: c.estTissu,
+    mode: c.mode,
+    pertePct: isNum(c.perte) ? num(c.perte) : 0,
   }));
+  const fabricOption = fabrics.find((f) => f.id === fabricId) ?? null;
+  const fabric: FabricContext | null = fabricOption
+    ? {
+        textileNom: fabricOption.nom,
+        grammage: fabricOption.grammage,
+        prixKg: fabricOption.prixKg,
+        surfaces: Object.fromEntries(Object.entries(surfaces).filter(([, v]) => isNum(v)).map(([k, v]) => [k, num(v)])),
+      }
+    : null;
+  const resolved = resolveComponents(parsedComponents, visibles.map((s) => s.cle), fabric);
   const parsedForced = Object.fromEntries(Object.entries(forced).filter(([, v]) => isNum(v) && num(v) > 0).map(([k, v]) => [k, num(v)]));
-  const grid = priceGrid(parsedComponents, visibles.map((s) => s.cle), params, { forced: parsedForced });
+  const grid = priceGrid(resolved.components, visibles.map((s) => s.cle), params, { forced: parsedForced });
+  const hasCalcule = parsedComponents.some((c) => c.mode === "tissu_calcule");
 
   function updateComponent(key: string, patch: Partial<ComponentDraft>) {
     setComponents((prev) => prev.map((c) => (c.key === key ? { ...c, ...patch } : c)));
@@ -76,7 +116,15 @@ export function ModelPricingEditor({
   function addComponent(libelle = "") {
     setComponents((prev) => [
       ...prev,
-      { key: Math.random().toString(36).slice(2), libelle, base: "", supplements: {}, estTissu: libelle.toLowerCase().startsWith("tissu") },
+      {
+        key: Math.random().toString(36).slice(2),
+        libelle,
+        base: "",
+        supplements: {},
+        estTissu: libelle.toLowerCase().startsWith("tissu"),
+        mode: "saisi",
+        perte: "",
+      },
     ]);
   }
 
@@ -86,7 +134,14 @@ export function ModelPricingEditor({
         charges_pct: isNum(charges) ? num(charges) : null,
         marge_pct: isNum(marge) ? num(marge) : null,
         notes,
-        components: parsedComponents.map((c) => ({ libelle: c.libelle, base: c.base, supplements: c.supplements, est_tissu: !!c.estTissu })),
+        components: parsedComponents.map((c) => ({
+          libelle: c.libelle,
+          base: c.base,
+          supplements: c.supplements,
+          est_tissu: !!c.estTissu,
+          mode_calcul: c.mode ?? "saisi",
+          perte_pct: c.pertePct ?? 0,
+        })),
         forced: parsedForced,
       });
       if (res.error) toast.error("Grille non enregistrée", { description: res.error });
@@ -156,6 +211,7 @@ export function ModelPricingEditor({
               <tr>
                 <th className="px-2 py-2 text-left font-medium">Composant</th>
                 <th className="px-2 py-2 font-medium" title="Part remplacée par le tissu pesé dans le prix de revient réel">Tissu</th>
+                <th className="px-2 py-2 font-medium" title="Saisi : base + suppléments. Calculé : surface × grammage × prix au kg">Calcul</th>
                 <th className="px-2 py-2 font-medium">Base</th>
                 {visibles.map((s) => (
                   <th key={s.cle} className="px-1 py-2 font-medium">
@@ -187,10 +243,32 @@ export function ModelPricingEditor({
                     />
                   </td>
                   <td className="px-2 py-1.5">
+                    <select
+                      value={c.mode}
+                      disabled={pending}
+                      onChange={(e) => updateComponent(c.key, { mode: e.target.value as ComponentDraft["mode"], estTissu: e.target.value === "tissu_calcule" || c.estTissu })}
+                      className="h-8 rounded-md border border-border bg-surface px-1 text-xs"
+                    >
+                      <option value="saisi">Saisi</option>
+                      <option value="tissu_calcule">Tissu calculé</option>
+                    </select>
+                    {c.mode === "tissu_calcule" && (
+                      <input
+                        inputMode="decimal"
+                        value={c.perte}
+                        placeholder="chutes %"
+                        disabled={pending}
+                        onChange={(e) => updateComponent(c.key, { perte: e.target.value })}
+                        className="ml-1 h-8 w-16 rounded-md border border-border bg-surface px-1 text-right text-xs"
+                      />
+                    )}
+                  </td>
+                  <td className="px-2 py-1.5">
                     <input
                       inputMode="decimal"
-                      value={c.base}
-                      disabled={pending}
+                      value={c.mode === "tissu_calcule" ? "" : c.base}
+                      placeholder={c.mode === "tissu_calcule" ? "calculé" : undefined}
+                      disabled={pending || c.mode === "tissu_calcule"}
                       onChange={(e) => updateComponent(c.key, { base: e.target.value })}
                       className="h-8 w-24 rounded-md border border-border bg-surface px-2 text-right text-sm"
                     />
@@ -199,9 +277,9 @@ export function ModelPricingEditor({
                     <td key={s.cle} className="px-1 py-1.5">
                       <input
                         inputMode="decimal"
-                        value={c.supplements[s.cle] ?? ""}
-                        placeholder="0"
-                        disabled={pending}
+                        value={c.mode === "tissu_calcule" ? "" : (c.supplements[s.cle] ?? "")}
+                        placeholder={c.mode === "tissu_calcule" ? "—" : "0"}
+                        disabled={pending || c.mode === "tissu_calcule"}
                         onChange={(e) => updateComponent(c.key, { supplements: { ...c.supplements, [s.cle]: e.target.value } })}
                         className="h-8 w-16 rounded-md border border-border bg-surface px-1 text-right text-sm"
                       />
@@ -234,11 +312,25 @@ export function ModelPricingEditor({
         </div>
       </div>
 
+      {hasCalcule && (
+        <FabricSection
+          productModelId={productModelId}
+          visibles={visibles}
+          fabrics={fabrics}
+          fabricId={fabricId}
+          setFabricId={setFabricId}
+          surfaces={surfaces}
+          setSurfaces={setSurfaces}
+        />
+      )}
+
       <div>
-        <p className="mb-2 text-xs font-medium text-foreground">Prix par taille</p>
-        {grid.warnings.length > 0 && (
+        <p className="mb-2 text-xs font-medium text-foreground">
+          Prix par taille{hasCalcule && fabricOption ? ` — ${fabricOption.nom}` : ""}
+        </p>
+        {[...resolved.warnings, ...grid.warnings].length > 0 && (
           <ul className="mb-2 list-disc pl-5 text-xs text-danger">
-            {grid.warnings.map((w) => (
+            {[...resolved.warnings, ...grid.warnings].map((w) => (
               <li key={w}>{w}</li>
             ))}
           </ul>
@@ -302,6 +394,99 @@ export function ModelPricingEditor({
       <Button loading={pending} onClick={save}>
         Enregistrer la grille
       </Button>
+    </div>
+  );
+}
+
+/** Grammage de l'aperçu et surfaces de tissu par taille (tissu calculé). */
+function FabricSection({
+  productModelId,
+  visibles,
+  fabrics,
+  fabricId,
+  setFabricId,
+  surfaces,
+  setSurfaces,
+}: {
+  productModelId: string;
+  visibles: SizeOption[];
+  fabrics: FabricOption[];
+  fabricId: string;
+  setFabricId: (id: string) => void;
+  surfaces: Record<string, string>;
+  setSurfaces: (s: Record<string, string>) => void;
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+
+  function save(source: "placement" | "saisie", values: Record<string, string>) {
+    startTransition(async () => {
+      const res = await saveFabricAreas(
+        productModelId,
+        Object.fromEntries(Object.entries(values).map(([k, v]) => [k, isNum(v) ? num(v) : null])),
+        source
+      );
+      if (res.error) toast.error("Surfaces non enregistrées", { description: res.error });
+      else {
+        toast.success("Surfaces enregistrées");
+        router.refresh();
+      }
+    });
+  }
+
+  function propose() {
+    startTransition(async () => {
+      const res = await proposeFabricAreaFromPlacement(productModelId);
+      if (res.error) toast.error("Proposition impossible", { description: res.error });
+      else if (res.surface === null || res.surface === undefined) toast.info("Aucun tracé de placement mesuré pour ce modèle.");
+      else {
+        const next = { ...surfaces };
+        for (const s of visibles) if (!isNum(next[s.cle] ?? "")) next[s.cle] = String(res.surface);
+        setSurfaces(next);
+        toast.success(`${res.surface} m² par pièce proposés depuis les tracés — à ajuster par taille, puis enregistrer`);
+      }
+    });
+  }
+
+  return (
+    <div className="space-y-2 rounded-md border border-border p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-medium text-foreground">Grammage de l&apos;aperçu</span>
+        <select value={fabricId} onChange={(e) => setFabricId(e.target.value)} className="h-8 rounded-md border border-border bg-surface px-2 text-sm">
+          {fabrics.length === 0 && <option value="">Aucun textile autorisé (onglet Général)</option>}
+          {fabrics.map((f) => (
+            <option key={f.id} value={f.id}>
+              {f.nom}
+              {f.grammage ? ` · ${f.grammage} g/m²` : ""}
+              {f.prixKg ? ` · ${formatMoney(f.prixKg)}/kg` : " · prix au kg à saisir (Tarification)"}
+            </option>
+          ))}
+        </select>
+      </div>
+      <p className="text-xs text-foreground-muted">Surface de tissu par pièce (m²), chutes non comprises — issue de la fiche de placement ou du patronnage, modifiable.</p>
+      <div className="flex flex-wrap gap-2">
+        {visibles.map((s) => (
+          <label key={s.cle} className="flex w-20 flex-col gap-1 text-center text-[11px] text-foreground-muted">
+            {s.libelle}
+            <input
+              inputMode="decimal"
+              value={surfaces[s.cle] ?? ""}
+              placeholder="m²"
+              disabled={pending}
+              onChange={(e) => setSurfaces({ ...surfaces, [s.cle]: e.target.value })}
+              className="h-8 rounded-md border border-border bg-surface px-1 text-right text-sm text-foreground"
+            />
+          </label>
+        ))}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" variant="secondary" loading={pending} onClick={() => save("saisie", surfaces)}>
+          Enregistrer les surfaces
+        </Button>
+        <Button size="sm" variant="ghost" disabled={pending} onClick={propose}>
+          Proposer depuis la fiche de placement
+        </Button>
+      </div>
     </div>
   );
 }

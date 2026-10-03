@@ -2,9 +2,9 @@ import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { roundMoney } from "@/lib/currency";
-import { coefficient, printCostPerPiece, printSignature, salePriceForSize, type PrintSpec } from "@/lib/pricing";
+import { coefficient, printCostPerPiece, printSignature, resolveComponents, salePriceForSize, type PrintSpec } from "@/lib/pricing";
 import { getSizeOptionsByModel } from "@/lib/quote-dispatch";
-import { effectiveParams, getModelPricings, getPricingSettings, getPrintGrid } from "@/lib/tarification";
+import { effectiveParams, getFabricContexts, getModelPricings, getPricingSettings, getPrintGrid } from "@/lib/tarification";
 
 /**
  * Chiffrage des devis à partir de la tarification (lot E, migrations 0067/0068).
@@ -52,10 +52,12 @@ export async function suggestLinePrices(input: {
   printZones: PrintZoneInput[];
   devise: string;
   tauxChange: number;
+  /** Grammage (textile) choisi sur la ligne (ART-D) — sinon le tissu principal du modèle. */
+  textileId?: string | null;
 }): Promise<SuggestedPrices> {
   const db = createAdminClient();
   const sig = printSignature(input.printZones);
-  const [sizesByModel, { data: memory }, settings, printGrid, pricings, specs] = await Promise.all([
+  const [sizesByModel, { data: memory }, settings, printGrid, pricings, specs, fabrics] = await Promise.all([
     getSizeOptionsByModel([input.productModelId]),
     db
       .from("client_model_prices")
@@ -67,11 +69,17 @@ export async function suggestLinePrices(input: {
     getPrintGrid(db),
     getModelPricings([input.productModelId], db),
     printSpecs(db, input.printZones),
+    getFabricContexts([input.productModelId], db, { [input.productModelId]: input.textileId }),
   ]);
 
   const taux = input.tauxChange > 0 ? input.tauxChange : 1;
   const toQuoteCurrency = (xof: number) => roundMoney(xof / taux, input.devise);
-  const pricing = pricings[input.productModelId];
+  const rawPricing = pricings[input.productModelId];
+  // Tissu calculé (ART-C) : résolu pour le grammage de la ligne. Les
+  // avertissements de résolution citent des coûts manquants, jamais un
+  // montant : ils ne sont pas transmis au commercial.
+  const cles = (sizesByModel[input.productModelId] ?? []).map((sz) => sz.cle);
+  const pricing = { ...rawPricing, components: resolveComponents(rawPricing.components, cles, fabrics[input.productModelId] ?? null).components };
   const params = effectiveParams(settings, pricing);
   const prints = printCostPerPiece(specs, printGrid, input.quantity);
   const notes: string[] = [];
@@ -203,12 +211,15 @@ export async function simulateQuote(quoteId: string): Promise<QuoteSimulation | 
 
   for (const l of lines) {
     if (!l.product_model_id) continue;
-    const pricing = pricings[l.product_model_id];
+    // Tissu calculé (ART-C) : résolu pour le tissu principal du modèle.
+    const fabric = (await getFabricContexts([l.product_model_id]))[l.product_model_id] ?? null;
+    const resolved = resolveComponents(pricings[l.product_model_id].components, (sizesByModel[l.product_model_id] ?? []).map((o) => o.cle), fabric);
+    const pricing = { ...pricings[l.product_model_id], components: resolved.components };
     const params = effectiveParams(settings, pricing);
     const specs = l.quote_line_printable_zones.map((z) => ({ label: z.product_printable_zones?.zone_label ?? "Emplacement", nbCouleurs: z.nb_couleurs }));
     const prints = printCostPerPiece(specs, printGrid, l.quantity);
     const hasGrid = pricing.components.length > 0 && coefficient(params) !== null;
-    const warnings = [...prints.warnings];
+    const warnings = [...prints.warnings, ...resolved.warnings];
     if (!hasGrid) warnings.push("Grille tarifaire du modèle non saisie : prix de revient inconnu (Tarification).");
 
     const priceByCle = new Map(l.quote_line_size_prices.map((p) => [p.taille, Number(p.prix)]));
@@ -241,6 +252,7 @@ export async function simulateQuote(quoteId: string): Promise<QuoteSimulation | 
             cout_impression: Math.round(prints.cost * 100) / 100,
             impressions: specs,
             composants: pricing.components.map((c) => ({ libelle: c.libelle, cout: c.base + (c.supplements[s.taille] ?? 0), est_tissu: !!c.estTissu })),
+            textile: fabric?.textileNom ?? null,
             prix_force: pricing.forced[s.taille] ?? null,
             prix_grille: calc?.pv ?? null,
             taux_change: taux,
