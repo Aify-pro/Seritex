@@ -27,12 +27,15 @@ export function LifecycleActions({
   canValidate,
   canRequestClosure,
   isAdmin,
+  enCoursTotal = 0,
 }: {
   productionOrderId: string;
   status: ProductionOrderStatus;
   canValidate: boolean;
   canRequestClosure: boolean;
   isAdmin: boolean;
+  /** Pièces encore en cours, toutes étapes (production_order_balance, SF-1) : motif exigé à la demande de clôture. */
+  enCoursTotal?: number;
 }) {
   const [pending, startTransition] = useTransition();
   const [showRefuse, setShowRefuse] = useState(false);
@@ -119,19 +122,37 @@ export function LifecycleActions({
       <div className="space-y-3">
         {canRequestClosure && (
           <Card className="border-brand/30 bg-brand-soft/40">
-            <CardBody className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
-              <div>
-                <p className="text-sm font-medium text-foreground">En production</p>
-                <p className="text-xs text-foreground-muted">
-                  Possible uniquement lorsque tous les sous-ODF ont atteint leur quantité prévue.
-                </p>
+            <CardBody className="space-y-3">
+              <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
+                <div>
+                  <p className="text-sm font-medium text-foreground">En production</p>
+                  <p className="text-xs text-foreground-muted">
+                    {enCoursTotal > 0
+                      ? `Il reste ${enCoursTotal} pièce(s) en cours dans les ateliers : un motif est exigé pour demander la clôture.`
+                      : "Plus aucune pièce en cours : la clôture peut être demandée. Le bilan par taille est figé à la demande."}
+                  </p>
+                </div>
+                <Button
+                  loading={pending}
+                  disabled={enCoursTotal > 0 && !reason.trim()}
+                  onClick={() =>
+                    call("Clôture demandée — en attente de validation par la direction", () =>
+                      requestClosure(productionOrderId, reason)
+                    )
+                  }
+                >
+                  <Flag className="h-4 w-4" /> Demander la clôture
+                </Button>
               </div>
-              <Button
-                loading={pending}
-                onClick={() => call("Clôture demandée — en attente de validation par la direction", () => requestClosure(productionOrderId))}
-              >
-                <Flag className="h-4 w-4" /> Demander la clôture
-              </Button>
+              {enCoursTotal > 0 && (
+                <textarea
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  placeholder="Motif : pourquoi clôturer avec de l'en-cours ?"
+                  className="w-full rounded-md border border-border bg-surface p-2 text-xs outline-none focus:ring-2 focus:ring-brand/30"
+                  rows={2}
+                />
+              )}
             </CardBody>
           </Card>
         )}

@@ -11,7 +11,7 @@ import { notFound } from "next/navigation";
 import { ArchiveButton } from "./archive-button";
 import { LifecycleActions } from "./lifecycle-actions";
 import { ReplacementOrderPicker } from "./replacement-order-picker";
-import { getSizesForProductModel } from "@/lib/sizes";
+import { getSizes, getSizesForProductModel } from "@/lib/sizes";
 import { SubmitOdfPanel } from "./submit-odf-panel";
 import { AnomaliesPanel } from "./anomalies-panel";
 import { ProductionOrderLines, type LineData } from "./production-order-lines";
@@ -21,6 +21,9 @@ import { StockMovementsPanel } from "./stock-movements-panel";
 import type { StatutFiche } from "@/lib/patronnage/types";
 import type { DownloadableMediaFile, MaquetteFile, StockMovement, StockExportFiche, SampleRequestStatus } from "@/lib/types/domain";
 import { ValidationCircuitPanel } from "./validation-circuit-panel";
+import { WhereArePieces, type WhereArePiecesLine } from "./where-are-pieces";
+import { ClosureBalance, type ClosureBalanceData } from "./closure-balance";
+import { stageRowFromDb } from "@/lib/production/flow";
 import { CheckCircle2, ChevronRight, Package, Printer, QrCode } from "lucide-react";
 import Link from "next/link";
 
@@ -98,8 +101,9 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     // tables n'ayant pas de production_order_id en commun.
     supabase
       .from("production_order_line_sections")
-      .select("production_order_line_id,section_id,ordre,quantite,partie,production_order_lines!inner(production_order_id)")
+      .select("production_order_line_id,section_id,ordre,etape,quantite,partie,production_order_lines!inner(production_order_id)")
       .eq("production_order_lines.production_order_id", id)
+      .order("etape")
       .order("ordre"),
     // ODF multi-lignes : une ligne par article du devis accepté, avec sa
     // configuration (modèle/tissu/couleur héritée du devis, immuable sauf
@@ -221,14 +225,20 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     production_order_line_id: string;
     section_id: string;
     ordre: number;
+    etape: number | null;
     quantite: number | null;
     partie: string | null;
   };
-  const sectionsByLine: Record<string, { sectionId: string; quantite: number | null; partie: string | null }[]> = {};
+  const sectionsByLine: Record<string, { sectionId: string; quantite: number | null; partie: string | null; etape: number }[]> = {};
   const coupeSelectedByLine: Record<string, boolean> = {};
   const impressionSectionSelectedByLine: Record<string, boolean> = {};
   for (const s of (chosenLineSections ?? []) as unknown as ChosenLineSection[]) {
-    (sectionsByLine[s.production_order_line_id] ??= []).push({ sectionId: s.section_id, quantite: s.quantite, partie: s.partie });
+    (sectionsByLine[s.production_order_line_id] ??= []).push({
+      sectionId: s.section_id,
+      quantite: s.quantite,
+      partie: s.partie,
+      etape: s.etape ?? s.ordre,
+    });
     if (coupeSectionIds.has(s.section_id)) coupeSelectedByLine[s.production_order_line_id] = true;
     if (impressionSectionIds.has(s.section_id)) impressionSectionSelectedByLine[s.production_order_line_id] = true;
   }
@@ -564,6 +574,38 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
   // stock verraient une redirection "accès refusé" en cliquant).
   const canViewCommercial = isAdmin || profile.role === "commercial";
 
+  // « Où sont mes pièces » (SF-1) : flux par étape × taille, calculé par la
+  // base (line_stage_flow) — seulement une fois l'ODF lancé.
+  const sectionNameById = new Map((allSections ?? []).map((s) => [s.id as string, s.name as string]));
+  const showFlow = ["en_production", "demande_cloture", "terminee"].includes(order.status);
+  const whereArePiecesLines: WhereArePiecesLine[] = showFlow
+    ? await Promise.all(
+        (productionOrderLines ?? []).map(async (line) => {
+          const { data: stages } = await supabase.rpc("line_stage_flow", { p_line_id: line.id });
+          const stepLabels: Record<number, string> = {};
+          for (const s of sectionsByLine[line.id] ?? []) {
+            const name = sectionNameById.get(s.sectionId) ?? "—";
+            stepLabels[s.etape] = stepLabels[s.etape] ? `${stepLabels[s.etape]} + ${name}` : name;
+          }
+          return {
+            id: line.id as string,
+            description: line.description as string,
+            stepLabels,
+            stages: ((stages ?? []) as Parameters<typeof stageRowFromDb>[0][]).map(stageRowFromDb),
+          };
+        })
+      )
+    : [];
+  const allSizes = showFlow ? await getSizes() : [];
+  // En production : en-cours total, pour exiger un motif à la demande de
+  // clôture. Ensuite : le bilan figé à la demande.
+  let enCoursTotal = 0;
+  if (order.status === "en_production" && canRequestClosure) {
+    const { data: balance } = await supabase.rpc("production_order_balance", { p_production_order_id: order.id });
+    enCoursTotal = Number((balance as ClosureBalanceData | null)?.en_cours ?? 0);
+  }
+  const bilanCloture = (order.bilan_cloture ?? null) as ClosureBalanceData | null;
+
   // Sous-ODF groupés par section (demande Ayman, 17/09) : un chef de section
   // scanne le QR d'en-tête de l'ODF depuis /atelier/section et doit
   // retrouver directement les sous-ODF de SA section — même regroupement
@@ -721,6 +763,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
           id: s.id,
           name: s.name,
           categorieNom: (s.atelier_categories as unknown as { nom: string } | null)?.nom ?? null,
+          categorieCle: (s.atelier_categories as unknown as { cle: string } | null)?.cle ?? null,
           requiertVisuel: !!(s.atelier_categories as unknown as { requiert_visuel: boolean } | null)?.requiert_visuel,
         }))}
         availableMediaFiles={availableMediaFiles}
@@ -774,7 +817,14 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
         canValidate={canValidate}
         canRequestClosure={canRequestClosure}
         isAdmin={isAdmin}
+        enCoursTotal={enCoursTotal}
       />
+
+      {bilanCloture && (
+        <ClosureBalance bilan={bilanCloture} motif={order.motif_cloture_en_cours ?? null} sizes={allSizes} />
+      )}
+
+      <WhereArePieces lines={whereArePiecesLines} sizes={allSizes} />
 
       <Card>
         <CardHeader

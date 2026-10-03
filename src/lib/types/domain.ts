@@ -477,6 +477,10 @@ export interface ProductionOrder {
   infographie_validee_par: string | null;
   soumis_le: string | null;
   soumis_par: string | null;
+  /** Bilan par article × taille figé à la demande de clôture (SF-1, migration 0072). */
+  bilan_cloture?: Record<string, unknown> | null;
+  /** Motif saisi quand la clôture est demandée avec de l'en-cours (SF-1). */
+  motif_cloture_en_cours?: string | null;
   created_at: string;
   companies?: Pick<Company, "id" | "name">;
   product_models?: Pick<ProductModel, "id" | "name"> | null;
@@ -519,11 +523,45 @@ export interface WorkOrder {
   actual_start: string | null;
   actual_end: string | null;
   blocking_reason: string | null;
+  /** Étape du parcours de l'article (SF-1, migration 0072) — null pour un sous-ODF antérieur. */
+  etape?: number | null;
   updated_at: string;
   sections?: Pick<Section, "id" | "name">;
   production_orders?: Pick<ProductionOrder, "id" | "reference" | "company_id"> & {
     companies?: Pick<Company, "name">;
   };
+}
+
+/**
+ * Déclaration de production par taille (SF-1, migration 0072) — ajout seul :
+ * une erreur se corrige par une contre-déclaration (quantité négative,
+ * `corrige_declaration_id`, motif obligatoire).
+ */
+export interface ProductionDeclaration {
+  id: string;
+  work_order_id: string;
+  production_order_line_id: string;
+  taille: string;
+  type: "bonne" | "dechet" | "premier_choix" | "deuxieme_choix" | "preleve";
+  quantite: number;
+  corrige_declaration_id: string | null;
+  motif: string | null;
+  article_lot_id: string | null;
+  created_by: string | null;
+  created_at: string;
+}
+
+/** Ligne de work_order_flow() : ce qu'un sous-ODF a reçu, déclaré et doit encore traiter, pour une taille. */
+export interface WorkOrderFlowRow {
+  taille: string;
+  recu: number;
+  bonnes: number;
+  dechets: number;
+  premier_choix: number;
+  deuxieme_choix: number;
+  preleve: number;
+  coupe_produit: number;
+  reste: number;
 }
 
 export interface WorkOrderEvent {

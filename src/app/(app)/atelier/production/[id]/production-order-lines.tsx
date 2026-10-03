@@ -68,7 +68,7 @@ export interface LineData {
    * null = quantité totale de l'article) et leur éventuelle partie de la
    * pièce (migration 0069, ex. « Manches »).
    */
-  sections: { sectionId: string; quantite: number | null; partie: string | null }[];
+  sections: { sectionId: string; quantite: number | null; partie: string | null; etape: number }[];
   /** Une section de catégorie Coupe est-elle retenue ? Conditionne l'affichage de la fiche Patronnage. */
   coupeSelected: boolean;
   fiche: { id: string; numeroOt: string; statut: StatutFiche } | null;
@@ -129,7 +129,7 @@ export function ProductionOrderLines({
   productModels: { id: string; name: string }[];
   colors: ColorOption[];
   /** Toutes les sections d'atelier actives, pour le sélecteur de sections retenues de chaque article. */
-  allSections: { id: string; name: string; categorieNom: string | null; requiertVisuel: boolean }[];
+  allSections: { id: string; name: string; categorieNom: string | null; categorieCle?: string | null; requiertVisuel: boolean }[];
   /** Fichiers de la médiathèque déjà affiliés à la demande de cet ODF, pour le sélecteur de visuel/maquette de chaque article. */
   availableMediaFiles: AttachableMediaFile[];
   /** Disponibilité couleurs, commentaire libre — jamais validé par le logiciel (section 9), reste au niveau de l'ODF entier. */
@@ -232,7 +232,7 @@ function LineCard({
   line: LineData;
   productModels: { id: string; name: string }[];
   colors: ColorOption[];
-  allSections: { id: string; name: string; categorieNom: string | null; requiertVisuel: boolean }[];
+  allSections: { id: string; name: string; categorieNom: string | null; categorieCle?: string | null; requiertVisuel: boolean }[];
   availableMediaFiles: AttachableMediaFile[];
 }) {
   const [pending, startTransition] = useTransition();

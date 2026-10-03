@@ -53,13 +53,16 @@ function revalidateOdf(productionOrderId: string) {
 export async function setProductionOrderLineSections(
   lineId: string,
   productionOrderId: string,
-  sections: { sectionId: string; quantite: number | null; partie: string | null }[]
+  sections: { sectionId: string; quantite: number | null; partie: string | null; etape?: number }[]
 ) {
   await requireRole(["administrateur", "responsable_production"]);
   const supabase = await createClient();
 
   if (sections.some((s) => s.quantite !== null && (!Number.isInteger(s.quantite) || s.quantite < 0))) {
     return { error: "La quantité d'une section doit être un nombre entier positif." };
+  }
+  if (sections.some((s) => s.etape !== undefined && (!Number.isInteger(s.etape) || s.etape < 1))) {
+    return { error: "L'étape d'une section doit être un entier à partir de 1." };
   }
   const partieDe = (s: { partie: string | null }) => s.partie?.trim() || null;
   if (sections.some((s) => (partieDe(s)?.length ?? 0) > 80)) {
@@ -78,6 +81,8 @@ export async function setProductionOrderLineSections(
         production_order_line_id: lineId,
         section_id: s.sectionId,
         ordre: i + 1,
+        // Étapes (SF-1) : même numéro = sections en parallèle ; absente = en série.
+        etape: s.etape ?? i + 1,
         quantite: s.quantite,
         partie: partieDe(s),
       }))
@@ -288,15 +293,17 @@ export async function refuseProductionOrder(productionOrderId: string, reason?: 
 
 /**
  * en_production -> demande_cloture. Réservé au chef de production
- * (responsable_production) côté RPC — possible uniquement si tous les
- * sous-ODF ont atteint leur quantité prévue (section 4 du document de
- * logique).
+ * (responsable_production) côté RPC. Le bilan par taille (1er/2e choix,
+ * déchets, en-cours) est figé sur l'ODF ; s'il reste de l'en-cours, un motif
+ * est exigé (SF-1, migration 0072).
  */
-export async function requestClosure(productionOrderId: string) {
+export async function requestClosure(productionOrderId: string, motif?: string) {
   await requireRole(["administrateur", "responsable_production"]);
   const supabase = await createClient();
+  // SF-1 : renvoie le bilan par taille ; motif exigé s'il reste de l'en-cours.
   const { error } = await supabase.rpc("request_closure", {
     p_production_order_id: productionOrderId,
+    p_motif: motif?.trim() || null,
   });
   if (error) return { error: error.message };
   revalidateOdf(productionOrderId);

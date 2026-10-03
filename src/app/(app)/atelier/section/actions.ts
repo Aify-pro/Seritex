@@ -350,3 +350,88 @@ export async function getWasteBagByCode(code: string): Promise<GetWasteBagResult
     },
   };
 }
+
+/* ============================================================
+   Déclarations par taille (SF-1, migration 0072)
+============================================================ */
+
+export type DeclarationLigne = {
+  taille: string;
+  type: "bonne" | "dechet" | "premier_choix" | "deuxieme_choix" | "preleve";
+  quantite: number;
+};
+
+/**
+ * Déclare d'un coup les quantités saisies dans la grille par taille d'un
+ * sous-ODF. Atomique : `declare_production_batch` (SECURITY DEFINER) refuse
+ * tout l'envoi si une seule ligne dépasse ce que la section a reçu, ou si un
+ * type n'est pas permis pour sa catégorie (seule la finition fait du 2e
+ * choix). Aucune vérification de rôle ici : la base fait autorité.
+ */
+export async function declareProduction(
+  workOrderId: string,
+  lignes: DeclarationLigne[],
+  motif?: string
+): Promise<RecordQuantityResult> {
+  await requireUser();
+  const supabase = await createClient();
+
+  const payload = lignes.filter((l) => Number.isInteger(l.quantite) && l.quantite > 0);
+  if (payload.length === 0) return { error: "Aucune quantité saisie." };
+
+  const { data: before } = await supabase
+    .from("work_orders")
+    .select("actual_start, production_order_id, sections(atelier_categories(cle)), production_orders(reference, companies(name))")
+    .eq("id", workOrderId)
+    .maybeSingle();
+
+  const { error } = await supabase.rpc("declare_production_batch", {
+    p_work_order_id: workOrderId,
+    p_lignes: payload,
+    p_motif: motif?.trim() || null,
+  });
+  if (error) return { error: error.message };
+
+  // Même notification que la saisie globale : première déclaration d'un
+  // atelier d'impression = commande partie en impression.
+  const categorieCle = (before?.sections as unknown as { atelier_categories: { cle: string } | null } | null)?.atelier_categories?.cle;
+  if (before && !before.actual_start && categorieCle === "impression") {
+    const po = before.production_orders as unknown as { reference: string; companies: { name: string } | null } | null;
+    await sendNotification("commande_en_impression", {
+      to: await resolveContactEmailForProductionOrder(before.production_order_id),
+      variables: { numero_odf: po?.reference ?? "", nom_client: po?.companies?.name ?? "" },
+      relatedEntityType: "production_order",
+      relatedEntityId: before.production_order_id,
+    });
+  }
+
+  revalidatePath("/atelier/section");
+  revalidatePath("/atelier/production");
+  revalidatePath("/livraisons");
+  revalidatePath("/dashboard");
+  return {};
+}
+
+/**
+ * Contre-déclaration motivée (annule tout ou partie d'une déclaration) —
+ * réservée au responsable production et à l'administrateur par
+ * `correct_declaration`.
+ */
+export async function correctDeclaration(
+  declarationId: string,
+  quantite: number,
+  motif: string
+): Promise<RecordQuantityResult> {
+  await requireUser();
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("correct_declaration", {
+    p_declaration_id: declarationId,
+    p_quantite: quantite,
+    p_motif: motif.trim(),
+  });
+  if (error) return { error: error.message };
+  revalidatePath("/atelier/section");
+  revalidatePath("/atelier/production");
+  revalidatePath("/livraisons");
+  return {};
+}
