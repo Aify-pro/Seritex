@@ -9,6 +9,9 @@ import Link from "next/link";
 import { ArrowLeft, CheckCircle2, Circle, Scissors } from "lucide-react";
 import { getSizes, orderedRepartition, type Size } from "@/lib/sizes";
 import type { RepartitionTailles } from "@/lib/patronnage/types";
+import type { WorkOrderFlowRow } from "@/lib/types/domain";
+import { DECLARATION_TYPE_LABELS, allowedDeclarationTypes, type DeclarationType } from "@/lib/production/flow";
+import { DeclarationHistory, type DeclarationRow } from "./declaration-history";
 
 const EVENT_TYPE_LABELS: Record<string, string> = {
   demarre: "Démarré",
@@ -42,7 +45,7 @@ export default async function WorkOrderDetailPage({
 }: {
   params: Promise<{ id: string; workOrderId: string }>;
 }) {
-  await requireRole(["responsable_production", "administrateur"]);
+  const { profile } = await requireRole(["responsable_production", "administrateur"]);
   const { id, workOrderId } = await params;
   const supabase = await createClient();
   const sizes = await getSizes();
@@ -121,6 +124,39 @@ export default async function WorkOrderDetailPage({
       }));
   }
 
+  // SF-1 : reçu / déclaré / reste par taille, et journal des déclarations.
+  const categorieCle = section?.atelier_categories?.cle ?? null;
+  const [{ data: flowData }, { data: declarationData }] = await Promise.all([
+    supabase.rpc("work_order_flow", { p_work_order_id: workOrderId }),
+    supabase
+      .from("production_declarations")
+      .select("id,taille,type,quantite,corrige_declaration_id,motif,created_by,created_at")
+      .eq("work_order_id", workOrderId)
+      .order("created_at", { ascending: false }),
+  ]);
+  const flow = (flowData ?? []) as WorkOrderFlowRow[];
+  const declarations = declarationData ?? [];
+  const declarantIds = [...new Set(declarations.map((d) => d.created_by).filter((v): v is string => !!v))];
+  const { data: declarants } =
+    declarantIds.length > 0 ? await supabase.from("app_users").select("id,full_name").in("id", declarantIds) : { data: [] };
+  const libelleTaille = (cle: string) => sizes.find((s) => s.cle === cle)?.libelle ?? cle.split("/").pop() ?? cle;
+  const declarationRows: DeclarationRow[] = declarations.map((d) => {
+    const corrections = declarations.filter((c) => c.corrige_declaration_id === d.id);
+    return {
+      id: d.id as string,
+      taille: d.taille as string,
+      tailleLibelle: libelleTaille(d.taille as string),
+      type: d.type as DeclarationType,
+      quantite: d.quantite as number,
+      annulable: (d.quantite as number) + corrections.reduce((s, c) => s + (c.quantite as number), 0),
+      corrige: !!d.corrige_declaration_id,
+      motif: (d.motif as string | null) ?? null,
+      auteur: declarants?.find((u) => u.id === d.created_by)?.full_name ?? "—",
+      createdAt: d.created_at as string,
+    };
+  });
+  const declTypes = allowedDeclarationTypes(categorieCle);
+
   const atteinte = wo.quantity_done >= wo.quantity_planned;
 
   return (
@@ -173,6 +209,70 @@ export default async function WorkOrderDetailPage({
           </div>
         </CardBody>
       </Card>
+
+      {flow.length > 0 && (
+        <Card>
+          <CardHeader
+            title="Par taille"
+            description="Ce que la section a reçu, ce qu'elle a déclaré et ce qu'il lui reste — la saisie se fait depuis le terminal de section."
+          />
+          <CardBody className="overflow-x-auto p-0">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border text-left text-[11px] uppercase tracking-wide text-foreground-muted">
+                  <th className="px-5 py-2">Taille</th>
+                  <th className="px-3 py-2 text-right">Reçu</th>
+                  {isCoupe && <th className="px-3 py-2 text-right">Coupées</th>}
+                  {declTypes.map((t) => (
+                    <th key={t} className="px-3 py-2 text-right">
+                      {DECLARATION_TYPE_LABELS[t]}
+                    </th>
+                  ))}
+                  <th className="px-3 py-2 text-right">Reste</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {flow.map((r) => {
+                  const valeur: Record<DeclarationType, number> = {
+                    bonne: r.bonnes,
+                    dechet: r.dechets,
+                    premier_choix: r.premier_choix,
+                    deuxieme_choix: r.deuxieme_choix,
+                    preleve: r.preleve,
+                  };
+                  return (
+                    <tr key={r.taille}>
+                      <td className="px-5 py-2 font-medium">{libelleTaille(r.taille)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{r.recu}</td>
+                      {isCoupe && <td className="px-3 py-2 text-right tabular-nums">{r.coupe_produit}</td>}
+                      {declTypes.map((t) => (
+                        <td key={t} className="px-3 py-2 text-right tabular-nums">
+                          {valeur[t]}
+                        </td>
+                      ))}
+                      <td className={`px-3 py-2 text-right font-semibold tabular-nums ${r.reste > 0 ? "text-brand" : "text-foreground-muted"}`}>
+                        {r.reste}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </CardBody>
+        </Card>
+      )}
+
+      {(declarationRows.length > 0 || flow.length > 0) && (
+        <Card>
+          <CardHeader title={`Déclarations (${declarationRows.length})`} description="Journal en ajout seul : une erreur se corrige par une contre-déclaration motivée." />
+          <CardBody className="p-0">
+            <DeclarationHistory
+              rows={declarationRows}
+              canCorrect={profile.role === "administrateur" || profile.role === "responsable_production"}
+            />
+          </CardBody>
+        </Card>
+      )}
 
       {isCoupe && (
         <Card>

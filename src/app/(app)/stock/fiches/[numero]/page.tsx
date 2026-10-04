@@ -1,3 +1,4 @@
+import { STOCK_MOVEMENT_TYPE_LABELS, formatMovementUnit } from "@/lib/stock/movements";
 import { redirect, notFound } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server";
@@ -7,14 +8,6 @@ import { Badge } from "@/components/ui/badge";
 import { formatDateTime } from "@/lib/utils";
 import { Download } from "lucide-react";
 import { SageReconciliationForm } from "./sage-reconciliation-form";
-
-const STOCK_MOVEMENT_TYPE_LABELS: Record<string, string> = {
-  sortie_mp: "Sortie MP",
-  entree_semi_fini: "Entrée semi-fini",
-  sortie_semi_fini: "Sortie semi-fini",
-  entree_fini: "Entrée fini",
-  retour_mp: "Retour MP",
-};
 
 const STOCK_MANAGER_ROLES = ["administrateur", "responsable_production", "gestionnaire_stock"];
 
@@ -43,7 +36,7 @@ export default async function StockExportFichePage({ params }: { params: Promise
   const { data: fiche } = await supabase
     .from("stock_export_fiches")
     .select(
-      "id,numero,generated_at,generated_by,production_orders(reference,companies(name)),sage_numero,sage_rapproche_le,sage_rapproche_par"
+      "id,numero,generated_at,generated_by,production_orders(reference,companies(name)),shipments(reference),sage_numero,sage_rapproche_le,sage_rapproche_par"
     )
     .eq("numero", numero)
     .maybeSingle();
@@ -61,12 +54,14 @@ export default async function StockExportFichePage({ params }: { params: Promise
 
   const { data: movements } = await supabase
     .from("stock_movements")
-    .select("id,type,article_ref,quantite_ou_poids,unite,created_at,production_orders(reference)")
+    .select("id,type,article_ref,quantite_ou_poids,unite,created_at,depot,taille,production_orders(reference)")
     .eq("exported_in_fiche_id", fiche.id)
     .order("created_at", { ascending: true });
 
   const productionOrder = fiche.production_orders as unknown as { reference: string; companies: { name: string } | null } | null;
   const isGlobal = !productionOrder;
+  // Fiche d'un bon de livraison (LIV-3).
+  const blReference = (fiche.shipments as unknown as { reference: string | null } | null)?.reference ?? null;
 
   return (
     <div className="space-y-6">
@@ -96,6 +91,7 @@ export default async function StockExportFichePage({ params }: { params: Promise
                     ).size
                   } ODF`
                 : `${productionOrder.reference}${productionOrder.companies?.name ? ` · ${productionOrder.companies.name}` : ""}`}
+              {blReference && <span className="block text-xs text-foreground-muted">Bon de livraison {blReference}</span>}
             </p>
           </div>
           <div>
@@ -149,7 +145,9 @@ export default async function StockExportFichePage({ params }: { params: Promise
                     <th className="px-5 py-3 font-medium">Type</th>
                     {isGlobal && <th className="px-5 py-3 font-medium">ODF</th>}
                     <th className="px-5 py-3 font-medium">Référence Sage</th>
+                    <th className="px-5 py-3 font-medium">Taille</th>
                     <th className="px-5 py-3 font-medium">Quantité</th>
+                    <th className="px-5 py-3 font-medium">Dépôt</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -162,9 +160,11 @@ export default async function StockExportFichePage({ params }: { params: Promise
                         </td>
                       )}
                       <td className="px-5 py-3 font-mono text-xs text-foreground-muted">{m.article_ref ?? "—"}</td>
+                      <td className="px-5 py-3 text-foreground-muted">{m.taille ? String(m.taille).split("/").pop() : "—"}</td>
                       <td className="px-5 py-3 text-foreground-muted">
-                        {m.quantite_ou_poids} {m.unite === "kg" ? "kg" : "pièce(s)"}
+                        {m.quantite_ou_poids} {formatMovementUnit(m.unite)}
                       </td>
+                      <td className="px-5 py-3 font-mono text-xs text-foreground-muted">{m.depot ?? "—"}</td>
                     </tr>
                   ))}
                 </tbody>

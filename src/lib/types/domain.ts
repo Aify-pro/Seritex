@@ -19,7 +19,12 @@ export type UserRole =
   // compte du client est en règle avant qu'un ODF puisse être soumis à
   // validation — attestation manuelle, aucune donnée financière rattachée
   // pour l'instant.
-  | "comptabilite";
+  | "comptabilite"
+  // Livraison (LIV-0, migrations 0074/0075) : le livreur n'accède qu'à SES
+  // livraisons (écran mobile individuel) ; le responsable livraison pilote le
+  // service (préparation, planification, tournées, lieux, transporteurs).
+  | "livreur"
+  | "responsable_livraison";
 
 export type RequestStatus =
   | "nouvelle"
@@ -189,6 +194,11 @@ export interface ProductModel {
   // que les mouvements de stock entree_semi_fini/entree_fini portent une
   // référence Sage exploitable.
   sage_reference: string | null;
+  /** Code Seritex du modèle (COM-0) : catégorie + numéro, ex. TS012 — figé une fois attribué. */
+  code?: string | null;
+  categorie_id?: string | null;
+  /** Matière portée par le modèle (A6). */
+  matiere_id?: string | null;
   // Lot C1 (référentiel textiles, migration 0032) — tissu de patronnage du
   // modèle, distinct de sa disponibilité tailles/couleurs (lot B2).
   textile_id: string | null;
@@ -293,7 +303,8 @@ export interface ProductionOrderMediaFile {
 export interface RequestRecord {
   id: string;
   reference: string;
-  company_id: string;
+  /** Null : demande pour le stock (SF-3). */
+  company_id: string | null;
   contact_id: string | null;
   assigned_commercial_id: string | null;
   status: RequestStatus;
@@ -428,7 +439,10 @@ export interface ProductionOrder {
   id: string;
   reference: string;
   quote_id: string | null;
-  company_id: string;
+  /** Null : ODF de stock, fabrication sans client (SF-3, D4). */
+  company_id: string | null;
+  /** Demande d'origine (SF-3) — reprise via le devis pour un ODF client. */
+  request_id?: string | null;
   status: ProductionOrderStatus;
   total_quantity: number;
   planned_start_date: string | null;
@@ -477,6 +491,10 @@ export interface ProductionOrder {
   infographie_validee_par: string | null;
   soumis_le: string | null;
   soumis_par: string | null;
+  /** Bilan par article × taille figé à la demande de clôture (SF-1, migration 0072). */
+  bilan_cloture?: Record<string, unknown> | null;
+  /** Motif saisi quand la clôture est demandée avec de l'en-cours (SF-1). */
+  motif_cloture_en_cours?: string | null;
   created_at: string;
   companies?: Pick<Company, "id" | "name">;
   product_models?: Pick<ProductModel, "id" | "name"> | null;
@@ -519,11 +537,45 @@ export interface WorkOrder {
   actual_start: string | null;
   actual_end: string | null;
   blocking_reason: string | null;
+  /** Étape du parcours de l'article (SF-1, migration 0072) — null pour un sous-ODF antérieur. */
+  etape?: number | null;
   updated_at: string;
   sections?: Pick<Section, "id" | "name">;
   production_orders?: Pick<ProductionOrder, "id" | "reference" | "company_id"> & {
     companies?: Pick<Company, "name">;
   };
+}
+
+/**
+ * Déclaration de production par taille (SF-1, migration 0072) — ajout seul :
+ * une erreur se corrige par une contre-déclaration (quantité négative,
+ * `corrige_declaration_id`, motif obligatoire).
+ */
+export interface ProductionDeclaration {
+  id: string;
+  work_order_id: string;
+  production_order_line_id: string;
+  taille: string;
+  type: "bonne" | "dechet" | "premier_choix" | "deuxieme_choix" | "preleve";
+  quantite: number;
+  corrige_declaration_id: string | null;
+  motif: string | null;
+  article_lot_id: string | null;
+  created_by: string | null;
+  created_at: string;
+}
+
+/** Ligne de work_order_flow() : ce qu'un sous-ODF a reçu, déclaré et doit encore traiter, pour une taille. */
+export interface WorkOrderFlowRow {
+  taille: string;
+  recu: number;
+  bonnes: number;
+  dechets: number;
+  premier_choix: number;
+  deuxieme_choix: number;
+  preleve: number;
+  coupe_produit: number;
+  reste: number;
 }
 
 export interface WorkOrderEvent {
@@ -697,6 +749,11 @@ export interface StockMovement {
   exported_in_fiche_id: string | null;
   created_by: string | null;
   created_at: string;
+  /** Dépôt Sage de la ligne d'export (LIV-3, migration 0085). */
+  depot?: string | null;
+  taille?: string | null;
+  commentaire?: string | null;
+  shipment_id?: string | null;
 }
 
 /**
@@ -737,6 +794,8 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   administrateur: "Administrateur",
   gestionnaire_stock: "Gestionnaire de stock",
   comptabilite: "Comptabilité",
+  livreur: "Livreur",
+  responsable_livraison: "Responsable livraison",
 };
 
 export const REQUEST_STATUS_LABELS: Record<RequestStatus, string> = {
@@ -988,3 +1047,115 @@ export const SAMPLE_STATUS_LABELS: Record<SampleRequestStatus, string> = {
   refuse: "Refusé",
   sans_suite: "Sans suite",
 };
+
+// ----------------------------------------------------------------------------
+// Livraison — référentiels (LIV-0, migration 0075)
+// ----------------------------------------------------------------------------
+
+export type DeliveryZoneType = "commune" | "interieur" | "international";
+
+export interface DeliveryZone {
+  id: string;
+  nom: string;
+  type: DeliveryZoneType;
+  ordre: number;
+  actif: boolean;
+}
+
+export type PositionSource = "gps_terrain" | "carte" | "approximative";
+
+export const POSITION_SOURCE_LABELS: Record<PositionSource, string> = {
+  gps_terrain: "GPS pris sur place",
+  carte: "Pointé sur la carte",
+  approximative: "Approximative",
+};
+
+/** Lieu de livraison d'un client, géolocalisé, géré dans Seritex (indépendant de Sage). */
+export interface DeliveryPlace {
+  id: string;
+  company_id: string;
+  contact_id: string | null;
+  libelle: string;
+  zone_id: string | null;
+  quartier: string | null;
+  repere: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  position_source: PositionSource | null;
+  position_confirmee_at: string | null;
+  position_confirmee_by: string | null;
+  contact_nom: string | null;
+  contact_tel: string | null;
+  horaires: string | null;
+  consignes: string | null;
+  photo_path: string | null;
+  par_defaut: boolean;
+  actif: boolean;
+  created_at: string;
+}
+
+export interface Carrier {
+  id: string;
+  nom: string;
+  type: "interne" | "prestataire";
+  integration: "manuel" | "yango" | "dhl";
+  actif: boolean;
+}
+
+export type VehicleType = "camion" | "fourgonnette" | "voiture" | "moto" | "tricycle";
+
+export const VEHICLE_TYPE_LABELS: Record<VehicleType, string> = {
+  camion: "Camion",
+  fourgonnette: "Fourgonnette",
+  voiture: "Voiture",
+  moto: "Moto",
+  tricycle: "Tricycle",
+};
+
+export interface Vehicle {
+  id: string;
+  type: VehicleType;
+  immatriculation: string | null;
+  libelle: string;
+  capacite_note: string | null;
+  actif: boolean;
+}
+
+// ----------------------------------------------------------------------------
+// Codification et déclinaisons (COM-0, migration 0076)
+// ----------------------------------------------------------------------------
+
+export interface ProductCategory {
+  id: string;
+  nom: string;
+  code_court: string;
+}
+
+export interface Matiere {
+  id: string;
+  nom: string;
+  code_court: string;
+  actif: boolean;
+}
+
+/** Déclinaison = modèle × textile (grammage) × couleur × taille — code figé, jamais réutilisé. */
+export interface ProductVariant {
+  id: string;
+  model_id: string;
+  textile_id: string;
+  color_id: string;
+  size_id: string;
+  code: string;
+  sage_reference: string | null;
+  actif: boolean;
+  archived_at: string | null;
+}
+
+/** Article stockable d'une déclinaison, par état : vierge, personnalisé (P), 2e choix (D). */
+export interface VariantStockArticle {
+  id: string;
+  variant_id: string;
+  etat: "vierge" | "personnalise" | "deuxieme_choix";
+  code: string;
+  sage_reference: string | null;
+}

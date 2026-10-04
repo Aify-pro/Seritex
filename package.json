@@ -13,7 +13,11 @@
     "test:dispatching": "tsx scripts/test-dispatching.ts",
     "test:pricing": "tsx scripts/test-pricing.ts",
     "test:real-cost": "tsx scripts/test-real-cost.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:en-cours": "tsx scripts/test-en-cours.ts",
+    "test:sql": "node scripts/sql-bench/run-all.mjs",
+    "test:codification": "tsx scripts/test-codification.ts",
+    "test:livraison": "tsx scripts/test-livraison.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",
@@ -25,6 +29,7 @@
     "framer-motion": "^13.1.1",
     "googleapis": "^144.0.0",
     "jsqr": "^1.4.0",
+    "leaflet": "^1.9.4",
     "lucide-react": "^1.37.0",
     "next": "16.3.3",
     "pdf-lib": "^1.17.1",
@@ -41,7 +46,9 @@
     "zod": "^4.5.4"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "@tailwindcss/postcss": "^4",
+    "@types/leaflet": "^1.9.22",
     "@types/node": "^20",
     "@types/qrcode": "^1.5.5",
     "@types/react": "^19",

@@ -6,10 +6,14 @@ import { REQUEST_STATUS_LABELS, PRODUCTION_ORDER_STATUS_LABELS } from "@/lib/typ
 import Link from "next/link";
 import { formatDate } from "@/lib/utils";
 import { PageHeader } from "@/components/shell/page-header";
+import { redirect } from "next/navigation";
 
 export default async function DashboardPage() {
   const { profile } = await requireUser();
   const supabase = await createClient();
+
+  // Le livreur n'a que son écran mobile (LIV-0, L4).
+  if (profile.role === "livreur") redirect("/livreur");
 
   if (profile.role === "client") {
     const [{ data: requests }, { data: quotes }, { data: samples }, { data: production }] =
@@ -84,7 +88,7 @@ export default async function DashboardPage() {
 
   if (profile.role === "commercial" || profile.role === "administrateur") {
     const [{ data: requests }, { data: quotesEnvoyes }, { data: samples }] = await Promise.all([
-      supabase.from("requests").select("id,status,reference,created_at,companies(id,name)").order(
+      supabase.from("requests").select("id,status,reference,created_at,companies(id,name)").not("company_id", "is", null).order(
         "created_at",
         { ascending: false }
       ).limit(6),
@@ -273,6 +277,30 @@ export default async function DashboardPage() {
         <Link href="/atelier/production" className="text-sm font-medium text-brand hover:underline">
           Ouvrir les ordres de fabrication →
         </Link>
+      </div>
+    );
+  }
+
+  if (profile.role === "responsable_livraison") {
+    const { data: shipments } = await supabase.from("shipments").select("statut").not("statut", "in", "(annulee,reception_confirmee)");
+    const n = (...statuts: string[]) => (shipments ?? []).filter((x) => statuts.includes(x.statut)).length;
+    return (
+      <div className="space-y-6">
+        <PageHeader title="Service livraison" description="Préparation, validation, planification et suivi des livraisons." />
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <StatCard label="À préparer" value={n("a_preparer")} tone="brand" />
+          <StatCard label="À valider (compta)" value={n("preparee")} tone="warning" />
+          <StatCard label="À planifier" value={n("validee_compta")} tone="info" />
+          <StatCard label="Échecs et litiges" value={n("echec", "litige")} tone="danger" />
+        </div>
+        <div className="flex gap-4 text-sm">
+          <Link href="/livraisons" className="font-medium text-brand hover:underline">
+            Ouvrir les livraisons →
+          </Link>
+          <Link href="/parametres/livraison" className="font-medium text-brand hover:underline">
+            Zones, transporteurs et véhicules →
+          </Link>
+        </div>
       </div>
     );
   }

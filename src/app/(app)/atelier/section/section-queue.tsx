@@ -1,5 +1,6 @@
 "use client";
 
+import { odfClientLabel } from "@/lib/production/client-label";
 import { useCallback, useDeferredValue, useEffect, useMemo, useState, useTransition } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { createClient } from "@/lib/supabase/client";
@@ -36,6 +37,8 @@ import {
   type WorkOrderRow,
 } from "./types";
 import type { Size } from "@/lib/sizes";
+import type { WorkOrderFlowRow } from "@/lib/types/domain";
+import { DeclarationDialog, FlowChips } from "./declaration-dialog";
 
 /**
  * File de travail du terminal de section — `chef_section`,
@@ -59,6 +62,8 @@ export function SectionQueue({
   traceOptionsByWorkOrderId,
   eventsByWorkOrderId,
   isCoupe,
+  categorieCle,
+  flowByWorkOrderId,
   initialOpenWasteBags,
   sizes,
 }: {
@@ -69,6 +74,10 @@ export function SectionQueue({
   traceOptionsByWorkOrderId: Record<string, TraceOption[]>;
   eventsByWorkOrderId: Record<string, QuantityEventRow[]>;
   isCoupe: boolean;
+  /** Catégorie d'atelier de la section (SF-1) : décide des colonnes de la grille de déclaration. */
+  categorieCle: string | null;
+  /** Reçu / déclaré / reste par taille de chaque sous-ODF (work_orders_flow). */
+  flowByWorkOrderId: Record<string, WorkOrderFlowRow[]>;
   initialOpenWasteBags: WasteBagRow[];
   sizes: Size[];
 }) {
@@ -140,14 +149,14 @@ export function SectionQueue({
           fields: {
             sousOdf: wo.reference,
             odf: wo.production_orders?.reference ?? null,
-            client: wo.production_orders?.companies?.name ?? null,
+            client: wo.production_orders ? odfClientLabel(wo.production_orders.company_id, wo.production_orders.companies?.name) : null,
             article: ctx?.articleDescription ?? null,
             ot: ctx?.numeroOt ?? null,
           },
           normalized: {
             sousOdf: normalizeSearch(wo.reference),
             odf: normalizeSearch(wo.production_orders?.reference ?? ""),
-            client: normalizeSearch(wo.production_orders?.companies?.name ?? ""),
+            client: normalizeSearch(wo.production_orders ? odfClientLabel(wo.production_orders.company_id, wo.production_orders.companies?.name) : ""),
             article: normalizeSearch(ctx?.articleDescription ?? ""),
             ot: normalizeSearch(ctx?.numeroOt ?? ""),
           },
@@ -323,6 +332,8 @@ export function SectionQueue({
                       highlightMatelasId={highlightMatelasId}
                       sectionId={sectionId}
                       onBagWeighed={onBagWeighed}
+                      categorieCle={categorieCle}
+                      flow={flowByWorkOrderId[wo.id]}
                     />
                   ))}
                 </AnimatePresence>
@@ -358,6 +369,8 @@ export function SectionQueue({
                         highlightMatelasId={highlightMatelasId}
                         sectionId={sectionId}
                         onBagWeighed={onBagWeighed}
+                        categorieCle={categorieCle}
+                        flow={flowByWorkOrderId[wo.id]}
                       />
                     ))}
                   </div>
@@ -395,6 +408,8 @@ function WorkOrderAccordionRow({
   highlightMatelasId,
   sectionId,
   onBagWeighed,
+  categorieCle,
+  flow,
 }: {
   wo: WorkOrderRow;
   context?: WorkOrderContext;
@@ -408,8 +423,13 @@ function WorkOrderAccordionRow({
   highlightMatelasId: string | null;
   sectionId: string;
   onBagWeighed: (bagId: string, poidsReleveKg: number) => void;
+  categorieCle: string | null;
+  /** Absent : sous-ODF sans répartition par taille (antérieur à SF-1) — saisie globale. */
+  flow?: WorkOrderFlowRow[];
 }) {
   const [quantityOpen, setQuantityOpen] = useState(false);
+  const [declarationOpen, setDeclarationOpen] = useState(false);
+  const parTaille = (flow?.length ?? 0) > 0;
   const [lotOpen, setLotOpen] = useState(false);
   const [anomalyOpen, setAnomalyOpen] = useState(false);
   // L'identifiant, pas l'objet : la fiche relit le matelas dans les props à
@@ -420,7 +440,7 @@ function WorkOrderAccordionRow({
 
   const atteinte = wo.quantity_done >= wo.quantity_planned;
   const progress = wo.quantity_planned > 0 ? Math.min(100, (wo.quantity_done / wo.quantity_planned) * 100) : 0;
-  const client = wo.production_orders?.companies?.name;
+  const client = wo.production_orders ? odfClientLabel(wo.production_orders.company_id, wo.production_orders.companies?.name) : null;
   const article = context?.articleDescription;
 
   return (
@@ -478,12 +498,25 @@ function WorkOrderAccordionRow({
                 <p className="text-xs text-foreground-muted">Démarré le {formatDateTime(wo.actual_start)}</p>
               )}
 
+              {parTaille && <FlowChips flow={flow ?? []} />}
+
               {matelas !== undefined ? (
-                <MatelasList
-                  matelas={matelas}
-                  highlightMatelasId={highlightMatelasId}
-                  onOpen={(m) => setOpenMatelasId(m.id)}
-                />
+                <>
+                  <MatelasList
+                    matelas={matelas}
+                    highlightMatelasId={highlightMatelasId}
+                    onOpen={(m) => setOpenMatelasId(m.id)}
+                  />
+                  {parTaille && (
+                    <Button size="md" variant="secondary" className="w-full" onClick={() => setDeclarationOpen(true)}>
+                      <Plus className="h-4 w-4" /> Déclarer des déchets (pièces)
+                    </Button>
+                  )}
+                </>
+              ) : parTaille ? (
+                <Button size="md" className="w-full" onClick={() => setDeclarationOpen(true)}>
+                  <Plus className="h-4 w-4" /> Déclarer par taille
+                </Button>
               ) : (
                 <>
                   <QuantityHistory events={events} />
@@ -527,6 +560,16 @@ function WorkOrderAccordionRow({
           matelas={openMatelas}
           onBagWeighed={onBagWeighed}
           onDone={() => setOpenMatelasId(null)}
+        />
+      )}
+      {parTaille && (
+        <DeclarationDialog
+          open={declarationOpen}
+          onOpenChange={setDeclarationOpen}
+          workOrderId={wo.id}
+          workOrderReference={wo.reference}
+          categorie={categorieCle}
+          flow={flow ?? []}
         />
       )}
       <QuantityDialog

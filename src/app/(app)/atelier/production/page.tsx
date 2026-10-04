@@ -1,3 +1,4 @@
+import { odfClientLabel } from "@/lib/production/client-label";
 import { requireRole } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server";
 import { getBaseUrl } from "@/lib/url";
@@ -26,7 +27,7 @@ export default async function ProductionOrdersPage({
 
   let query = supabase
     .from("production_orders")
-    .select("id,reference,status,total_quantity,planned_start_date,planned_end_date,archived_at,companies(name)")
+    .select("id,reference,status,total_quantity,planned_start_date,planned_end_date,archived_at,company_id,companies(name)")
     .order("created_at", { ascending: false });
   query = showArchived ? query.not("archived_at", "is", null) : query.is("archived_at", null);
 
@@ -145,7 +146,7 @@ export default async function ProductionOrdersPage({
                       </Badge>
                     )}
                   </Td>
-                  <Td>{(o.companies as unknown as { name: string } | null)?.name ?? "—"}</Td>
+                  <Td>{odfClientLabel(o.company_id, (o.companies as unknown as { name: string } | null)?.name)}</Td>
                   <Td align="center">{o.total_quantity} pièces</Td>
                   <Td>
                     <StatusBadge status={o.status} labels={PRODUCTION_ORDER_STATUS_LABELS} kind="production" />

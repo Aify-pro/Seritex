@@ -29,6 +29,29 @@ export async function generateGlobalStockExportFiche(): Promise<GenerateStockExp
   return { id: fiche.id, numero: fiche.numero };
 }
 
+/** Dépôt Sage d'un mouvement pas encore exporté (LIV-3) — pré-rempli par nature, modifiable. */
+export async function setStockMovementDepot(movementId: string, depot: string): Promise<{ error?: string }> {
+  await requireRole(["administrateur", "responsable_production", "gestionnaire_stock"]);
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("set_stock_movement_depot", { p_movement_id: movementId, p_depot: depot });
+  if (error) return { error: error.message };
+  revalidatePath("/atelier/stock");
+  revalidatePath("/atelier/production", "layout");
+  return {};
+}
+
+/** Fiche d'export Sage d'un bon de livraison (LIV-3) : les sorties PF de cette expédition. */
+export async function generateShipmentStockExportFiche(shipmentId: string): Promise<GenerateStockExportFicheResult> {
+  await requireRole(["administrateur", "responsable_production", "gestionnaire_stock"]);
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("generate_shipment_stock_export_fiche", { p_shipment_id: shipmentId }).single();
+  if (error) return { error: error.message };
+  revalidatePath(`/livraisons/${shipmentId}`);
+  revalidatePath("/atelier/stock");
+  const fiche = data as { id: string; numero: string };
+  return { id: fiche.id, numero: fiche.numero };
+}
+
 export type RecordSageReconciliationResult = { error: string } | { ok: true };
 
 /**

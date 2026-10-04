@@ -24,6 +24,7 @@ const SOURCE_LABEL: Record<PriceSource, string> = {
 export function LinePricesEditor({
   companyId,
   productModelId,
+  textileId,
   quantity,
   printZones,
   devise,
@@ -38,6 +39,8 @@ export function LinePricesEditor({
 }: {
   companyId: string;
   productModelId: string;
+  /** Grammage choisi (ART-D) : le coût tissu, donc le prix, en dépend. */
+  textileId: string | null;
   quantity: number;
   printZones: Record<string, number>;
   devise: string;
@@ -68,6 +71,7 @@ export function LinePricesEditor({
       const res = await suggestQuoteLinePrices({
         companyId,
         productModelId,
+        textileId,
         quantity,
         printZones: (JSON.parse(printKey) as [string, number][]).map(([printable_zone_id, nb_couleurs]) => ({ printable_zone_id, nb_couleurs })),
         devise,
@@ -92,7 +96,7 @@ export function LinePricesEditor({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [auto, companyId, productModelId, quantity, printKey, devise, tauxChange]);
+  }, [auto, companyId, productModelId, textileId, quantity, printKey, devise, tauxChange]);
 
   // Groupe affiché : celui de la répartition, à défaut le premier du modèle.
   const groupe = sizes.find((s) => (dispatch[s.cle] ?? 0) > 0)?.groupe ?? sizes[0]?.groupe;

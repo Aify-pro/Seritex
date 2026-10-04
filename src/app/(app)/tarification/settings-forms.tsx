@@ -13,7 +13,7 @@ const num = (v: string) => Number(String(v).replace(",", "."));
 export function PricingSettingsForm({
   initial,
 }: {
-  initial: { chargesPct: number; margePct: number; arrondi: number; fraisEcranParCouleur: number };
+  initial: { chargesPct: number; margePct: number; arrondi: number; fraisEcranParCouleur: number; coefPrixVente?: number | null };
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -22,20 +22,32 @@ export function PricingSettingsForm({
     marge: String(initial.margePct),
     arrondi: String(initial.arrondi),
     ecran: String(initial.fraisEcranParCouleur),
+    coef: initial.coefPrixVente != null ? String(initial.coefPrixVente) : "",
   });
-  const coef = coefficient({ chargesPct: num(v.charges), margePct: num(v.marge) });
+  const coefImpose = v.coef.trim() === "" ? null : num(v.coef);
+  const coefCalcule = coefficient({ chargesPct: num(v.charges), margePct: num(v.marge) });
+  const coef = coefficient({ chargesPct: num(v.charges), margePct: num(v.marge), coefPrixVente: coefImpose });
 
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
         <Field label="Charges globales (%)" value={v.charges} onChange={(x) => setV({ ...v, charges: x })} disabled={pending} />
         <Field label="Marge cible (%)" value={v.marge} onChange={(x) => setV({ ...v, marge: x })} disabled={pending} />
         <Field label="Arrondi du prix (F CFA)" value={v.arrondi} onChange={(x) => setV({ ...v, arrondi: x })} disabled={pending} />
         <Field label="Frais d'écran par couleur (F CFA)" value={v.ecran} onChange={(x) => setV({ ...v, ecran: x })} disabled={pending} />
+        <Field
+          label="Coefficient de vente imposé"
+          value={v.coef}
+          onChange={(x) => setV({ ...v, coef: x })}
+          disabled={pending}
+          placeholder={coefCalcule ? coefCalcule.toFixed(3) : "—"}
+        />
       </div>
       <p className="text-xs text-foreground-muted">
-        Coefficient appliqué au prix de revient : <span className="font-medium text-foreground">{coef ? coef.toFixed(3) : "—"}</span> (PV = PR ÷ (1 − charges) ÷ (1 − marge), comme
-        la grille Excel). Les frais d&apos;écran sont comptés une fois par couleur imprimée et par commande, puis répartis sur la quantité.
+        Coefficient appliqué au prix de revient : <span className="font-medium text-foreground">{coef ? coef.toFixed(3) : "—"}</span> ({coefImpose !== null
+          ? "imposé — les modèles qui ont leurs propres charges ou marge gardent la formule"
+          : "PV = PR ÷ (1 − charges) ÷ (1 − marge), comme la grille Excel ; laissez le coefficient vide pour garder ce calcul"}
+        ). Les frais d&apos;écran sont comptés une fois par couleur imprimée et par commande, puis répartis sur la quantité.
       </p>
       <Button
         size="sm"
@@ -47,6 +59,7 @@ export function PricingSettingsForm({
               marge_pct: num(v.marge),
               arrondi: num(v.arrondi),
               frais_ecran_par_couleur: num(v.ecran),
+              coef_prix_vente: coefImpose,
             });
             if (res.error) toast.error("Paramètres non enregistrés", { description: res.error });
             else {

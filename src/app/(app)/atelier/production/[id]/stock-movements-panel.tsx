@@ -1,5 +1,6 @@
 "use client";
 
+import { STOCK_MOVEMENT_TYPE_LABELS, formatMovementUnit } from "@/lib/stock/movements";
 import { useTransition } from "react";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -9,14 +10,7 @@ import { Button } from "@/components/ui/button";
 import { generateStockExportFiche } from "../actions";
 import { formatDateTime } from "@/lib/utils";
 import type { StockMovement, StockExportFiche } from "@/lib/types/domain";
-
-const STOCK_MOVEMENT_TYPE_LABELS: Record<string, string> = {
-  sortie_mp: "Sortie MP",
-  entree_semi_fini: "Entrée semi-fini",
-  sortie_semi_fini: "Sortie semi-fini",
-  entree_fini: "Entrée fini",
-  retour_mp: "Retour MP",
-};
+import { DepotEditor } from "../../stock/depot-editor";
 
 /**
  * Lot 10 — mouvements de stock & fiches d'import Sage (section 19 du
@@ -71,15 +65,21 @@ export function StockMovementsPanel({
             <li key={m.id} className="flex items-center justify-between gap-3 px-5 py-3">
               <div>
                 <p className="text-sm text-foreground">
-                  {STOCK_MOVEMENT_TYPE_LABELS[m.type] ?? m.type} · {m.quantite_ou_poids} {m.unite === "kg" ? "kg" : "pièce(s)"}
+                  {STOCK_MOVEMENT_TYPE_LABELS[m.type] ?? m.type} · {m.quantite_ou_poids} {formatMovementUnit(m.unite)}
                 </p>
                 <p className="text-xs text-foreground-muted">
-                  {m.article_ref ? `Article ${m.article_ref}` : "Référence Sage non renseignée"} · {formatDateTime(m.created_at)}
+                  {m.article_ref ? `Article ${m.article_ref}` : "Référence Sage non renseignée"}
+                  {m.taille ? ` · ${m.taille.split("/").pop()}` : ""} · {formatDateTime(m.created_at)}
                 </p>
+                {m.commentaire && <p className="text-xs text-foreground-muted">{m.commentaire}</p>}
               </div>
-              <Badge tone={m.exported_in_fiche_id ? "neutral" : "warning"}>
-                {m.exported_in_fiche_id ? "Exporté" : "Non exporté"}
-              </Badge>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-foreground-muted">Dépôt</span>
+                <DepotEditor movementId={m.id} depot={m.depot ?? null} editable={canGenerate && !m.exported_in_fiche_id} />
+                <Badge tone={m.exported_in_fiche_id ? "neutral" : "warning"}>
+                  {m.exported_in_fiche_id ? "Exporté" : "Non exporté"}
+                </Badge>
+              </div>
             </li>
           ))}
         </ul>

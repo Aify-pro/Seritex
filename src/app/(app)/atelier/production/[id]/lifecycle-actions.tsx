@@ -27,12 +27,15 @@ export function LifecycleActions({
   canValidate,
   canRequestClosure,
   isAdmin,
+  enCoursTotal = 0,
 }: {
   productionOrderId: string;
   status: ProductionOrderStatus;
   canValidate: boolean;
   canRequestClosure: boolean;
   isAdmin: boolean;
+  /** Pièces encore en cours, toutes étapes (production_order_balance) : la clôture est refusée tant qu'il en reste (SF-4). */
+  enCoursTotal?: number;
 }) {
   const [pending, startTransition] = useTransition();
   const [showRefuse, setShowRefuse] = useState(false);
@@ -119,19 +122,26 @@ export function LifecycleActions({
       <div className="space-y-3">
         {canRequestClosure && (
           <Card className="border-brand/30 bg-brand-soft/40">
-            <CardBody className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
-              <div>
-                <p className="text-sm font-medium text-foreground">En production</p>
-                <p className="text-xs text-foreground-muted">
-                  Possible uniquement lorsque tous les sous-ODF ont atteint leur quantité prévue.
-                </p>
+            <CardBody className="space-y-3">
+              <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
+                <div>
+                  <p className="text-sm font-medium text-foreground">En production</p>
+                  <p className="text-xs text-foreground-muted">
+                    {enCoursTotal > 0
+                      ? `Il reste ${enCoursTotal} pièce(s) en cours dans les ateliers : terminez-les ou donnez une destination à chaque reste (« Restes à clôturer ») avant de demander la clôture.`
+                      : "Plus aucune pièce en cours : la clôture peut être demandée. Le bilan par taille est figé à la demande."}
+                  </p>
+                </div>
+                <Button
+                  loading={pending}
+                  disabled={enCoursTotal > 0}
+                  onClick={() =>
+                    call("Clôture demandée — en attente de validation par la direction", () => requestClosure(productionOrderId))
+                  }
+                >
+                  <Flag className="h-4 w-4" /> Demander la clôture
+                </Button>
               </div>
-              <Button
-                loading={pending}
-                onClick={() => call("Clôture demandée — en attente de validation par la direction", () => requestClosure(productionOrderId))}
-              >
-                <Flag className="h-4 w-4" /> Demander la clôture
-              </Button>
             </CardBody>
           </Card>
         )}

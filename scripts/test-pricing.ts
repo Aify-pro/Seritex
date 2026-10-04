@@ -8,12 +8,26 @@
  *  3. les suppléments par taille ne s'appliquent qu'aux tailles concernées ;
  *  4. un prix forcé remplace le calcul et la marge réelle le reflète ;
  *  5. les impressions : coût par nombre de couleurs + frais d'écran amortis,
- *     et une donnée manquante est signalée au lieu d'être comptée 0.
+ *     et une donnée manquante est signalée au lieu d'être comptée 0 ;
+ *  6. le coût tissu calculé (ART-C, A9) : surface × grammage × prix au kg,
+ *     qui change avec le grammage sans aucune grille à saisir.
  *
  * Lancer : npm run test:pricing
  */
 import assert from "node:assert/strict";
-import { coefficient, printCostPerPiece, printSignature, priceGrid, roundUpTo, salePriceForSize, type CostComponent, type PricingParams } from "../src/lib/pricing";
+import {
+  coefficient,
+  fabricCostPerPiece,
+  printCostPerPiece,
+  printSignature,
+  priceGrid,
+  resolveComponents,
+  roundUpTo,
+  salePriceForSize,
+  type CostComponent,
+  type FabricContext,
+  type PricingParams,
+} from "../src/lib/pricing";
 import { averageUnitPrice, computeQuoteTotals, lineNet } from "../src/lib/quote-totals";
 
 let n = 0;
@@ -131,6 +145,44 @@ test("montants d'un devis chiffré par taille : le total suit la répartition", 
   const t = computeQuoteTotals([modifiee, { quantity: 2, unit_price: 500 }], 0, 18);
   assert.equal(t.ht, 166000 + 1000);
   assert.equal(t.tva, Math.round(167000 * 0.18));
+});
+
+test("coût tissu calculé : surface × (1 + perte) × grammage × prix au kg", () => {
+  // 0,55 m² par pièce, 165 g/m², 3 500 F CFA le kg, 5 % de chutes : 0,55 × 1,05 × 0,165 × 3 500 = 333,51.
+  close(fabricCostPerPiece(0.55, 165, 3500, 5), 333.506);
+});
+
+test("le coût tissu change avec le grammage, sans saisir de grille", () => {
+  const comps: CostComponent[] = [
+    { id: "t", libelle: "Tissu", base: 0, supplements: {}, mode: "tissu_calcule", estTissu: true },
+    { id: "c", libelle: "Confection", base: 150, supplements: {} },
+  ];
+  const surfaces = { [M]: 0.5, [XXL]: 0.62 };
+  const j165: FabricContext = { textileNom: "Jersey 165", grammage: 165, prixKg: 3000, surfaces };
+  const j200: FabricContext = { textileNom: "Jersey 200", grammage: 200, prixKg: 3000, surfaces };
+  const g165 = priceGrid(resolveComponents(comps, [M, XXL], j165).components, [M, XXL], jersey);
+  const g200 = priceGrid(resolveComponents(comps, [M, XXL], j200).components, [M, XXL], jersey);
+  close(g165.sizes[0].pr, 0.5 * 0.165 * 3000 + 150);
+  close(g200.sizes[0].pr, 0.5 * 0.2 * 3000 + 150);
+  assert.ok(g200.sizes[1].pr > g165.sizes[1].pr);
+  assert.ok(g200.sizes[0].pvCalcule! >= g165.sizes[0].pvCalcule!);
+});
+
+test("tissu calculé : donnée manquante signalée, jamais comptée 0 en silence", () => {
+  const comps: CostComponent[] = [{ id: "t", libelle: "Tissu", base: 0, supplements: {}, mode: "tissu_calcule" }];
+  assert.ok(resolveComponents(comps, [M], null).warnings[0].includes("aucun textile"));
+  assert.ok(resolveComponents(comps, [M], { textileNom: "J", grammage: 165, prixKg: null, surfaces: { [M]: 0.5 } }).warnings[0].includes("prix au kg"));
+  const r = resolveComponents(comps, [M, XXL], { textileNom: "J", grammage: 165, prixKg: 3000, surfaces: { [M]: 0.5 } });
+  assert.ok(r.warnings[0].includes("XXL"));
+  // Un composant « saisi » n'est pas touché.
+  assert.deepEqual(resolveComponents(modele1, [M], null).components, modele1);
+});
+
+test("coefficient de vente imposé (A8) : remplace la formule charges / marge", () => {
+  close(coefficient({ chargesPct: 40, margePct: 15, coefPrixVente: 2 })!, 2);
+  close(coefficient({ chargesPct: 40, margePct: 15, coefPrixVente: null })!, 1 / (0.6 * 0.85));
+  const g = priceGrid([{ id: "c", libelle: "Confection", base: 1000, supplements: {} }], [M], { ...jersey, coefPrixVente: 1.75 });
+  assert.equal(g.sizes[0].pvCalcule, 1800);
 });
 
 console.log(`\n${n} tests OK`);

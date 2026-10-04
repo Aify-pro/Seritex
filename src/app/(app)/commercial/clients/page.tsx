@@ -48,7 +48,7 @@ const nf = new Intl.NumberFormat("fr-FR");
  * vit dans l'URL ; l'export CSV (`/api/clients/export`) applique exactement les mêmes.
  */
 export default async function ClientsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
-  await requireRole(["commercial", "administrateur", "responsable_production"]);
+  await requireRole(["commercial", "administrateur", "responsable_production", "responsable_livraison"]);
   const filters = parseClientFilters(await searchParams);
   const supabase = await createClient();
 

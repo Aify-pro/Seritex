@@ -5,6 +5,7 @@ import {
   Factory,
   ShieldCheck,
   SlidersHorizontal,
+  Truck,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { createElement, type ReactNode } from "react";
@@ -42,9 +43,8 @@ const HUBS: HubDefinition[] = [
     label: "Produits",
     icon: Shirt,
     tabs: [
-      { href: "/parametres/produits", label: "Modèles de produits" },
       { href: "/parametres/couleurs", label: "Couleurs et tailles" },
-      { href: "/parametres/textiles", label: "Textiles" },
+      { href: "/parametres/codification", label: "Codification" },
     ],
   },
   {
@@ -56,6 +56,12 @@ const HUBS: HubDefinition[] = [
       { href: "/parametres/fabrication", label: "Fabrication" },
       { href: "/parametres/dispatching", label: "Dispatching des tailles" },
     ],
+  },
+  {
+    key: "livraison",
+    label: "Livraison",
+    icon: Truck,
+    tabs: [{ href: "/parametres/livraison", label: "Zones, transporteurs et véhicules" }],
   },
   {
     key: "acces",

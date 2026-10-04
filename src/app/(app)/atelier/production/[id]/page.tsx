@@ -11,7 +11,7 @@ import { notFound } from "next/navigation";
 import { ArchiveButton } from "./archive-button";
 import { LifecycleActions } from "./lifecycle-actions";
 import { ReplacementOrderPicker } from "./replacement-order-picker";
-import { getSizesForProductModel } from "@/lib/sizes";
+import { getSizes, getSizesForProductModel } from "@/lib/sizes";
 import { SubmitOdfPanel } from "./submit-odf-panel";
 import { AnomaliesPanel } from "./anomalies-panel";
 import { ProductionOrderLines, type LineData } from "./production-order-lines";
@@ -21,6 +21,15 @@ import { StockMovementsPanel } from "./stock-movements-panel";
 import type { StatutFiche } from "@/lib/patronnage/types";
 import type { DownloadableMediaFile, MaquetteFile, StockMovement, StockExportFiche, SampleRequestStatus } from "@/lib/types/domain";
 import { ValidationCircuitPanel } from "./validation-circuit-panel";
+import { WhereArePieces, type WhereArePiecesLine } from "./where-are-pieces";
+import type { StockAvailabilityRow } from "./line-stock-tools";
+import { ClosureBalance, type ClosureBalanceData } from "./closure-balance";
+import type { WorkOrderFlowRow } from "@/lib/types/domain";
+import { RemaindersPanel, type RemainderRow } from "./remainders-panel";
+import { ConsumptionPanel, type ConsumptionRow } from "./consumption-panel";
+import { odfClientLabel } from "@/lib/production/client-label";
+import { SHIPMENT_STATUS_LABELS, type ShipmentStatus } from "@/lib/delivery/status";
+import { stageRowFromDb } from "@/lib/production/flow";
 import { CheckCircle2, ChevronRight, Package, Printer, QrCode } from "lucide-react";
 import Link from "next/link";
 
@@ -98,8 +107,9 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     // tables n'ayant pas de production_order_id en commun.
     supabase
       .from("production_order_line_sections")
-      .select("production_order_line_id,section_id,ordre,quantite,partie,production_order_lines!inner(production_order_id)")
+      .select("production_order_line_id,section_id,ordre,etape,quantite,partie,production_order_lines!inner(production_order_id)")
       .eq("production_order_lines.production_order_id", id)
+      .order("etape")
       .order("ordre"),
     // ODF multi-lignes : une ligne par article du devis accepté, avec sa
     // configuration (modèle/tissu/couleur héritée du devis, immuable sauf
@@ -187,7 +197,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     // jamais saisis directement (migration 0020).
     supabase
       .from("stock_movements")
-      .select("id,production_order_id,type,article_ref,quantite_ou_poids,unite,exported_in_fiche_id,created_by,created_at")
+      .select("id,production_order_id,type,article_ref,quantite_ou_poids,unite,exported_in_fiche_id,created_by,created_at,depot,taille,commentaire,shipment_id")
       .eq("production_order_id", id)
       .order("created_at", { ascending: false }),
     supabase
@@ -221,14 +231,20 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     production_order_line_id: string;
     section_id: string;
     ordre: number;
+    etape: number | null;
     quantite: number | null;
     partie: string | null;
   };
-  const sectionsByLine: Record<string, { sectionId: string; quantite: number | null; partie: string | null }[]> = {};
+  const sectionsByLine: Record<string, { sectionId: string; quantite: number | null; partie: string | null; etape: number }[]> = {};
   const coupeSelectedByLine: Record<string, boolean> = {};
   const impressionSectionSelectedByLine: Record<string, boolean> = {};
   for (const s of (chosenLineSections ?? []) as unknown as ChosenLineSection[]) {
-    (sectionsByLine[s.production_order_line_id] ??= []).push({ sectionId: s.section_id, quantite: s.quantite, partie: s.partie });
+    (sectionsByLine[s.production_order_line_id] ??= []).push({
+      sectionId: s.section_id,
+      quantite: s.quantite,
+      partie: s.partie,
+      etape: s.etape ?? s.ordre,
+    });
     if (coupeSectionIds.has(s.section_id)) coupeSelectedByLine[s.production_order_line_id] = true;
     if (impressionSectionIds.has(s.section_id)) impressionSectionSelectedByLine[s.production_order_line_id] = true;
   }
@@ -502,12 +518,42 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
   // produit ») plutôt qu'en cartes séparées en bas de page (demande Ayman,
   // 15/09, étendue 16/09) — regroupe ici les données calculées ci-dessus
   // par article.
+  // Parcours types des modèles de l'ODF (ART-H) — « appliquer un parcours type ».
+  const lineModelIds = [...new Set(lines.map((l) => l.productModelId).filter((v): v is string => !!v))];
+  const { data: modelRoutes } =
+    lineModelIds.length > 0
+      ? await supabase.from("model_routes").select("id,nom,par_defaut,product_model_id").in("product_model_id", lineModelIds).order("nom")
+      : { data: [] };
+
+  // Disponible en stock par taille des articles qui partent du Stock (SF-2).
+  const stockSectionIds = new Set(
+    (allSections ?? []).filter((x) => (x.atelier_categories as unknown as { cle: string } | null)?.cle === "stock").map((x) => x.id as string)
+  );
+  const stockLineIds = lines.filter((l) => (sectionsByLine[l.id] ?? []).some((x) => stockSectionIds.has(x.sectionId))).map((l) => l.id);
+  const sizesRef = await getSizes();
+  const stockAvailabilityByLine: Record<string, StockAvailabilityRow[]> = {};
+  for (const lineId of stockLineIds) {
+    const { data: av } = await supabase.rpc("line_stock_availability", { p_line_id: lineId });
+    stockAvailabilityByLine[lineId] = ((av ?? []) as { taille: string; code: string | null; demande: number; en_stock: number | null; disponible: number | null }[]).map((r) => ({
+      taille: r.taille,
+      libelle: sizesRef.find((x) => x.cle === r.taille)?.libelle ?? r.taille.split("/").pop() ?? r.taille,
+      code: r.code,
+      demande: r.demande,
+      enStock: r.en_stock === null ? null : Number(r.en_stock),
+      disponible: r.disponible === null ? null : Number(r.disponible),
+    }));
+  }
+
   const linesWithConfig: LineData[] = lines.map((line) => {
     const quoteLineId = quoteLineIdByLine[line.id];
     const maquetteFromDevisFile = quoteLineId ? maquetteByQuoteLine[quoteLineId] : undefined;
     return {
       ...line,
       sections: sectionsByLine[line.id] ?? [],
+      routes: (modelRoutes ?? [])
+        .filter((r) => r.product_model_id === line.productModelId)
+        .map((r) => ({ id: r.id as string, nom: r.nom as string, parDefaut: !!r.par_defaut })),
+      stockAvailability: stockAvailabilityByLine[line.id],
       coupeSelected: !!coupeSelectedByLine[line.id],
       fiche: fichesByLine[line.id] ?? null,
       impressionSectionSelected: !!impressionSectionSelectedByLine[line.id],
@@ -564,6 +610,99 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
   // stock verraient une redirection "accès refusé" en cliquant).
   const canViewCommercial = isAdmin || profile.role === "commercial";
 
+  // « Où sont mes pièces » (SF-1) : flux par étape × taille, calculé par la
+  // base (line_stage_flow) — seulement une fois l'ODF lancé.
+  const sectionNameById = new Map((allSections ?? []).map((s) => [s.id as string, s.name as string]));
+  const showFlow = ["en_production", "demande_cloture", "terminee"].includes(order.status);
+  const whereArePiecesLines: WhereArePiecesLine[] = showFlow
+    ? await Promise.all(
+        (productionOrderLines ?? []).map(async (line) => {
+          const { data: stages } = await supabase.rpc("line_stage_flow", { p_line_id: line.id });
+          const stepLabels: Record<number, string> = {};
+          for (const s of sectionsByLine[line.id] ?? []) {
+            const name = sectionNameById.get(s.sectionId) ?? "—";
+            stepLabels[s.etape] = stepLabels[s.etape] ? `${stepLabels[s.etape]} + ${name}` : name;
+          }
+          return {
+            id: line.id as string,
+            description: line.description as string,
+            stepLabels,
+            stages: ((stages ?? []) as Parameters<typeof stageRowFromDb>[0][]).map(stageRowFromDb),
+          };
+        })
+      )
+    : [];
+  const allSizes = showFlow ? await getSizes() : [];
+  // En production : en-cours total, pour exiger un motif à la demande de
+  // clôture. Ensuite : le bilan figé à la demande.
+  let enCoursTotal = 0;
+  if (order.status === "en_production" && canRequestClosure) {
+    const { data: balance } = await supabase.rpc("production_order_balance", { p_production_order_id: order.id });
+    enCoursTotal = Number((balance as ClosureBalanceData | null)?.en_cours ?? 0);
+  }
+  const bilanCloture = (order.bilan_cloture ?? null) as ClosureBalanceData | null;
+
+  // Consommables (COM-G) : calculés à la demande de clôture.
+  const { data: consumptionData } = ["demande_cloture", "terminee"].includes(order.status)
+    ? await supabase
+        .from("production_order_consumptions")
+        .select("id,production_order_line_id,pieces,quantite_theorique,quantite_reelle,motif_ajustement,stock_movement_id,consumables(code,designation,unite)")
+        .eq("production_order_id", order.id)
+    : { data: [] };
+  const consumptions: ConsumptionRow[] = (consumptionData ?? []).map((c) => {
+    const k = c.consumables as unknown as { code: string; designation: string; unite: string };
+    return {
+      id: c.id as string,
+      article: (productionOrderLines ?? []).find((l) => l.id === c.production_order_line_id)?.description ?? "Article",
+      code: k.code,
+      designation: k.designation,
+      unite: k.unite,
+      pieces: c.pieces as number,
+      theorique: Number(c.quantite_theorique),
+      reelle: c.quantite_reelle != null ? Number(c.quantite_reelle) : null,
+      motif: (c.motif_ajustement as string | null) ?? null,
+      sortie: !!c.stock_movement_id,
+    };
+  });
+
+  // Restes à clôturer (SF-4) : chaque sous-ODF × taille encore en cours.
+  let remainders: RemainderRow[] = [];
+  if (enCoursTotal > 0 && (workOrders ?? []).length > 0) {
+    const { data: flows } = await supabase.rpc("work_orders_flow", { p_work_order_ids: (workOrders ?? []).map((w) => w.id as string) });
+    const catBySection = new Map(
+      (allSections ?? []).map((s) => [s.id as string, (s.atelier_categories as unknown as { cle: string } | null)?.cle ?? null])
+    );
+    remainders = ((flows ?? []) as (WorkOrderFlowRow & { work_order_id: string })[])
+      .filter((f) => f.reste > 0)
+      .map((f) => {
+        const wo = (workOrders ?? []).find((w) => w.id === f.work_order_id)!;
+        return {
+          workOrderId: f.work_order_id,
+          lineDescription: (productionOrderLines ?? []).find((l) => l.id === wo.production_order_line_id)?.description ?? "Article",
+          etape: (wo.etape as number | null) ?? 0,
+          section: (wo.sections as unknown as { name: string } | null)?.name ?? "—",
+          categorie: catBySection.get(wo.section_id as string) ?? null,
+          taille: f.taille,
+          libelleTaille: allSizes.find((s) => s.cle === f.taille)?.libelle ?? f.taille,
+          reste: f.reste,
+        };
+      })
+      .sort((a, b) => a.lineDescription.localeCompare(b.lineDescription) || a.etape - b.etape);
+  }
+
+  // Livraison (LIV-1) : état non livré / partiel / livré, et les BL de l'ODF.
+  const [{ data: deliverySummary }, { data: odfShipments }] = showFlow
+    ? await Promise.all([
+        supabase.rpc("production_order_delivery_summary", { p_production_order_id: order.id }),
+        supabase
+          .from("shipments")
+          .select("id,reference,statut,mode,date_promise,date_planifiee,shipment_lines(quantite)")
+          .eq("production_order_id", order.id)
+          .order("created_at"),
+      ])
+    : [{ data: null }, { data: [] }];
+  const delivery = deliverySummary as { premier_choix: number; en_expedition: number; livre: number; etat: string } | null;
+
   // Sous-ODF groupés par section (demande Ayman, 17/09) : un chef de section
   // scanne le QR d'en-tête de l'ODF depuis /atelier/section et doit
   // retrouver directement les sous-ODF de SA section — même regroupement
@@ -592,7 +731,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
         description={
           <span className="flex flex-wrap items-center gap-x-1.5">
             <span>
-              {company?.name ?? ""} · {order.total_quantity} pièces
+              {odfClientLabel(order.company_id, company?.name)} · {order.total_quantity} pièces
             </span>
             <span>·</span>
             <span>
@@ -710,7 +849,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
 
       <ProductionOrderLines
         productionOrderId={order.id}
-        companyId={order.company_id}
+        companyId={order.company_id ?? ""}
         requestId={requestId}
         editable={modifiable}
         mediaEditable={mediaEditable}
@@ -721,6 +860,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
           id: s.id,
           name: s.name,
           categorieNom: (s.atelier_categories as unknown as { nom: string } | null)?.nom ?? null,
+          categorieCle: (s.atelier_categories as unknown as { cle: string } | null)?.cle ?? null,
           requiertVisuel: !!(s.atelier_categories as unknown as { requiert_visuel: boolean } | null)?.requiert_visuel,
         }))}
         availableMediaFiles={availableMediaFiles}
@@ -730,7 +870,11 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
       <ValidationCircuitPanel
         productionOrderId={order.id}
         modifiable={modifiable}
-        comptabilite={{ valideLe: order.comptabilite_validee_le, validePar: order.comptabilite_validee_par ? nameOf(order.comptabilite_validee_par) : null }}
+        comptabilite={{
+          valideLe: order.comptabilite_validee_le,
+          validePar: order.comptabilite_validee_par ? nameOf(order.comptabilite_validee_par) : null,
+          requise: !!order.company_id,
+        }}
         infographie={{
           requise: requiresInfographie,
           valideLe: order.infographie_validee_le,
@@ -747,7 +891,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
           productionOrderId={order.id}
           anySectionChosen={anySectionChosen}
           linesConfigured={linesConfigured}
-          comptabiliteOk={!!order.comptabilite_validee_le}
+          comptabiliteOk={!order.company_id || !!order.comptabilite_validee_le}
           infographieOk={!requiresInfographie || !!order.infographie_validee_le}
           echantillonsOk={echantillonsCircuit.every((e) => e.statuses.includes("valide"))}
         />
@@ -774,7 +918,49 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
         canValidate={canValidate}
         canRequestClosure={canRequestClosure}
         isAdmin={isAdmin}
+        enCoursTotal={enCoursTotal}
       />
+
+      {canRequestClosure && order.status === "en_production" && (
+        <RemaindersPanel productionOrderId={order.id} rows={remainders} hasClient={!!order.company_id} />
+      )}
+
+      <ConsumptionPanel
+        productionOrderId={order.id}
+        rows={consumptions}
+        editable={canRequestClosure && order.status === "demande_cloture"}
+      />
+
+      {bilanCloture && (
+        <ClosureBalance bilan={bilanCloture} motif={order.motif_cloture_en_cours ?? null} sizes={allSizes} />
+      )}
+
+      <WhereArePieces lines={whereArePiecesLines} sizes={allSizes} />
+
+      {delivery && (delivery.premier_choix > 0 || (odfShipments ?? []).length > 0) && (
+        <Card>
+          <CardHeader
+            title="Livraison"
+            description={`${delivery.etat === "livre" ? "Livré" : delivery.etat === "partiel" ? "Livraison partielle" : "Non livré"} — ${delivery.premier_choix} pièce(s) de 1er choix, ${delivery.en_expedition} en expédition, ${delivery.livre} livrée(s).`}
+          />
+          <CardBody className="p-0">
+            <ul className="divide-y divide-border">
+              {(odfShipments ?? []).map((sh) => (
+                <li key={sh.id} className="flex items-center justify-between gap-3 px-5 py-2.5 text-sm">
+                  <Link href={`/livraisons/${sh.id}`} className="font-medium text-brand hover:underline">
+                    {sh.reference ?? "À préparer"}
+                  </Link>
+                  <span className="text-xs text-foreground-muted">
+                    {((sh.shipment_lines ?? []) as { quantite: number }[]).reduce((t, l) => t + l.quantite, 0)} pcs ·{" "}
+                    {sh.mode === "retrait" ? "retrait" : formatDate(sh.date_planifiee ?? sh.date_promise)} ·{" "}
+                    {SHIPMENT_STATUS_LABELS[sh.statut as ShipmentStatus]}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </CardBody>
+        </Card>
+      )}
 
       <Card>
         <CardHeader

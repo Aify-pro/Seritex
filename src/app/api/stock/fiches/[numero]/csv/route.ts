@@ -1,17 +1,12 @@
+import { STOCK_MOVEMENT_TYPE_LABELS, movementSign } from "@/lib/stock/movements";
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server";
 
-const STOCK_MOVEMENT_TYPE_LABELS: Record<string, string> = {
-  sortie_mp: "Sortie MP",
-  entree_semi_fini: "Entrée semi-fini",
-  sortie_semi_fini: "Sortie semi-fini",
-  entree_fini: "Entrée fini",
-  retour_mp: "Retour MP",
-};
-
 /**
- * Colonnes PLACEHOLDER (migration 0038) : aucune spec Sage réelle fournie à
+ * Format PROVISOIRE (Q-SF-5 : aucun fichier d'import Sage fourni au
+ * 2026-10-03), complété par LIV-3 d'une colonne Dépôt (D5), d'un sens et du
+ * numéro de BL. Colonnes PLACEHOLDER d'origine (migration 0038) : aucune spec Sage réelle fournie à
  * ce stade — Date/Type/Référence ODF/Référence article Sage/Quantité/Unité
  * couvrent ce que stock_movements sait déjà dire. À remapper le jour où le
  * format d'import Sage réel est connu ; seule cette fonction changera, pas
@@ -35,23 +30,28 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ num
 
   const { data: movements } = await supabase
     .from("stock_movements")
-    .select("type,article_ref,quantite_ou_poids,unite,created_at,production_orders(reference)")
+    .select("type,article_ref,quantite_ou_poids,unite,created_at,depot,taille,production_orders(reference),shipments(reference)")
     .eq("exported_in_fiche_id", fiche.id)
     .order("created_at", { ascending: true });
 
   const rows = (movements ?? []).map((m) => {
     const odfReference = (m.production_orders as unknown as { reference: string } | null)?.reference ?? "";
+    const blReference = (m.shipments as unknown as { reference: string | null } | null)?.reference ?? "";
     return [
       csvField(m.created_at.slice(0, 10)),
       csvField(STOCK_MOVEMENT_TYPE_LABELS[m.type] ?? m.type),
+      movementSign(m.type) > 0 ? "E" : "S",
       csvField(odfReference),
+      csvField(blReference),
       csvField(m.article_ref ?? ""),
+      csvField(m.taille ? String(m.taille).split("/").pop() ?? "" : ""),
       csvField(String(m.quantite_ou_poids)),
       csvField(m.unite),
+      csvField(m.depot ?? ""),
     ].join(";");
   });
 
-  const csv = ["Date;Type;Référence ODF;Référence article Sage;Quantité;Unité", ...rows].join("\r\n");
+  const csv = ["Date;Type;Sens;Référence ODF;N° BL;Référence article Sage;Taille;Quantité;Unité;Dépôt", ...rows].join("\r\n");
 
   // BOM UTF-8 : Excel (utilisé pour relire/vérifier avant import Sage)
   // n'interprète correctement les accents qu'avec ce marqueur en tête.

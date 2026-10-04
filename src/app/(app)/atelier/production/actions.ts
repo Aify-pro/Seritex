@@ -12,9 +12,11 @@ async function notifyCommandeTerminee(productionOrderId: string) {
   const supabase = await createClient();
   const { data: po } = await supabase
     .from("production_orders")
-    .select("reference, companies(name)")
+    .select("reference, company_id, companies(name)")
     .eq("id", productionOrderId)
     .maybeSingle();
+  // ODF de stock (SF-3) : pas de notification client.
+  if (!po?.company_id) return;
   await sendNotification("commande_terminee", {
     to: await resolveContactEmailForProductionOrder(productionOrderId),
     variables: {
@@ -53,13 +55,16 @@ function revalidateOdf(productionOrderId: string) {
 export async function setProductionOrderLineSections(
   lineId: string,
   productionOrderId: string,
-  sections: { sectionId: string; quantite: number | null; partie: string | null }[]
+  sections: { sectionId: string; quantite: number | null; partie: string | null; etape?: number }[]
 ) {
   await requireRole(["administrateur", "responsable_production"]);
   const supabase = await createClient();
 
   if (sections.some((s) => s.quantite !== null && (!Number.isInteger(s.quantite) || s.quantite < 0))) {
     return { error: "La quantité d'une section doit être un nombre entier positif." };
+  }
+  if (sections.some((s) => s.etape !== undefined && (!Number.isInteger(s.etape) || s.etape < 1))) {
+    return { error: "L'étape d'une section doit être un entier à partir de 1." };
   }
   const partieDe = (s: { partie: string | null }) => s.partie?.trim() || null;
   if (sections.some((s) => (partieDe(s)?.length ?? 0) > 80)) {
@@ -78,6 +83,8 @@ export async function setProductionOrderLineSections(
         production_order_line_id: lineId,
         section_id: s.sectionId,
         ordre: i + 1,
+        // Étapes (SF-1) : même numéro = sections en parallèle ; absente = en série.
+        etape: s.etape ?? i + 1,
         quantite: s.quantite,
         partie: partieDe(s),
       }))
@@ -101,6 +108,20 @@ export async function setProductionOrderLineSections(
     if (orphanError) return { error: orphanError.message };
   }
 
+  revalidateOdf(productionOrderId);
+  return {};
+}
+
+/**
+ * Applique un parcours type du modèle à un article d'ODF modifiable (ART-H) :
+ * ses sections sont remplacées, la Finition ajoutée en dernier ; le parcours
+ * reste ensuite modifiable. Autorité : apply_model_route (base).
+ */
+export async function applyModelRoute(lineId: string, productionOrderId: string, routeId: string) {
+  await requireRole(["administrateur", "responsable_production"]);
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("apply_model_route", { p_line_id: lineId, p_route_id: routeId });
+  if (error) return { error: error.message };
   revalidateOdf(productionOrderId);
   return {};
 }
@@ -288,15 +309,62 @@ export async function refuseProductionOrder(productionOrderId: string, reason?: 
 
 /**
  * en_production -> demande_cloture. Réservé au chef de production
- * (responsable_production) côté RPC — possible uniquement si tous les
- * sous-ODF ont atteint leur quantité prévue (section 4 du document de
- * logique).
+ * (responsable_production) côté RPC. Le bilan par taille (1er/2e choix,
+ * déchets, en-cours) est figé sur l'ODF ; s'il reste de l'en-cours, un motif
+ * est exigé (SF-1, migration 0072).
  */
-export async function requestClosure(productionOrderId: string) {
+export async function requestClosure(productionOrderId: string, motif?: string) {
   await requireRole(["administrateur", "responsable_production"]);
   const supabase = await createClient();
+  // SF-4 : refusée tant qu'il reste de l'en-cours (destinations à donner d'abord).
   const { error } = await supabase.rpc("request_closure", {
     p_production_order_id: productionOrderId,
+    p_motif: motif?.trim() || null,
+  });
+  if (error) return { error: error.message };
+  revalidateOdf(productionOrderId);
+  return {};
+}
+
+const settleSchema = z.object({
+  workOrderId: z.guid(),
+  taille: z.string().min(1),
+  quantite: z.number().int().positive("Quantité invalide"),
+  destination: z.enum(["dechet", "abandon", "stock_vierge", "stock_personnalise", "livre_client"]),
+  motif: z.string().trim().min(1, "Un motif est obligatoire"),
+});
+
+/**
+ * Destination d'un reste d'en-cours avant la clôture (SF-4, settle_en_cours) :
+ * déchet, abandon (reste non prélevé au stock), ou terminé jusqu'à la
+ * finition puis entré en stock vierge / personnalisé ou livré au client.
+ */
+export async function settleEnCours(productionOrderId: string, input: z.input<typeof settleSchema>) {
+  await requireRole(["administrateur", "responsable_production"]);
+  const parsed = settleSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Saisie invalide" };
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("settle_en_cours", {
+    p_work_order_id: parsed.data.workOrderId,
+    p_taille: parsed.data.taille,
+    p_quantite: parsed.data.quantite,
+    p_destination: parsed.data.destination,
+    p_motif: parsed.data.motif,
+  });
+  if (error) return { error: error.message };
+  revalidateOdf(productionOrderId);
+  return {};
+}
+
+/** Ajuste la consommation réelle d'un consommable (COM-G), entre la demande de clôture et la clôture. */
+export async function adjustConsumption(productionOrderId: string, consumptionId: string, quantite: number, motif: string) {
+  await requireRole(["administrateur", "responsable_production"]);
+  if (!Number.isFinite(quantite) || quantite < 0) return { error: "Quantité invalide" };
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("set_order_consumption", {
+    p_consumption_id: consumptionId,
+    p_quantite: quantite,
+    p_motif: motif.trim() || null,
   });
   if (error) return { error: error.message };
   revalidateOdf(productionOrderId);
@@ -909,4 +977,18 @@ export async function generateStockExportFiche(productionOrderId: string): Promi
   revalidatePath("/atelier/stock");
   const fiche = data as { id: string; numero: string };
   return { id: fiche.id, numero: fiche.numero };
+}
+
+/**
+ * Découpe un article d'ODF modifiable (SF-2) : les quantités par taille
+ * données passent sur une nouvelle ligne du même article — typiquement une
+ * partie prise en stock, une partie fabriquée. Autorité : la base.
+ */
+export async function splitProductionOrderLine(lineId: string, productionOrderId: string, tailles: Record<string, number>) {
+  await requireRole(["administrateur", "responsable_production"]);
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("split_production_order_line", { p_line_id: lineId, p_tailles: tailles });
+  if (error) return { error: error.message };
+  revalidateOdf(productionOrderId);
+  return {};
 }

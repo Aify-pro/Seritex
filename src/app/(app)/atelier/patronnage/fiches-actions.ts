@@ -1150,9 +1150,19 @@ export async function affecterFamille(
     let articleId = cible.articleId ?? "";
     if (!articleId) {
       if (!cible.articleCode) return { error: "Choisissez un article ou saisissez un code article." };
+      // A5 : le nouvel article de patronnage hérite du modèle de la fiche du tracé.
+      const { data: fiche } = await supabase.from("fiches_placement").select("product_model_id").eq("id", ficheId).maybeSingle();
+      if (!fiche?.product_model_id) {
+        return { error: "Cette fiche n'est rattachée à aucun modèle : impossible de créer un article de patronnage sans modèle." };
+      }
       const { data: article, error: articleError } = await supabase
         .from("pattern_articles")
-        .insert({ article_code: cible.articleCode, designation: cible.designation || "Sans désignation", created_by: authId })
+        .insert({
+          article_code: cible.articleCode,
+          designation: cible.designation || "Sans désignation",
+          product_model_id: fiche.product_model_id,
+          created_by: authId,
+        })
         .select("id")
         .single();
       if (articleError) {

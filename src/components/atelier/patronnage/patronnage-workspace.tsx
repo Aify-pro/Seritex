@@ -33,9 +33,16 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
  * cette bibliothèque reste une page séparée (/atelier/patronnage/bibliotheque)
  * puisqu'elle sert de référence à toutes les fiches, pas à une seule.
  */
-export function PatronBibliothequeManager({ initialLibrary }: { initialLibrary: LibraryArticle[] }) {
+export function PatronBibliothequeManager({
+  initialLibrary,
+  productModels,
+}: {
+  initialLibrary: LibraryArticle[];
+  /** Modèles actifs : un nouvel article de patronnage est forcément rattaché à l'un d'eux (A5). */
+  productModels: { id: string; name: string }[];
+}) {
   const router = useRouter();
-  return <BibliothequeTab library={initialLibrary} onChanged={() => router.refresh()} />;
+  return <BibliothequeTab library={initialLibrary} productModels={productModels} onChanged={() => router.refresh()} />;
 }
 
 /* ============================================================
@@ -48,9 +55,18 @@ interface DraftPiece extends PreviewedPiece {
   expectedCount: number;
 }
 
-function BibliothequeTab({ library, onChanged }: { library: LibraryArticle[]; onChanged: () => void }) {
+function BibliothequeTab({
+  library,
+  productModels,
+  onChanged,
+}: {
+  library: LibraryArticle[];
+  productModels: { id: string; name: string }[];
+  onChanged: () => void;
+}) {
   const [showAdd, setShowAdd] = useState(false);
   const [existingArticleId, setExistingArticleId] = useState("");
+  const [productModelId, setProductModelId] = useState("");
   const [articleCode, setArticleCode] = useState("");
   const [designation, setDesignation] = useState("");
   const [size, setSize] = useState("M");
@@ -63,6 +79,7 @@ function BibliothequeTab({ library, onChanged }: { library: LibraryArticle[]; on
   function resetForm() {
     setShowAdd(false);
     setExistingArticleId("");
+    setProductModelId("");
     setArticleCode("");
     setDesignation("");
     setSize("M");
@@ -108,6 +125,7 @@ function BibliothequeTab({ library, onChanged }: { library: LibraryArticle[]; on
     else {
       fd.set("article_code", articleCode);
       fd.set("designation", designation);
+      fd.set("product_model_id", productModelId);
     }
     fd.set(
       "pieces_meta",
@@ -175,6 +193,21 @@ function BibliothequeTab({ library, onChanged }: { library: LibraryArticle[]; on
 
                 {!existingArticleId && (
                   <div className="grid grid-cols-2 gap-4">
+                    <Field label="Modèle de produit (obligatoire)">
+                      <select
+                        value={productModelId}
+                        onChange={(e) => setProductModelId(e.target.value)}
+                        className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground"
+                      >
+                        <option value="">— Choisir le modèle —</option>
+                        {productModels.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.name}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                    <div />
                     <Field label="Code article">
                       <input
                         value={articleCode}

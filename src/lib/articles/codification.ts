@@ -1,0 +1,99 @@
+/**
+ * Codification des articles Seritex (COM-0, A4, A7) — miroir pur de
+ * generate_variant_code() (migration 0076), qui fait autorité. Sert à
+ * prévisualiser un code dans Paramètres > Codification et au banc de test
+ * `npm run test:codification`.
+ *
+ * Format par défaut : modèle + matière + grammage + couleur + taille, sans
+ * séparateur — ex. TS012JE165BLAXL. Suffixe d'état pour Sage (Q-COM-1) :
+ * rien = vierge 1er choix, P = personnalisé, D = 2e choix. Le suffixe compte
+ * dans la longueur maximale (18 caractères, limite Sage confirmée).
+ */
+
+export const CODE_SEGMENTS = ["modele", "matiere", "grammage", "couleur", "taille"] as const;
+export type CodeSegment = (typeof CODE_SEGMENTS)[number];
+
+export const CODE_SEGMENT_LABELS: Record<CodeSegment, string> = {
+  modele: "Modèle",
+  matiere: "Matière",
+  grammage: "Grammage",
+  couleur: "Couleur",
+  taille: "Taille",
+};
+
+export type StockEtat = "vierge" | "personnalise" | "deuxieme_choix";
+
+export const STOCK_ETAT_SUFFIXES: Record<StockEtat, string> = {
+  vierge: "",
+  personnalise: "P",
+  deuxieme_choix: "D",
+};
+
+export const STOCK_ETAT_LABELS: Record<StockEtat, string> = {
+  vierge: "Vierge (1er choix)",
+  personnalise: "Personnalisé",
+  deuxieme_choix: "2e choix",
+};
+
+export interface CodingSettings {
+  segments: CodeSegment[];
+  longueurMax: number;
+  separateur: string;
+}
+
+export const DEFAULT_CODING: CodingSettings = { segments: [...CODE_SEGMENTS], longueurMax: 18, separateur: "" };
+
+export type CodeParts = Partial<Record<CodeSegment, string | null>>;
+
+export type CodeResult = { code: string } | { error: string };
+
+/** Code court proposé par défaut : majuscules, sans accents ni ponctuation, tronqué. */
+export function defaultShortCode(text: string, length: number): string {
+  return text
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .toUpperCase()
+    .slice(0, length);
+}
+
+/** Code d'une déclinaison ; refuse un segment manquant ou un code trop long (suffixe compris). */
+export function variantCode(parts: CodeParts, settings: CodingSettings = DEFAULT_CODING): CodeResult {
+  const values: string[] = [];
+  for (const seg of settings.segments) {
+    const v = parts[seg];
+    if (!v) return { error: `Segment « ${CODE_SEGMENT_LABELS[seg]} » sans code court` };
+    values.push(v);
+  }
+  const code = values.join(settings.separateur);
+  // Le suffixe d'état (1 caractère) doit tenir dans la longueur maximale.
+  if (code.length + 1 > settings.longueurMax) {
+    return { error: `Le code ${code} (${code.length + 1} caractères suffixe compris) dépasse ${settings.longueurMax}` };
+  }
+  return { code };
+}
+
+/** Code de l'article stockable d'une déclinaison, pour un état donné. */
+export function stockArticleCode(variantCodeValue: string, etat: StockEtat): string {
+  return variantCodeValue + STOCK_ETAT_SUFFIXES[etat];
+}
+
+/** Code du modèle : code court de la catégorie + numéro suivant sur 3 chiffres (TS012). */
+export function nextModelCode(categoryCode: string, existingCodes: string[]): string {
+  const numbers = existingCodes
+    .filter((c) => c.startsWith(categoryCode) && /^\d+$/.test(c.slice(categoryCode.length)))
+    .map((c) => Number(c.slice(categoryCode.length)));
+  const next = (numbers.length ? Math.max(...numbers) : 0) + 1;
+  return categoryCode + String(next).padStart(3, "0");
+}
+
+/** Codes en double dans un ensemble (déclinaisons d'un modèle, par exemple). */
+export function duplicateCodes(codes: string[]): string[] {
+  const seen = new Set<string>();
+  const dups = new Set<string>();
+  for (const c of codes) {
+    if (seen.has(c)) dups.add(c);
+    seen.add(c);
+  }
+  return [...dups];
+}

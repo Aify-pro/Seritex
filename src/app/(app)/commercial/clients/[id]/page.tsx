@@ -10,6 +10,9 @@ import { ContactForm } from "./contact-form";
 import { ContactActions } from "./contact-actions";
 import type { Company, Contact } from "@/lib/types/domain";
 import { formatDate } from "@/lib/utils";
+import { can } from "@/lib/auth/permissions";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { DeliveryPlaces, type PlaceWithPhoto } from "./delivery-places";
 import { FolderOpen, Globe, Lock, Mail, MapPin, Phone, Star, User } from "lucide-react";
 
 /**
@@ -19,7 +22,7 @@ import { FolderOpen, Globe, Lock, Mail, MapPin, Phone, Star, User } from "lucide
  * compte utilisateur de rôle client représente désormais (`app_users.contact_id`).
  */
 export default async function ClientDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  await requireRole(["commercial", "administrateur", "responsable_production"]);
+  const { profile } = await requireRole(["commercial", "administrateur", "responsable_production", "responsable_livraison"]);
   const { id } = await params;
   const supabase = await createClient();
 
@@ -36,6 +39,23 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
   ]);
 
   if (!company) notFound();
+
+  // Lieux de livraison (LIV-0) : gérés dans Seritex, indépendants de Sage.
+  const [{ data: placeRows }, { data: zones }] = await Promise.all([
+    supabase.from("delivery_places").select("*").eq("company_id", id).order("par_defaut", { ascending: false }).order("libelle"),
+    supabase.from("delivery_zones").select("id,nom").eq("actif", true).order("ordre"),
+  ]);
+  const photoPaths = (placeRows ?? []).map((p) => p.photo_path as string | null).filter((v): v is string => !!v);
+  const signed =
+    photoPaths.length > 0
+      ? (await createAdminClient().storage.from("livraisons").createSignedUrls(photoPaths, 3600)).data ?? []
+      : [];
+  const places: PlaceWithPhoto[] = (placeRows ?? []).map((p) => ({
+    ...(p as PlaceWithPhoto),
+    photoUrl: signed.find((s) => s.path === p.photo_path)?.signedUrl ?? null,
+  }));
+  const canEditPlaces =
+    ["commercial", "administrateur", "responsable_livraison"].includes(profile.role) && (await can("livraisons", "modify"));
 
   const fromSage = company.origin === "sage";
   const fullAddress = [company.address, [company.postal_code, company.city].filter(Boolean).join(" "), company.country]
@@ -183,6 +203,16 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
               <li className="px-5 py-8 text-center text-sm text-foreground-muted">Aucun contact pour ce client.</li>
             )}
           </ul>
+        </CardBody>
+      </Card>
+
+      <Card id="lieux">
+        <CardHeader
+          title="Lieux de livraison"
+          description="Où livrer ce client : repères, contact sur place, horaires, position GPS. Un seul lieu par défaut."
+        />
+        <CardBody>
+          <DeliveryPlaces companyId={id} places={places} zones={zones ?? []} editable={canEditPlaces} />
         </CardBody>
       </Card>
 

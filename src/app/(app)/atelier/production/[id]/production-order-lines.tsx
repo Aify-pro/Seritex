@@ -15,6 +15,8 @@ import {
 } from "../actions";
 import type { Size } from "@/lib/sizes";
 import { LineSectionsPicker } from "./line-sections-picker";
+import { RouteApplier } from "./route-applier";
+import { SplitLineButton, StockAvailability, type StockAvailabilityRow } from "./line-stock-tools";
 import { FichePatronnageLink } from "./fiche-patronnage-link";
 import { LineVisuelPicker } from "./line-visuel-picker";
 import { LineMaquettePicker } from "./line-maquette-picker";
@@ -68,7 +70,11 @@ export interface LineData {
    * null = quantité totale de l'article) et leur éventuelle partie de la
    * pièce (migration 0069, ex. « Manches »).
    */
-  sections: { sectionId: string; quantite: number | null; partie: string | null }[];
+  sections: { sectionId: string; quantite: number | null; partie: string | null; etape: number }[];
+  /** Parcours types du modèle de l'article (ART-H). */
+  routes?: { id: string; nom: string; parDefaut: boolean }[];
+  /** Disponible en stock par taille, si l'article part du Stock (SF-2). */
+  stockAvailability?: StockAvailabilityRow[];
   /** Une section de catégorie Coupe est-elle retenue ? Conditionne l'affichage de la fiche Patronnage. */
   coupeSelected: boolean;
   fiche: { id: string; numeroOt: string; statut: StatutFiche } | null;
@@ -129,7 +135,7 @@ export function ProductionOrderLines({
   productModels: { id: string; name: string }[];
   colors: ColorOption[];
   /** Toutes les sections d'atelier actives, pour le sélecteur de sections retenues de chaque article. */
-  allSections: { id: string; name: string; categorieNom: string | null; requiertVisuel: boolean }[];
+  allSections: { id: string; name: string; categorieNom: string | null; categorieCle?: string | null; requiertVisuel: boolean }[];
   /** Fichiers de la médiathèque déjà affiliés à la demande de cet ODF, pour le sélecteur de visuel/maquette de chaque article. */
   availableMediaFiles: AttachableMediaFile[];
   /** Disponibilité couleurs, commentaire libre — jamais validé par le logiciel (section 9), reste au niveau de l'ODF entier. */
@@ -232,7 +238,7 @@ function LineCard({
   line: LineData;
   productModels: { id: string; name: string }[];
   colors: ColorOption[];
-  allSections: { id: string; name: string; categorieNom: string | null; requiertVisuel: boolean }[];
+  allSections: { id: string; name: string; categorieNom: string | null; categorieCle?: string | null; requiertVisuel: boolean }[];
   availableMediaFiles: AttachableMediaFile[];
 }) {
   const [pending, startTransition] = useTransition();
@@ -441,8 +447,25 @@ function LineCard({
       )}
 
       <div className="space-y-3 border-t border-border pt-3">
+        {line.stockAvailability && <StockAvailability rows={line.stockAvailability} />}
+        {editable && line.initialSizes.length > 0 && (
+          <SplitLineButton
+            lineId={line.id}
+            productionOrderId={productionOrderId}
+            sizes={line.initialSizes.map((s) => ({
+              cle: s.taille,
+              libelle: line.referentielTailles.find((t) => t.cle === s.taille)?.libelle ?? s.taille.split("/").pop() ?? s.taille,
+              quantite: s.quantite_demandee,
+            }))}
+          />
+        )}
+        {editable && (line.routes?.length ?? 0) > 0 && (
+          <RouteApplier lineId={line.id} productionOrderId={productionOrderId} routes={line.routes ?? []} />
+        )}
         {editable && (
           <LineSectionsPicker
+            // Remonté quand le parcours change côté serveur (parcours type appliqué).
+            key={line.sections.map((x) => `${x.sectionId}:${x.etape}`).join(",")}
             lineId={line.id}
             productionOrderId={productionOrderId}
             allSections={allSections}

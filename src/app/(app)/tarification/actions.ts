@@ -18,6 +18,8 @@ const settingsSchema = z.object({
   marge_pct: pct,
   arrondi: z.number().int().min(1, "Arrondi invalide"),
   frais_ecran_par_couleur: money,
+  // A8 : vide = coefficient calculé depuis charges et marge.
+  coef_prix_vente: z.number().gt(0, "Coefficient invalide").max(99, "Coefficient invalide").nullable().optional(),
 });
 
 export async function updatePricingSettings(input: z.input<typeof settingsSchema>) {
@@ -71,6 +73,9 @@ const modelPricingSchema = z.object({
         libelle: z.string().trim().min(1, "Chaque composant doit avoir un libellé").max(120),
         base: money,
         est_tissu: z.boolean().default(false),
+        // Tissu calculé (ART-C, A9) : surface × grammage × prix au kg.
+        mode_calcul: z.enum(["saisi", "tissu_calcule"]).default("saisi"),
+        perte_pct: z.number().min(0).max(99).default(0),
         // Supplément par taille : peut être négatif (taille moins coûteuse que la base).
         supplements: z.record(z.string().min(1), z.number()),
       })
@@ -109,7 +114,15 @@ export async function saveModelPricing(productModelId: string, input: ModelPrici
   for (const [i, c] of g.components.entries()) {
     const { data: comp, error } = await supabase
       .from("model_cost_components")
-      .insert({ product_model_id: productModelId, libelle: c.libelle, base: c.base, est_tissu: c.est_tissu, display_order: i })
+      .insert({
+        product_model_id: productModelId,
+        libelle: c.libelle,
+        base: c.base,
+        est_tissu: c.est_tissu || c.mode_calcul === "tissu_calcule",
+        mode_calcul: c.mode_calcul,
+        perte_pct: c.perte_pct,
+        display_order: i,
+      })
       .select("id")
       .single();
     if (error) return { error: error.message };
@@ -131,7 +144,45 @@ export async function saveModelPricing(productModelId: string, input: ModelPrici
   }
 
   revalidatePath("/tarification", "layout");
+  revalidatePath("/articles", "layout");
   return {};
+}
+
+/**
+ * Surfaces de tissu par taille d'un modèle (ART-C) — base du coût tissu
+ * calculé. Remplace l'ensemble ; une taille vide est retirée.
+ */
+export async function saveFabricAreas(productModelId: string, surfaces: Record<string, number | null>, source: "patronnage" | "placement" | "saisie") {
+  const { profile } = await requireRole(["administrateur"]);
+  const rows = Object.entries(surfaces).filter(([, v]) => v !== null && Number.isFinite(v) && (v as number) > 0);
+  if (rows.some(([, v]) => (v as number) >= 20)) return { error: "Surface invalide (m² par pièce)." };
+  const supabase = await createClient();
+  const { error: delError } = await supabase.from("model_size_fabric_area").delete().eq("product_model_id", productModelId);
+  if (delError) return { error: delError.message };
+  if (rows.length > 0) {
+    const { error } = await supabase.from("model_size_fabric_area").insert(
+      rows.map(([taille, surface]) => ({
+        product_model_id: productModelId,
+        taille,
+        surface_m2: surface,
+        source,
+        updated_by: profile.id,
+      }))
+    );
+    if (error) return { error: error.message };
+  }
+  revalidatePath("/articles", "layout");
+  revalidatePath("/tarification", "layout");
+  return {};
+}
+
+/** Surface par pièce proposée depuis les tracés de placement du modèle (m²). */
+export async function proposeFabricAreaFromPlacement(productModelId: string): Promise<{ error?: string; surface?: number | null }> {
+  await requireRole(["administrateur"]);
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("propose_fabric_area_from_placement", { p_model_id: productModelId });
+  if (error) return { error: error.message };
+  return { surface: data === null ? null : Number(data) };
 }
 
 /** Prix du tissu au kg, rendu, d'un textile (migration 0070) ; null retire le prix. */

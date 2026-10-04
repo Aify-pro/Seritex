@@ -1,4 +1,6 @@
+import { STOCK_MOVEMENT_TYPE_LABELS, formatMovementUnit } from "@/lib/stock/movements";
 import { requireRole } from "@/lib/auth/current-user";
+import { odfClientLabel } from "@/lib/production/client-label";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
@@ -10,15 +12,11 @@ import { formatDate, formatDateTime } from "@/lib/utils";
 import { StockEntryForm } from "../production/[id]/stock-entry-form";
 import { StockMovementsPanel } from "../production/[id]/stock-movements-panel";
 import { GlobalExportButton } from "./global-export-button";
+import { PickingList, type PickingRow } from "./picking-list";
+import { DepotEditor } from "./depot-editor";
+import { getSizes } from "@/lib/sizes";
+import type { WorkOrderFlowRow } from "@/lib/types/domain";
 import type { StockMovement, StockExportFiche } from "@/lib/types/domain";
-
-const STOCK_MOVEMENT_TYPE_LABELS: Record<string, string> = {
-  sortie_mp: "Sortie MP",
-  entree_semi_fini: "Entrée semi-fini",
-  sortie_semi_fini: "Sortie semi-fini",
-  entree_fini: "Entrée fini",
-  retour_mp: "Retour MP",
-};
 
 /**
  * Gestion de stock — saisie déjà déplacée hors de l'ODF (demande Ayman
@@ -44,18 +42,18 @@ export default async function StockManagementPage({
       // ODF clôturé n'a plus de mouvement à enregistrer.
       supabase
         .from("production_orders")
-        .select("id,reference,total_quantity,companies(name)")
+        .select("id,reference,total_quantity,company_id,companies(name)")
         .not("status", "in", "(terminee,annulee)")
         .order("created_at", { ascending: false }),
       supabase.from("stock_movements").select("id", { count: "exact", head: true }).is("exported_in_fiche_id", null),
       supabase
         .from("stock_export_fiches")
-        .select("id,numero,production_order_id,generated_at,production_orders(reference),sage_numero")
+        .select("id,numero,production_order_id,generated_at,production_orders(reference),shipments(reference),sage_numero")
         .order("generated_at", { ascending: false })
         .limit(50),
       supabase
         .from("stock_movements")
-        .select("id,type,article_ref,quantite_ou_poids,unite,created_at,exported_in_fiche_id,production_orders(reference)")
+        .select("id,type,article_ref,quantite_ou_poids,unite,created_at,exported_in_fiche_id,depot,production_orders(reference)")
         .order("created_at", { ascending: false })
         .limit(100),
     ]);
@@ -63,11 +61,40 @@ export default async function StockManagementPage({
   const odfOptions = (orders ?? []).map((o) => ({
     id: o.id as string,
     reference: o.reference as string,
-    companyName: (o.companies as unknown as { name: string } | null)?.name ?? null,
+    companyName: odfClientLabel(o.company_id as string | null, (o.companies as unknown as { name: string } | null)?.name),
     totalQuantity: o.total_quantity as number,
   }));
 
   const productionOrderId = params.odf ?? odfOptions[0]?.id ?? null;
+
+  // Prélèvements à faire (SF-2) : sous-ODF des sections Stock d'ODF en
+  // production, avec un reste à prélever.
+  const { data: stockWos } = await supabase
+    .from("work_orders")
+    .select("id,reference,production_order_line_id,sections!inner(atelier_categories!inner(cle)),production_orders!inner(reference,status,company_id,companies(name))")
+    .eq("sections.atelier_categories.cle", "stock")
+    .eq("production_orders.status", "en_production");
+  const stockWoIds = (stockWos ?? []).map((w) => w.id as string);
+  const [{ data: stockFlows }, { data: stockLines }] = stockWoIds.length
+    ? await Promise.all([
+        supabase.rpc("work_orders_flow", { p_work_order_ids: stockWoIds }),
+        supabase.from("production_order_lines").select("id,description").in("id", (stockWos ?? []).map((w) => w.production_order_line_id as string)),
+      ])
+    : [{ data: [] }, { data: [] }];
+  const pickingRows: PickingRow[] = (stockWos ?? [])
+    .map((w) => {
+      const po = w.production_orders as unknown as { reference: string; company_id: string | null; companies: { name: string } | null };
+      return {
+        workOrderId: w.id as string,
+        reference: w.reference as string,
+        odfReference: po.reference,
+        client: odfClientLabel(po.company_id, po.companies?.name),
+        article: (stockLines ?? []).find((l) => l.id === w.production_order_line_id)?.description ?? "Article",
+        flow: ((stockFlows ?? []) as (WorkOrderFlowRow & { work_order_id: string })[]).filter((f) => f.work_order_id === w.id),
+      };
+    })
+    .filter((r) => r.flow.some((f) => f.reste > 0));
+  const allSizes = await getSizes();
 
   let odfSection: React.ReactNode = null;
   if (productionOrderId) {
@@ -81,7 +108,7 @@ export default async function StockManagementPage({
         supabase.from("stock_item_view").select("sage_reference,designation").order("designation"),
         supabase
           .from("stock_movements")
-          .select("id,production_order_id,type,article_ref,quantite_ou_poids,unite,exported_in_fiche_id,created_by,created_at")
+          .select("id,production_order_id,type,article_ref,quantite_ou_poids,unite,exported_in_fiche_id,created_by,created_at,depot,taille,commentaire,shipment_id")
           .eq("production_order_id", productionOrderId)
           .order("created_at", { ascending: false }),
         supabase
@@ -119,8 +146,18 @@ export default async function StockManagementPage({
 
       <Card>
         <CardHeader
+          title={`Prélèvements à faire (${pickingRows.length})`}
+          description="Lignes d'ODF qui partent du stock : prélevez les produits finis vierges et déclarez-les par taille — chaque prélèvement crée une sortie PF pour Sage."
+        />
+        <CardBody className="p-0">
+          <PickingList rows={pickingRows} sizes={allSizes} />
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader
           title="Export Sage"
-          description="Génère un CSV au format d'import Sage à partir des mouvements pas encore exportés."
+          description="Génère un CSV (format provisoire, avec dépôt) à partir des mouvements pas encore exportés. Chaque mouvement doit porter un dépôt : pré-rempli selon la nature (Paramètres > Codification), modifiable ci-dessous."
           action={<GlobalExportButton unexportedCount={unexportedCount ?? 0} />}
         />
         <CardBody className="p-0">
@@ -139,6 +176,7 @@ export default async function StockManagementPage({
               <Tbody>
                 {allFiches.map((f) => {
                   const po = f.production_orders as unknown as { reference: string } | null;
+                  const bl = (f.shipments as unknown as { reference: string | null } | null)?.reference ?? null;
                   return (
                     <Tr key={f.id}>
                       <Td>
@@ -146,7 +184,7 @@ export default async function StockManagementPage({
                           {f.numero}
                         </Link>
                       </Td>
-                      <Td>{po ? po.reference : "Global"}</Td>
+                      <Td>{bl ? `BL ${bl}` : po ? po.reference : "Global"}</Td>
                       <Td>{formatDate(f.generated_at)}</Td>
                       <Td>
                         <Badge tone={f.sage_numero ? "success" : "warning"}>
@@ -173,6 +211,7 @@ export default async function StockManagementPage({
                 <Th>ODF</Th>
                 <Th>Référence Sage</Th>
                 <Th align="right">Quantité</Th>
+                <Th>Dépôt</Th>
                 <Th>Export</Th>
               </Tr>
             </Thead>
@@ -184,7 +223,10 @@ export default async function StockManagementPage({
                   <Td>{(m.production_orders as unknown as { reference: string } | null)?.reference ?? "—"}</Td>
                   <Td className="font-mono text-xs">{m.article_ref ?? "—"}</Td>
                   <Td align="right">
-                    {m.quantite_ou_poids} {m.unite === "kg" ? "kg" : "pièce(s)"}
+                    {m.quantite_ou_poids} {formatMovementUnit(m.unite)}
+                  </Td>
+                  <Td>
+                    <DepotEditor movementId={m.id} depot={(m.depot as string | null) ?? null} editable={!m.exported_in_fiche_id} />
                   </Td>
                   <Td>
                     <Badge tone={m.exported_in_fiche_id ? "neutral" : "warning"}>
@@ -193,7 +235,7 @@ export default async function StockManagementPage({
                   </Td>
                 </Tr>
               ))}
-              {(!recentMovements || recentMovements.length === 0) && <EmptyRow colSpan={6}>Aucun mouvement pour le moment.</EmptyRow>}
+              {(!recentMovements || recentMovements.length === 0) && <EmptyRow colSpan={7}>Aucun mouvement pour le moment.</EmptyRow>}
             </Tbody>
           </Table>
         </CardBody>

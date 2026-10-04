@@ -17,6 +17,7 @@ export default async function PatronnageBibliothequePage() {
       "id,article_code,designation,tolerance_pct,patterns(id,size,pattern_pieces(id,name,expected_count,area,perimeter,points))"
     )
     .order("article_code");
+  const { data: productModels } = await supabase.from("product_models").select("id,name").eq("active", true).order("name");
 
   const library: LibraryArticle[] = (articles ?? []).map((a) => ({
     id: a.id,
@@ -43,7 +44,7 @@ export default async function PatronnageBibliothequePage() {
         title="Bibliothèque de patrons de référence"
         description="Sert de référence à la reconnaissance automatique de tous les tracés déposés dans le module Patronnage."
       />
-      <PatronBibliothequeManager initialLibrary={library} />
+      <PatronBibliothequeManager initialLibrary={library} productModels={productModels ?? []} />
     </div>
   );
 }

@@ -113,8 +113,15 @@ export async function saveReferencePattern(
   const articleCode = String(formData.get("article_code") ?? "").trim();
   const designation = String(formData.get("designation") ?? "").trim();
 
+  const productModelId = String(formData.get("product_model_id") ?? "").trim();
+
   if (!existingArticleId && !articleCode) {
     return { error: "Code article manquant" };
+  }
+  // A5 : un nouvel article de patronnage est forcément rattaché à un modèle
+  // (contrainte pattern_articles_modele_obligatoire, migration 0073).
+  if (!existingArticleId && !productModelId) {
+    return { error: "Choisissez le modèle de produit de ce patron" };
   }
 
   let piecesMeta: z.infer<typeof pieceMetaSchema>;
@@ -142,7 +149,12 @@ export async function saveReferencePattern(
   if (!articleId) {
     const { data: article, error: articleError } = await supabase
       .from("pattern_articles")
-      .insert({ article_code: articleCode, designation: designation || "Sans désignation", created_by: authId })
+      .insert({
+        article_code: articleCode,
+        designation: designation || "Sans désignation",
+        product_model_id: productModelId,
+        created_by: authId,
+      })
       .select("id")
       .single();
     if (articleError) return { error: `Création de l'article impossible : ${articleError.message}` };

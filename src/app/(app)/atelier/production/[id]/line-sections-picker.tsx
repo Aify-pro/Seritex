@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Trash2, ChevronUp, ChevronDown, AlertTriangle } from "lucide-react";
+import { Trash2, ChevronUp, ChevronDown, AlertTriangle, Lock } from "lucide-react";
 import { setProductionOrderLineSections } from "../actions";
 
 /**
@@ -30,8 +30,26 @@ import { setProductionOrderLineSections } from "../actions";
  * sérigraphie, les manches à la bonneterie et le col au bunker. Une section
  * qui porte une partie travaille sur toutes les pièces de l'article, pour
  * cette partie seulement : elle sort du contrôle de quantité ci-dessus.
+ *
+ * Étapes (SF-1, migration 0072) : une section cochée « en même temps que la
+ * précédente » partage l'étape de celle-ci — les deux travaillent en
+ * parallèle. La Finition est toujours la dernière étape, seule : si aucune
+ * n'est retenue, elle est ajoutée automatiquement à la soumission.
  */
-type ChosenSection = { sectionId: string; quantite: number | null; partie: string | null };
+type ChosenSection = { sectionId: string; quantite: number | null; partie: string | null; etape: number };
+
+/** Étapes recalculées dans l'ordre de la liste : une section « parallèle » reprend l'étape de la précédente. */
+function renumberEtapes(list: ChosenSection[], parallele: boolean[]): ChosenSection[] {
+  let etape = 0;
+  return list.map((s, i) => {
+    if (i === 0 || !parallele[i]) etape += 1;
+    return { ...s, etape };
+  });
+}
+
+function paralleleFlags(list: ChosenSection[]): boolean[] {
+  return list.map((s, i) => i > 0 && s.etape === list[i - 1].etape);
+}
 
 export function LineSectionsPicker({
   lineId,
@@ -42,7 +60,7 @@ export function LineSectionsPicker({
 }: {
   lineId: string;
   productionOrderId: string;
-  allSections: { id: string; name: string; categorieNom: string | null; requiertVisuel: boolean }[];
+  allSections: { id: string; name: string; categorieNom: string | null; categorieCle?: string | null; requiertVisuel: boolean }[];
   lineQuantity: number;
   initialSections: ChosenSection[];
 }) {
@@ -50,28 +68,53 @@ export function LineSectionsPicker({
   const [pending, startTransition] = useTransition();
   const [sections, setSections] = useState<ChosenSection[]>(initialSections);
 
+  const categorieOf = (id: string) => allSections.find((a) => a.id === id)?.categorieCle ?? null;
+  const isFinition = (id: string) => categorieOf(id) === "finition";
+  const hasFinition = sections.some((s) => isFinition(s.sectionId));
+  const parallele = paralleleFlags(sections);
+  // Mélange « par partie » / « par quantité » dans une même étape : refusé à la soumission (Q-SF-6).
+  const etapesMixtes = [...new Set(sections.map((s) => s.etape))].filter((etape) => {
+    const group = sections.filter((s) => s.etape === etape);
+    const avecPartie = group.filter((s) => s.partie).length;
+    return group.length > 1 && avecPartie > 0 && avecPartie < group.length;
+  });
+  const premiereEtape = sections[0]?.etape;
+  const coupeHorsDebut = sections.some(
+    (s) => ["coupe", "stock"].includes(categorieOf(s.sectionId) ?? "") && s.etape !== premiereEtape
+  );
+
   const sectionIds = sections.map((s) => s.sectionId);
   const availableSections = allSections.filter((s) => !sectionIds.includes(s.id));
   const quantiteEffective = (s: ChosenSection) => s.quantite ?? lineQuantity;
 
-  // Catégories où plusieurs ateliers se partagent les PIÈCES (sans partie
-  // renseignée) et dont le total ne correspond pas à la quantité de l'article.
-  const byCategorie = new Map<string, ChosenSection[]>();
+  // Étapes où plusieurs ateliers travaillent en parallèle en se partageant
+  // les PIÈCES (sans partie renseignée) et dont le total ne correspond pas à
+  // la quantité de l'article.
+  const byEtape = new Map<number, ChosenSection[]>();
   for (const s of sections) {
     if (s.partie) continue;
-    const categorie = allSections.find((a) => a.id === s.sectionId)?.categorieNom;
-    if (categorie) byCategorie.set(categorie, [...(byCategorie.get(categorie) ?? []), s]);
+    byEtape.set(s.etape, [...(byEtape.get(s.etape) ?? []), s]);
   }
-  const ecarts = [...byCategorie.entries()]
+  const ecarts = [...byEtape.entries()]
     .filter(([, group]) => group.length > 1)
-    .map(([categorie, group]) => ({
-      categorie,
+    .map(([etape, group]) => ({
+      categorie: `Étape ${etape}`,
       group,
       total: group.reduce((somme, s) => somme + quantiteEffective(s), 0),
     }))
     .filter((e) => e.total !== lineQuantity);
 
-  function persist(next: ChosenSection[]) {
+  function persist(next: ChosenSection[], flags?: boolean[]) {
+    // La Finition reste toujours en dernier, seule dans son étape.
+    const finitions = next.filter((x) => isFinition(x.sectionId));
+    const autres = next.filter((x) => !isFinition(x.sectionId));
+    const ordered = [...autres, ...finitions];
+    const baseFlags = flags ?? paralleleFlags(next);
+    const flagById = new Map(next.map((x, i) => [x.sectionId, baseFlags[i] ?? false]));
+    next = renumberEtapes(
+      ordered,
+      ordered.map((x, i) => i > 0 && !isFinition(x.sectionId) && (flagById.get(x.sectionId) ?? false))
+    );
     setSections(next);
     startTransition(async () => {
       const res = await setProductionOrderLineSections(lineId, productionOrderId, next);
@@ -84,19 +127,31 @@ export function LineSectionsPicker({
   }
 
   function addSection(id: string) {
-    persist([...sections, { sectionId: id, quantite: null, partie: null }]);
+    persist([...sections, { sectionId: id, quantite: null, partie: null, etape: 0 }], [...parallele, false]);
   }
 
   function removeSection(id: string) {
-    persist(sections.filter((s) => s.sectionId !== id));
+    const index = sections.findIndex((s) => s.sectionId === id);
+    persist(
+      sections.filter((s) => s.sectionId !== id),
+      parallele.filter((_, i) => i !== index)
+    );
   }
 
   function moveSection(index: number, direction: -1 | 1) {
     const target = index + direction;
     if (target < 0 || target >= sections.length) return;
     const next = [...sections];
+    const flags = [...parallele];
     [next[index], next[target]] = [next[target], next[index]];
-    persist(next);
+    [flags[index], flags[target]] = [flags[target], flags[index]];
+    persist(next, flags);
+  }
+
+  function setParallele(index: number, value: boolean) {
+    const flags = [...parallele];
+    flags[index] = value;
+    persist(sections, flags);
   }
 
   function setQuantite(id: string, raw: string) {
@@ -137,9 +192,10 @@ export function LineSectionsPicker({
       <div>
         <p className="text-xs font-medium text-foreground-muted">Sections retenues</p>
         <p className="text-[11px] text-foreground-muted">
-          Dans l&apos;ordre de passage de cet article. Si deux ateliers se partagent les pièces d&apos;une même
-          catégorie, répartissez les quantités ; s&apos;ils se partagent la pièce elle-même (ex. manches / col),
-          indiquez la partie de chacun.
+          Dans l&apos;ordre de passage de cet article. Cochez « en parallèle » pour qu&apos;une section travaille en
+          même temps que la précédente. Si deux ateliers se partagent les pièces, répartissez les quantités ;
+          s&apos;ils se partagent la pièce elle-même (ex. manches / col), indiquez la partie de chacun. La Finition
+          ferme toujours le parcours.
         </p>
       </div>
       <datalist id="parties-suggestions">
@@ -159,13 +215,19 @@ export function LineSectionsPicker({
             {sections.map((chosen, i) => {
               const id = chosen.sectionId;
               const section = allSections.find((s) => s.id === id);
+              const finition = isFinition(id);
               return (
                 <li
                   key={id}
-                  className="flex items-center gap-2 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm"
+                  className={`flex flex-wrap items-center gap-2 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm ${
+                    parallele[i] ? "ml-6" : ""
+                  }`}
                 >
-                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand-soft text-xs font-medium text-brand">
-                    {i + 1}
+                  <span
+                    title={`Étape ${chosen.etape}`}
+                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand-soft text-xs font-medium text-brand"
+                  >
+                    {chosen.etape}
                   </span>
                   <span className="min-w-0 flex-1 text-foreground">
                     {section?.name ?? "Section inconnue"}
@@ -173,6 +235,22 @@ export function LineSectionsPicker({
                       <span className="ml-1.5 text-[11px] text-foreground-muted">{section.categorieNom}</span>
                     )}
                   </span>
+                  {i > 0 && !finition && (
+                    <label className="flex shrink-0 items-center gap-1 text-[11px] text-foreground-muted">
+                      <input
+                        type="checkbox"
+                        checked={parallele[i]}
+                        disabled={pending}
+                        onChange={(e) => setParallele(i, e.target.checked)}
+                      />
+                      en parallèle
+                    </label>
+                  )}
+                  {finition && (
+                    <span className="inline-flex shrink-0 items-center gap-1 text-[11px] text-foreground-muted">
+                      <Lock className="h-3 w-3" /> dernière étape
+                    </span>
+                  )}
                   <input
                     key={`${id}-partie-${chosen.partie ?? ""}`}
                     type="text"
@@ -209,7 +287,7 @@ export function LineSectionsPicker({
                   <button
                     type="button"
                     onClick={() => moveSection(i, -1)}
-                    disabled={pending || i === 0}
+                    disabled={pending || i === 0 || finition}
                     title="Monter"
                     className="text-foreground-muted hover:text-foreground disabled:opacity-30"
                   >
@@ -218,7 +296,7 @@ export function LineSectionsPicker({
                   <button
                     type="button"
                     onClick={() => moveSection(i, 1)}
-                    disabled={pending || i === sections.length - 1}
+                    disabled={pending || i === sections.length - 1 || finition || isFinition(sections[i + 1]?.sectionId ?? "")}
                     title="Descendre"
                     className="text-foreground-muted hover:text-foreground disabled:opacity-30"
                   >
@@ -237,6 +315,27 @@ export function LineSectionsPicker({
               );
             })}
           </ol>
+        )}
+
+        {!hasFinition && (
+          <p className="flex items-center gap-1.5 rounded-md border border-dashed border-border px-2.5 py-1.5 text-xs text-foreground-muted">
+            <Lock className="h-3 w-3" /> Finition — ajoutée automatiquement en dernière étape à la soumission.
+          </p>
+        )}
+
+        {etapesMixtes.length > 0 && (
+          <p className="flex items-start gap-1.5 rounded-md border border-danger/30 bg-danger-soft px-2.5 py-2 text-xs text-danger">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            Étape {etapesMixtes.join(", ")} : mélange de sections « par partie » et « par quantité ». Séparez-les en deux
+            étapes, sinon la soumission sera refusée.
+          </p>
+        )}
+
+        {coupeHorsDebut && (
+          <p className="flex items-start gap-1.5 rounded-md border border-danger/30 bg-danger-soft px-2.5 py-2 text-xs text-danger">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            La Coupe (ou le Stock) ne peut être que la première étape du parcours.
+          </p>
         )}
 
         {ecarts.map(({ categorie, group, total }) => (

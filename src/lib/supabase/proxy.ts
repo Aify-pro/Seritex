@@ -4,7 +4,16 @@ import { NextResponse, type NextRequest } from "next/server";
 // Les écrans de mot de passe oublié/réinitialisation sont publics : ils sont
 // atteints sans session (ou avec la seule session de récupération créée par
 // /auth/confirm) ; chacun contrôle lui-même ce dont il a besoin.
-const PUBLIC_PATHS = ["/login", "/auth", "/api/health", "/mot-de-passe-oublie", "/reinitialiser-mot-de-passe"];
+// La confirmation de réception d'une livraison (LIV-2) est publique : le
+// client l'ouvre depuis un e-mail, sans compte ; le jeton fait foi.
+const PUBLIC_PATHS = [
+  "/login",
+  "/auth",
+  "/api/health",
+  "/mot-de-passe-oublie",
+  "/reinitialiser-mot-de-passe",
+  "/confirmation-livraison",
+];
 
 /** Préfixes de route → rôles autorisés. Défense en profondeur : la RLS reste
  * la garantie ultime, mais on évite ici de laisser un rôle non concerné
@@ -13,7 +22,8 @@ const ROUTE_ACCESS: { prefix: string; roles: string[] }[] = [
   { prefix: "/client", roles: ["client"] },
   // Fiche client CRM (v4) : aussi utile au responsable production, qui suit
   // l'avancement de production par client sans repasser par le commercial.
-  { prefix: "/commercial/clients", roles: ["commercial", "responsable_production", "administrateur"] },
+  // Le responsable livraison y gère les lieux de livraison (LIV-0).
+  { prefix: "/commercial/clients", roles: ["commercial", "responsable_production", "administrateur", "responsable_livraison"] },
   // Règle spécifique évaluée avant la règle générale /commercial ci-dessous :
   // l'échantillonnage est aussi géré par le responsable production (section
   // 2.1/2.7 de l'analyse), contrairement au reste de l'espace commercial.
@@ -32,6 +42,10 @@ const ROUTE_ACCESS: { prefix: string; roles: string[] }[] = [
   { prefix: "/parametres/clients-sage", roles: ["commercial", "responsable_production", "administrateur", "gestionnaire_stock"] },
   { prefix: "/parametres/articles-sage", roles: ["commercial", "responsable_production", "administrateur", "gestionnaire_stock"] },
   { prefix: "/parametres/devis-sage", roles: ["commercial", "responsable_production", "administrateur"] },
+  // Codification (COM-0) : codes courts par la production, dépôts Sage par la gestion de stock.
+  { prefix: "/parametres/codification", roles: ["responsable_production", "administrateur", "gestionnaire_stock"] },
+  // Référentiels de livraison (LIV-0) : le service livraison.
+  { prefix: "/parametres/livraison", roles: ["responsable_livraison", "administrateur"] },
   { prefix: "/parametres", roles: ["administrateur"] },
   // Prix de revient et marges (migration 0067) : Direction et administrateur
   // seulement (base_role administrateur) — jamais les commerciaux.

@@ -47,6 +47,8 @@ const quoteLineSchema = z.object({
   // Remise propre à la ligne (migration 0061), en % du brut de la ligne.
   remise_pct: z.coerce.number().min(0, "Remise invalide").max(100, "La remise d'une ligne ne peut pas dépasser 100 %"),
   product_model_id: z.string().uuid().nullable(),
+  // Grammage choisi (ART-D, migration 0083) — hérité par la ligne d'ODF.
+  textile_id: z.guid().nullable().optional(),
   // Configuration couleur — la « maquette » que le client valide avec le
   // devis (chantier config-produit-devis). Jamais les deux ensemble :
   // couleur_unique_id pour un modèle « uni », zone_colors sinon.
@@ -206,6 +208,7 @@ function quoteLineFields(line: QuoteLineInput) {
     unit_price: line.product_model_id ? averageUnitPrice(line) : line.unit_price,
     remise_pct: line.remise_pct,
     couleur_unique_id: line.couleur_unique_id,
+    textile_id: line.product_model_id ? line.textile_id ?? null : null,
   };
 }
 
@@ -505,6 +508,7 @@ async function recomputeQuoteTotals(db: ServerSupabase | ReturnType<typeof creat
 export async function suggestQuoteLinePrices(input: {
   companyId: string;
   productModelId: string;
+  textileId?: string | null;
   quantity: number;
   printZones: { printable_zone_id: string; nb_couleurs: number }[];
   devise: string;
@@ -515,6 +519,7 @@ export async function suggestQuoteLinePrices(input: {
     .object({
       companyId: z.guid(),
       productModelId: z.guid(),
+      textileId: z.guid().nullable().optional(),
       quantity: z.number().int().min(0),
       printZones: z.array(z.object({ printable_zone_id: z.guid(), nb_couleurs: z.number().int().min(1).max(12) })),
       devise: z.string().regex(/^[A-Z]{3}$/),

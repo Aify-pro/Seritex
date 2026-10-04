@@ -17,8 +17,10 @@ import type {
   StockItemOption,
 } from "./types";
 import { SectionSwitcher } from "./section-switcher";
+import type { WorkOrderFlowRow } from "@/lib/types/domain";
 import { Card, CardBody } from "@/components/ui/card";
 import Link from "next/link";
+import { LotScanPanel } from "./lot-scan-panel";
 
 export default async function SectionQueuePage({
   searchParams,
@@ -89,7 +91,8 @@ export default async function SectionQueuePage({
   // Patronnage d'une fiche "Bon pour coupe" liée à l'ODF du sous-ODF.
   // Totaux pré-remplis depuis repartition_par_couche × couches réelles
   // (migration 0053) — l'opérateur ne corrige que ce qui manque.
-  const isCoupe = (section?.atelier_categories as unknown as { cle: string } | null)?.cle === "coupe";
+  const categorieCle = (section?.atelier_categories as unknown as { cle: string } | null)?.cle ?? null;
+  const isCoupe = categorieCle === "coupe";
   const contextByWorkOrderId: Record<string, WorkOrderContext> = {};
   const matelasByWorkOrderId: Record<string, MatelasRow[]> = {};
   const traceOptionsByWorkOrderId: Record<string, TraceOption[]> = {};
@@ -291,6 +294,19 @@ export default async function SectionQueuePage({
     }));
   }
 
+  // SF-1 : reçu / déclaré / reste par taille de chaque sous-ODF, calculés par
+  // la base (work_orders_flow) — la même fonction qui refuse une déclaration
+  // au-delà de l'entrée.
+  const flowByWorkOrderId: Record<string, WorkOrderFlowRow[]> = {};
+  if (!isStockManager && workOrders && workOrders.length > 0) {
+    const { data: flows } = await supabase.rpc("work_orders_flow", {
+      p_work_order_ids: workOrders.map((wo) => wo.id),
+    });
+    for (const f of (flows ?? []) as (WorkOrderFlowRow & { work_order_id: string })[]) {
+      (flowByWorkOrderId[f.work_order_id] ??= []).push(f);
+    }
+  }
+
   if (!isStockManager && workOrders && workOrders.length > 0) {
     // Description de l'article, pour l'en-tête du sous-ODF déplié et pour la
     // recherche. `production_order_lines` n'est aujourd'hui lisible que par
@@ -352,10 +368,12 @@ export default async function SectionQueuePage({
             ? "Sortie lot et retour stock — changez de section ci-contre si besoin."
             : isCoupe
               ? "Ouvrez un matelas pour voir son tracé et saisir le réel — déchets pesés par scan du sac."
-              : "Ajoutez la quantité produite au fur et à mesure sur vos ordres de travail."
+              : "Déclarez au fur et à mesure, taille par taille, ce que vous avez reçu et produit."
         }
         action={sections.length > 0 ? <SectionSwitcher sections={sections} value={sectionId} /> : undefined}
       />
+
+      {!isStockManager && <LotScanPanel sectionId={sectionId} />}
 
       {odfFilterId && (
         <Card>
@@ -390,6 +408,8 @@ export default async function SectionQueuePage({
           traceOptionsByWorkOrderId={traceOptionsByWorkOrderId}
           eventsByWorkOrderId={eventsByWorkOrderId}
           isCoupe={isCoupe}
+          categorieCle={categorieCle}
+          flowByWorkOrderId={flowByWorkOrderId}
           initialOpenWasteBags={openWasteBags}
           sizes={await getSizes()}
         />

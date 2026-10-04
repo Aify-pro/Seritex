@@ -35,7 +35,7 @@ export async function recordWorkOrderQuantity(
   // migration 0036 — un sous-ODF ne porte plus de statut distinct).
   const { data: before } = await supabase
     .from("work_orders")
-    .select("actual_start, production_order_id, sections(name, atelier_categories(cle)), production_orders(reference, companies(name))")
+    .select("actual_start, production_order_id, sections(name, atelier_categories(cle)), production_orders(reference, company_id, companies(name))")
     .eq("id", workOrderId)
     .maybeSingle();
 
@@ -50,7 +50,8 @@ export async function recordWorkOrderQuantity(
   }
 
   const categorieCle = (before?.sections as unknown as { atelier_categories: { cle: string } | null } | null)?.atelier_categories?.cle;
-  if (before && !before.actual_start && categorieCle === "impression") {
+  const avecClient = !!(before?.production_orders as unknown as { company_id: string | null } | null)?.company_id;
+  if (before && !before.actual_start && categorieCle === "impression" && avecClient) {
     const po = before.production_orders as unknown as { reference: string; companies: { name: string } | null } | null;
     await sendNotification("commande_en_impression", {
       to: await resolveContactEmailForProductionOrder(before.production_order_id),
@@ -349,4 +350,129 @@ export async function getWasteBagByCode(code: string): Promise<GetWasteBagResult
       weighings,
     },
   };
+}
+
+/* ============================================================
+   Déclarations par taille (SF-1, migration 0072)
+============================================================ */
+
+export type DeclarationLigne = {
+  taille: string;
+  type: "bonne" | "dechet" | "premier_choix" | "deuxieme_choix" | "preleve";
+  quantite: number;
+};
+
+/**
+ * Déclare d'un coup les quantités saisies dans la grille par taille d'un
+ * sous-ODF. Atomique : `declare_production_batch` (SECURITY DEFINER) refuse
+ * tout l'envoi si une seule ligne dépasse ce que la section a reçu, ou si un
+ * type n'est pas permis pour sa catégorie (seule la finition fait du 2e
+ * choix). Aucune vérification de rôle ici : la base fait autorité.
+ */
+export async function declareProduction(
+  workOrderId: string,
+  lignes: DeclarationLigne[],
+  motif?: string,
+  /** Lot QR cité (SF-5) : la déclaration et le parcours du lot sont reliés. */
+  lotCode?: string
+): Promise<RecordQuantityResult> {
+  await requireUser();
+  const supabase = await createClient();
+
+  const payload = lignes.filter((l) => Number.isInteger(l.quantite) && l.quantite > 0);
+  if (payload.length === 0) return { error: "Aucune quantité saisie." };
+
+  const { data: before } = await supabase
+    .from("work_orders")
+    .select("actual_start, production_order_id, sections(atelier_categories(cle)), production_orders(reference, company_id, companies(name))")
+    .eq("id", workOrderId)
+    .maybeSingle();
+
+  const { error } = lotCode
+    ? await supabase.rpc("declare_production_batch_lot", {
+        p_work_order_id: workOrderId,
+        p_lignes: payload,
+        p_motif: motif?.trim() || null,
+        p_lot_code: lotCode,
+      })
+    : await supabase.rpc("declare_production_batch", {
+        p_work_order_id: workOrderId,
+        p_lignes: payload,
+        p_motif: motif?.trim() || null,
+      });
+  if (error) return { error: error.message };
+
+  // Même notification que la saisie globale : première déclaration d'un
+  // atelier d'impression = commande partie en impression.
+  const categorieCle = (before?.sections as unknown as { atelier_categories: { cle: string } | null } | null)?.atelier_categories?.cle;
+  const avecClient = !!(before?.production_orders as unknown as { company_id: string | null } | null)?.company_id;
+  if (before && !before.actual_start && categorieCle === "impression" && avecClient) {
+    const po = before.production_orders as unknown as { reference: string; companies: { name: string } | null } | null;
+    await sendNotification("commande_en_impression", {
+      to: await resolveContactEmailForProductionOrder(before.production_order_id),
+      variables: { numero_odf: po?.reference ?? "", nom_client: po?.companies?.name ?? "" },
+      relatedEntityType: "production_order",
+      relatedEntityId: before.production_order_id,
+    });
+  }
+
+  revalidatePath("/atelier/section");
+  revalidatePath("/atelier/production");
+  revalidatePath("/livraisons");
+  revalidatePath("/dashboard");
+  return {};
+}
+
+/**
+ * Contre-déclaration motivée (annule tout ou partie d'une déclaration) —
+ * réservée au responsable production et à l'administrateur par
+ * `correct_declaration`.
+ */
+export async function correctDeclaration(
+  declarationId: string,
+  quantite: number,
+  motif: string
+): Promise<RecordQuantityResult> {
+  await requireUser();
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("correct_declaration", {
+    p_declaration_id: declarationId,
+    p_quantite: quantite,
+    p_motif: motif.trim(),
+  });
+  if (error) return { error: error.message };
+  revalidatePath("/atelier/section");
+  revalidatePath("/atelier/production");
+  revalidatePath("/livraisons");
+  return {};
+}
+
+/**
+ * Scan d'un lot à l'entrée ou à la sortie de la section (SF-5). Le sous-ODF
+ * est celui de la section affichée pour l'article du lot — un responsable de
+ * production scanne ainsi depuis la section choisie au sélecteur.
+ */
+export async function scanArticleLot(code: string, sens: "entree" | "sortie", sectionId: string): Promise<{ error?: string; message?: string }> {
+  await requireUser();
+  const supabase = await createClient();
+  const clean = code.trim().toUpperCase();
+  if (!clean) return { error: "Code de lot vide" };
+  const { data: lot } = await supabase.from("article_lots").select("production_order_line_id").eq("code", clean).maybeSingle();
+  if (!lot) return { error: `Lot inconnu : ${clean}` };
+  let workOrderId: string | null = null;
+  if (lot.production_order_line_id) {
+    const { data: wo } = await supabase
+      .from("work_orders")
+      .select("id")
+      .eq("production_order_line_id", lot.production_order_line_id)
+      .eq("section_id", sectionId)
+      .maybeSingle();
+    workOrderId = wo?.id ?? null;
+    if (!workOrderId) return { error: `Le lot ${clean} ne passe pas par cette section` };
+  }
+  const { data, error } = await supabase.rpc("scan_article_lot", { p_code: clean, p_sens: sens, p_work_order_id: workOrderId });
+  if (error) return { error: error.message };
+  const r = data as { code: string; etape: number; section: string };
+  revalidatePath("/atelier/section");
+  return { message: `${r.code} : ${sens === "entree" ? "entrée" : "sortie"} ${r.section} (étape ${r.etape})` };
 }

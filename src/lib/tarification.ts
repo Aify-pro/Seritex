@@ -1,6 +1,6 @@
 import "server-only";
 import { createClient } from "@/lib/supabase/server";
-import type { CostComponent, PricingParams, PrintGrid } from "@/lib/pricing";
+import { resolveComponents, type CostComponent, type FabricContext, type PricingParams, type PrintGrid } from "@/lib/pricing";
 
 /**
  * Client de lecture : par défaut celui de l'utilisateur (RLS : Direction et
@@ -28,6 +28,7 @@ export async function getPricingSettings(db?: Db): Promise<PricingSettings> {
     chargesPct: Number(data?.charges_pct ?? 40),
     margePct: Number(data?.marge_pct ?? 15),
     arrondi: Number(data?.arrondi ?? 100),
+    coefPrixVente: data?.coef_prix_vente != null ? Number(data.coef_prix_vente) : null,
     fraisEcranParCouleur: Number(data?.frais_ecran_par_couleur ?? 0),
     updatedAt: (data?.updated_at as string | undefined) ?? null,
   };
@@ -63,7 +64,7 @@ export async function getModelPricings(modelIds: string[], db?: Db): Promise<Rec
     supabase.from("model_pricing").select("*").in("product_model_id", modelIds),
     supabase
       .from("model_cost_components")
-      .select("id,product_model_id,libelle,base,est_tissu,display_order,model_cost_supplements(taille,supplement)")
+      .select("id,product_model_id,libelle,base,est_tissu,mode_calcul,perte_pct,display_order,model_cost_supplements(taille,supplement)")
       .in("product_model_id", modelIds)
       .order("display_order"),
     supabase.from("model_forced_prices").select("product_model_id,taille,prix").in("product_model_id", modelIds),
@@ -84,6 +85,8 @@ export async function getModelPricings(modelIds: string[], db?: Db): Promise<Rec
           libelle: c.libelle as string,
           base: Number(c.base),
           estTissu: !!c.est_tissu,
+          mode: (c.mode_calcul as "saisi" | "tissu_calcule" | null) ?? "saisi",
+          pertePct: Number(c.perte_pct ?? 0),
           supplements: Object.fromEntries(
             ((c.model_cost_supplements ?? []) as { taille: string; supplement: number }[]).map((s) => [s.taille, Number(s.supplement)])
           ),
@@ -94,11 +97,72 @@ export async function getModelPricings(modelIds: string[], db?: Db): Promise<Rec
   return out;
 }
 
-/** Paramètres effectifs d'un modèle : les siens, sinon les généraux. */
+/**
+ * Paramètres effectifs d'un modèle : les siens, sinon les généraux. Le
+ * coefficient général imposé (A8) ne s'applique qu'aux modèles sans charges ni
+ * marge propres — même règle que model_sale_prices() (migration 0083).
+ */
 export function effectiveParams(settings: PricingSettings, model: Pick<ModelPricing, "chargesPct" | "margePct">): PricingParams {
+  const ownParams = model.chargesPct != null || model.margePct != null;
   return {
     chargesPct: model.chargesPct ?? settings.chargesPct,
     margePct: model.margePct ?? settings.margePct,
     arrondi: settings.arrondi,
+    coefPrixVente: ownParams ? null : settings.coefPrixVente ?? null,
   };
+}
+
+/**
+ * Contexte tissu de chaque modèle (ART-C, A9) : surfaces par taille et le
+ * textile de la déclinaison — celui demandé (`textileByModel`, ex. grammage
+ * choisi sur le devis), sinon le tissu principal du modèle, sinon son premier
+ * textile autorisé. Réservé, comme les coûts, à la Direction (RLS), ou au
+ * client d'administration pour le calcul des prix de vente.
+ */
+export async function getFabricContexts(
+  modelIds: string[],
+  db?: Db,
+  textileByModel: Record<string, string | null | undefined> = {}
+): Promise<Record<string, FabricContext & { textileId: string | null }>> {
+  if (modelIds.length === 0) return {};
+  const supabase = db ?? (await createClient());
+  const [{ data: models }, { data: allowed }, { data: areas }] = await Promise.all([
+    supabase.from("product_models").select("id,textile_id").in("id", modelIds),
+    supabase.from("product_model_textiles").select("product_model_id,textile_id").in("product_model_id", modelIds),
+    supabase.from("model_size_fabric_area").select("product_model_id,taille,surface_m2").in("product_model_id", modelIds),
+  ]);
+  const textileIdOf = (id: string) =>
+    textileByModel[id] ??
+    ((models ?? []).find((m) => m.id === id)?.textile_id as string | null) ??
+    ((allowed ?? []).find((a) => a.product_model_id === id)?.textile_id as string | undefined) ??
+    null;
+  const textileIds = [...new Set(modelIds.map(textileIdOf).filter((v): v is string => !!v))];
+  const [{ data: textiles }, { data: prices }] = textileIds.length
+    ? await Promise.all([
+        supabase.from("textiles").select("id,nom,grammage").in("id", textileIds),
+        supabase.from("textile_prices").select("textile_id,prix_kg").in("textile_id", textileIds),
+      ])
+    : [{ data: [] }, { data: [] }];
+
+  const out: Record<string, FabricContext & { textileId: string | null }> = {};
+  for (const id of modelIds) {
+    const tid = textileIdOf(id);
+    const t = (textiles ?? []).find((x) => x.id === tid);
+    const p = (prices ?? []).find((x) => x.textile_id === tid);
+    out[id] = {
+      textileId: tid,
+      textileNom: (t?.nom as string | undefined) ?? null,
+      grammage: t?.grammage != null ? Number(t.grammage) : null,
+      prixKg: p ? Number(p.prix_kg) : null,
+      surfaces: Object.fromEntries(
+        (areas ?? []).filter((a) => a.product_model_id === id).map((a) => [a.taille as string, Number(a.surface_m2)])
+      ),
+    };
+  }
+  return out;
+}
+
+/** Composants concrets d'un modèle pour un contexte tissu (tissu calculé résolu). */
+export function resolvedPricing(pricing: ModelPricing, cles: string[], fabric: FabricContext | null) {
+  return resolveComponents(pricing.components, cles, fabric);
 }

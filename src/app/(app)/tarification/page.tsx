@@ -4,9 +4,9 @@ import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
 import { formatMoney } from "@/lib/currency";
-import { priceGrid } from "@/lib/pricing";
+import { priceGrid, resolveComponents } from "@/lib/pricing";
 import { getSizeOptionsByModel } from "@/lib/quote-dispatch";
-import { effectiveParams, getModelPricings, getPricingSettings, getPrintGrid } from "@/lib/tarification";
+import { effectiveParams, getFabricContexts, getModelPricings, getPricingSettings, getPrintGrid } from "@/lib/tarification";
 import { PricingSettingsForm, PrintCostsForm } from "./settings-forms";
 import { TextilePricesForm } from "./textile-prices-form";
 
@@ -26,7 +26,7 @@ export default async function TarificationPage() {
     supabase.from("textile_prices").select("textile_id,prix_kg"),
   ]);
   const ids = (models ?? []).map((m) => m.id as string);
-  const [pricings, sizesByModel] = await Promise.all([getModelPricings(ids), getSizeOptionsByModel(ids)]);
+  const [pricings, sizesByModel, fabrics] = await Promise.all([getModelPricings(ids), getSizeOptionsByModel(ids), getFabricContexts(ids)]);
 
   const range = (values: (number | null)[]) => {
     const v = values.filter((x): x is number => x !== null);
@@ -66,7 +66,9 @@ export default async function TarificationPage() {
                 {(models ?? []).map((m) => {
                   const p = pricings[m.id as string];
                   const cles = (sizesByModel[m.id as string] ?? []).map((s) => s.cle);
-                  const grid = p.components.length > 0 ? priceGrid(p.components, cles, effectiveParams(settings, p), { forced: p.forced }) : null;
+                  // Tissu calculé (ART-C) : aperçu sur le tissu principal du modèle.
+                  const components = resolveComponents(p.components, cles, fabrics[m.id as string] ?? null).components;
+                  const grid = p.components.length > 0 ? priceGrid(components, cles, effectiveParams(settings, p), { forced: p.forced }) : null;
                   return (
                     <tr key={m.id}>
                       <td className="px-5 py-3">
@@ -77,7 +79,7 @@ export default async function TarificationPage() {
                       <td className="px-5 py-3">{grid ? range(grid.sizes.map((s) => s.pr)) : "—"}</td>
                       <td className="px-5 py-3">{grid ? range(grid.sizes.map((s) => s.pv)) : "—"}</td>
                       <td className="px-5 py-3 text-right">
-                        <Link href={`/tarification/${m.id}`} className="text-xs font-medium text-brand hover:underline">
+                        <Link href={`/articles/${m.id}/prix-de-revient`} className="text-xs font-medium text-brand hover:underline">
                           {p.components.length ? "Ouvrir la grille" : "Saisir la grille"} →
                         </Link>
                       </td>
