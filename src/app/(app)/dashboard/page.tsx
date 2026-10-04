@@ -7,6 +7,7 @@ import Link from "next/link";
 import { formatDate } from "@/lib/utils";
 import { PageHeader } from "@/components/shell/page-header";
 import { redirect } from "next/navigation";
+import { ACTIVE_ODF_STATUSES } from "@/lib/production-orders/active";
 
 export default async function DashboardPage() {
   const { profile } = await requireUser();
@@ -204,8 +205,9 @@ export default async function DashboardPage() {
   if (profile.role === "chef_section") {
     const { data: workOrders } = await supabase
       .from("work_orders")
-      .select("id,quantity_planned,quantity_done")
-      .eq("section_id", profile.section_id!);
+      .select("id,quantity_planned,quantity_done,production_orders!inner(status)")
+      .eq("section_id", profile.section_id!)
+      .in("production_orders.status", ACTIVE_ODF_STATUSES);
 
     const enCours = workOrders?.filter((w) => w.quantity_done < w.quantity_planned).length ?? 0;
     const atteints = workOrders?.filter((w) => w.quantity_done >= w.quantity_planned).length ?? 0;
