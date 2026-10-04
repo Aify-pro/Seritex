@@ -6,8 +6,8 @@ import { STORAGE_BACKEND_LABELS } from "@/lib/types/domain";
 import type { StorageBackendType } from "@/lib/types/domain";
 import { formatDate } from "@/lib/utils";
 import { NewStorageTargetForm } from "./new-target-form";
-import { TargetActiveToggle } from "./target-active-toggle";
-import { TargetActions, type EditableTarget } from "./target-actions";
+import type { EditableTarget } from "./target-actions";
+import { TargetControls } from "./target-controls";
 import { Database } from "lucide-react";
 
 /**
@@ -34,7 +34,7 @@ export default async function StorageTargetsPage() {
         <CardBody className="p-0">
           <ul className="divide-y divide-border">
             {targets?.map((t) => (
-              <li key={t.id} className="flex items-center justify-between gap-4 px-5 py-4">
+              <li key={t.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 px-5 py-4">
                 <div className="flex items-center gap-2">
                   <Database className="h-4 w-4 text-foreground-muted" />
                   <div>
@@ -46,10 +46,7 @@ export default async function StorageTargetsPage() {
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center gap-4">
-                  <TargetActions target={editable(t)} />
-                  <TargetActiveToggle targetId={t.id} active={t.active} />
-                </div>
+                <TargetControls target={editable(t)} active={t.active} />
               </li>
             ))}
             {(!targets || targets.length === 0) && (

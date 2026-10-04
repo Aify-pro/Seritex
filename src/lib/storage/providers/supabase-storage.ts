@@ -1,6 +1,7 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
-import type { StorageProvider, StorageTargetRow, UploadInput, UploadResult } from "@/lib/storage/types";
+import type { ConnectionCheckResult, StorageProvider, StorageTargetRow, UploadInput, UploadResult } from "@/lib/storage/types";
+import { atStep } from "@/lib/storage/diagnostics";
 import { StorageProviderError } from "@/lib/storage/types";
 
 /**
@@ -10,6 +11,23 @@ import { StorageProviderError } from "@/lib/storage/types";
  * L'accès en lecture se fait ensuite via URL signée, jamais en public.
  */
 export const supabaseStorageProvider: StorageProvider = {
+  async check(target: StorageTargetRow): Promise<ConnectionCheckResult> {
+    const bucket = (target.config as { bucket?: string })?.bucket;
+    if (!bucket) {
+      throw new StorageProviderError("supabase_storage", "Bucket Supabase Storage non configuré pour cette cible");
+    }
+    const admin = await atStep("supabase_storage", "Accès Supabase (clé de service)", () => createAdminClient());
+    const { error } = await admin.storage.getBucket(bucket);
+    if (error) {
+      throw new StorageProviderError(
+        "supabase_storage",
+        `Bucket « ${bucket} » inaccessible — ${/not found/i.test(error.message) ? "il n'existe pas : créez-le dans le dashboard Supabase (Storage)." : error.message}`,
+        error
+      );
+    }
+    return { checks: [`Bucket « ${bucket} » trouvé`] };
+  },
+
   async upload(target: StorageTargetRow, input: UploadInput): Promise<UploadResult> {
     const bucket = (target.config as { bucket?: string })?.bucket;
     if (!bucket) {

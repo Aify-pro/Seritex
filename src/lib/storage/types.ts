@@ -61,7 +61,34 @@ export interface UploadResult {
   remotePath: string;
 }
 
+/** Résultat d'un test de connexion à une cible de stockage (écran Paramètres > Stockage). */
+export interface ConnectionStatus {
+  connected: boolean;
+  checkedAt: string;
+  durationMs: number;
+  /** Cause lisible de l'échec (étape + explication) — absente si connecté. */
+  message?: string;
+  /** Détail technique pour le débogage (code, statut HTTP, message brut) — secrets masqués. */
+  detail?: string;
+  /** Connecté, mais à surveiller (ex. dossier de base absent, créé au premier dépôt). */
+  warning?: string;
+  /** Ce qui a été réellement vérifié, étape par étape. */
+  checks?: string[];
+}
+
+export interface ConnectionCheckOptions {
+  /** Test approfondi : vérifie aussi l'écriture (fichier témoin créé puis supprimé). Réservé aux tests demandés explicitement. */
+  deep?: boolean;
+}
+
+export interface ConnectionCheckResult {
+  warning?: string;
+  checks: string[];
+}
+
 export interface StorageProvider {
+  /** Teste la connexion et les droits ; lève une StorageProviderError (étape + cause) en cas d'échec. */
+  check?(target: StorageTargetRow, options: ConnectionCheckOptions): Promise<ConnectionCheckResult>;
   /** Copie le fichier sur la cible et renvoie le chemin/identifiant distant. */
   upload(target: StorageTargetRow, input: UploadInput): Promise<UploadResult>;
   /** Relit le contenu d'un fichier à partir du chemin renvoyé par `upload`. Absent = lecture non prise en charge par ce support. */

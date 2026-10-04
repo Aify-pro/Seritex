@@ -22,7 +22,7 @@ export interface EditableTarget {
 
 const inputClass = "h-9 w-full rounded-md border border-border bg-surface px-2 text-sm";
 
-export function TargetActions({ target }: { target: EditableTarget }) {
+export function TargetActions({ target, onUpdated }: { target: EditableTarget; onUpdated?: () => void }) {
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [confirming, setConfirming] = useState(false);
@@ -70,6 +70,7 @@ export function TargetActions({ target }: { target: EditableTarget }) {
               else {
                 toast.success("Cible mise à jour");
                 setOpen(false);
+                onUpdated?.();
               }
             })
           }

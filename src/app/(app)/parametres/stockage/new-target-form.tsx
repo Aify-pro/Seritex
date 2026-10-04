@@ -3,7 +3,7 @@
 import { useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { createStorageTarget } from "@/lib/actions/media";
+import { checkStorageTarget, createStorageTarget } from "@/lib/actions/media";
 import type { StorageBackendType } from "@/lib/types/domain";
 import { Plus } from "lucide-react";
 
@@ -25,10 +25,16 @@ export function NewStorageTargetForm() {
       action={(formData) =>
         startTransition(async () => {
           const res = await createStorageTarget(formData);
-          if (res?.error) toast.error(res.error);
+          if (res?.error || !res.id) toast.error(res?.error ?? "Cible non créée");
           else {
-            toast.success("Cible de stockage créée");
             formRef.current?.reset();
+            // Test approfondi (écriture comprise) dès la création : on sait tout de suite si la cible est utilisable.
+            const status = await checkStorageTarget(res.id, true);
+            if (status.connected) {
+              toast.success("Cible créée — connectée", { description: status.warning ?? status.checks?.join(" · ") });
+            } else {
+              toast.error("Cible créée mais non connectée", { description: status.message, duration: 15000 });
+            }
           }
         })
       }
