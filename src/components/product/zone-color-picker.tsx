@@ -1,6 +1,10 @@
 "use client";
 
 import type { Color, ProductZoneTemplate } from "@/lib/types/domain";
+import { swatchColor } from "@/lib/colors";
+
+/** Couleur du référentiel avec de quoi dessiner sa pastille (hex facultatif : anciennes données). */
+export type ColorSwatchData = Pick<Color, "id" | "name" | "code"> & { hex?: string | null };
 
 /** État d'une configuration couleur en cours d'édition — devis ou ODF. */
 export type ZoneColorDraft = {
@@ -29,7 +33,7 @@ export function ZoneColorPicker({
   disabled,
 }: {
   zoneTemplate: Pick<ProductZoneTemplate, "zone_key" | "zone_label" | "display_order">[];
-  colors: Pick<Color, "id" | "name" | "code">[];
+  colors: ColorSwatchData[];
   value: ZoneColorDraft;
   onChange: (next: ZoneColorDraft) => void;
   disabled?: boolean;
@@ -82,7 +86,7 @@ export function ZoneColorPicker({
           {value.couleurUniqueId && (
             <span
               className="h-5 w-5 shrink-0 rounded-full border border-border"
-              style={{ backgroundColor: colorById(value.couleurUniqueId)?.code }}
+              style={{ backgroundColor: swatchColor(colorById(value.couleurUniqueId)) }}
               aria-hidden
             />
           )}
@@ -115,7 +119,7 @@ export function ZoneColorPicker({
                 {value.zoneColors[z.zone_key] && (
                   <span
                     className="h-5 w-5 shrink-0 rounded-full border border-border"
-                    style={{ backgroundColor: colorById(value.zoneColors[z.zone_key])?.code }}
+                    style={{ backgroundColor: swatchColor(colorById(value.zoneColors[z.zone_key])) }}
                     aria-hidden
                   />
                 )}
@@ -132,15 +136,15 @@ export function ZoneColorSummary({
   couleurUnique,
   zoneColors,
 }: {
-  couleurUnique?: Pick<Color, "id" | "name" | "code"> | null;
-  zoneColors: { zone_key: string; zone_label?: string; colors?: Pick<Color, "id" | "name" | "code"> | null }[];
+  couleurUnique?: ColorSwatchData | null;
+  zoneColors: { zone_key: string; zone_label?: string; colors?: ColorSwatchData | null }[];
 }) {
   if (couleurUnique) {
     return (
       <span className="inline-flex items-center gap-1.5 text-xs text-foreground-muted">
         <span
           className="h-3 w-3 shrink-0 rounded-full border border-border"
-          style={{ backgroundColor: couleurUnique.code }}
+          style={{ backgroundColor: swatchColor(couleurUnique) }}
           aria-hidden
         />
         Couleur unique : {couleurUnique.name}
@@ -156,7 +160,7 @@ export function ZoneColorSummary({
         <span key={z.zone_key} className="inline-flex items-center gap-1.5 text-xs text-foreground-muted">
           <span
             className="h-3 w-3 shrink-0 rounded-full border border-border"
-            style={{ backgroundColor: z.colors?.code }}
+            style={{ backgroundColor: swatchColor(z.colors) }}
             aria-hidden
           />
           {z.zone_label ?? z.zone_key} : {z.colors?.name ?? "—"}

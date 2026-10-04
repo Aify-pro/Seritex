@@ -7,6 +7,7 @@ import { AlertTriangle, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { swatchColor } from "@/lib/colors";
 import { STOCK_ETAT_LABELS, type StockEtat } from "@/lib/articles/codification";
 import { generateVariants, setStockArticleSageReference, setVariantActive } from "../../actions";
 
@@ -37,7 +38,7 @@ export function VariantMatrix({
 }: {
   productModelId: string;
   textiles: { id: string; nom: string }[];
-  colors: { id: string; name: string; code: string }[];
+  colors: { id: string; name: string; code: string; hex?: string | null }[];
   sizes: { id: string; libelle: string }[];
   variants: MatrixVariant[];
   editable: boolean;
@@ -92,7 +93,7 @@ export function VariantMatrix({
                 {colors.map((c) => (
                   <tr key={c.id}>
                     <td className="whitespace-nowrap px-2 py-1">
-                      <span className="mr-1.5 inline-block h-3 w-3 rounded-full border border-border align-middle" style={{ backgroundColor: c.code }} />
+                      <span className="mr-1.5 inline-block h-3 w-3 rounded-full border border-border align-middle" style={{ backgroundColor: swatchColor(c) }} />
                       {c.name}
                     </td>
                     {sizes.map((s) => {

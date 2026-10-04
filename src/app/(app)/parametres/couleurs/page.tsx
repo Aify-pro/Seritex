@@ -6,9 +6,16 @@ import { NewColorForm } from "./new-color-form";
 import { ColorActiveToggle } from "./color-active-toggle";
 import { NewSizeForm } from "./new-size-form";
 import { SizeActiveToggle } from "./size-active-toggle";
+import { ColorRowActions } from "./color-row-actions";
+import { SizeRowActions } from "./size-row-actions";
+import { FAMILLE_LABELS } from "./color-fields";
+import { swatchColor } from "@/lib/colors";
+import { Badge } from "@/components/ui/badge";
 
 export default async function ColorsPage() {
-  await requireRole(["administrateur", "responsable_production"]);
+  const { profile } = await requireRole(["administrateur", "responsable_production"]);
+  // Suppression réservée à l'administrateur (politique RLS d'origine, conservée).
+  const canDelete = profile.role === "administrateur";
   const supabase = await createClient();
 
   const [{ data: colors }, { data: sizes }] = await Promise.all([
@@ -29,7 +36,7 @@ export default async function ColorsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Couleurs et tailles"
-        description="Les deux référentiels que tout le reste consomme : les couleurs affectées aux zones d'un ODF, et les tailles proposées au dispatching. La disponibilité de chaque modèle se déclare sur sa carte, dans Modèles de produits."
+        description="Les deux référentiels que tout le reste consomme : les couleurs affectées aux zones d'un ODF (référence Pantone TCX, aperçu HEX, famille du fournisseur), et les tailles proposées au dispatching. La disponibilité de chaque modèle se déclare sur sa carte, dans Modèles de produits."
       />
 
       <h2 className="text-sm font-semibold text-foreground">Couleurs</h2>
@@ -46,15 +53,22 @@ export default async function ColorsPage() {
                   <div className="flex items-center gap-3">
                     <span
                       className="h-5 w-5 shrink-0 rounded-full border border-border"
-                      style={{ backgroundColor: c.code }}
+                      style={{ backgroundColor: swatchColor(c) }}
                       aria-hidden
                     />
                     <div>
                       <p className="text-sm font-medium text-foreground">{c.name}</p>
-                      <p className="font-mono text-xs text-foreground-muted">{c.code}</p>
+                      <p className="font-mono text-xs text-foreground-muted">
+                        {c.code}
+                        {c.hex ? ` · ${c.hex}` : ""}
+                      </p>
                     </div>
+                    {c.famille && <Badge tone="neutral">Famille {FAMILLE_LABELS[c.famille as keyof typeof FAMILLE_LABELS] ?? c.famille}</Badge>}
                   </div>
-                  <ColorActiveToggle colorId={c.id} active={c.active} />
+                  <div className="flex items-center gap-3">
+                    <ColorRowActions color={c} canDelete={canDelete} />
+                    <ColorActiveToggle colorId={c.id} active={c.active} />
+                  </div>
                 </li>
               ))}
             </ul>
@@ -94,6 +108,7 @@ export default async function ColorsPage() {
                         >
                           <span className="text-sm font-medium text-foreground">{t.libelle}</span>
                           <SizeActiveToggle sizeId={t.id} active={t.active} />
+                          <SizeRowActions size={t} groupes={groupes} canDelete={canDelete} />
                         </li>
                       ))}
                     </ul>

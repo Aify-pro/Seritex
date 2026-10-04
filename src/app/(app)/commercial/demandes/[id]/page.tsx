@@ -74,7 +74,7 @@ export default async function RequestDetailPage({
       // couleur du devis (chantier config-produit-devis) dès qu'une ligne
       // choisit un modèle, sans aller-retour supplémentaire par ligne.
       supabase.from("product_zone_templates").select("product_model_id,zone_key,zone_label,display_order"),
-      supabase.from("colors").select("id,name,code").eq("active", true).order("name"),
+      supabase.from("colors").select("id,name,code,hex").eq("active", true).order("name"),
       // Fiches échantillon rattachées à cette demande (migration 0051).
       supabase
         .from("sample_requests")

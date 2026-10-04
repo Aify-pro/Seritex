@@ -12,7 +12,7 @@ export default async function ArticleVariantsPage({ params }: { params: Promise<
 
   const [{ data: allowed }, { data: modelColors }, { data: modelSizes }, { data: variants }] = await Promise.all([
     supabase.from("product_model_textiles").select("textile_id,textiles(id,nom,grammage)").eq("product_model_id", id),
-    supabase.from("product_model_colors").select("color_id,colors(id,name,code)").eq("product_model_id", id),
+    supabase.from("product_model_colors").select("color_id,colors(id,name,code,hex)").eq("product_model_id", id),
     supabase.from("product_model_sizes").select("size_id,sizes(id,libelle,groupe,display_order)").eq("product_model_id", id),
     supabase
       .from("product_variants")
