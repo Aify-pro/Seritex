@@ -1,109 +1,72 @@
-import Link from "next/link";
+import { redirect } from "next/navigation";
 import { requireRole } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
-import { Card, CardHeader, CardBody } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { formatDate, formatDateTime } from "@/lib/utils";
+import { Card, CardBody } from "@/components/ui/card";
+import { formatDateTime } from "@/lib/utils";
 import { Lock } from "lucide-react";
-import { formatMovementUnit } from "@/lib/stock/movements";
+import { MIRROR_PAGE_SIZE, orIlike, pageRange, parseMirrorParams } from "@/lib/sage-mirror/list";
+import { MirrorToolbar } from "@/components/sage-mirror/mirror-toolbar";
+import { MirrorPagination } from "@/components/sage-mirror/mirror-pagination";
+import { DetailRows, type DetailRow } from "@/components/sage-mirror/detail-rows";
 
-const STOCK_MOVEMENT_TYPE_LABELS: Record<string, string> = {
-  sortie_mp: "Sortie MP",
-  entree_semi_fini: "Entrée semi-fini",
-  sortie_semi_fini: "Sortie semi-fini",
-  entree_fini: "Entrée fini",
-  retour_mp: "Retour MP",
-};
+const CELL_CLASSES = [
+  "px-5 py-3 font-mono text-xs text-foreground-muted",
+  "px-5 py-3 font-medium text-foreground",
+  "px-5 py-3 capitalize text-foreground-muted",
+  "px-5 py-3 text-foreground-muted",
+  "px-5 py-3 text-foreground-muted",
+  "px-5 py-3 text-foreground-muted",
+];
 
-export default async function StockPage() {
-  const { profile } = await requireRole(["administrateur", "responsable_production", "chef_section"]);
+/**
+ * Stock Sage. Les articles et leur stock viennent de la même table Sage : pour
+ * tous les rôles qui lisent aussi le catalogue, le stock est affiché dans
+ * l'onglet « Articles et stock » (/parametres/articles-sage) et cet écran n'y
+ * renvoie que. Il ne reste en service que pour le chef de section, qui lit le
+ * stock mais pas le catalogue (prix, rapprochement) — liste par article/dépôt.
+ */
+export default async function StockPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const { profile } = await requireRole(["administrateur", "responsable_production", "chef_section", "gestionnaire_stock"]);
+  if (profile.role !== "chef_section") redirect("/parametres/articles-sage");
+
   const supabase = await createClient();
+  const params = parseMirrorParams(await searchParams);
 
-  const { data: items } = await supabase.from("stock_item_view").select("*").order("designation");
+  let query = supabase.from("stock_item_view").select("*", { count: "exact" });
+  const search = orIlike(["sage_reference", "designation", "category", "warehouse"], params.q);
+  if (search) query = query.or(search);
+  const [from, to] = pageRange(params.page);
+  const { data: items, count, error } = await query.order("designation").order("warehouse").range(from, to);
 
-  // Lot 11 : comparaison de stock (section 20 du document de logique) —
-  // réservée à la direction, dans le cadre du contrôle de clôture (section
-  // 4). V1 acceptée par le cahier des charges : affichage côte à côte,
-  // vérification manuelle, pas de calcul d'écart automatique — Sage reste
-  // la seule source de vérité, et une fiche générée par Seritex n'a aucune
-  // garantie d'avoir déjà été importée côté Sage (import manuel, section
-  // 19) : un "écart" calculé serait donc trompeur plutôt qu'utile.
-  //
-  // Portée volontairement limitée aux ODF en attente de clôture
-  // (`demande_cloture`) : c'est précisément l'usage que décrit la section
-  // 20, pas un historique général de tous les ODF déjà clôturés.
-  const isDirection = profile.role === "administrateur" || profile.role === "responsable_production";
-
-  type PendingMovement = {
-    id: string;
-    type: string;
-    article_ref: string | null;
-    quantite_ou_poids: number;
-    unite: string;
-    exported_in_fiche_id: string | null;
-    created_at: string;
-  };
-  type PendingOrder = {
-    id: string;
-    reference: string;
-    cloture_demandee_at: string | null;
-    companies: { name: string } | null;
-    movements: PendingMovement[];
-  };
-
-  let pendingClosureOrders: PendingOrder[] = [];
-  const sageByReference = new Map<string, { designation: string; quantity_available: number; unit: string; last_sync_at: string }>();
-
-  if (isDirection) {
-    const { data: orders } = await supabase
-      .from("production_orders")
-      .select("id,reference,cloture_demandee_at,companies(name)")
-      .eq("status", "demande_cloture")
-      .order("cloture_demandee_at", { ascending: true });
-
-    const orderIds = (orders ?? []).map((o) => o.id);
-
-    const { data: movements } =
-      orderIds.length > 0
-        ? await supabase
-            .from("stock_movements")
-            .select("id,production_order_id,type,article_ref,quantite_ou_poids,unite,exported_in_fiche_id,created_at")
-            .in("production_order_id", orderIds)
-            .order("created_at", { ascending: true })
-        : { data: [] as (PendingMovement & { production_order_id: string })[] };
-
-    const articleRefs = Array.from(new Set((movements ?? []).map((m) => m.article_ref).filter((r): r is string => !!r)));
-
-    const { data: sageItems } =
-      articleRefs.length > 0
-        ? await supabase
-            .from("stock_item_view")
-            .select("sage_reference,designation,quantity_available,unit,last_sync_at")
-            .in("sage_reference", articleRefs)
-        : { data: [] };
-
-    // Depuis la migration 0058, un article a une ligne par dépôt : on agrège
-    // (somme des quantités, date la plus récente) pour obtenir le total
-    // comparable à la quantité mouvementée par Seritex, tous dépôts confondus.
-    for (const i of sageItems ?? []) {
-      const existing = sageByReference.get(i.sage_reference);
-      if (existing) {
-        existing.quantity_available += i.quantity_available;
-        if (i.last_sync_at > existing.last_sync_at) existing.last_sync_at = i.last_sync_at;
-      } else {
-        sageByReference.set(i.sage_reference, { ...i });
-      }
-    }
-
-    pendingClosureOrders = (orders ?? []).map((o) => ({
-      id: o.id,
-      reference: o.reference,
-      cloture_demandee_at: o.cloture_demandee_at,
-      companies: o.companies as unknown as { name: string } | null,
-      movements: (movements ?? []).filter((m) => m.production_order_id === o.id),
-    }));
-  }
+  const rows: DetailRow[] = (items ?? []).map((i) => ({
+    id: `${i.sage_reference}|${i.warehouse}`,
+    cells: [
+      i.sage_reference,
+      i.designation,
+      String(i.category).replace(/_/g, " "),
+      `${i.quantity_available} ${i.unit}`,
+      i.warehouse,
+      formatDateTime(i.last_sync_at),
+    ],
+    title: i.designation,
+    subtitle: `${i.sage_reference} — dépôt ${i.warehouse}`,
+    fields: [
+      { label: "Référence Sage", value: i.sage_reference },
+      { label: "Désignation", value: i.designation },
+      { label: "Catégorie", value: String(i.category).replace(/_/g, " ") },
+      { label: "Unité", value: i.unit },
+      { label: "Dépôt", value: i.warehouse },
+      { label: "Stock réel", value: `${i.quantite_reelle} ${i.unit}` },
+      { label: "Réservé", value: `${i.quantite_reservee} ${i.unit}` },
+      { label: "Disponible", value: `${i.quantity_available} ${i.unit}` },
+      { label: "Dernière synchro", value: formatDateTime(i.last_sync_at) },
+    ],
+  }));
 
   return (
     <div className="space-y-6">
@@ -115,8 +78,23 @@ export default async function StockPage() {
       <div className="flex items-start gap-2 rounded-md bg-info-soft px-3 py-2 text-xs text-info">
         <Lock className="mt-0.5 h-4 w-4 shrink-0" />
         Aucune écriture n&apos;est possible depuis Seritex sur cette vue : elle est alimentée par une
-        synchronisation périodique utilisant un compte technique Sage à droits strictement limités à la lecture.
+        synchronisation périodique utilisant un compte technique Sage à droits strictement limités à la lecture. Cliquez
+        sur une ligne pour voir le détail.
       </div>
+
+      <MirrorToolbar
+        q={params.q}
+        filterValues={{}}
+        filters={[]}
+        label="Rechercher dans le stock"
+        placeholder="Rechercher : référence, désignation, catégorie, dépôt…"
+      />
+
+      {error && error.code !== "PGRST103" && (
+        <div role="alert" className="rounded-md border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger">
+          Impossible de charger le stock ({error.message}).
+        </div>
+      )}
 
       <Card>
         <CardBody className="p-0">
@@ -127,107 +105,32 @@ export default async function StockPage() {
                 <th className="px-5 py-3 font-medium">Désignation</th>
                 <th className="px-5 py-3 font-medium">Catégorie</th>
                 <th className="px-5 py-3 font-medium">Disponible</th>
-                <th className="px-5 py-3 font-medium">Entrepôt</th>
+                <th className="px-5 py-3 font-medium">Dépôt</th>
                 <th className="px-5 py-3 font-medium">Dernière synchro</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {items?.map((i) => (
-                <tr key={`${i.sage_reference}-${i.warehouse}`}>
-                  <td className="px-5 py-3 font-mono text-xs text-foreground-muted">{i.sage_reference}</td>
-                  <td className="px-5 py-3 font-medium text-foreground">{i.designation}</td>
-                  <td className="px-5 py-3 capitalize text-foreground-muted">{i.category}</td>
-                  <td className="px-5 py-3 text-foreground-muted">
-                    {i.quantity_available} {i.unit}
+              <DetailRows rows={rows} cellClassNames={CELL_CLASSES} />
+              {rows.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="px-5 py-8 text-center text-sm text-foreground-muted">
+                    {params.q ? "Aucune ligne de stock ne correspond à la recherche." : "Aucune donnée — lancez une synchronisation."}
                   </td>
-                  <td className="px-5 py-3 text-foreground-muted">{i.warehouse}</td>
-                  <td className="px-5 py-3 text-foreground-muted">{formatDateTime(i.last_sync_at)}</td>
                 </tr>
-              ))}
+              )}
             </tbody>
           </table>
+          <MirrorPagination
+            basePath="/parametres/stock"
+            query={{ q: params.q }}
+            page={params.page}
+            size={MIRROR_PAGE_SIZE}
+            total={count ?? 0}
+            noun="ligne de stock"
+            plural="lignes de stock"
+          />
         </CardBody>
       </Card>
-
-      {isDirection && (
-        <Card>
-          <CardHeader
-            title="Comparaison de stock — ODF en attente de clôture"
-            description="Contrôle de clôture (section 4/20) : les mouvements demandés par Seritex, à comparer vous-même au stock Sage ci-dessus avant de valider. Aucun écart n'est calculé automatiquement — une fiche générée n'a pas la garantie d'avoir déjà été importée côté Sage."
-          />
-          <CardBody className={pendingClosureOrders.length === 0 ? undefined : "p-0"}>
-            {pendingClosureOrders.length === 0 ? (
-              <p className="text-sm text-foreground-muted">Aucun ODF en attente de clôture pour le moment.</p>
-            ) : (
-              <ul className="divide-y divide-border">
-                {pendingClosureOrders.map((order) => (
-                  <li key={order.id} className="space-y-3 px-5 py-4">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div>
-                        <Link href={`/atelier/production/${order.id}`} className="text-sm font-medium text-brand hover:underline">
-                          {order.reference}
-                        </Link>
-                        <span className="ml-1 text-sm text-foreground-muted">{order.companies?.name ?? ""}</span>
-                      </div>
-                      {order.cloture_demandee_at && (
-                        <span className="text-xs text-foreground-muted">
-                          Clôture demandée le {formatDate(order.cloture_demandee_at)}
-                        </span>
-                      )}
-                    </div>
-
-                    {order.movements.length === 0 ? (
-                      <p className="text-xs text-foreground-muted">Aucun mouvement de stock pour cet ODF.</p>
-                    ) : (
-                      <div className="overflow-x-auto rounded-md border border-border">
-                        <table className="w-full text-xs">
-                          <thead>
-                            <tr className="border-b border-border bg-surface-muted text-left uppercase tracking-wide text-foreground-muted">
-                              <th className="px-3 py-2 font-medium">Mouvement Seritex</th>
-                              <th className="px-3 py-2 font-medium">Référence</th>
-                              <th className="px-3 py-2 font-medium">Quantité</th>
-                              <th className="px-3 py-2 font-medium">Statut</th>
-                              <th className="px-3 py-2 font-medium">Stock Sage (actuel)</th>
-                              <th className="px-3 py-2 font-medium">Dernière synchro Sage</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-border">
-                            {order.movements.map((m) => {
-                              const sageItem = m.article_ref ? sageByReference.get(m.article_ref) : undefined;
-                              return (
-                                <tr key={m.id}>
-                                  <td className="px-3 py-2 text-foreground">{STOCK_MOVEMENT_TYPE_LABELS[m.type] ?? m.type}</td>
-                                  <td className="px-3 py-2 font-mono text-foreground-muted">
-                                    {m.article_ref ?? "— non renseignée"}
-                                  </td>
-                                  <td className="px-3 py-2 text-foreground-muted">
-                                    {m.quantite_ou_poids} {formatMovementUnit(m.unite)}
-                                  </td>
-                                  <td className="px-3 py-2">
-                                    <Badge tone={m.exported_in_fiche_id ? "neutral" : "warning"}>
-                                      {m.exported_in_fiche_id ? "Exporté" : "Non exporté"}
-                                    </Badge>
-                                  </td>
-                                  <td className="px-3 py-2 text-foreground-muted">
-                                    {sageItem ? `${sageItem.quantity_available} ${sageItem.unit}` : "—"}
-                                  </td>
-                                  <td className="px-3 py-2 text-foreground-muted">
-                                    {sageItem ? formatDateTime(sageItem.last_sync_at) : "—"}
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </CardBody>
-        </Card>
-      )}
     </div>
   );
 }
