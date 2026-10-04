@@ -26,6 +26,7 @@ import type { StockAvailabilityRow } from "./line-stock-tools";
 import { ClosureBalance, type ClosureBalanceData } from "./closure-balance";
 import type { WorkOrderFlowRow } from "@/lib/types/domain";
 import { RemaindersPanel, type RemainderRow } from "./remainders-panel";
+import { ConsumptionPanel, type ConsumptionRow } from "./consumption-panel";
 import { odfClientLabel } from "@/lib/production/client-label";
 import { SHIPMENT_STATUS_LABELS, type ShipmentStatus } from "@/lib/delivery/status";
 import { stageRowFromDb } from "@/lib/production/flow";
@@ -641,6 +642,29 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
   }
   const bilanCloture = (order.bilan_cloture ?? null) as ClosureBalanceData | null;
 
+  // Consommables (COM-G) : calculés à la demande de clôture.
+  const { data: consumptionData } = ["demande_cloture", "terminee"].includes(order.status)
+    ? await supabase
+        .from("production_order_consumptions")
+        .select("id,production_order_line_id,pieces,quantite_theorique,quantite_reelle,motif_ajustement,stock_movement_id,consumables(code,designation,unite)")
+        .eq("production_order_id", order.id)
+    : { data: [] };
+  const consumptions: ConsumptionRow[] = (consumptionData ?? []).map((c) => {
+    const k = c.consumables as unknown as { code: string; designation: string; unite: string };
+    return {
+      id: c.id as string,
+      article: (productionOrderLines ?? []).find((l) => l.id === c.production_order_line_id)?.description ?? "Article",
+      code: k.code,
+      designation: k.designation,
+      unite: k.unite,
+      pieces: c.pieces as number,
+      theorique: Number(c.quantite_theorique),
+      reelle: c.quantite_reelle != null ? Number(c.quantite_reelle) : null,
+      motif: (c.motif_ajustement as string | null) ?? null,
+      sortie: !!c.stock_movement_id,
+    };
+  });
+
   // Restes à clôturer (SF-4) : chaque sous-ODF × taille encore en cours.
   let remainders: RemainderRow[] = [];
   if (enCoursTotal > 0 && (workOrders ?? []).length > 0) {
@@ -900,6 +924,12 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
       {canRequestClosure && order.status === "en_production" && (
         <RemaindersPanel productionOrderId={order.id} rows={remainders} hasClient={!!order.company_id} />
       )}
+
+      <ConsumptionPanel
+        productionOrderId={order.id}
+        rows={consumptions}
+        editable={canRequestClosure && order.status === "demande_cloture"}
+      />
 
       {bilanCloture && (
         <ClosureBalance bilan={bilanCloture} motif={order.motif_cloture_en_cours ?? null} sizes={allSizes} />

@@ -1,4 +1,4 @@
-import { STOCK_MOVEMENT_TYPE_LABELS } from "@/lib/stock/movements";
+import { STOCK_MOVEMENT_TYPE_LABELS, formatMovementUnit } from "@/lib/stock/movements";
 import { requireRole } from "@/lib/auth/current-user";
 import { odfClientLabel } from "@/lib/production/client-label";
 import { createClient } from "@/lib/supabase/server";
@@ -223,7 +223,7 @@ export default async function StockManagementPage({
                   <Td>{(m.production_orders as unknown as { reference: string } | null)?.reference ?? "—"}</Td>
                   <Td className="font-mono text-xs">{m.article_ref ?? "—"}</Td>
                   <Td align="right">
-                    {m.quantite_ou_poids} {m.unite === "kg" ? "kg" : "pièce(s)"}
+                    {m.quantite_ou_poids} {formatMovementUnit(m.unite)}
                   </Td>
                   <Td>
                     <DepotEditor movementId={m.id} depot={(m.depot as string | null) ?? null} editable={!m.exported_in_fiche_id} />

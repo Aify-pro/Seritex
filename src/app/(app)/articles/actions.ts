@@ -222,9 +222,10 @@ export async function removeProductPrintableZone(zoneId: string) {
 
 const newNomenclatureLineSchema = z.object({
   product_model_id: z.string().uuid(),
-  designation: z.string().trim().min(1),
+  // COM-G : la ligne pointe vers le référentiel des consommables ; désignation
+  // et unité en sont reprises (le texte libre ne compte pas à la clôture).
+  consumable_id: z.guid("Choisissez un consommable"),
   quantite_par_piece: z.coerce.number().positive(),
-  unite: z.string().trim().min(1),
 });
 
 /** Ajoute une ligne de nomenclature (composant constant hors tissu) à un modèle de produit. */
@@ -232,14 +233,27 @@ export async function addNomenclatureLine(formData: FormData) {
   await requireRole(["administrateur", "responsable_production"]);
   const parsed = newNomenclatureLineSchema.safeParse({
     product_model_id: formData.get("product_model_id"),
-    designation: formData.get("designation"),
+    consumable_id: formData.get("consumable_id"),
     quantite_par_piece: formData.get("quantite_par_piece"),
-    unite: formData.get("unite"),
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message };
 
   const supabase = await createClient();
-  const { error } = await supabase.from("nomenclature_lines").insert(parsed.data);
+  const { data: consumable } = await supabase.from("consumables").select("designation,unite").eq("id", parsed.data.consumable_id).maybeSingle();
+  if (!consumable) return { error: "Consommable introuvable" };
+  const { error } = await supabase
+    .from("nomenclature_lines")
+    .insert({ ...parsed.data, designation: consumable.designation, unite: consumable.unite });
+  if (error) return { error: error.message };
+  revalidateArticles();
+  return {};
+}
+
+/** Relie une ligne de nomenclature en texte libre (antérieure à COM-G) à un consommable du référentiel. */
+export async function linkNomenclatureLine(lineId: string, consumableId: string) {
+  await requireRole(["administrateur", "responsable_production"]);
+  const supabase = await createClient();
+  const { error } = await supabase.from("nomenclature_lines").update({ consumable_id: consumableId }).eq("id", lineId);
   if (error) return { error: error.message };
   revalidateArticles();
   return {};

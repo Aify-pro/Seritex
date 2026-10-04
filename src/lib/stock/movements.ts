@@ -11,6 +11,7 @@ export const STOCK_MOVEMENT_TYPE_LABELS: Record<string, string> = {
   entree_pf_personnalise: "Entrée PF personnalisé",
   entree_2e_choix: "Entrée 2e choix",
   sortie_pf_bl: "Sortie PF (bon de livraison)",
+  sortie_consommable: "Sortie consommable",
   entree_semi_fini: "Entrée semi-fini (obsolète)",
   sortie_semi_fini: "Sortie semi-fini (obsolète)",
   entree_fini: "Entrée fini (obsolète)",
@@ -19,6 +20,11 @@ export const STOCK_MOVEMENT_TYPE_LABELS: Record<string, string> = {
 /** Sens du mouvement pour Sage : +1 entrée en stock, −1 sortie. */
 export function movementSign(type: string): 1 | -1 {
   return ["retour_mp", "entree_pf", "entree_pf_personnalise", "entree_2e_choix", "entree_semi_fini", "entree_fini"].includes(type) ? 1 : -1;
+}
+
+/** Unité affichée d'un mouvement (pièce, kg, et depuis COM-G g, m, l). */
+export function formatMovementUnit(unite: string): string {
+  return unite === "piece" ? "pièce(s)" : unite;
 }
 
 /** Nature du stock touchée par le mouvement (MP, PF, consommable) — dépôt Sage pré-rempli à l'export. */

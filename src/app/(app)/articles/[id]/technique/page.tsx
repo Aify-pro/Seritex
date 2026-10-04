@@ -21,7 +21,7 @@ export default async function ArticleTechniquePage({ params }: { params: Promise
   const supabase = await createClient();
   const canPatronnage = await can("patronnage", "view");
 
-  const [{ data: zones }, { data: printableZones }, { data: nomenclature }, { data: patterns }, { data: orphans }, { data: fiches }] =
+  const [{ data: zones }, { data: printableZones }, { data: nomenclature }, { data: patterns }, { data: orphans }, { data: fiches }, { data: consumables }] =
     await Promise.all([
       supabase.from("product_zone_templates").select("*").eq("product_model_id", id).order("display_order"),
       supabase.from("product_printable_zones").select("*").eq("product_model_id", id).order("display_order"),
@@ -36,6 +36,7 @@ export default async function ArticleTechniquePage({ params }: { params: Promise
         .eq("product_model_id", id)
         .order("date_emission", { ascending: false })
         .limit(20),
+      supabase.from("consumables").select("id,code,designation,unite").eq("actif", true).order("code"),
     ]);
 
   return (
@@ -58,10 +59,17 @@ export default async function ArticleTechniquePage({ params }: { params: Promise
       </Card>
 
       <Card>
-        <CardHeader title="Nomenclature" description="Composants constants hors tissu (boutons, fil, col…) et leur quantité par pièce." />
+        <CardHeader
+          title="Nomenclature"
+          description="Consommables par pièce (boutons, fil, étiquettes, emballage…) : consommation théorique calculée à la clôture des ODF. Le tissu reste mesuré par les pesées."
+        />
         <CardBody>
           {canModify ? (
-            <NomenclatureEditor productModelId={id} lines={nomenclature ?? []} />
+            <NomenclatureEditor
+              productModelId={id}
+              lines={nomenclature ?? []}
+              consumables={(consumables ?? []).map((c) => ({ id: c.id as string, code: c.code as string, designation: c.designation as string, unite: c.unite as string }))}
+            />
           ) : (
             <ul className="space-y-1 text-sm">
               {(nomenclature ?? []).map((l) => (

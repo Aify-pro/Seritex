@@ -1,6 +1,6 @@
 "use client";
 
-import { STOCK_MOVEMENT_TYPE_LABELS } from "@/lib/stock/movements";
+import { STOCK_MOVEMENT_TYPE_LABELS, formatMovementUnit } from "@/lib/stock/movements";
 import { useTransition } from "react";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -65,7 +65,7 @@ export function StockMovementsPanel({
             <li key={m.id} className="flex items-center justify-between gap-3 px-5 py-3">
               <div>
                 <p className="text-sm text-foreground">
-                  {STOCK_MOVEMENT_TYPE_LABELS[m.type] ?? m.type} · {m.quantite_ou_poids} {m.unite === "kg" ? "kg" : "pièce(s)"}
+                  {STOCK_MOVEMENT_TYPE_LABELS[m.type] ?? m.type} · {m.quantite_ou_poids} {formatMovementUnit(m.unite)}
                 </p>
                 <p className="text-xs text-foreground-muted">
                   {m.article_ref ? `Article ${m.article_ref}` : "Référence Sage non renseignée"}

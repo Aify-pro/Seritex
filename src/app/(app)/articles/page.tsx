@@ -22,6 +22,7 @@ import { loadArticleCatalog } from "@/lib/articles/catalog";
 import { ArticlesFilters } from "./articles-filters";
 import { NewProductModelForm } from "./new-product-model-form";
 import { NewTextileForm } from "./matieres/new-textile-form";
+import { ConsumablesTable, type ConsumableRow } from "./consommables/consumables-table";
 
 const TAB_LABELS: Record<ArticleTab, string> = {
   produits: "Produits finis",
@@ -77,7 +78,7 @@ export default async function ArticlesPage({
 
       {filters.onglet === "produits" && <ProduitsFinis filters={filters} canModify={canModify} canSeeCosts={canSeeCosts} />}
       {filters.onglet === "matieres" && <Matieres filters={filters} canModify={canModify} />}
-      {filters.onglet === "consommables" && <Consommables />}
+      {filters.onglet === "consommables" && <Consommables filters={filters} canModify={canModify} />}
     </div>
   );
 }
@@ -229,13 +230,47 @@ async function Matieres({ filters, canModify }: { filters: ArticleFilters; canMo
   );
 }
 
-function Consommables() {
+/** Consommables (COM-G) : boutons, fil, étiquettes, emballages — consommés à la clôture des ODF selon la nomenclature. */
+async function Consommables({ filters, canModify }: { filters: ArticleFilters; canModify: boolean }) {
+  const supabase = await createClient();
+  const [{ data: consumables }, { data: familles }, { data: liens }] = await Promise.all([
+    supabase.from("consumables").select("id,code,designation,unite,sage_reference,nature,etape,actif,consumable_families(nom)").order("code"),
+    supabase.from("consumable_families").select("id,nom,code_court").order("nom"),
+    supabase.from("nomenclature_lines").select("consumable_id,product_model_id").not("consumable_id", "is", null),
+  ]);
+  const terms = searchTerms(filters.q);
+  const all: ConsumableRow[] = (consumables ?? [])
+    .map((c) => ({
+      id: c.id as string,
+      code: c.code as string,
+      designation: c.designation as string,
+      famille: (c.consumable_families as unknown as { nom: string } | null)?.nom ?? "—",
+      unite: c.unite as string,
+      sageReference: (c.sage_reference as string | null) ?? null,
+      nature: c.nature as "consommable" | "mp",
+      etape: c.etape as "production" | "finition",
+      actif: !!c.actif,
+      modeles: new Set((liens ?? []).filter((l) => l.consumable_id === c.id).map((l) => l.product_model_id)).size,
+    }))
+    .filter((c) => {
+      const text = articleSearchText([c.code, c.designation, c.famille, c.sageReference]);
+      return terms.every((term) => text.includes(term)) && (filters.actif === "tous" || (filters.actif === "oui") === c.actif);
+    });
+  const { rows, page, totalPages } = paginate(all, filters.page, filters.taille);
+
   return (
-    <Card>
-      <CardBody className="text-sm text-foreground-muted">
-        Aucun consommable pour le moment : boutons, emballages et fournitures arrivent avec le référentiel des
-        consommables.
-      </CardBody>
-    </Card>
+    <div className="space-y-4">
+      <ArticlesFilters values={filters} options={{ categories: [], matieres: [], grammages: [], couleurs: [] }} showGrille={false} />
+      <Card>
+        <CardBody>
+          <ConsumablesTable
+            rows={rows}
+            familles={(familles ?? []).map((f) => ({ id: f.id as string, nom: f.nom as string, code: f.code_court as string }))}
+            canModify={canModify}
+          />
+        </CardBody>
+      </Card>
+      <Pagination filters={filters} page={page} totalPages={totalPages} total={all.length} />
+    </div>
   );
 }

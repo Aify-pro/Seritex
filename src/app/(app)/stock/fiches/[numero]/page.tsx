@@ -1,4 +1,4 @@
-import { STOCK_MOVEMENT_TYPE_LABELS } from "@/lib/stock/movements";
+import { STOCK_MOVEMENT_TYPE_LABELS, formatMovementUnit } from "@/lib/stock/movements";
 import { redirect, notFound } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server";
@@ -162,7 +162,7 @@ export default async function StockExportFichePage({ params }: { params: Promise
                       <td className="px-5 py-3 font-mono text-xs text-foreground-muted">{m.article_ref ?? "—"}</td>
                       <td className="px-5 py-3 text-foreground-muted">{m.taille ? String(m.taille).split("/").pop() : "—"}</td>
                       <td className="px-5 py-3 text-foreground-muted">
-                        {m.quantite_ou_poids} {m.unite === "kg" ? "kg" : "pièce(s)"}
+                        {m.quantite_ou_poids} {formatMovementUnit(m.unite)}
                       </td>
                       <td className="px-5 py-3 font-mono text-xs text-foreground-muted">{m.depot ?? "—"}</td>
                     </tr>

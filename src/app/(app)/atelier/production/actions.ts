@@ -356,6 +356,21 @@ export async function settleEnCours(productionOrderId: string, input: z.input<ty
   return {};
 }
 
+/** Ajuste la consommation réelle d'un consommable (COM-G), entre la demande de clôture et la clôture. */
+export async function adjustConsumption(productionOrderId: string, consumptionId: string, quantite: number, motif: string) {
+  await requireRole(["administrateur", "responsable_production"]);
+  if (!Number.isFinite(quantite) || quantite < 0) return { error: "Quantité invalide" };
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("set_order_consumption", {
+    p_consumption_id: consumptionId,
+    p_quantite: quantite,
+    p_motif: motif.trim() || null,
+  });
+  if (error) return { error: error.message };
+  revalidateOdf(productionOrderId);
+  return {};
+}
+
 /**
  * demande_cloture -> terminee (approve=true) ou retour en_production
  * (renvoi pour corrections, motif obligatoire). Contrôle réel effectué par

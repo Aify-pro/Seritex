@@ -6,6 +6,7 @@ import { Card, CardHeader, CardBody } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatDate, formatDateTime } from "@/lib/utils";
 import { Lock } from "lucide-react";
+import { formatMovementUnit } from "@/lib/stock/movements";
 
 const STOCK_MOVEMENT_TYPE_LABELS: Record<string, string> = {
   sortie_mp: "Sortie MP",
@@ -200,7 +201,7 @@ export default async function StockPage() {
                                     {m.article_ref ?? "— non renseignée"}
                                   </td>
                                   <td className="px-3 py-2 text-foreground-muted">
-                                    {m.quantite_ou_poids} {m.unite === "kg" ? "kg" : "pièce(s)"}
+                                    {m.quantite_ou_poids} {formatMovementUnit(m.unite)}
                                   </td>
                                   <td className="px-3 py-2">
                                     <Badge tone={m.exported_in_fiche_id ? "neutral" : "warning"}>
