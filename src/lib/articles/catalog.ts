@@ -1,5 +1,6 @@
 import "server-only";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { articleSearchText, type ArticleRow } from "@/lib/articles/filters";
 import type { FilterOption } from "@/lib/clients/filters";
 
@@ -42,6 +43,24 @@ export async function loadArticleCatalog({ canSeeCosts }: { canSeeCosts: boolean
     // ART-E (migration 0084) : stock disponible vierge et plus petit prix de vente, sans aucun coût.
     supabase.rpc("article_catalog_figures"),
   ]);
+  // Vignette (ART-F) : image principale « toutes couleurs », sinon la première principale.
+  const { data: principals } = await supabase
+    .from("product_model_media")
+    .select("product_model_id,path,color_id")
+    .eq("principale", true)
+    .order("ordre");
+  const vignettePath = new Map<string, string>();
+  for (const p of principals ?? []) {
+    const cur = vignettePath.get(p.product_model_id as string);
+    if (!cur || p.color_id === null) vignettePath.set(p.product_model_id as string, p.path as string);
+  }
+  const signedVignettes = vignettePath.size
+    ? ((await createAdminClient().storage.from("articles").createSignedUrls([...vignettePath.values()], 3600)).data ?? [])
+    : [];
+  const vignetteUrl = (modelId: string) => {
+    const path = vignettePath.get(modelId);
+    return path ? signedVignettes.find((s) => s.path === path)?.signedUrl ?? null : null;
+  };
   const figuresByModel = new Map(
     ((figures ?? []) as { product_model_id: string; stock_disponible: number | null; prix_a_partir_de: number | null }[]).map((f) => [f.product_model_id, f])
   );
@@ -81,7 +100,7 @@ export async function loadArticleCatalog({ canSeeCosts }: { canSeeCosts: boolean
       declinaisons: modelVariants.filter((v) => v.actif).length,
       stockDisponible: figuresByModel.get(m.id as string)?.stock_disponible != null ? Number(figuresByModel.get(m.id as string)!.stock_disponible) : null,
       prixAPartirDe: figuresByModel.get(m.id as string)?.prix_a_partir_de != null ? Number(figuresByModel.get(m.id as string)!.prix_a_partir_de) : null,
-      vignetteUrl: null,
+      vignetteUrl: vignetteUrl(m.id as string),
       searchText: articleSearchText([
         m.name as string,
         m.code as string | null,

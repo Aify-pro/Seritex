@@ -16,5 +16,6 @@ export const ARTICLE_DETAIL_TABS: ArticleTabDef[] = [
   { slug: "fabrication", label: "Fabrication" },
   { slug: "ventes", label: "Ventes" },
   { slug: "stock", label: "Stock" },
+  { slug: "medias", label: "Médias & e-shop" },
   { slug: "prix-de-revient", label: "Prix de revient", costsOnly: true },
 ];
