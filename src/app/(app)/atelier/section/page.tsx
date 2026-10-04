@@ -21,6 +21,7 @@ import type { WorkOrderFlowRow } from "@/lib/types/domain";
 import { Card, CardBody } from "@/components/ui/card";
 import Link from "next/link";
 import { LotScanPanel } from "./lot-scan-panel";
+import { ACTIVE_ODF_STATUSES } from "@/lib/production-orders/active";
 
 export default async function SectionQueuePage({
   searchParams,
@@ -76,12 +77,16 @@ export default async function SectionQueuePage({
     odfReference = odf?.reference ?? null;
   }
 
+  // Seuls les ODF encore à produire alimentent la file : annuler ou clôturer un ODF
+  // ne touche que `production_orders.status` (les sous-ODF gardent leur quantité
+  // restante), il faut donc filtrer ici sur le statut de l'ODF parent.
   let workOrdersQuery = supabase
     .from("work_orders")
     .select(
-      "id,reference,quantity_planned,quantity_done,blocking_reason,planned_start,planned_end,actual_start,production_order_id,production_order_line_id,production_orders(id,reference,company_id,companies(name))"
+      "id,reference,quantity_planned,quantity_done,blocking_reason,planned_start,planned_end,actual_start,production_order_id,production_order_line_id,production_orders!inner(id,reference,company_id,companies(name))"
     )
-    .eq("section_id", sectionId);
+    .eq("section_id", sectionId)
+    .in("production_orders.status", ACTIVE_ODF_STATUSES);
   if (odfFilterId) workOrdersQuery = workOrdersQuery.eq("production_order_id", odfFilterId);
   const { data: workOrders } = await workOrdersQuery
     .order("planned_start", { ascending: true });
