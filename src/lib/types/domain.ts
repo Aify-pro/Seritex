@@ -221,7 +221,11 @@ export interface Textile {
 export interface Color {
   id: string;
   name: string;
+  /** Référence Pantone TCX. */
   code: string;
+  /** Couleur d'affichage (#RRGGBB) ; voir swatchColor(). */
+  hex: string | null;
+  famille: "blanc" | "clair" | "moyen" | "fonce" | null;
   active: boolean;
   created_at: string;
 }

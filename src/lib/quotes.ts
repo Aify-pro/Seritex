@@ -18,7 +18,7 @@ export async function getQuoteLinesWithColorConfig(quoteId: string): Promise<Quo
     supabase
       .from("quote_lines")
       .select(
-        "*,couleur_unique:couleur_unique_id(id,name,code),zone_colors:quote_line_zone_colors(zone_key,colors:color_id(id,name,code)),printable_zones:quote_line_printable_zones(printable_zone_id,nb_couleurs,product_printable_zones(zone_label,display_order)),sizes:quote_line_sizes(taille,quantite),size_prices:quote_line_size_prices(taille,prix)"
+        "*,couleur_unique:couleur_unique_id(id,name,code,hex),zone_colors:quote_line_zone_colors(zone_key,colors:color_id(id,name,code,hex)),printable_zones:quote_line_printable_zones(printable_zone_id,nb_couleurs,product_printable_zones(zone_label,display_order)),sizes:quote_line_sizes(taille,quantite),size_prices:quote_line_size_prices(taille,prix)"
       )
       .eq("quote_id", quoteId),
     supabase.from("product_zone_templates").select("product_model_id,zone_key,zone_label"),

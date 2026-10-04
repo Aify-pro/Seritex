@@ -34,6 +34,7 @@ interface ColorOption {
   id: string;
   name: string;
   code: string;
+  hex?: string | null;
 }
 
 interface ZoneColorValue {

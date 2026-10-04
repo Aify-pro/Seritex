@@ -21,7 +21,7 @@ import type { SagePrefill } from "@/lib/sage-quotes";
 /** Modèle proposé au devis ; `textiles` : grammages autorisés (ART-D), le premier est le principal. */
 type ProductModel = { id: string; name: string; base_price: number | null; textiles: { id: string; nom: string }[] };
 type ZoneTemplate = { zone_key: string; zone_label: string; display_order: number };
-type ColorOption = { id: string; name: string; code: string };
+type ColorOption = { id: string; name: string; code: string; hex?: string | null };
 /** Emplacement imprimable d'un modèle (Paramètres > Produits, migration 0039). */
 export type PrintableZoneOption = { id: string; zone_label: string; display_order: number };
 
