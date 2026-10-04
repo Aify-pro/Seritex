@@ -3,7 +3,8 @@ import { supabaseStorageProvider } from "@/lib/storage/providers/supabase-storag
 import { googleDriveProvider } from "@/lib/storage/providers/google-drive";
 import { webdavProvider } from "@/lib/storage/providers/webdav";
 import { StorageProviderError } from "@/lib/storage/types";
-import type { StorageProvider, StorageTargetRow, UploadInput, UploadResult } from "@/lib/storage/types";
+import { describeError } from "@/lib/storage/diagnostics";
+import type { ConnectionStatus, StorageProvider, StorageTargetRow, UploadInput, UploadResult } from "@/lib/storage/types";
 
 export type { StorageTargetRow, UploadInput, UploadResult, StorageBackendType } from "@/lib/storage/types";
 export { StorageProviderError } from "@/lib/storage/types";
@@ -70,6 +71,50 @@ export function selectWriteTargets(activeTargets: StorageTargetRow[]): StorageTa
   return activeTargets.some(isWebdavTarget)
     ? activeTargets.filter((t) => t.type !== "supabase_storage")
     : activeTargets;
+}
+
+const CHECK_TIMEOUT_MS = 12_000;
+
+/** Valeurs secrètes d'une cible, à masquer dans tout message de diagnostic. */
+function secretsOf(target: StorageTargetRow): string[] {
+  const c = target.config as { password?: string; serviceAccountJson?: string };
+  const out = [c.password, c.serviceAccountJson];
+  try {
+    const parsed = JSON.parse(c.serviceAccountJson ?? "{}") as { private_key?: string; private_key_id?: string };
+    out.push(parsed.private_key, parsed.private_key_id);
+  } catch {
+    // JSON invalide : rien d'autre à masquer
+  }
+  return out.filter((s): s is string => !!s);
+}
+
+/**
+ * Teste la connexion à une cible (jamais d'exception : le résultat dit
+ * « connecté » ou « non connecté » avec la cause). Borné à 12 s : un NAS éteint
+ * ne doit pas figer la page. `deep` ajoute l'écriture d'un fichier témoin.
+ */
+export async function checkTargetConnection(target: StorageTargetRow, options: { deep?: boolean } = {}): Promise<ConnectionStatus> {
+  const started = Date.now();
+  const base = () => ({ checkedAt: new Date().toISOString(), durationMs: Date.now() - started });
+  const provider = PROVIDERS[target.type];
+  if (!provider.check) {
+    return { ...base(), connected: false, message: "Ce type de cible ne peut pas être testé." };
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const result = await Promise.race([
+      provider.check(target, { deep: options.deep }),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new StorageProviderError(target.type, "Délai dépassé", Object.assign(new Error(`aucune réponse en ${CHECK_TIMEOUT_MS / 1000} s`), { code: "ETIMEDOUT" }))), CHECK_TIMEOUT_MS);
+      }),
+    ]);
+    return { ...base(), connected: true, warning: result.warning, checks: result.checks };
+  } catch (error) {
+    const { message, detail } = describeError(error, secretsOf(target));
+    return { ...base(), connected: false, message, detail };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 export async function downloadFromTarget(target: StorageTargetRow, remotePath: string): Promise<Buffer> {

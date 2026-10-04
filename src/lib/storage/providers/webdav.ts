@@ -1,6 +1,7 @@
 import "server-only";
 import { createClient as createWebdavClient, type WebDAVClient } from "webdav";
-import type { StorageProvider, StorageTargetRow, UploadInput, UploadResult, WebdavConfig } from "@/lib/storage/types";
+import type { ConnectionCheckResult, StorageProvider, StorageTargetRow, UploadInput, UploadResult, WebdavConfig } from "@/lib/storage/types";
+import { atStep } from "@/lib/storage/diagnostics";
 import { StorageProviderError } from "@/lib/storage/types";
 
 /**
@@ -18,6 +19,38 @@ import { StorageProviderError } from "@/lib/storage/types";
  * WebDAV (basePath inclus) : il suffit à relire ou supprimer le fichier.
  */
 export const webdavProvider: StorageProvider = {
+  async check(target: StorageTargetRow, { deep }): Promise<ConnectionCheckResult> {
+    const checks: string[] = [];
+    const client = await atStep(target.type, "Configuration", () => openClient(target));
+    const base = baseOf(target) || "/";
+    let warning: string | undefined;
+
+    let baseExists = true;
+    try {
+      await atStep(target.type, `Connexion et authentification (lecture de ${base})`, () => client.getDirectoryContents(base));
+      checks.push("Serveur joignable, identifiants acceptés");
+    } catch (error) {
+      if (statusOf(error) !== 404) throw error;
+      baseExists = false;
+      await atStep(target.type, "Connexion et authentification (lecture de la racine)", () => client.getDirectoryContents("/"));
+      checks.push("Serveur joignable, identifiants acceptés");
+      warning = `Le dossier de base « ${base} » n'existe pas : il sera créé au premier dépôt.`;
+    }
+    if (baseExists) checks.push(`Dossier de base « ${base} » trouvé`);
+
+    if (deep && baseExists) {
+      const probe = `${base === "/" ? "" : base}/.seritex-test-${Date.now()}.txt`;
+      await atStep(target.type, "Écriture d'un fichier témoin", () =>
+        client.putFileContents(probe, "test de connexion Seritex", { overwrite: true })
+      );
+      await atStep(target.type, "Suppression du fichier témoin", () => client.deleteFile(probe));
+      checks.push("Écriture et suppression testées");
+    } else if (deep) {
+      checks.push("Écriture non testée (dossier de base absent)");
+    }
+    return { warning, checks };
+  },
+
   async upload(target: StorageTargetRow, input: UploadInput): Promise<UploadResult> {
     const client = openClient(target);
     try {
@@ -68,6 +101,11 @@ function openClient(target: StorageTargetRow): WebDAVClient {
     throw new StorageProviderError(target.type, "URL et identifiants WebDAV non configurés pour cette cible");
   }
   return createWebdavClient(config.url, { username: config.username, password: config.password });
+}
+
+function statusOf(error: unknown): number | undefined {
+  const e = error as { status?: number; response?: { status?: number }; cause?: { status?: number } } | null;
+  return e?.status ?? e?.response?.status ?? e?.cause?.status;
 }
 
 function baseOf(target: StorageTargetRow) {

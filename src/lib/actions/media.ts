@@ -3,8 +3,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireUser, requirePlatformAdmin } from "@/lib/auth/current-user";
-import { replicateToTargets, selectWriteTargets } from "@/lib/storage";
-import type { StorageTargetRow } from "@/lib/storage/types";
+import { checkTargetConnection, replicateToTargets, selectWriteTargets } from "@/lib/storage";
+import type { ConnectionStatus, StorageTargetRow } from "@/lib/storage/types";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
@@ -279,16 +279,36 @@ export async function createStorageTarget(formData: FormData) {
   }
 
   const supabase = await createClient();
-  const { error } = await supabase.from("storage_targets").insert({
-    type: parsed.data.type,
-    name: parsed.data.name,
-    config,
-    created_by: authId,
-  });
+  const { data: created, error } = await supabase
+    .from("storage_targets")
+    .insert({
+      type: parsed.data.type,
+      name: parsed.data.name,
+      config,
+      created_by: authId,
+    })
+    .select("id")
+    .single();
 
   if (error) return { error: error.message };
   revalidatePath("/parametres/stockage");
-  return {};
+  return { id: created.id as string };
+}
+
+/**
+ * Teste la connexion d'une cible : « connecté » ou « non connecté » avec la cause
+ * et un détail technique (secrets masqués). Réservé à l'administrateur de
+ * plateforme. `deep` vérifie aussi l'écriture (fichier témoin créé puis
+ * supprimé sur un NAS) — à n'utiliser que sur demande explicite.
+ */
+export async function checkStorageTarget(targetId: string, deep = false): Promise<ConnectionStatus> {
+  await requirePlatformAdmin();
+  const supabase = await createClient();
+  const { data: target } = await supabase.from("storage_targets").select("*").eq("id", targetId).maybeSingle();
+  if (!target) {
+    return { connected: false, checkedAt: new Date().toISOString(), durationMs: 0, message: "Cible introuvable (supprimée ?)." };
+  }
+  return checkTargetConnection(target as StorageTargetRow, { deep });
 }
 
 /**
