@@ -22,7 +22,16 @@ interface HubDefinition {
   key: string;
   label: string;
   icon: LucideIcon;
-  tabs: { href: string; label: string }[];
+  tabs: HubTabDefinition[];
+}
+
+interface HubTabDefinition {
+  href: string;
+  label: string;
+  /** Écran qui absorbe celui-ci : l'onglet disparaît quand le rôle a accès à cet écran. */
+  mergedInto?: string;
+  /** Libellé de l'écran absorbant quand il absorbe effectivement un autre onglet. */
+  mergedLabel?: string;
 }
 
 const HUBS: HubDefinition[] = [
@@ -33,8 +42,11 @@ const HUBS: HubDefinition[] = [
     tabs: [
       { href: "/parametres/sage", label: "Vue d'ensemble" },
       { href: "/parametres/clients-sage", label: "Clients" },
-      { href: "/parametres/articles-sage", label: "Articles" },
-      { href: "/parametres/stock", label: "Stock" },
+      // Articles et stock viennent de la même table Sage : un seul onglet pour
+      // les rôles qui lisent les deux ; le stock reste un onglet à part pour
+      // celui qui n'a pas accès au catalogue (chef de section).
+      { href: "/parametres/articles-sage", label: "Articles", mergedLabel: "Articles et stock" },
+      { href: "/parametres/stock", label: "Stock", mergedInto: "/parametres/articles-sage" },
       { href: "/parametres/devis-sage", label: "Devis" },
     ],
   },
@@ -103,10 +115,14 @@ const isParametres = (item: NavItem) => item.section === PARAMETRES;
 /** Thèmes (et onglets) de Paramètres accessibles avec ces entrées de menu. */
 export function getParametresHubs(items: NavItem[]): ParametresHub[] {
   const allowed = new Set(items.filter(isParametres).map((item) => item.href));
+  const absorbed = (tab: HubTabDefinition, hub: HubDefinition) =>
+    hub.tabs.some((other) => other.mergedInto === tab.href && allowed.has(other.href));
   return HUBS.map((hub) => ({
     key: hub.key,
     label: hub.label,
-    tabs: hub.tabs.filter((tab) => allowed.has(tab.href)),
+    tabs: hub.tabs
+      .filter((tab) => allowed.has(tab.href) && !(tab.mergedInto && allowed.has(tab.mergedInto)))
+      .map((tab) => ({ href: tab.href, label: absorbed(tab, hub) && tab.mergedLabel ? tab.mergedLabel : tab.label })),
   })).filter((hub) => hub.tabs.length > 0);
 }
 

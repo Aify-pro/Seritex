@@ -55,7 +55,7 @@ export default async function SageSettingsPage() {
   const [clients, articles, stock, devis] = await Promise.all([
     getMirrorStatus(supabase, "sage_customers_view", "Clients", "/parametres/clients-sage"),
     getMirrorStatus(supabase, "sage_articles_view", "Articles", "/parametres/articles-sage"),
-    getMirrorStatus(supabase, "stock_item_view", "Stock (lignes, tous dépôts)", "/parametres/stock"),
+    getMirrorStatus(supabase, "stock_item_view", "Stock (lignes, tous dépôts)", "/parametres/articles-sage"),
     getMirrorStatus(supabase, "sage_quotes_view", "Devis en cours", "/parametres/devis-sage"),
   ]);
 
