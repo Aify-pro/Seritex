@@ -17,7 +17,7 @@ export default async function PatronnageBibliothequePage() {
       "id,article_code,designation,tolerance_pct,patterns(id,size,pattern_pieces(id,name,expected_count,area,perimeter,points))"
     )
     .order("article_code");
-  const { data: productModels } = await supabase.from("product_models").select("id,name").eq("active", true).order("name");
+  const { data: productModels } = await supabase.from("product_models").select("id,name").eq("active", true).eq("nature", "pf").order("name");
 
   const library: LibraryArticle[] = (articles ?? []).map((a) => ({
     id: a.id,

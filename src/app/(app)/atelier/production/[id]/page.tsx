@@ -126,7 +126,7 @@ export default async function ProductionOrderDetailPage({
     supabase
       .from("production_order_lines")
       .select(
-        "id,description,quantity,product_model_id,quote_line_id,couleur_unique_id,product_models(id,name,textile_id,textiles(nom,composition,grammage,laize_cm)),couleur_unique:couleur_unique_id(id,name,code,hex),zone_colors:production_order_line_zone_colors(zone_key,colors:color_id(id,name,code,hex)),sizes:production_order_sizes(taille,quantite_demandee),quote_lines(product_model_id)"
+        "id,description,quantity,product_model_id,quote_line_id,couleur_unique_id,product_models(id,name,textile_id,textiles!product_models_textile_id_fkey(nom,composition,grammage,laize_cm)),couleur_unique:couleur_unique_id(id,name,code,hex),zone_colors:production_order_line_zone_colors(zone_key,colors:color_id(id,name,code,hex)),sizes:production_order_sizes(taille,quantite_demandee),quote_lines(product_model_id)"
       )
       .eq("production_order_id", id)
       .order("created_at"),
@@ -161,7 +161,7 @@ export default async function ProductionOrderDetailPage({
       .eq("odf_id", id)
       .order("cloture_le", { ascending: false }),
     // Lot 9 : configurateur couleur par zone (section 8/9 du document de logique).
-    supabase.from("product_models").select("id,name").eq("active", true).order("name"),
+    supabase.from("product_models").select("id,name").eq("active", true).eq("nature", "pf").order("name"),
     supabase.from("colors").select("id,name,code,hex").eq("active", true).order("name"),
     // Gabarits de zones de tous les modèles — chaque ligne peut avoir un
     // modèle différent (ODF multi-lignes), un seul aller-retour plutôt

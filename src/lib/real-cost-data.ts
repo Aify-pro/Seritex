@@ -58,7 +58,7 @@ export async function getOdfRealCosts(odfIds?: string[]): Promise<OdfRealCost[]>
     supabase.from("quote_cost_snapshots").select("quote_id,quantite,prix_vente,prix_revient,detail").in("quote_id", quoteIds),
     supabase.from("pesees").select("production_order_id,type,poids_kg").in("production_order_id", ids).in("type", ["reception_tissu", "retour_stock"]),
     supabase.from("production_order_real_costs").select("production_order_id,prix_tissu_kg,notes").in("production_order_id", ids),
-    supabase.from("quote_lines").select("quote_id,product_models(textile_id,textiles(id,nom))").in("quote_id", quoteIds),
+    supabase.from("quote_lines").select("quote_id,product_models(textile_id,textiles!product_models_textile_id_fkey(id,nom))").in("quote_id", quoteIds),
     supabase.from("rendement_par_odf").select("odf_id,pieces_obtenues").in("odf_id", ids),
   ]);
 

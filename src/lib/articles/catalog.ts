@@ -12,7 +12,11 @@ import type { FilterOption } from "@/lib/clients/filters";
  */
 export interface ArticleCatalog {
   rows: ArticleRow[];
+  /** Familles et sous-familles (migration 0093), pour les filtres et la création. */
+  familles: { id: string; nom: string; parentId: string | null }[];
   options: {
+    familles: FilterOption[];
+    sousFamilles: FilterOption[];
     categories: FilterOption[];
     matieres: FilterOption[];
     grammages: FilterOption[];
@@ -33,7 +37,9 @@ export async function loadArticleCatalog({ canSeeCosts }: { canSeeCosts: boolean
   const [{ data: models }, { data: modelColors }, { data: colors }, { data: costs }, { data: variants }, { data: allowed }, { data: figures }] = await Promise.all([
     supabase
       .from("product_models")
-      .select("id,code,name,category,active,sage_reference,textile_id,textiles!product_models_textile_id_fkey(nom,grammage),matieres(nom)")
+      .select(
+        "id,code,name,category,active,sage_reference,textile_id,nature,type_appro,famille_id,sous_famille_id,unite,textiles!product_models_textile_id_fkey(nom,grammage),matieres(nom)"
+      )
       .order("name"),
     supabase.from("product_model_colors").select("product_model_id,color_id"),
     supabase.from("colors").select("id,name").order("name"),
@@ -43,6 +49,15 @@ export async function loadArticleCatalog({ canSeeCosts }: { canSeeCosts: boolean
     // ART-E (migration 0084) : stock disponible vierge et plus petit prix de vente, sans aucun coût.
     supabase.rpc("article_catalog_figures"),
   ]);
+  // Fiche unique (migration 0093) : données techniques des matières premières et consommables.
+  const [{ data: familles }, { data: ownTextiles }, { data: ownConsumables }] = await Promise.all([
+    supabase.from("article_families").select("id,nom,parent_id,ordre").eq("actif", true).order("ordre").order("nom"),
+    supabase.from("textiles").select("product_model_id,composition,grammage,matieres(nom)").not("product_model_id", "is", null),
+    supabase.from("consumables").select("product_model_id,code,sage_reference").not("product_model_id", "is", null),
+  ]);
+  const familleNom = new Map((familles ?? []).map((f) => [f.id as string, f.nom as string]));
+  const textileOf = new Map((ownTextiles ?? []).map((t) => [t.product_model_id as string, t]));
+  const consumableOf = new Map((ownConsumables ?? []).map((c) => [c.product_model_id as string, c]));
   // Vignette (ART-F) : image principale « toutes couleurs », sinon la première principale.
   const { data: principals } = await supabase
     .from("product_model_media")
@@ -86,17 +101,34 @@ export async function loadArticleCatalog({ canSeeCosts }: { canSeeCosts: boolean
       ),
     ];
     const couleurIds = (modelColors ?? []).filter((c) => c.product_model_id === m.id).map((c) => c.color_id as string);
+    const ownTextile = textileOf.get(m.id as string);
+    const ownConsumable = consumableOf.get(m.id as string);
+    const ownMatiere = (ownTextile?.matieres as unknown as { nom: string } | null)?.nom ?? null;
+    const famille = [familleNom.get(m.famille_id as string), familleNom.get(m.sous_famille_id as string)].filter(Boolean).join(" › ") || null;
     return {
       id: m.id as string,
-      code: (m.code as string | null) ?? null,
+      // Un consommable garde son code COFI… ; les autres, le code du modèle.
+      code: (m.code as string | null) ?? (ownConsumable?.code as string | undefined) ?? null,
       name: m.name as string,
+      nature: m.nature as ArticleRow["nature"],
+      typeAppro: m.type_appro as ArticleRow["typeAppro"],
+      familleId: (m.famille_id as string | null) ?? null,
+      sousFamilleId: (m.sous_famille_id as string | null) ?? null,
+      famille,
+      unite: m.unite as string,
       category: (m.category as string | null) ?? null,
       active: !!m.active,
-      matiere: matiere ?? textile?.nom ?? null,
-      grammages: grammages.length ? grammages : textile?.grammage ? [Number(textile.grammage)] : [],
+      matiere: ownMatiere ?? matiere ?? textile?.nom ?? null,
+      grammages: ownTextile?.grammage
+        ? [Number(ownTextile.grammage)]
+        : grammages.length
+          ? grammages
+          : textile?.grammage
+            ? [Number(textile.grammage)]
+            : [],
       couleurIds,
       grille: canSeeCosts ? avecGrille.has(m.id as string) : null,
-      sage: !!m.sage_reference || modelVariants.some((v) => v.sage),
+      sage: !!m.sage_reference || !!ownConsumable?.sage_reference || modelVariants.some((v) => v.sage),
       declinaisons: modelVariants.filter((v) => v.actif).length,
       stockDisponible: figuresByModel.get(m.id as string)?.stock_disponible != null ? Number(figuresByModel.get(m.id as string)!.stock_disponible) : null,
       prixAPartirDe: figuresByModel.get(m.id as string)?.prix_a_partir_de != null ? Number(figuresByModel.get(m.id as string)!.prix_a_partir_de) : null,
@@ -108,14 +140,29 @@ export async function loadArticleCatalog({ canSeeCosts }: { canSeeCosts: boolean
         matiere,
         textile?.nom,
         m.sage_reference as string | null,
+        famille,
+        (ownTextile?.composition as string | null) ?? null,
+        (ownConsumable?.code as string | null) ?? null,
         ...couleurIds.map((id) => colorName.get(id)),
       ]),
     };
   });
 
+  const familleOptions = (parentId: "racine" | "enfant") =>
+    (familles ?? [])
+      .filter((f) => (parentId === "racine" ? !f.parent_id : !!f.parent_id))
+      .map((f) => ({
+        value: f.id as string,
+        label: f.parent_id ? `${familleNom.get(f.parent_id as string) ?? ""} › ${f.nom}` : (f.nom as string),
+        count: rows.filter((r) => (parentId === "racine" ? r.familleId : r.sousFamilleId) === f.id).length,
+      }));
+
   return {
     rows,
+    familles: (familles ?? []).map((f) => ({ id: f.id as string, nom: f.nom as string, parentId: (f.parent_id as string | null) ?? null })),
     options: {
+      familles: familleOptions("racine"),
+      sousFamilles: familleOptions("enfant"),
       categories: countOptions(rows.map((r) => r.category)),
       matieres: countOptions(rows.map((r) => r.matiere)),
       grammages: countOptions(rows.flatMap((r) => r.grammages.map(String)), (g) => `${g} g/m²`),

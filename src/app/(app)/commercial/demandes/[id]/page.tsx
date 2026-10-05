@@ -97,7 +97,9 @@ export default async function RequestDetailPage({
       supabase
         .from("product_models")
         .select("id,name,base_price,textile_id,textiles!product_models_textile_id_fkey(id,nom,grammage),product_model_textiles(textile_id,textiles(id,nom,grammage))")
-        .eq("active", true),
+        .eq("active", true)
+        // Produits finis : les autres articles n'ont pas encore leur circuit de vente.
+        .eq("nature", "pf"),
       // Gabarits de zones de tous les modèles — nécessaire au sélecteur de
       // couleur du devis (chantier config-produit-devis) dès qu'une ligne
       // choisit un modèle, sans aller-retour supplémentaire par ligne.

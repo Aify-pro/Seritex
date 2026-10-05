@@ -77,6 +77,12 @@ const row = (r: Partial<ArticleRow> & { id: string; name: string }): ArticleRow 
   category: null,
   active: true,
   matiere: null,
+  nature: "pf",
+  typeAppro: "fabrique",
+  familleId: null,
+  sousFamilleId: null,
+  famille: null,
+  unite: "piece",
   grammages: [],
   couleurIds: [],
   grille: null,
@@ -100,6 +106,18 @@ test("liste Articles : recherche sans accents, filtres et tri", () => {
   assert.deepEqual(applyArticleFilters(rows, parseArticleFilters({ categorie: "T-shirt" })).map((r) => r.id), ["2"]);
   assert.deepEqual(applyArticleFilters(rows, parseArticleFilters({ actif: "tous", categorie: "T-shirt" })).map((r) => r.id), ["3", "2"]);
   assert.deepEqual(applyArticleFilters(rows, parseArticleFilters({ tri: "declinaisons", ordre: "desc" })).map((r) => r.id), ["2", "1"]);
+});
+
+test("liste unique : filtres nature, type et famille (fiche article unique)", () => {
+  const rows = [
+    row({ id: "pf", name: "T-shirt", nature: "pf", familleId: "vet", sousFamilleId: "ts" }),
+    row({ id: "mp", name: "Jersey 165", nature: "mp", typeAppro: "negoce", familleId: "tex" }),
+    row({ id: "co", name: "Bouton 12 mm", nature: "consommable", typeAppro: "negoce", familleId: "merc" }),
+  ];
+  assert.deepEqual(applyArticleFilters(rows, parseArticleFilters({ nature: "mp" })).map((r) => r.id), ["mp"]);
+  assert.deepEqual(applyArticleFilters(rows, parseArticleFilters({ type: "negoce" })).map((r) => r.id), ["co", "mp"]);
+  assert.deepEqual(applyArticleFilters(rows, parseArticleFilters({ famille: "vet", sous_famille: "ts" })).map((r) => r.id), ["pf"]);
+  assert.equal(parseArticleFilters({ nature: "inconnue" }).nature, "");
 });
 
 console.log(`\n${n} tests OK`);

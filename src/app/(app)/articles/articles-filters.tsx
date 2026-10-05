@@ -13,6 +13,7 @@ import {
   type ArticleSortKey,
 } from "@/lib/articles/filters";
 import type { FilterOption } from "@/lib/clients/filters";
+import { NATURE_LABELS, TYPE_APPRO_LABELS, type ArticleNature, type TypeAppro } from "@/lib/articles/natures";
 
 const SORT_LABELS: Record<ArticleSortKey, string> = {
   nom: "Nom",
@@ -71,7 +72,14 @@ export function ArticlesFilters({
   showGrille,
 }: {
   values: ArticleFilters;
-  options: { categories: FilterOption[]; matieres: FilterOption[]; grammages: FilterOption[]; couleurs: FilterOption[] };
+  options: {
+    familles: FilterOption[];
+    sousFamilles: FilterOption[];
+    categories: FilterOption[];
+    matieres: FilterOption[];
+    grammages: FilterOption[];
+    couleurs: FilterOption[];
+  };
   /** Filtre « grille de prix présente » : Direction et administrateur seulement (A2). */
   showGrille: boolean;
 }) {
@@ -126,7 +134,7 @@ export function ArticlesFilters({
 
   function reset() {
     if (timer.current) clearTimeout(timer.current);
-    const defaults = { ...parseArticleFilters({}), onglet: values.onglet };
+    const defaults = parseArticleFilters({});
     localRef.current = defaults;
     setLocal(defaults);
     setSentQ("");
@@ -134,8 +142,7 @@ export function ArticlesFilters({
     startTransition(() => router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false }));
   }
 
-  const produits = values.onglet === "produits";
-  const advancedActive = activeArticleFilterCount(local) - (local.q ? 1 : 0);
+  const advancedActive = activeArticleFilterCount(local) - (local.q ? 1 : 0) - (local.nature ? 1 : 0);
 
   return (
     <div className="space-y-3 rounded-lg border border-border bg-surface p-4">
@@ -146,27 +153,41 @@ export function ArticlesFilters({
             type="search"
             value={local.q}
             onChange={(e) => onSearch(e.target.value)}
-            placeholder={produits ? "Rechercher : nom, code, catégorie, matière, couleur, référence Sage…" : "Rechercher : nom, composition…"}
+            placeholder="Rechercher : nom, code, famille, catégorie, matière, couleur, référence Sage…"
             aria-label="Rechercher un article"
             className={`${inputClass} pl-8`}
           />
         </div>
-        {produits && (
-          <Button
-            type="button"
-            size="md"
-            variant={advancedOpen ? "primary" : "secondary"}
-            onClick={() => setAdvancedOpen((o) => !o)}
-            aria-expanded={advancedOpen}
+        <label className="w-48">
+          <span className="sr-only">Nature</span>
+          <select
+            value={local.nature}
+            onChange={(e) => navigate({ nature: e.target.value as "" | ArticleNature })}
+            className={inputClass}
+            aria-label="Nature"
           >
-            <SlidersHorizontal className="h-4 w-4" />
-            Recherche avancée
-            {advancedActive > 0 && (
-              <span className="rounded-full bg-brand-foreground/20 px-1.5 text-xs font-semibold">{advancedActive}</span>
-            )}
-            <ChevronDown className={`h-4 w-4 transition-transform ${advancedOpen ? "rotate-180" : ""}`} />
-          </Button>
-        )}
+            <option value="">Toutes les natures</option>
+            {(Object.keys(NATURE_LABELS) as ArticleNature[]).map((n) => (
+              <option key={n} value={n}>
+                {NATURE_LABELS[n]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <Button
+          type="button"
+          size="md"
+          variant={advancedOpen ? "primary" : "secondary"}
+          onClick={() => setAdvancedOpen((o) => !o)}
+          aria-expanded={advancedOpen}
+        >
+          <SlidersHorizontal className="h-4 w-4" />
+          Recherche avancée
+          {advancedActive > 0 && (
+            <span className="rounded-full bg-brand-foreground/20 px-1.5 text-xs font-semibold">{advancedActive}</span>
+          )}
+          <ChevronDown className={`h-4 w-4 transition-transform ${advancedOpen ? "rotate-180" : ""}`} />
+        </Button>
         {pending && <Loader2 className="mb-2 h-4 w-4 animate-spin text-foreground-muted" aria-label="Chargement" />}
         {activeCount > 0 && (
           <Button type="button" size="sm" variant="secondary" onClick={reset}>
@@ -175,9 +196,25 @@ export function ArticlesFilters({
         )}
       </div>
 
-      {produits && advancedOpen && (
+      {advancedOpen && (
         <div className="space-y-3 border-t border-border pt-3">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <Field label="Famille">
+              <OptionSelect value={local.famille} onChange={(v) => navigate({ famille: v, sousFamille: "" })} options={options.familles} placeholder="Toutes" />
+            </Field>
+            <Field label="Sous-famille">
+              <OptionSelect value={local.sousFamille} onChange={(v) => navigate({ sousFamille: v })} options={options.sousFamilles} placeholder="Toutes" />
+            </Field>
+            <Field label="Type">
+              <select value={local.type} onChange={(e) => navigate({ type: e.target.value as "" | TypeAppro })} className={inputClass}>
+                <option value="">Tous</option>
+                {(Object.keys(TYPE_APPRO_LABELS) as TypeAppro[]).map((t) => (
+                  <option key={t} value={t}>
+                    {TYPE_APPRO_LABELS[t]}
+                  </option>
+                ))}
+              </select>
+            </Field>
             <Field label="Catégorie">
               <OptionSelect value={local.categorie} onChange={(v) => navigate({ categorie: v })} options={options.categories} placeholder="Toutes" />
             </Field>
