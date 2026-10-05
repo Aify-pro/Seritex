@@ -5,6 +5,7 @@ import { requireRole, requireUser } from "@/lib/auth/current-user";
 import type { RequestStatus } from "@/lib/types/domain";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { cleanRequestLines, type RequestArticleLine } from "@/lib/requests/articles";
 import { sendNotification } from "@/lib/notifications/send";
 import { resolveContactEmailForRequest, resolveRoleEmails } from "@/lib/notifications/recipients";
 import { computeQuoteTotals } from "@/lib/quote-totals";
@@ -568,6 +569,29 @@ const newRequestSchema = z.object({
 });
 
 export async function createRequest(formData: FormData) {
+  // Articles demandés (modèle, couleur, tailles) : client ou stock.
+  let lignes: RequestArticleLine[] = [];
+  try {
+    lignes = cleanRequestLines(JSON.parse(String(formData.get("lignes") ?? "[]")) as RequestArticleLine[]);
+  } catch {
+    return { error: "Articles de la demande illisibles" };
+  }
+
+  // Demande pour le stock (SF-3) : sans client, articles et quantités obligatoires.
+  if (formData.get("pour_stock") === "on") {
+    await requireRole(["commercial", "administrateur", "responsable_production"]);
+    const avecQuantites = lignes.filter((l) => Object.keys(l.tailles).length > 0);
+    if (avecQuantites.length === 0) return { error: "Ajoutez au moins un article avec des quantités par taille." };
+    const supabase = await createClient();
+    const { data, error } = await supabase.rpc("create_stock_request", {
+      p_description: String(formData.get("description") ?? ""),
+      p_lignes: avecQuantites,
+    });
+    if (error) return { error: error.message };
+    revalidatePath("/commercial/demandes");
+    return { requestId: data as string };
+  }
+
   const { authId } = await requireRole(["commercial", "administrateur"]);
   const parsed = newRequestSchema.safeParse({
     company_id: formData.get("company_id"),
@@ -591,6 +615,7 @@ export async function createRequest(formData: FormData) {
       contact_id: parsed.data.contact_id || null,
       description: parsed.data.description,
       needs_graphics: parsed.data.needs_graphics ?? false,
+      lignes_stock: lignes.length ? lignes : null,
       assigned_commercial_id: authId,
       source: "manuel",
       created_by: authId,

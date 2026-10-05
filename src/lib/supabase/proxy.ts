@@ -28,6 +28,8 @@ const ROUTE_ACCESS: { prefix: string; roles: string[] }[] = [
   // l'échantillonnage est aussi géré par le responsable production (section
   // 2.1/2.7 de l'analyse), contrairement au reste de l'espace commercial.
   { prefix: "/commercial/echantillons", roles: ["commercial", "responsable_production", "administrateur"] },
+  // Demandes : la production crée et suit les demandes pour le stock (SF-3).
+  { prefix: "/commercial/demandes", roles: ["commercial", "administrateur", "responsable_production"] },
   { prefix: "/commercial", roles: ["commercial", "administrateur"] },
   { prefix: "/infographie", roles: ["infographiste", "administrateur"] },
   // Gestionnaire de stock : accès aux ODF pour la partie Stock de chaque

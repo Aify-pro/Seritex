@@ -17,6 +17,8 @@ import { CreateSampleDialog } from "@/components/samples/create-sample-dialog";
 import { getSampleQuoteLineOptions } from "@/lib/samples";
 import { getCompanySettings } from "@/lib/company-settings";
 import { getDispatchRules, getSizeOptionsByModel } from "@/lib/quote-dispatch";
+import { StockRequestDetail } from "./stock-request-detail";
+import type { RequestArticleLine } from "@/lib/requests/articles";
 
 export default async function RequestDetailPage({
   params,
@@ -26,7 +28,7 @@ export default async function RequestDetailPage({
   /** `sage` : n° d'un devis Sage à récupérer (préremplit le devis) ; `sage_q` : recherche par numéro (migration 0071). */
   searchParams: Promise<{ sage?: string; sage_q?: string }>;
 }) {
-  const { authId } = await requireRole(["commercial", "administrateur"]);
+  const { authId, profile } = await requireRole(["commercial", "administrateur", "responsable_production"]);
   const { id } = await params;
   const { sage: sageParam, sage_q: sageQuery } = await searchParams;
   const supabase = await createClient();
@@ -38,6 +40,32 @@ export default async function RequestDetailPage({
     .single();
 
   if (!request) notFound();
+
+  // Demande pour le stock (sans client, SF-3) : sa propre fiche, sans devis.
+  if (!request.company_id) {
+    const { data: odfs } = await supabase
+      .from("production_orders")
+      .select("id,reference,status")
+      .eq("request_id", id)
+      .neq("status", "annulee")
+      .limit(1);
+    return (
+      <StockRequestDetail
+        request={{
+          id: request.id,
+          reference: request.reference,
+          status: request.status,
+          description: request.description,
+          created_at: request.created_at,
+          lignes: (request.lignes_stock ?? []) as { description: string; tailles: Record<string, number> }[],
+          odf: odfs?.[0] ? { id: odfs[0].id as string, reference: odfs[0].reference as string } : null,
+        }}
+        canCreateOdf={profile.role === "administrateur" || profile.role === "responsable_production"}
+      />
+    );
+  }
+  // La production n'ouvre que les demandes pour le stock.
+  if (profile.role === "responsable_production") notFound();
 
   const [
     { data: messages },
@@ -182,6 +210,7 @@ export default async function RequestDetailPage({
   };
   const contact = request.contacts as unknown as { first_name: string; last_name: string; email: string } | null;
 
+  const requestArticles = ((request.lignes_stock ?? []) as RequestArticleLine[]).filter((l) => l.product_model_id);
   const quoteFormProps = {
     requestId: request.id,
     companyId: company.id,
@@ -211,6 +240,8 @@ export default async function RequestDetailPage({
     },
     paymentTerms: paymentTerms ?? [],
     currencies: currencies ?? [],
+    // Articles choisis dans la demande : lignes de départ du devis.
+    requestLines: requestArticles,
     client: {
       name: company.name,
       address: company.address ?? null,
@@ -254,6 +285,23 @@ export default async function RequestDetailPage({
               <p className="text-sm text-foreground">{request.description}</p>
               {request.needs_graphics && (
                 <p className="mt-3 text-xs text-accent">🎨 Nécessite une intervention graphique</p>
+              )}
+              {requestArticles.length > 0 && (
+                <div className="mt-4 space-y-1">
+                  <p className="text-xs font-medium uppercase tracking-wide text-foreground-muted">Articles demandés</p>
+                  <ul className="space-y-0.5 text-sm">
+                    {requestArticles.map((l, i) => {
+                      const total = Object.values(l.tailles ?? {}).reduce((a, b) => a + b, 0);
+                      return (
+                        <li key={i}>
+                          {l.description}
+                          {total > 0 && <span className="text-xs text-foreground-muted"> · {total} pièce(s)</span>}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  <p className="text-xs text-foreground-muted">Ils sont repris comme lignes de départ du devis.</p>
+                </div>
               )}
             </CardBody>
           </Card>

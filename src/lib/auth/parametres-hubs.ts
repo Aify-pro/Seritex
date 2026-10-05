@@ -129,20 +129,13 @@ export function getParametresHubs(items: NavItem[]): ParametresHub[] {
 
 /**
  * Entrées de la barre latérale : les écrans de Paramètres, éparpillés à plat
- * dans les entrées du rôle, deviennent UN volet « Paramètres » placé là où
- * se trouvait le premier, avec un menu par thème à l'intérieur.
+ * dans les entrées du rôle, deviennent UN volet « Paramètres », toujours en
+ * bas du menu, avec un menu par thème à l'intérieur.
  */
 export function buildSidebarEntries(items: NavItem[]): SidebarEntry[] {
   const hubs = getParametresHubs(items);
-  const entries: SidebarEntry[] = [];
-  let groupAdded = false;
-  for (const item of items) {
-    if (!isParametres(item)) {
-      entries.push(item);
-      continue;
-    }
-    if (groupAdded || hubs.length === 0) continue;
-    groupAdded = true;
+  const entries: SidebarEntry[] = items.filter((item) => !isParametres(item));
+  if (hubs.length > 0) {
     entries.push({
       label: PARAMETRES,
       icon: icon(Settings),
