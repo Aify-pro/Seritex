@@ -127,6 +127,8 @@ export interface SampleArticleMedia {
   odfOnly: DownloadableMediaFile[];
   /** L'article passe par un atelier qui exige un visuel — avertissement, jamais bloquant. */
   requiresVisuel: boolean;
+  /** ODF lancé : dépôt et retrait figés (0042) — l'écran l'explique au lieu de laisser la RLS refuser. */
+  locked: boolean;
   /** Fichiers de la demande proposables au dépôt (migration 0043). */
   available: AttachableMediaFile[];
 }
@@ -144,6 +146,7 @@ const EMPTY_ARTICLE_MEDIA: SampleArticleMedia = {
   visuels: [],
   odfOnly: [],
   requiresVisuel: false,
+  locked: false,
   available: [],
 };
 
@@ -154,12 +157,16 @@ export function emptySampleArticleMedia(): SampleArticleMedia {
 /**
  * Qui peut déposer sur l'article depuis la fiche : les droits suivent la
  * RLS de la table ciblée — commercial/administrateur sur une ligne de devis
- * (0041), responsable production/administrateur sur un article d'ODF
- * (0042). Rien n'est proposé à un client.
+ * (0041) ; sur un article d'ODF, commercial, responsable production et
+ * administrateur depuis 0095 (le commercial n'a pas accès à l'écran ODF :
+ * la fiche échantillon est son point d'entrée). Rien n'est proposé à un
+ * client. Le gel d'un ODF lancé est porté par `SampleArticleMedia.locked`.
  */
 export function canEditSampleArticleMedia(role: string, target: SampleArticleMedia["target"]) {
   if (target === "quote_line") return role === "commercial" || role === "administrateur";
-  if (target === "order_line") return role === "responsable_production" || role === "administrateur";
+  if (target === "order_line") {
+    return role === "commercial" || role === "responsable_production" || role === "administrateur";
+  }
   return false;
 }
 
@@ -219,6 +226,17 @@ export async function getSampleArticleMediaMap(samples: SampleArticleRef[]): Pro
           .in("model_routes.product_model_id", modelIds)
           .eq("model_routes.par_defaut", true)
       : { data: [] };
+
+  // Statut de l'ODF des articles visés : dépôt figé passé la validation (0042).
+  const { data: orderLineStatuses } =
+    orderLineIds.length > 0
+      ? await supabase.from("production_order_lines").select("id,production_orders(status)").in("id", orderLineIds)
+      : { data: [] };
+  const lockedOrderLines = new Set(
+    ((orderLineStatuses ?? []) as unknown as { id: string; production_orders: { status: string } | null }[])
+      .filter((l) => !["brouillon", "en_attente_validation", "refuse"].includes(l.production_orders?.status ?? ""))
+      .map((l) => l.id)
+  );
 
   const { data: categoriesVisuel } = await supabase.from("atelier_categories").select("cle").eq("requiert_visuel", true);
   const visuelCategoryKeys = new Set((categoriesVisuel ?? []).map((c) => c.cle));
@@ -287,6 +305,7 @@ export async function getSampleArticleMediaMap(samples: SampleArticleRef[]): Pro
         target === "quote_line"
           ? quoteLinesRequiringVisuel.has(sample.quote_line_id!)
           : orderLinesRequiringVisuel.has(sample.production_order_line_id!),
+      locked: target === "order_line" && lockedOrderLines.has(sample.production_order_line_id!),
       available: requestFiles.get(sample.request_id ?? "") ?? [],
     });
   }

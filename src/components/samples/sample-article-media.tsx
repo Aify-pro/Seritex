@@ -66,7 +66,7 @@ export function SampleArticleMediaFiles({
     );
   }
 
-  const canEdit = editable;
+  const canEdit = editable && !media.locked;
   const targetLabel = media.target === "quote_line" ? "la ligne de devis" : "l'article d'ODF";
 
   return (
@@ -78,6 +78,13 @@ export function SampleArticleMediaFiles({
           technique d&apos;impression.
         </p>
       </div>
+
+      {media.locked && (
+        <p className="flex items-start gap-1.5 text-xs text-foreground-muted">
+          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          L&apos;ordre de fabrication est lancé : maquette et visuels sont figés.
+        </p>
+      )}
 
       {media.requiresVisuel && media.visuels.length === 0 && (
         <p className="flex items-start gap-1.5 rounded-md bg-warning-soft px-2.5 py-1.5 text-xs text-warning">
