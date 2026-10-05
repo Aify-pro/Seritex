@@ -57,7 +57,12 @@ export type MatelasRow = {
    * Renseigné quand le matelas est clôturé : il reste dans la liste, marqué
    * terminé, et ses quantités obtenues par taille servent aux étiquettes.
    */
-  cloture: { occurredAt: string; quantitesObtenues: Record<string, number> } | null;
+  cloture: {
+    occurredAt: string;
+    quantitesObtenues: Record<string, number>;
+    /** Code du lot créé pour chaque taille à la clôture (migration 0092) : c'est lui que porte l'étiquette. */
+    lots: Record<string, string>;
+  } | null;
 };
 
 /** Lot 6 : tracé d'origine optionnel d'un lot article — clôturé ou non. */

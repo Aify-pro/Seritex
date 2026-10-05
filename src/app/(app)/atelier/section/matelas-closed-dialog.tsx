@@ -15,8 +15,9 @@ import { useSizes, type MatelasRow } from "./types";
  * taille, date), et en haut la planche A4 qui regroupe toutes les étiquettes
  * du matelas.
  *
- * Le QR renvoie vers la file de la section, filtrée sur l'ODF — la même cible
- * que le QR d'en-tête d'ODF (voir `QrScanButton`).
+ * Chaque étiquette est celle du lot créé pour la taille à la clôture
+ * (migration 0092) : son code en gros et son QR, que les sections suivantes
+ * scannent à l'entrée et à la sortie. Le QR ouvre la fiche du lot.
  */
 export function MatelasClosedDialog({
   workOrderId,
@@ -48,7 +49,9 @@ export function MatelasClosedDialog({
 
   function printLabel(taille: { cle: string; libelle: string; quantite: number }) {
     setPrinting(taille.cle);
-    const url = `${window.location.origin}/atelier/section?odf=${productionOrderId}`;
+    const lot = cloture!.lots[taille.cle];
+    // Sans lot (clôture antérieure à 0092, déjà traitée), l'ancien QR vers la file de l'ODF.
+    const url = lot ? `${window.location.origin}/lots/${lot}` : `${window.location.origin}/atelier/section?odf=${productionOrderId}`;
     const modules = QRCode.create(url, { errorCorrectionLevel: "M" }).modules.size;
     printOnSunmi([
       { op: "align", v: 1 },
@@ -56,7 +59,8 @@ export function MatelasClosedDialog({
       { op: "feed", n: 1 },
       { op: "qr", v: url, module: qrModuleSize(modules), level: 1 },
       { op: "feed", n: 1 },
-      { op: "text", v: `${workOrderReference}\n`, size: 36 },
+      ...(lot ? [{ op: "text" as const, v: `${lot}\n`, size: 40 }] : []),
+      { op: "text", v: `${workOrderReference}\n`, size: lot ? 26 : 36 },
       { op: "text", v: `${taille.libelle} · ${taille.quantite} pcs\n`, size: 30 },
       { op: "text", v: `${formatDate(cloture!.occurredAt)}\n`, size: 30 },
       { op: "feed", n: 4 },
@@ -92,7 +96,10 @@ export function MatelasClosedDialog({
         <ul className="divide-y divide-border overflow-hidden rounded-md border border-border">
           {tailles.map((t) => (
             <li key={t.cle} className="flex min-h-12 items-center gap-3 bg-surface px-3 py-2">
-              <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{t.libelle}</span>
+              <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+                {t.libelle}
+                {cloture.lots[t.cle] && <span className="ml-2 font-mono text-xs text-foreground-muted">{cloture.lots[t.cle]}</span>}
+              </span>
               <span className="shrink-0 text-sm tabular-nums text-foreground">{t.quantite} pcs</span>
               <button
                 type="button"

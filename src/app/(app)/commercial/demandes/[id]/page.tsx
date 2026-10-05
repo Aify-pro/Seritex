@@ -68,7 +68,7 @@ export default async function RequestDetailPage({
         .eq("request_id", id),
       supabase
         .from("product_models")
-        .select("id,name,base_price,textile_id,product_model_textiles(textile_id,textiles(id,nom,grammage))")
+        .select("id,name,base_price,textile_id,textiles!product_models_textile_id_fkey(id,nom,grammage),product_model_textiles(textile_id,textiles(id,nom,grammage))")
         .eq("active", true),
       // Gabarits de zones de tous les modèles — nécessaire au sélecteur de
       // couleur du devis (chantier config-produit-devis) dès qu'une ligne
@@ -190,8 +190,11 @@ export default async function RequestDetailPage({
       id: pm.id as string,
       name: pm.name as string,
       base_price: pm.base_price as number | null,
-      textiles: ((pm.product_model_textiles ?? []) as unknown as { textiles: { id: string; nom: string; grammage: number | null } | null }[])
-        .map((t) => t.textiles)
+      // Textiles autorisés ; à défaut, le textile principal du modèle.
+      textiles: [
+        ...((pm.product_model_textiles ?? []) as unknown as { textiles: { id: string; nom: string; grammage: number | null } | null }[]).map((t) => t.textiles),
+        ...((pm.product_model_textiles ?? []).length === 0 ? [pm.textiles as unknown as { id: string; nom: string; grammage: number | null } | null] : []),
+      ]
         .filter((t): t is { id: string; nom: string; grammage: number | null } => !!t)
         .sort((x, y) => Number(y.id === pm.textile_id) - Number(x.id === pm.textile_id) || (x.grammage ?? 0) - (y.grammage ?? 0))
         .map((t) => ({ id: t.id, nom: t.nom })),

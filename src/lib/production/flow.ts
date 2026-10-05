@@ -15,10 +15,11 @@
  *     partie de la pièce (mode « partie ») ;
  *   - entrée de l'étape 1 sans coupe ni stock = répartition de tailles (P1) ;
  *   - coupe : pièces des matelas clôturés ; stock : prélevé ;
- *   - on ne déclare jamais plus que l'entrée.
+ *   - on ne déclare jamais plus que l'entrée, sauf surplus déclaré avec un
+ *     motif (migration 0091) : il s'ajoute à ce que la section a reçu.
  */
 
-export type DeclarationType = "bonne" | "dechet" | "premier_choix" | "deuxieme_choix" | "preleve";
+export type DeclarationType = "bonne" | "dechet" | "premier_choix" | "deuxieme_choix" | "preleve" | "surplus";
 
 export const DECLARATION_TYPE_LABELS: Record<DeclarationType, string> = {
   bonne: "Bonnes",
@@ -26,13 +27,17 @@ export const DECLARATION_TYPE_LABELS: Record<DeclarationType, string> = {
   premier_choix: "1er choix",
   deuxieme_choix: "2e choix",
   preleve: "Prélevé",
+  surplus: "Surplus",
 };
 
 /** Catégorie d'atelier (clé) d'une section — null : section sans catégorie. */
 export type CategorieCle = "coupe" | "impression" | "couture" | "finition" | "stock" | (string & {}) | null;
 
+/** Types saisis par un atelier ; le surplus est enregistré par la base à partir d'un dépassement motivé. */
+export type DeclarableType = Exclude<DeclarationType, "surplus">;
+
 /** Types qu'une section peut déclarer, selon sa catégorie (D7 : seule la finition fait du 2e choix). */
-export function allowedDeclarationTypes(categorie: CategorieCle): DeclarationType[] {
+export function allowedDeclarationTypes(categorie: CategorieCle): DeclarableType[] {
   switch (categorie) {
     case "coupe":
       return ["dechet"];
@@ -61,6 +66,8 @@ export interface UnitTotals {
   premier_choix?: number;
   deuxieme_choix?: number;
   preleve?: number;
+  /** Pièces produites en plus de ce que la section a reçu (avec motif). */
+  surplus?: number;
   /** Coupe : pièces des matelas clôturés. */
   coupe_produit?: number;
 }
@@ -160,6 +167,7 @@ export function computeFlowDetail(
       const sumB = perUnit.reduce((s, p) => s + p.b, 0);
       const sumD = perUnit.reduce((s, p) => s + p.d, 0);
       const minB = perUnit.length ? Math.min(...perUnit.map((p) => p.b)) : 0;
+      const sumS = perUnit.reduce((s, p) => s + (p.t.surplus ?? 0), 0);
 
       let entree: number;
       if (index === 0) {
@@ -171,14 +179,15 @@ export function computeFlowDetail(
       }
 
       for (const p of perUnit) {
-        const recu = mode === "partie" ? entree : entree - (sumB + sumD - p.b - p.d);
+        const s = p.t.surplus ?? 0;
+        const recu = mode === "partie" ? entree + s : entree + sumS - (sumB + sumD - p.b - p.d);
         rows.push({
           etape,
           mode,
           unitId: p.unit.id,
           categorie: p.unit.categorie,
           taille,
-          entreeEtape: entree,
+          entreeEtape: mode === "partie" ? entree + s : entree + sumS,
           recu,
           bonnes: p.b,
           dechets: p.d,

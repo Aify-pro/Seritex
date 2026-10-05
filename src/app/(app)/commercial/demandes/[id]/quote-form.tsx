@@ -593,7 +593,12 @@ export function QuoteForm({
                   ))}
                 </select>
               </div>
-              {(products.find((p) => p.id === line.productModelId)?.textiles.length ?? 0) > 1 && (
+              {line.productModelId && (products.find((p) => p.id === line.productModelId)?.textiles.length ?? 0) === 0 && (
+                <p className="self-end pb-2 text-xs text-warning">
+                  Aucun grammage déclaré pour ce modèle : renseignez ses textiles dans la fiche article (onglet Général).
+                </p>
+              )}
+              {(products.find((p) => p.id === line.productModelId)?.textiles.length ?? 0) > 0 && (
                 <div>
                   <label className="mb-1 block text-xs font-medium text-foreground">Grammage</label>
                   <select

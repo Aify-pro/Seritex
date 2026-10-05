@@ -992,3 +992,29 @@ export async function splitProductionOrderLine(lineId: string, productionOrderId
   revalidateOdf(productionOrderId);
   return {};
 }
+
+/**
+ * Paramètres de l'analyse du prix de revient réel d'un ODF (migration 0070) :
+ * prix du tissu au kg propre à cet ODF (null = prix du textile) et notes.
+ */
+export async function saveOdfRealCost(productionOrderId: string, input: { prix_tissu_kg: number | null; notes: string }) {
+  const { profile } = await requireRole(["administrateur"]);
+  const parsed = z
+    .object({
+      prix_tissu_kg: z.number().positive("Prix au kg invalide").nullable(),
+      notes: z.string().trim().max(2000).transform((v) => v || null),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Paramètres invalides" };
+
+  const supabase = await createClient();
+  const { error } = await supabase.from("production_order_real_costs").upsert({
+    production_order_id: productionOrderId,
+    ...parsed.data,
+    updated_at: new Date().toISOString(),
+    updated_by: profile.id,
+  });
+  if (error) return { error: error.message };
+  revalidateOdf(productionOrderId);
+  return {};
+}

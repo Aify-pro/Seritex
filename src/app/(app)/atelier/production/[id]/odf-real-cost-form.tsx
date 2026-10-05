@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { saveOdfRealCost } from "../../actions";
+import { saveOdfRealCost } from "../actions";
 
 /** Prix du tissu au kg propre à cet ODF (vide = prix du textile) et notes (migration 0070). */
 export function OdfRealCostForm({ odfId, prixKgOdf, notes, textilePlaceholder }: { odfId: string; prixKgOdf: number | null; notes: string | null; textilePlaceholder: string }) {

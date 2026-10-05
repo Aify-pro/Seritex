@@ -13,8 +13,8 @@ const pique = await one(`insert into matieres(nom, code_court) values ('Piqué',
 const t165 = await one(`insert into textiles(nom, grammage, matiere_id, code_court) values ('Jersey 165',165,$1,'165') returning id`, [jersey.id]);
 const t180 = await one(`insert into textiles(nom, grammage, matiere_id, code_court) values ('Jersey 180',180,$1,'180') returning id`, [jersey.id]);
 const tPique = await one(`insert into textiles(nom, grammage, matiere_id, code_court) values ('Piqué 220',220,$1,'220') returning id`, [pique.id]);
-const blanc = await one(`insert into colors(name, code) values ('Blanc', '#FFFFFF') returning id, code_court`);
-const noir = await one(`insert into colors(name, code) values ('Noir', '#000000') returning id, code_court`);
+const blanc = await one(`insert into colors(name, code) values ('Blanc', '#FFFFFF') on conflict (name) do update set name = excluded.name returning id, code_court`);
+const noir = await one(`insert into colors(name, code) values ('Noir', '#000000') on conflict (name) do update set name = excluded.name returning id, code_court`);
 const xl = await one(`select id, code_court from sizes where cle='Homme/XL'`);
 const m = await one(`select id from sizes where cle='Homme/M'`);
 

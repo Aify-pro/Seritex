@@ -238,6 +238,7 @@ export default async function WorkOrderDetailPage({
                     dechet: r.dechets,
                     premier_choix: r.premier_choix,
                     deuxieme_choix: r.deuxieme_choix,
+                    surplus: 0,
                     preleve: r.preleve,
                   };
                   return (

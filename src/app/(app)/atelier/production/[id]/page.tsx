@@ -26,6 +26,8 @@ import type { StockAvailabilityRow } from "./line-stock-tools";
 import { ClosureBalance, type ClosureBalanceData } from "./closure-balance";
 import type { WorkOrderFlowRow } from "@/lib/types/domain";
 import { RemaindersPanel, type RemainderRow } from "./remainders-panel";
+import { OdfTabs, type OdfTab } from "./odf-tabs";
+import { RealCostTab } from "./real-cost-tab";
 import { ConsumptionPanel, type ConsumptionRow } from "./consumption-panel";
 import { odfClientLabel } from "@/lib/production/client-label";
 import { SHIPMENT_STATUS_LABELS, type ShipmentStatus } from "@/lib/delivery/status";
@@ -35,7 +37,13 @@ import Link from "next/link";
 
 const LOT_CATEGORIE_LABELS: Record<string, string> = { semi_fini: "Semi-fini", fini: "Fini", dechet: "Déchet" };
 
-export default async function ProductionOrderDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function ProductionOrderDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ onglet?: string }>;
+}) {
   const { profile } = await requireRole([
     "responsable_production",
     "administrateur",
@@ -44,6 +52,7 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     "infographiste",
   ]);
   const { id } = await params;
+  const { onglet } = await searchParams;
   const supabase = await createClient();
   const baseUrl = await getBaseUrl();
 
@@ -724,6 +733,14 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
     }
   }
 
+  // Onglets visibles selon le rôle : la lecture s'ouvre catégorie par catégorie.
+  const tabs: OdfTab[] = ["general"];
+  if (["administrateur", "responsable_production", "gestionnaire_stock"].includes(profile.role)) tabs.push("production");
+  if (order.company_id && ["administrateur", "responsable_production", "comptabilite"].includes(profile.role)) tabs.push("livraison");
+  if (canManageStock) tabs.push("stock");
+  if (profile.role === "administrateur" && order.quote_id) tabs.push("couts");
+  const tab: OdfTab = tabs.includes(onglet as OdfTab) ? (onglet as OdfTab) : "general";
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -777,15 +794,6 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
             >
               <Printer className="h-3.5 w-3.5" /> PDF
             </a>
-            {/* Prix de revient réel (lot F) : Direction et administrateur seulement. */}
-            {profile.role === "administrateur" && order.quote_id && (
-              <Link
-                href={`/tarification/realise/${order.id}`}
-                className="inline-flex h-8 items-center rounded-md border border-border bg-surface px-3 text-xs font-medium text-foreground hover:bg-surface-muted"
-              >
-                Prix de revient réel
-              </Link>
-            )}
             {canArchive && <ArchiveButton productionOrderId={order.id} archived={!!order.archived_at} />}
           </div>
         }
@@ -834,75 +842,6 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
 
       <AnomaliesPanel productionOrderId={order.id} anomalies={anomalyRows} canResolve={isAdmin || profile.role === "responsable_production"} />
 
-      {order.mention_surplus_traces && (
-        <Card className="border-info/30 bg-info-soft/40">
-          <CardBody>
-            <p className="text-xs font-medium text-foreground-muted">Surplus tracé vs quantité demandée</p>
-            <p className="text-sm text-foreground">
-              {Object.entries(order.mention_surplus_traces as Record<string, number>)
-                .map(([taille, surplus]) => `${taille} : +${surplus}`)
-                .join(" · ")}
-            </p>
-          </CardBody>
-        </Card>
-      )}
-
-      <ProductionOrderLines
-        productionOrderId={order.id}
-        companyId={order.company_id ?? ""}
-        requestId={requestId}
-        editable={modifiable}
-        mediaEditable={mediaEditable}
-        lines={linesWithConfig}
-        productModels={productModels ?? []}
-        colors={activeColors ?? []}
-        allSections={(allSections ?? []).map((s) => ({
-          id: s.id,
-          name: s.name,
-          categorieNom: (s.atelier_categories as unknown as { nom: string } | null)?.nom ?? null,
-          categorieCle: (s.atelier_categories as unknown as { cle: string } | null)?.cle ?? null,
-          requiertVisuel: !!(s.atelier_categories as unknown as { requiert_visuel: boolean } | null)?.requiert_visuel,
-        }))}
-        availableMediaFiles={availableMediaFiles}
-        initialNote={order.note_disponibilite_couleurs}
-      />
-
-      <ValidationCircuitPanel
-        productionOrderId={order.id}
-        modifiable={modifiable}
-        comptabilite={{
-          valideLe: order.comptabilite_validee_le,
-          validePar: order.comptabilite_validee_par ? nameOf(order.comptabilite_validee_par) : null,
-          requise: !!order.company_id,
-        }}
-        infographie={{
-          requise: requiresInfographie,
-          valideLe: order.infographie_validee_le,
-          validePar: order.infographie_validee_par ? nameOf(order.infographie_validee_par) : null,
-        }}
-        soumis={{ le: order.soumis_le, par: order.soumis_par ? nameOf(order.soumis_par) : null }}
-        canAttesterComptabilite={canAttesterComptabilite}
-        canAttesterInfographie={canAttesterInfographie}
-        echantillons={echantillonsCircuit}
-      />
-
-      {modifiable && (
-        <SubmitOdfPanel
-          productionOrderId={order.id}
-          anySectionChosen={anySectionChosen}
-          linesConfigured={linesConfigured}
-          comptabiliteOk={!order.company_id || !!order.comptabilite_validee_le}
-          infographieOk={!requiresInfographie || !!order.infographie_validee_le}
-          echantillonsOk={echantillonsCircuit.every((e) => e.statuses.includes("valide"))}
-        />
-      )}
-
-      <ProductionOrderMediaFiles
-        productionOrderId={order.id}
-        attached={attachedGeneralMediaFiles}
-        available={availableMediaFiles}
-      />
-
       {order.status === "annulee" && (
         <ReplacementOrderPicker
           productionOrderId={order.id}
@@ -921,259 +860,353 @@ export default async function ProductionOrderDetailPage({ params }: { params: Pr
         enCoursTotal={enCoursTotal}
       />
 
-      {canRequestClosure && order.status === "en_production" && (
-        <RemaindersPanel productionOrderId={order.id} rows={remainders} hasClient={!!order.company_id} />
-      )}
+      <OdfTabs productionOrderId={order.id} current={tab} tabs={tabs} />
 
-      <ConsumptionPanel
-        productionOrderId={order.id}
-        rows={consumptions}
-        editable={canRequestClosure && order.status === "demande_cloture"}
-      />
+      {tab === "general" && (
+        <>
+        {order.mention_surplus_traces && (
+          <Card className="border-info/30 bg-info-soft/40">
+            <CardBody>
+              <p className="text-xs font-medium text-foreground-muted">Surplus tracé vs quantité demandée</p>
+              <p className="text-sm text-foreground">
+                {Object.entries(order.mention_surplus_traces as Record<string, number>)
+                  .map(([taille, surplus]) => `${taille} : +${surplus}`)
+                  .join(" · ")}
+              </p>
+            </CardBody>
+          </Card>
+        )}
 
-      {bilanCloture && (
-        <ClosureBalance bilan={bilanCloture} motif={order.motif_cloture_en_cours ?? null} sizes={allSizes} />
-      )}
-
-      <WhereArePieces lines={whereArePiecesLines} sizes={allSizes} />
-
-      {delivery && (delivery.premier_choix > 0 || (odfShipments ?? []).length > 0) && (
-        <Card>
-          <CardHeader
-            title="Livraison"
-            description={`${delivery.etat === "livre" ? "Livré" : delivery.etat === "partiel" ? "Livraison partielle" : "Non livré"} — ${delivery.premier_choix} pièce(s) de 1er choix, ${delivery.en_expedition} en expédition, ${delivery.livre} livrée(s).`}
-          />
-          <CardBody className="p-0">
-            <ul className="divide-y divide-border">
-              {(odfShipments ?? []).map((sh) => (
-                <li key={sh.id} className="flex items-center justify-between gap-3 px-5 py-2.5 text-sm">
-                  <Link href={`/livraisons/${sh.id}`} className="font-medium text-brand hover:underline">
-                    {sh.reference ?? "À préparer"}
-                  </Link>
-                  <span className="text-xs text-foreground-muted">
-                    {((sh.shipment_lines ?? []) as { quantite: number }[]).reduce((t, l) => t + l.quantite, 0)} pcs ·{" "}
-                    {sh.mode === "retrait" ? "retrait" : formatDate(sh.date_planifiee ?? sh.date_promise)} ·{" "}
-                    {SHIPMENT_STATUS_LABELS[sh.statut as ShipmentStatus]}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </CardBody>
-        </Card>
-      )}
-
-      <Card>
-        <CardHeader
-          title="Ordres de travail"
-          description="Un sous-ODF par section retenue, généré à la validation de l'ODF, groupés par section. Cliquez sur un sous-ODF pour son détail."
+        <ProductionOrderLines
+          productionOrderId={order.id}
+          companyId={order.company_id ?? ""}
+          requestId={requestId}
+          editable={modifiable}
+          mediaEditable={mediaEditable}
+          lines={linesWithConfig}
+          productModels={productModels ?? []}
+          colors={activeColors ?? []}
+          allSections={(allSections ?? []).map((s) => ({
+            id: s.id,
+            name: s.name,
+            categorieNom: (s.atelier_categories as unknown as { nom: string } | null)?.nom ?? null,
+            categorieCle: (s.atelier_categories as unknown as { cle: string } | null)?.cle ?? null,
+            requiertVisuel: !!(s.atelier_categories as unknown as { requiert_visuel: boolean } | null)?.requiert_visuel,
+          }))}
+          availableMediaFiles={availableMediaFiles}
+          initialNote={order.note_disponibilite_couleurs}
         />
-        <CardBody className="p-0">
-          {workOrderGroups.length === 0 ? (
-            <p className="px-5 py-6 text-sm text-foreground-muted">
-              Aucun ordre de travail généré pour le moment — les sous-ODF sont créés à la validation de l&apos;ODF.
-            </p>
-          ) : (
-            <div className="divide-y divide-border">
-              {workOrderGroups.map((group) => (
-                <div key={group.sectionId}>
-                  <p className="bg-surface-muted px-5 py-2 text-xs font-semibold uppercase tracking-wide text-foreground-muted">
-                    {group.sectionName}
-                  </p>
-                  <ol className="divide-y divide-border">
-                    {group.workOrders.map((wo, i) => {
-                      const atteinte = wo.quantity_done >= wo.quantity_planned;
-                      return (
-                        <li key={wo.id}>
-                          <Link
-                            href={`/atelier/production/${order.id}/ot/${wo.id}`}
-                            className="flex items-center gap-4 px-5 py-4 hover:bg-surface-muted"
-                          >
-                            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-surface-muted text-xs font-semibold text-foreground-muted">
-                              {i + 1}
-                            </span>
-                            <div className="flex-1">
-                              <p className="text-sm font-medium text-foreground">{wo.reference}</p>
-                              <p className="text-xs text-foreground-muted">
-                                {wo.quantity_done}/{wo.quantity_planned} pièces
-                                {wo.actual_start ? ` · démarré le ${formatDateTime(wo.actual_start)}` : ""}
-                                {wo.actual_end ? ` · quantité atteinte le ${formatDateTime(wo.actual_end)}` : ""}
-                              </p>
-                              {wo.blocking_reason && (
-                                <p className="mt-1 text-xs text-danger">⚠ {wo.blocking_reason}</p>
-                              )}
-                            </div>
-                            {atteinte ? (
-                              <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
-                            ) : (
-                              <Package className="h-4 w-4 shrink-0 text-foreground-muted" />
-                            )}
-                            <ChevronRight className="h-4 w-4 shrink-0 text-foreground-muted" />
-                          </Link>
-                        </li>
-                      );
-                    })}
-                  </ol>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardBody>
-      </Card>
 
-      {articleLots && articleLots.length > 0 && (
+        <ValidationCircuitPanel
+          productionOrderId={order.id}
+          modifiable={modifiable}
+          comptabilite={{
+            valideLe: order.comptabilite_validee_le,
+            validePar: order.comptabilite_validee_par ? nameOf(order.comptabilite_validee_par) : null,
+            requise: !!order.company_id,
+          }}
+          infographie={{
+            requise: requiresInfographie,
+            valideLe: order.infographie_validee_le,
+            validePar: order.infographie_validee_par ? nameOf(order.infographie_validee_par) : null,
+          }}
+          soumis={{ le: order.soumis_le, par: order.soumis_par ? nameOf(order.soumis_par) : null }}
+          canAttesterComptabilite={canAttesterComptabilite}
+          canAttesterInfographie={canAttesterInfographie}
+          echantillons={echantillonsCircuit}
+        />
+
+        {modifiable && (
+          <SubmitOdfPanel
+            productionOrderId={order.id}
+            anySectionChosen={anySectionChosen}
+            linesConfigured={linesConfigured}
+            comptabiliteOk={!order.company_id || !!order.comptabilite_validee_le}
+            infographieOk={!requiresInfographie || !!order.infographie_validee_le}
+            echantillonsOk={echantillonsCircuit.every((e) => e.statuses.includes("valide"))}
+          />
+        )}
+
+        <ProductionOrderMediaFiles
+          productionOrderId={order.id}
+          attached={attachedGeneralMediaFiles}
+          available={availableMediaFiles}
+        />
+
         <Card>
-          <CardHeader title="Lots générés" description="Sérialisation par lot (lot 6) — QR à imprimer par étiquette dédiée." />
+          <CardHeader title="Historique du cycle de vie" />
+          <CardBody className="grid grid-cols-1 gap-3 text-sm text-foreground-muted sm:grid-cols-2">
+            <p>Début planifié : {formatDate(order.planned_start_date)}</p>
+            <p>Fin planifiée : {formatDate(order.planned_end_date)}</p>
+            {order.launched_at && (
+              <p>
+                Lancé le {formatDateTime(order.launched_at)} par {nameOf(order.launched_by)}
+              </p>
+            )}
+            {order.cloture_demandee_at && (
+              <p>
+                Clôture demandée le {formatDateTime(order.cloture_demandee_at)} par{" "}
+                {nameOf(order.cloture_demandee_par)}
+              </p>
+            )}
+            {order.closed_at && (
+              <p>
+                Clôturé le {formatDateTime(order.closed_at)} par {nameOf(order.closed_by)}
+              </p>
+            )}
+          </CardBody>
+        </Card>
+        </>
+      )}
+
+      {tab === "production" && (
+        <>
+        {canRequestClosure && order.status === "en_production" && (
+          <RemaindersPanel productionOrderId={order.id} rows={remainders} hasClient={!!order.company_id} />
+        )}
+
+        <ConsumptionPanel
+          productionOrderId={order.id}
+          rows={consumptions}
+          editable={canRequestClosure && order.status === "demande_cloture"}
+        />
+
+        {bilanCloture && (
+          <ClosureBalance bilan={bilanCloture} motif={order.motif_cloture_en_cours ?? null} sizes={allSizes} />
+        )}
+
+        <WhereArePieces lines={whereArePiecesLines} sizes={allSizes} />
+
+        <Card>
+          <CardHeader
+            title="Ordres de travail"
+            description="Un sous-ODF par section retenue, généré à la validation de l'ODF, groupés par section. Cliquez sur un sous-ODF pour son détail."
+          />
           <CardBody className="p-0">
-            <ul className="divide-y divide-border">
-              {articleLots.map((lot) => (
-                <li key={lot.id} className="flex items-center justify-between gap-3 px-5 py-3">
-                  <div className="flex items-center gap-2">
-                    <QrCode className="h-3.5 w-3.5 text-foreground-muted" />
-                    <span className="font-mono text-xs text-foreground">{lot.code}</span>
-                    <Badge tone="brand">{LOT_CATEGORIE_LABELS[lot.categorie] ?? lot.categorie}</Badge>
-                  </div>
-                  <Link href={`/lots/${lot.code}`} target="_blank" className="text-xs font-medium text-brand hover:underline">
-                    Voir le QR →
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </CardBody>
-        </Card>
-      )}
-
-      {hasReconciliationData && (
-        <Card>
-          <CardHeader
-            title="Réconciliation matière"
-            description="Poids entrant (tissu reçu) vs poids sortant (lots + déchets + retours) — lot 7, section 16 du document de logique."
-          />
-          <CardBody className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
-            <div>
-              <p className="text-xs text-foreground-muted">Entrant (tissu)</p>
-              <p className="font-medium text-foreground">{recon!.poids_entrant_kg} kg</p>
-            </div>
-            <div>
-              <p className="text-xs text-foreground-muted">Sortie lots</p>
-              <p className="font-medium text-foreground">{recon!.poids_sortie_lots_kg} kg</p>
-            </div>
-            <div>
-              <p className="text-xs text-foreground-muted">Déchets</p>
-              <p className="font-medium text-foreground">{recon!.poids_dechets_kg} kg</p>
-            </div>
-            <div>
-              <p className="text-xs text-foreground-muted">Retour stock</p>
-              <p className="font-medium text-foreground">{recon!.poids_retour_kg} kg</p>
-            </div>
-            <div>
-              <p className="text-xs text-foreground-muted">Sortant total</p>
-              <p className="font-medium text-foreground">{recon!.poids_sortant_total_kg} kg</p>
-            </div>
-            <div>
-              <p className="text-xs text-foreground-muted">Écart</p>
-              <p className={Math.abs(recon!.ecart_kg) > 0.01 ? "font-medium text-warning" : "font-medium text-foreground"}>
-                {recon!.ecart_kg} kg
+            {workOrderGroups.length === 0 ? (
+              <p className="px-5 py-6 text-sm text-foreground-muted">
+                Aucun ordre de travail généré pour le moment — les sous-ODF sont créés à la validation de l&apos;ODF.
               </p>
-            </div>
-          </CardBody>
-        </Card>
-      )}
-
-      {canManageStock && (
-        <p className="text-xs text-foreground-muted">
-          Mouvements de stock consultables ci-dessous — pour en enregistrer un nouveau, direction{" "}
-          <Link href={`/atelier/stock?odf=${order.id}`} className="font-medium text-brand hover:underline">
-            Gestion de stock
-          </Link>
-          .
-        </p>
-      )}
-
-      <StockMovementsPanel
-        productionOrderId={order.id}
-        movements={(stockMovements ?? []) as StockMovement[]}
-        fiches={(stockExportFiches ?? []) as StockExportFiche[]}
-        canGenerate={canManageStock}
-      />
-
-      {rend && (
-        <Card>
-          <CardHeader
-            title="Rendement matière"
-            description="Pièces obtenues par kg de tissu engagé (lot 8) — théorique (dimensions des matelas) vs mesuré (pesées réelles, lot 7)."
-          />
-          <CardBody className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
-            <div>
-              <p className="text-xs text-foreground-muted">Pièces obtenues</p>
-              <p className="font-medium text-foreground">{rend.pieces_obtenues}</p>
-            </div>
-            <div>
-              <p className="text-xs text-foreground-muted">Tissu engagé (théorique)</p>
-              <p className="font-medium text-foreground">
-                {rend.theorique_complet ? `${rend.poids_tissu_theorique_kg} kg` : "incomplet"}
-              </p>
-              {!rend.theorique_complet && (
-                <p className="text-xs text-foreground-muted">dimension ou grammage manquant sur un matelas</p>
-              )}
-            </div>
-            <div>
-              <p className="text-xs text-foreground-muted">Tissu engagé (mesuré)</p>
-              <p className="font-medium text-foreground">{rend.poids_tissu_reel_mesure_kg} kg</p>
-            </div>
-            <div>
-              <p className="text-xs text-foreground-muted">Rendement (théorique / mesuré)</p>
-              <p className="font-medium text-foreground">
-                {rend.rendement_theorique_pieces_par_kg ?? "—"} / {rend.rendement_mesure_pieces_par_kg ?? "—"} pièces/kg
-              </p>
-            </div>
-          </CardBody>
-          {rendementTraces && rendementTraces.length > 0 && (
-            <ul className="divide-y divide-border border-t border-border">
-              {rendementTraces.map((rt) => (
-                <li key={rt.trace_id} className="flex items-center justify-between gap-3 px-5 py-3">
-                  <div>
-                    <p className="text-sm text-foreground">{rt.reference}</p>
-                    <p className="text-xs text-foreground-muted">
-                      {rt.pieces_obtenues} pièces · {rt.rendement_estime_pieces_par_kg ?? "—"} pièces/kg ·
-                      {" "}clôturé le {formatDateTime(rt.cloture_le)}
+            ) : (
+              <div className="divide-y divide-border">
+                {workOrderGroups.map((group) => (
+                  <div key={group.sectionId}>
+                    <p className="bg-surface-muted px-5 py-2 text-xs font-semibold uppercase tracking-wide text-foreground-muted">
+                      {group.sectionName}
                     </p>
+                    <ol className="divide-y divide-border">
+                      {group.workOrders.map((wo, i) => {
+                        const atteinte = wo.quantity_done >= wo.quantity_planned;
+                        return (
+                          <li key={wo.id}>
+                            <Link
+                              href={`/atelier/production/${order.id}/ot/${wo.id}`}
+                              className="flex items-center gap-4 px-5 py-4 hover:bg-surface-muted"
+                            >
+                              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-surface-muted text-xs font-semibold text-foreground-muted">
+                                {i + 1}
+                              </span>
+                              <div className="flex-1">
+                                <p className="text-sm font-medium text-foreground">{wo.reference}</p>
+                                <p className="text-xs text-foreground-muted">
+                                  {wo.quantity_done}/{wo.quantity_planned} pièces
+                                  {wo.actual_start ? ` · démarré le ${formatDateTime(wo.actual_start)}` : ""}
+                                  {wo.actual_end ? ` · quantité atteinte le ${formatDateTime(wo.actual_end)}` : ""}
+                                </p>
+                                {wo.blocking_reason && (
+                                  <p className="mt-1 text-xs text-danger">⚠ {wo.blocking_reason}</p>
+                                )}
+                              </div>
+                              {atteinte ? (
+                                <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
+                              ) : (
+                                <Package className="h-4 w-4 shrink-0 text-foreground-muted" />
+                              )}
+                              <ChevronRight className="h-4 w-4 shrink-0 text-foreground-muted" />
+                            </Link>
+                          </li>
+                        );
+                      })}
+                    </ol>
                   </div>
-                  <Link
-                    href={`/atelier/patronnage/${rt.fiche_id}?trace=${rt.trace_id}`}
-                    className="shrink-0 text-xs font-medium text-brand hover:underline"
-                  >
-                    Voir le tracé →
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
+                ))}
+              </div>
+            )}
+          </CardBody>
         </Card>
+
+        {articleLots && articleLots.length > 0 && (
+          <Card>
+            <CardHeader title="Lots générés" description="Sérialisation par lot (lot 6) — QR à imprimer par étiquette dédiée." />
+            <CardBody className="p-0">
+              <ul className="divide-y divide-border">
+                {articleLots.map((lot) => (
+                  <li key={lot.id} className="flex items-center justify-between gap-3 px-5 py-3">
+                    <div className="flex items-center gap-2">
+                      <QrCode className="h-3.5 w-3.5 text-foreground-muted" />
+                      <span className="font-mono text-xs text-foreground">{lot.code}</span>
+                      <Badge tone="brand">{LOT_CATEGORIE_LABELS[lot.categorie] ?? lot.categorie}</Badge>
+                    </div>
+                    <Link href={`/lots/${lot.code}`} target="_blank" className="text-xs font-medium text-brand hover:underline">
+                      Voir le QR →
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </CardBody>
+          </Card>
+        )}
+
+        {hasReconciliationData && (
+          <Card>
+            <CardHeader
+              title="Réconciliation matière"
+              description="Poids entrant (tissu reçu) vs poids sortant (lots + déchets + retours) — lot 7, section 16 du document de logique."
+            />
+            <CardBody className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
+              <div>
+                <p className="text-xs text-foreground-muted">Entrant (tissu)</p>
+                <p className="font-medium text-foreground">{recon!.poids_entrant_kg} kg</p>
+              </div>
+              <div>
+                <p className="text-xs text-foreground-muted">Sortie lots</p>
+                <p className="font-medium text-foreground">{recon!.poids_sortie_lots_kg} kg</p>
+              </div>
+              <div>
+                <p className="text-xs text-foreground-muted">Déchets</p>
+                <p className="font-medium text-foreground">{recon!.poids_dechets_kg} kg</p>
+              </div>
+              <div>
+                <p className="text-xs text-foreground-muted">Retour stock</p>
+                <p className="font-medium text-foreground">{recon!.poids_retour_kg} kg</p>
+              </div>
+              <div>
+                <p className="text-xs text-foreground-muted">Sortant total</p>
+                <p className="font-medium text-foreground">{recon!.poids_sortant_total_kg} kg</p>
+              </div>
+              <div>
+                <p className="text-xs text-foreground-muted">Écart</p>
+                <p className={Math.abs(recon!.ecart_kg) > 0.01 ? "font-medium text-warning" : "font-medium text-foreground"}>
+                  {recon!.ecart_kg} kg
+                </p>
+              </div>
+            </CardBody>
+          </Card>
+        )}
+
+        {rend && (
+          <Card>
+            <CardHeader
+              title="Rendement matière"
+              description="Pièces obtenues par kg de tissu engagé (lot 8) — théorique (dimensions des matelas) vs mesuré (pesées réelles, lot 7)."
+            />
+            <CardBody className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+              <div>
+                <p className="text-xs text-foreground-muted">Pièces obtenues</p>
+                <p className="font-medium text-foreground">{rend.pieces_obtenues}</p>
+              </div>
+              <div>
+                <p className="text-xs text-foreground-muted">Tissu engagé (théorique)</p>
+                <p className="font-medium text-foreground">
+                  {rend.theorique_complet ? `${rend.poids_tissu_theorique_kg} kg` : "incomplet"}
+                </p>
+                {!rend.theorique_complet && (
+                  <p className="text-xs text-foreground-muted">dimension ou grammage manquant sur un matelas</p>
+                )}
+              </div>
+              <div>
+                <p className="text-xs text-foreground-muted">Tissu engagé (mesuré)</p>
+                <p className="font-medium text-foreground">{rend.poids_tissu_reel_mesure_kg} kg</p>
+              </div>
+              <div>
+                <p className="text-xs text-foreground-muted">Rendement (théorique / mesuré)</p>
+                <p className="font-medium text-foreground">
+                  {rend.rendement_theorique_pieces_par_kg ?? "—"} / {rend.rendement_mesure_pieces_par_kg ?? "—"} pièces/kg
+                </p>
+              </div>
+            </CardBody>
+            {rendementTraces && rendementTraces.length > 0 && (
+              <ul className="divide-y divide-border border-t border-border">
+                {rendementTraces.map((rt) => (
+                  <li key={rt.trace_id} className="flex items-center justify-between gap-3 px-5 py-3">
+                    <div>
+                      <p className="text-sm text-foreground">{rt.reference}</p>
+                      <p className="text-xs text-foreground-muted">
+                        {rt.pieces_obtenues} pièces · {rt.rendement_estime_pieces_par_kg ?? "—"} pièces/kg ·
+                        {" "}clôturé le {formatDateTime(rt.cloture_le)}
+                      </p>
+                    </div>
+                    <Link
+                      href={`/atelier/patronnage/${rt.fiche_id}?trace=${rt.trace_id}`}
+                      className="shrink-0 text-xs font-medium text-brand hover:underline"
+                    >
+                      Voir le tracé →
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+        )}
+        </>
       )}
 
-      <Card>
-        <CardHeader title="Historique du cycle de vie" />
-        <CardBody className="grid grid-cols-1 gap-3 text-sm text-foreground-muted sm:grid-cols-2">
-          <p>Début planifié : {formatDate(order.planned_start_date)}</p>
-          <p>Fin planifiée : {formatDate(order.planned_end_date)}</p>
-          {order.launched_at && (
-            <p>
-              Lancé le {formatDateTime(order.launched_at)} par {nameOf(order.launched_by)}
-            </p>
+      {tab === "livraison" && (
+        <>
+        {delivery && (delivery.premier_choix > 0 || (odfShipments ?? []).length > 0) && (
+          <Card>
+            <CardHeader
+              title="Livraison"
+              description={`${delivery.etat === "livre" ? "Livré" : delivery.etat === "partiel" ? "Livraison partielle" : "Non livré"} — ${delivery.premier_choix} pièce(s) de 1er choix, ${delivery.en_expedition} en expédition, ${delivery.livre} livrée(s).`}
+            />
+            <CardBody className="p-0">
+              <ul className="divide-y divide-border">
+                {(odfShipments ?? []).map((sh) => (
+                  <li key={sh.id} className="flex items-center justify-between gap-3 px-5 py-2.5 text-sm">
+                    <Link href={`/livraisons/${sh.id}`} className="font-medium text-brand hover:underline">
+                      {sh.reference ?? "À préparer"}
+                    </Link>
+                    <span className="text-xs text-foreground-muted">
+                      {((sh.shipment_lines ?? []) as { quantite: number }[]).reduce((t, l) => t + l.quantite, 0)} pcs ·{" "}
+                      {sh.mode === "retrait" ? "retrait" : formatDate(sh.date_planifiee ?? sh.date_promise)} ·{" "}
+                      {SHIPMENT_STATUS_LABELS[sh.statut as ShipmentStatus]}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </CardBody>
+          </Card>
+        )}
+          {!(delivery && (delivery.premier_choix > 0 || (odfShipments ?? []).length > 0)) && (
+            <Card>
+              <CardBody className="text-sm text-foreground-muted">Aucune expédition pour le moment : elles se créent au 1er choix de finition.</CardBody>
+            </Card>
           )}
-          {order.cloture_demandee_at && (
-            <p>
-              Clôture demandée le {formatDateTime(order.cloture_demandee_at)} par{" "}
-              {nameOf(order.cloture_demandee_par)}
-            </p>
-          )}
-          {order.closed_at && (
-            <p>
-              Clôturé le {formatDateTime(order.closed_at)} par {nameOf(order.closed_by)}
-            </p>
-          )}
-        </CardBody>
-      </Card>
+        </>
+      )}
+
+      {tab === "stock" && (
+        <>
+        {canManageStock && (
+          <p className="text-xs text-foreground-muted">
+            Mouvements de stock consultables ci-dessous — pour en enregistrer un nouveau, direction{" "}
+            <Link href={`/atelier/stock?odf=${order.id}`} className="font-medium text-brand hover:underline">
+              Gestion de stock
+            </Link>
+            .
+          </p>
+        )}
+
+        <StockMovementsPanel
+          productionOrderId={order.id}
+          movements={(stockMovements ?? []) as StockMovement[]}
+          fiches={(stockExportFiches ?? []) as StockExportFiche[]}
+          canGenerate={canManageStock}
+        />
+        </>
+      )}
+
+      {tab === "couts" && <RealCostTab productionOrderId={order.id} />}
     </div>
   );
 }

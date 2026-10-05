@@ -59,7 +59,7 @@ await test("le prélèvement crée une sortie PF ; l'étape suivante ne dépasse
   await q(`select declare_production($1,$2,'preleve',5,'carton abîmé, complément')`, [stockWo.id, M]);
   assert.equal((await one(`select statut from stock_reservations where production_order_line_id=$1 and taille=$2`, [o.line.id, M])).statut, "prelevee");
   await as(admin);
-  await expectFail(() => q(`select declare_production($1,$2,'premier_choix',34)`, [fin.id, M]), /jamais plus/);
+  await expectFail(() => q(`select declare_production($1,$2,'premier_choix',34)`, [fin.id, M]), /motif pour déclarer un surplus/);
   await q(`select declare_production($1,$2,'premier_choix',33)`, [fin.id, M]);
 });
 

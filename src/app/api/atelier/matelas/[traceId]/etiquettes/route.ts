@@ -30,7 +30,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ trac
     .maybeSingle();
   const { data: event } = await supabase
     .from("work_order_events")
-    .select("occurred_at,quantites_obtenues")
+    .select("id,occurred_at,quantites_obtenues")
     .eq("event_type", "matelas_cloture")
     .eq("work_order_id", workOrderId)
     .eq("trace_id", traceId)
@@ -49,10 +49,19 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ trac
   ];
   if (tailles.length === 0) return NextResponse.json({ error: "Aucune quantité obtenue" }, { status: 404 });
 
-  const url = `${await getBaseUrl()}/atelier/section?odf=${wo.production_order_id}`;
+  // Une étiquette = le lot de la taille (migration 0092), QR vers sa fiche.
+  const { data: lots } = await supabase.from("article_lots").select("code,matelas_taille").eq("work_order_event_id", event.id);
+  const baseUrl = await getBaseUrl();
+  const lotOf = (cle: string) => (lots ?? []).find((l) => l.matelas_taille === cle)?.code as string | undefined;
   const date = formatLabelDate(event.occurred_at);
   const pdfBytes = await buildLabelSheetPdf(
-    tailles.map((t) => ({ url, lines: [wo.reference, `${t.libelle} · ${quantites[t.cle]} pcs`, date] })),
+    tailles.map((t) => {
+      const lot = lotOf(t.cle);
+      return {
+        url: lot ? `${baseUrl}/lots/${lot}` : `${baseUrl}/atelier/section?odf=${wo.production_order_id}`,
+        lines: [lot ?? wo.reference, `${lot ? `${wo.reference} · ` : ""}${t.libelle} · ${quantites[t.cle]} pcs`, date] as [string, string, string],
+      };
+    }),
     `Étiquettes ${wo.reference}`
   );
 

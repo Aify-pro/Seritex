@@ -457,6 +457,9 @@ export async function scanArticleLot(code: string, sens: "entree" | "sortie", se
   const supabase = await createClient();
   const clean = code.trim().toUpperCase();
   if (!clean) return { error: "Code de lot vide" };
+  if (/-OT\d+$/.test(clean) || clean.includes("ATELIER/SECTION")) {
+    return { error: "Étiquette d'ancien format (référence d'OT) : réimprimez l'étiquette depuis la fiche du matelas, elle porte désormais le code du lot." };
+  }
   const { data: lot } = await supabase.from("article_lots").select("production_order_line_id").eq("code", clean).maybeSingle();
   if (!lot) return { error: `Lot inconnu : ${clean}` };
   let workOrderId: string | null = null;

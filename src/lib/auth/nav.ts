@@ -202,7 +202,7 @@ export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
     { href: "/demandes-stock", label: "Demandes pour le stock", icon: navIcon(PackagePlus) },
     { href: "/commercial/devis", label: "Devis", icon: navIcon(FileText) },
     { href: "/articles", label: "Articles", icon: navIcon(Tags), module: "articles" },
-    { href: "/tarification", label: "Tarification", icon: navIcon(Calculator), module: "tarification" },
+    { href: "/parametres/tarification", label: "Tarification", icon: navIcon(Calculator), section: PARAMETRES, module: "tarification" },
     { href: "/commercial/echantillons", label: "Échantillons", icon: navIcon(FlaskConical) },
     { href: "/mediatheque", label: "Médiathèque", icon: navIcon(FolderOpen), module: "mediatheque" },
     { href: "/atelier/production", label: "Ordres de fabrication", icon: navIcon(Factory), module: "ordres_fabrication" },

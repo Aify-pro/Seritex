@@ -6,62 +6,12 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 /**
- * Écritures du module Tarification (migration 0067). Réservées à la Direction
- * et à l'administrateur (base_role administrateur) — la RLS l'impose aussi.
+ * Grille de prix de revient d'un modèle (migration 0067, ART-C), saisie dans
+ * l'onglet Prix de revient de la fiche article. Direction et administrateur.
  */
 
 const pct = z.number().min(0, "Pourcentage invalide").max(99.99, "Doit rester sous 100 %");
 const money = z.number().min(0, "Montant invalide");
-
-const settingsSchema = z.object({
-  charges_pct: pct,
-  marge_pct: pct,
-  arrondi: z.number().int().min(1, "Arrondi invalide"),
-  frais_ecran_par_couleur: money,
-  // A8 : vide = coefficient calculé depuis charges et marge.
-  coef_prix_vente: z.number().gt(0, "Coefficient invalide").max(99, "Coefficient invalide").nullable().optional(),
-});
-
-export async function updatePricingSettings(input: z.input<typeof settingsSchema>) {
-  const { profile } = await requireRole(["administrateur"]);
-  const parsed = settingsSchema.safeParse(input);
-  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Paramètres invalides" };
-
-  const supabase = await createClient();
-  const { error } = await supabase
-    .from("pricing_settings")
-    .update({ ...parsed.data, updated_at: new Date().toISOString(), updated_by: profile.id })
-    .eq("id", true);
-  if (error) return { error: error.message };
-  revalidatePath("/tarification", "layout");
-  return {};
-}
-
-const printCostsSchema = z.record(z.string().regex(/^([1-9]|1[0-2])$/), money.nullable());
-
-/** Grille impression : un coût par nombre de couleurs ; vide = retiré de la grille (signalé au chiffrage). */
-export async function savePrintCosts(input: Record<string, number | null>) {
-  await requireRole(["administrateur"]);
-  const parsed = printCostsSchema.safeParse(input);
-  if (!parsed.success) return { error: "Grille impression invalide" };
-
-  const supabase = await createClient();
-  const toDelete = Object.entries(parsed.data).filter(([, v]) => v === null).map(([k]) => Number(k));
-  const toUpsert = Object.entries(parsed.data)
-    .filter((e): e is [string, number] => e[1] !== null)
-    .map(([k, v]) => ({ nb_couleurs: Number(k), cout_piece: v, updated_at: new Date().toISOString() }));
-
-  if (toDelete.length > 0) {
-    const { error } = await supabase.from("print_costs").delete().in("nb_couleurs", toDelete);
-    if (error) return { error: error.message };
-  }
-  if (toUpsert.length > 0) {
-    const { error } = await supabase.from("print_costs").upsert(toUpsert);
-    if (error) return { error: error.message };
-  }
-  revalidatePath("/tarification", "layout");
-  return {};
-}
 
 const modelPricingSchema = z.object({
   charges_pct: pct.nullable(),
@@ -143,7 +93,6 @@ export async function saveModelPricing(productModelId: string, input: ModelPrici
     if (error) return { error: error.message };
   }
 
-  revalidatePath("/tarification", "layout");
   revalidatePath("/articles", "layout");
   return {};
 }
@@ -172,7 +121,6 @@ export async function saveFabricAreas(productModelId: string, surfaces: Record<s
     if (error) return { error: error.message };
   }
   revalidatePath("/articles", "layout");
-  revalidatePath("/tarification", "layout");
   return {};
 }
 
@@ -183,48 +131,4 @@ export async function proposeFabricAreaFromPlacement(productModelId: string): Pr
   const { data, error } = await supabase.rpc("propose_fabric_area_from_placement", { p_model_id: productModelId });
   if (error) return { error: error.message };
   return { surface: data === null ? null : Number(data) };
-}
-
-/** Prix du tissu au kg, rendu, d'un textile (migration 0070) ; null retire le prix. */
-export async function saveTextilePrice(textileId: string, prixKg: number | null) {
-  const { profile } = await requireRole(["administrateur"]);
-  const parsed = z.object({ id: z.guid(), prix: z.number().positive("Prix au kg invalide").nullable() }).safeParse({ id: textileId, prix: prixKg });
-  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Prix invalide" };
-
-  const supabase = await createClient();
-  const { error } =
-    parsed.data.prix === null
-      ? await supabase.from("textile_prices").delete().eq("textile_id", textileId)
-      : await supabase
-          .from("textile_prices")
-          .upsert({ textile_id: textileId, prix_kg: parsed.data.prix, updated_at: new Date().toISOString(), updated_by: profile.id });
-  if (error) return { error: error.message };
-  revalidatePath("/tarification", "layout");
-  return {};
-}
-
-/**
- * Paramètres de l'analyse du prix de revient réel d'un ODF (migration 0070) :
- * prix du tissu au kg propre à cet ODF (null = prix du textile) et notes.
- */
-export async function saveOdfRealCost(productionOrderId: string, input: { prix_tissu_kg: number | null; notes: string }) {
-  const { profile } = await requireRole(["administrateur"]);
-  const parsed = z
-    .object({
-      prix_tissu_kg: z.number().positive("Prix au kg invalide").nullable(),
-      notes: z.string().trim().max(2000).transform((v) => v || null),
-    })
-    .safeParse(input);
-  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Paramètres invalides" };
-
-  const supabase = await createClient();
-  const { error } = await supabase.from("production_order_real_costs").upsert({
-    production_order_id: productionOrderId,
-    ...parsed.data,
-    updated_at: new Date().toISOString(),
-    updated_by: profile.id,
-  });
-  if (error) return { error: error.message };
-  revalidatePath("/tarification", "layout");
-  return {};
 }

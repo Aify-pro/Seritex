@@ -7,7 +7,7 @@ import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatMoney } from "@/lib/currency";
 import { priceGrid, resolveComponents, type CostComponent, type FabricContext } from "@/lib/pricing";
-import { proposeFabricAreaFromPlacement, saveFabricAreas, saveModelPricing } from "../../../tarification/actions";
+import { proposeFabricAreaFromPlacement, saveFabricAreas, saveModelPricing } from "../prix-de-revient/actions";
 
 type SizeOption = { cle: string; libelle: string; groupe: string };
 
