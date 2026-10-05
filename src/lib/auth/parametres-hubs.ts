@@ -57,6 +57,7 @@ const HUBS: HubDefinition[] = [
     tabs: [
       { href: "/parametres/couleurs", label: "Couleurs et tailles" },
       { href: "/parametres/codification", label: "Codification" },
+      { href: "/parametres/tarification", label: "Tarification" },
     ],
   },
   {
