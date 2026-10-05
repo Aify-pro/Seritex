@@ -110,4 +110,20 @@ await test("depuis un BL : lot du colis → lot de coupe → matelas → section
   assert.equal(tr.expeditions[0].id, ship.id);
 });
 
+await test("clôture de matelas : un lot par taille, relié à la clôture (étiquette imprimée)", async () => {
+  await as(admin);
+  const trace2 = await one(`insert into traces_placement(fiche_id, ordre, reference, repartition_par_couche) values ($1,2,'OT-L-1-T2','{"Homme/M":1}') returning id`, [fiche.id]);
+  const ev = await one(`insert into work_order_events(work_order_id, event_type, trace_id, resultat, quantites_obtenues) values ($1,'matelas_cloture',$2,'ok','{"Homme/M":6,"Homme/L":0}') returning id`, [woCouture.id, trace2.id]);
+  const lots = await q(`select code, matelas_taille, composition_taille c, production_order_line_id, trace_id from article_lots where work_order_event_id=$1`, [ev.id]);
+  assert.equal(lots.length, 1);
+  assert.deepEqual([lots[0].matelas_taille, lots[0].c, lots[0].production_order_line_id, lots[0].trace_id], [M, { [M]: 6 }, o.line.id, trace2.id]);
+  assert.match(lots[0].code, /^LOT-\d{4}-\d{5}$/);
+  // Rejouée : pas de doublon.
+  assert.equal((await one(`select create_matelas_lots($1) n`, [ev.id])).n, 0);
+  // Le lot de l'étiquette se scanne dans la section suivante.
+  await as(chef);
+  const r = await one(`select scan_article_lot($1,'entree') r`, [lots[0].code]);
+  assert.equal(r.r.work_order_id, woCouture.id);
+});
+
 console.log("SF-5 : tous les tests passent");

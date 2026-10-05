@@ -166,19 +166,27 @@ export default async function SectionQueuePage({
 
     const { data: closedEvents } = await supabase
       .from("work_order_events")
-      .select("trace_id,occurred_at,quantites_obtenues")
+      .select("id,trace_id,occurred_at,quantites_obtenues")
       .eq("event_type", "matelas_cloture")
       .in(
         "work_order_id",
         workOrders.map((wo) => wo.id)
       );
     const closedTraceIds = new Set((closedEvents ?? []).map((e) => e.trace_id as string));
+    // Lots créés à la clôture (un par taille, migration 0092) : l'étiquette porte leur code.
+    const closedEventIds = (closedEvents ?? []).map((e) => e.id as string);
+    const { data: matelasLots } = closedEventIds.length
+      ? await supabase.from("article_lots").select("code,matelas_taille,work_order_event_id").in("work_order_event_id", closedEventIds)
+      : { data: [] };
     const clotureByTraceId = new Map(
       (closedEvents ?? []).map((e) => [
         e.trace_id as string,
         {
           occurredAt: e.occurred_at as string,
           quantitesObtenues: (e.quantites_obtenues ?? {}) as Record<string, number>,
+          lots: Object.fromEntries(
+            (matelasLots ?? []).filter((l) => l.work_order_event_id === e.id).map((l) => [l.matelas_taille as string, l.code as string])
+          ),
         },
       ])
     );
