@@ -48,7 +48,11 @@ export function DeclarationDialog({
   const libelle = (cle: string) => sizes.find((s) => s.cle === cle)?.libelle ?? cle.split("/").pop() ?? cle;
 
   const totalSaisi = (taille: string) => types.reduce((s, t) => s + (saisie[taille]?.[t] ?? 0), 0);
-  const depassements = flow.filter((r) => categorie !== "stock" && totalSaisi(r.taille) > Math.max(r.reste, 0));
+  const exces = flow.filter((r) => totalSaisi(r.taille) > Math.max(r.reste, 0));
+  // Coupe : les bonnes viennent des matelas, on ne dépasse jamais. Ailleurs,
+  // un dépassement est un surplus (retour de recette C2) : motif obligatoire.
+  const depassements = categorie === "coupe" ? exces : [];
+  const surplus = categorie !== "coupe" && categorie !== "stock" && exces.length > 0;
   const complement = categorie === "stock" && flow.some((r) => totalSaisi(r.taille) > Math.max(r.reste, 0));
   const total = flow.reduce((s, r) => s + totalSaisi(r.taille), 0);
 
@@ -100,7 +104,7 @@ export function DeclarationDialog({
       open={open}
       onOpenChange={onOpenChange}
       title={`Déclarer par taille — ${workOrderReference}`}
-      description="Pour chaque taille : reçu, déjà déclaré, reste. On ne déclare jamais plus que ce qui a été reçu."
+      description="Pour chaque taille : reçu, déjà déclaré, reste. Au-delà du reste, les pièces en plus sont un surplus, accepté avec un motif."
       size="lg"
     >
       <div className="space-y-4">
@@ -125,8 +129,9 @@ export function DeclarationDialog({
               <tbody className="divide-y divide-border">
                 {flow.map((r) => {
                   const trop = depassements.some((d) => d.taille === r.taille);
+                  const enSurplus = surplus && exces.some((d) => d.taille === r.taille);
                   return (
-                    <tr key={r.taille} className={cn(trop && "bg-danger-soft/50")}>
+                    <tr key={r.taille} className={cn(trop && "bg-danger-soft/50", enSurplus && "bg-warning-soft/60")}>
                       <td className="py-1.5 pr-2 font-medium text-foreground">{libelle(r.taille)}</td>
                       <td className="py-1.5 pr-2 text-right tabular-nums">{r.recu}</td>
                       <td className="py-1.5 pr-2 text-xs text-foreground-muted">{dejaDeclare(r)}</td>
@@ -169,10 +174,17 @@ export function DeclarationDialog({
           </p>
         )}
 
-        {(complement || categorie === "stock") && (
+        {surplus && (
+          <p className="rounded-md bg-warning-soft px-2.5 py-2 text-xs text-warning">
+            Surplus pour : {exces.map((d) => `${libelle(d.taille)} (+${totalSaisi(d.taille) - Math.max(d.reste, 0)})`).join(", ")}. Les pièces
+            en plus sont acceptées et suivent la production ; indiquez pourquoi (défaut de tissu, demande spéciale…).
+          </p>
+        )}
+
+        {(complement || surplus || categorie === "stock") && (
           <div>
             <label htmlFor={`motif-${workOrderId}`} className="block text-xs text-foreground-muted">
-              Motif {complement ? "(obligatoire : prélèvement complémentaire)" : "(facultatif)"}
+              Motif {complement ? "(obligatoire : prélèvement complémentaire)" : surplus ? "(obligatoire : surplus)" : "(facultatif)"}
             </label>
             <input
               id={`motif-${workOrderId}`}
@@ -194,7 +206,7 @@ export function DeclarationDialog({
             className="w-full sm:w-auto"
             onClick={submit}
             loading={pending}
-            disabled={total === 0 || depassements.length > 0 || (complement && !motif.trim())}
+            disabled={total === 0 || depassements.length > 0 || ((complement || surplus) && !motif.trim())}
           >
             Déclarer {total > 0 ? `${total} pièce(s)` : ""}
           </Button>

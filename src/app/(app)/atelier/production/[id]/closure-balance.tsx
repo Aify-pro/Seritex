@@ -16,13 +16,16 @@ export interface ClosureBalanceData {
       deuxieme_choix: number;
       dechets: number;
       en_cours: number;
+      /** Pièces produites en plus, déclarées avec motif (migration 0091). */
+      surplus?: number;
     }[];
   }[];
 }
 
 /**
  * Bilan de clôture d'un ODF, par article et par taille : ce qui était demandé,
- * ce qui est sorti en 1er et 2e choix, les déchets et ce qui restait en cours.
+ * ce qui est sorti en 1er et 2e choix, le surplus produit, les déchets et ce
+ * qui restait en cours.
  */
 export function ClosureBalance({ bilan, motif, sizes }: { bilan: ClosureBalanceData; motif: string | null; sizes: Size[] }) {
   const libelle = (cle: string) => sizes.find((s) => s.cle === cle)?.libelle ?? cle.split("/").pop() ?? cle;
@@ -50,6 +53,7 @@ export function ClosureBalance({ bilan, motif, sizes }: { bilan: ClosureBalanceD
                   <th className="px-2 py-1.5 text-right">Demandé</th>
                   <th className="px-2 py-1.5 text-right">1er choix</th>
                   <th className="px-2 py-1.5 text-right">2e choix</th>
+                  <th className="px-2 py-1.5 text-right">Surplus</th>
                   <th className="px-2 py-1.5 text-right">Déchets</th>
                   <th className="px-2 py-1.5 text-right">En cours</th>
                 </tr>
@@ -61,6 +65,7 @@ export function ClosureBalance({ bilan, motif, sizes }: { bilan: ClosureBalanceD
                     <td className="px-2 py-1.5 text-right">{t.demande}</td>
                     <td className="px-2 py-1.5 text-right">{t.premier_choix}</td>
                     <td className="px-2 py-1.5 text-right">{t.deuxieme_choix}</td>
+                    <td className="px-2 py-1.5 text-right">{t.surplus ? `+${t.surplus}` : "—"}</td>
                     <td className="px-2 py-1.5 text-right">{t.dechets}</td>
                     <td className={`px-2 py-1.5 text-right ${t.en_cours > 0 ? "font-semibold text-warning" : ""}`}>{t.en_cours}</td>
                   </tr>

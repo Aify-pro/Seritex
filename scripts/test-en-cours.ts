@@ -189,4 +189,15 @@ test("bilan de clôture : demandé, 1er/2e choix, déchets et en-cours par taill
   assert.equal(balanceIsClosed(ouvert), false);
 });
 
+test("surplus déclaré avec motif : s'ajoute au reçu de la section et suit le circuit", () => {
+  const detail = computeFlowDetail({ [M]: 10 }, serie, {
+    couture: { [M]: { surplus: 2, bonne: 12 } },
+    finition: { [M]: { premier_choix: 12 } },
+  });
+  const couture = detail.find((r) => r.unitId === "couture")!;
+  assert.deepEqual([couture.recu, couture.bonnes, couture.reste], [12, 12, 0]);
+  const finition = detail.find((r) => r.unitId === "finition")!;
+  assert.deepEqual([finition.recu, finition.reste], [12, 0]);
+});
+
 console.log(`\n${n} tests OK`);

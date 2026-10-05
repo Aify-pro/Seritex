@@ -48,7 +48,7 @@ await test("la couture ne déclare pas plus que son entrée, taille par taille",
   const w = await wo("couture");
   await as(chefCouture);
   await q(`select declare_production($1,$2,'bonne',25)`, [w.id, M]);
-  await expectFail(() => q(`select declare_production($1,$2,'bonne',6)`, [w.id, M]), /jamais plus que l'entrée/);
+  await expectFail(() => q(`select declare_production($1,$2,'bonne',6)`, [w.id, M]), /motif pour déclarer un surplus/);
   await q(`select declare_production($1,$2,'dechet',5)`, [w.id, M]);
   await expectFail(() => q(`select declare_production($1,$2,'dechet',1)`, [w.id, M]), /jamais plus/);
   const after = await one(`select quantity_done, quantity_rejected from work_orders where id=$1`, [w.id]);
@@ -63,7 +63,7 @@ await test("seule la finition déclare du 2e choix", async () => {
   const f = await wo("finition");
   await q(`select declare_production($1,$2,'premier_choix',20)`, [f.id, M]);
   await q(`select declare_production($1,$2,'deuxieme_choix',3)`, [f.id, M]);
-  await expectFail(() => q(`select declare_production($1,$2,'premier_choix',3)`, [f.id, M]), /jamais plus/);
+  await expectFail(() => q(`select declare_production($1,$2,'premier_choix',3)`, [f.id, M]), /motif pour déclarer un surplus/);
   await expectFail(() => q(`select declare_production($1,$2,'bonne',1)`, [f.id, M]), /impossible/);
 });
 
@@ -133,7 +133,7 @@ await test("étape mixte interdite ; parallèle par partie = minimum, par quanti
   await q(`select validate_production_order($1)`, [qte.po.id]);
   const [c, d] = await q(`select w.id from work_orders w join sections s on s.id=w.section_id where w.production_order_line_id=$1 and w.etape=1 order by s.name`, [qte.line.id]);
   await q(`select declare_production($1,$2,'bonne',7)`, [c.id, M]);
-  await expectFail(() => q(`select declare_production($1,$2,'bonne',4)`, [d.id, M]), /jamais plus/);
+  await expectFail(() => q(`select declare_production($1,$2,'bonne',4)`, [d.id, M]), /motif pour déclarer un surplus/);
   await q(`select declare_production_batch($1, $2::jsonb)`, [d.id, JSON.stringify([{ taille: M, type: "bonne", quantite: 3 }])]);
   f = await q(`select * from line_stage_flow($1) where taille=$2 order by etape`, [qte.line.id, M]);
   assert.deepEqual(f.map((r) => [r.etape, r.entree, r.bonnes, r.en_cours]), [[1, 10, 10, 0], [2, 10, 0, 10]]);
