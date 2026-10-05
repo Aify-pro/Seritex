@@ -2,28 +2,30 @@ import { requireRole } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardBody } from "@/components/ui/card";
-import { StatusBadge } from "@/components/ui/badge";
+import { Badge, StatusBadge } from "@/components/ui/badge";
 import { REQUEST_STATUS_LABELS } from "@/lib/types/domain";
 import { formatDate } from "@/lib/utils";
 import Link from "next/link";
 import { ArrowRight, Plus } from "lucide-react";
 
+/**
+ * Demandes : celles des clients et celles pour le stock (SF-3), dans une
+ * seule liste. La production n'y voit que les demandes pour le stock (RLS).
+ */
 export default async function RequestsPage() {
-  await requireRole(["commercial", "administrateur"]);
+  await requireRole(["commercial", "administrateur", "responsable_production"]);
   const supabase = await createClient();
 
   const { data: requests } = await supabase
     .from("requests")
-    .select("id,reference,status,description,created_at,companies(name)")
-    // Les demandes pour le stock (sans client, SF-3) ont leur propre écran.
-    .not("company_id", "is", null)
+    .select("id,reference,status,description,created_at,company_id,companies(name)")
     .order("created_at", { ascending: false });
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Demandes"
-        description="Pipeline commercial — de la demande entrante jusqu'au devis."
+        description="Demandes des clients, jusqu'au devis, et demandes pour le stock, jusqu'à l'ODF de stock."
         action={
           <Link
             href="/commercial/demandes/nouvelle"
@@ -45,7 +47,8 @@ export default async function RequestsPage() {
                 >
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium text-foreground">
-                      {r.reference} · {(r.companies as unknown as { name: string } | null)?.name}
+                      {r.reference} ·{" "}
+                      {r.company_id ? (r.companies as unknown as { name: string } | null)?.name : <Badge tone="info">Pour le stock</Badge>}
                     </p>
                     <p className="truncate text-xs text-foreground-muted">{r.description}</p>
                   </div>

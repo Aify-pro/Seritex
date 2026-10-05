@@ -254,6 +254,7 @@ export function QuoteForm({
   currencies,
   correction,
   prefill,
+  requestLines = [],
 }: {
   requestId: string;
   companyId: string;
@@ -274,6 +275,8 @@ export function QuoteForm({
   correction?: QuoteCorrection;
   /** Présent : le formulaire s'ouvre prérempli depuis ce devis Sage (migration 0071). */
   prefill?: SagePrefill;
+  /** Articles choisis dans la demande : lignes de départ d'un nouveau devis. */
+  requestLines?: { product_model_id: string; description: string; couleur_unique_id: string | null; tailles: Record<string, number> }[];
 }) {
   const [pending, startTransition] = useTransition();
   const [open, setOpen] = useState(!!prefill);
@@ -289,7 +292,27 @@ export function QuoteForm({
         variant="secondary"
         size="sm"
         onClick={() => {
-          setLines(correction ? correction.lines.map(lineFromCorrection) : [newLine()]);
+          setLines(
+            correction
+              ? correction.lines.map(lineFromCorrection)
+              : requestLines.length
+                ? requestLines.map((l) => {
+                    const quantity = Object.values(l.tailles ?? {}).reduce((a, b) => a + b, 0);
+                    return {
+                      ...newLine(),
+                      productModelId: l.product_model_id,
+                      textileId: products.find((p) => p.id === l.product_model_id)?.textiles[0]?.id ?? "",
+                      description: l.description,
+                      quantity: quantity ? String(quantity) : "",
+                      colorDraft: l.couleur_unique_id
+                        ? { isUni: true, couleurUniqueId: l.couleur_unique_id, zoneColors: {} }
+                        : EMPTY_ZONE_COLOR_DRAFT,
+                      sizes: l.tailles ?? {},
+                      sizesAuto: quantity === 0,
+                    };
+                  })
+                : [newLine()]
+          );
           setTerms(correction ? correction.terms : newTerms(defaults, paymentTerms));
           setOpen(true);
         }}
