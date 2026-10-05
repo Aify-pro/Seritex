@@ -62,7 +62,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     supabase
       .from("production_order_lines")
       .select(
-        "id,description,quantity,product_model_id,quote_line_id,couleur_unique_id,product_models(name,textiles(nom,composition,grammage,laize_cm)),couleur_unique:couleur_unique_id(name,code),zone_colors:production_order_line_zone_colors(zone_key,colors:color_id(name,code)),sizes:production_order_sizes(taille,quantite_demandee),line_sections:production_order_line_sections(ordre,partie,sections(id,name,atelier_categories(requiert_visuel)))"
+        "id,description,quantity,product_model_id,quote_line_id,couleur_unique_id,product_models(name,textiles!product_models_textile_id_fkey(nom,composition,grammage,laize_cm)),couleur_unique:couleur_unique_id(name,code),zone_colors:production_order_line_zone_colors(zone_key,colors:color_id(name,code)),sizes:production_order_sizes(taille,quantite_demandee),line_sections:production_order_line_sections(ordre,partie,sections(id,name,atelier_categories(requiert_visuel)))"
       )
       .eq("production_order_id", id)
       .order("created_at"),

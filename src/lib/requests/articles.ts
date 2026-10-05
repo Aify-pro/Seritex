@@ -25,7 +25,8 @@ export interface RequestModelOption {
 export async function getRequestModelOptions(): Promise<RequestModelOption[]> {
   const supabase = await createClient();
   const [{ data: models }, { data: modelColors }, { data: modelSizes }, { data: sizes }] = await Promise.all([
-    supabase.from("product_models").select("id,name").eq("active", true).order("name"),
+    // Produits finis seulement, tant que la vente des autres articles n'a pas son circuit.
+    supabase.from("product_models").select("id,name").eq("active", true).eq("nature", "pf").order("name"),
     supabase.from("product_model_colors").select("product_model_id,colors(id,name)"),
     supabase.from("product_model_sizes").select("product_model_id,sizes(cle,libelle,groupe,display_order)"),
     supabase.from("sizes").select("cle,libelle,groupe,display_order").eq("active", true).order("groupe").order("display_order"),

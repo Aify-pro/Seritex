@@ -63,34 +63,6 @@ export async function setProductModelColors(productModelId: string, colorIds: st
   return {};
 }
 
-const newProductModelSchema = z.object({
-  name: z.string().min(1),
-  category: z.string().optional(),
-});
-
-/**
- * Modèles de produit — aucune page de gestion n'existait avant ce lot
- * (product_models n'était consommé qu'en lecture, pour les devis et le
- * catalogue Sage). Nécessaire ici pour rattacher un gabarit de zones.
- */
-export async function createProductModel(formData: FormData) {
-  await requireRole(["administrateur", "responsable_production"]);
-  const parsed = newProductModelSchema.safeParse({
-    name: formData.get("name"),
-    category: formData.get("category"),
-  });
-  if (!parsed.success) return { error: parsed.error.issues[0]?.message };
-
-  const supabase = await createClient();
-  const { error } = await supabase.from("product_models").insert({
-    name: parsed.data.name.trim(),
-    category: parsed.data.category?.trim() || null,
-  });
-  if (error) return { error: error.message };
-  revalidateArticles();
-  return {};
-}
-
 export async function toggleProductModelActive(productModelId: string, active: boolean) {
   await requireRole(["administrateur", "responsable_production"]);
   const supabase = await createClient();

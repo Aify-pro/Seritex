@@ -4,13 +4,16 @@ import { ArrowLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { requireArticles } from "@/lib/articles/access";
 import { ARTICLE_DETAIL_TABS } from "@/lib/articles/tabs";
+import { NATURE_LABELS, TYPE_APPRO_LABELS, type ArticleNature, type TypeAppro } from "@/lib/articles/natures";
 import { PageHeader } from "@/components/shell/page-header";
 import { Badge } from "@/components/ui/badge";
 import { TabNav } from "@/components/shell/tab-nav";
 
 /**
- * Fiche article à onglets (ART-A) : l'en-tête et la barre d'onglets sont
- * communs, chaque onglet charge ses propres données.
+ * Fiche article à onglets (ART-A), commune à toutes les natures (migration
+ * 0093) : l'en-tête et la barre d'onglets sont communs, chaque onglet charge
+ * ses propres données ; les onglets de fabrication n'apparaissent que pour
+ * un produit fini.
  */
 export default async function ArticleLayout({
   children,
@@ -24,12 +27,13 @@ export default async function ArticleLayout({
   const supabase = await createClient();
   const { data: model } = await supabase
     .from("product_models")
-    .select("id,name,category,active")
+    .select("id,name,category,active,nature,type_appro,famille:article_families!product_models_famille_id_fkey(nom),sous_famille:article_families!product_models_sous_famille_id_fkey(nom)")
     .eq("id", id)
     .maybeSingle();
   if (!model) notFound();
 
-  const tabs = ARTICLE_DETAIL_TABS.filter((t) => !t.costsOnly || canSeeCosts).map((t) => ({
+  const nature = model.nature as ArticleNature;
+  const tabs = ARTICLE_DETAIL_TABS.filter((t) => (!t.costsOnly || canSeeCosts) && (!t.natures || t.natures.includes(nature))).map((t) => ({
     href: `/articles/${id}/${t.slug}`,
     label: t.label,
   }));
@@ -44,7 +48,14 @@ export default async function ArticleLayout({
       </Link>
       <PageHeader
         title={model.name}
-        description={model.category ?? "Produit fini"}
+        description={[
+          NATURE_LABELS[nature],
+          TYPE_APPRO_LABELS[model.type_appro as TypeAppro],
+          [(model.famille as unknown as { nom: string } | null)?.nom, (model.sous_famille as unknown as { nom: string } | null)?.nom].filter(Boolean).join(" › "),
+          model.category,
+        ]
+          .filter(Boolean)
+          .join(" · ")}
         action={!model.active ? <Badge tone="neutral">Inactif</Badge> : undefined}
       />
       <TabNav items={tabs} label="Onglets de la fiche article" />

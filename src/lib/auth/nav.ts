@@ -2,6 +2,7 @@ import type { UserRole } from "@/lib/types/domain";
 import {
   LayoutDashboard,
   Inbox,
+  FolderTree,
   FileText,
   FlaskConical,
   Factory,
@@ -140,6 +141,7 @@ export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
     { href: "/livraisons", label: "Livraisons", icon: navIcon(Truck), module: "livraisons" },
     { href: "/mediatheque", label: "Médiathèque", icon: navIcon(FolderOpen), module: "mediatheque" },
     { href: "/parametres/couleurs", label: "Couleurs et tailles", icon: navIcon(SwatchBook), section: PARAMETRES },
+    { href: "/parametres/familles-articles", label: "Familles d'articles", icon: navIcon(FolderTree), section: PARAMETRES, module: "articles" },
     { href: "/parametres/codification", label: "Codification", icon: navIcon(Barcode), section: PARAMETRES },
     { href: "/parametres/stock", label: "Stock Sage (lecture)", icon: navIcon(Warehouse), section: PARAMETRES, module: "stock_sage" },
     {
@@ -211,6 +213,7 @@ export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
     { href: "/parametres/roles", label: "Rôles & permissions", icon: navIcon(ShieldCheck), section: PARAMETRES, module: "roles" },
     { href: "/parametres/sections", label: "Sections d'atelier", icon: navIcon(Boxes), section: PARAMETRES, module: "sections" },
     { href: "/parametres/couleurs", label: "Couleurs et tailles", icon: navIcon(SwatchBook), section: PARAMETRES },
+    { href: "/parametres/familles-articles", label: "Familles d'articles", icon: navIcon(FolderTree), section: PARAMETRES, module: "articles" },
     { href: "/parametres/codification", label: "Codification", icon: navIcon(Barcode), section: PARAMETRES },
     { href: "/parametres/societe", label: "Informations société", icon: navIcon(Landmark), section: PARAMETRES, module: "societe" },
     { href: "/parametres/fabrication", label: "Fabrication", icon: navIcon(Gauge), section: PARAMETRES, module: "fabrication" },

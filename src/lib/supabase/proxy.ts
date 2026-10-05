@@ -48,6 +48,8 @@ const ROUTE_ACCESS: { prefix: string; roles: string[] }[] = [
   { prefix: "/parametres/codification", roles: ["responsable_production", "administrateur", "gestionnaire_stock"] },
   // Référentiels de livraison (LIV-0) : le service livraison.
   { prefix: "/parametres/livraison", roles: ["responsable_livraison", "administrateur"] },
+  // Familles d'articles (migration 0093) : la production classe aussi les articles.
+  { prefix: "/parametres/familles-articles", roles: ["responsable_production", "administrateur"] },
   { prefix: "/parametres", roles: ["administrateur"] },
   // Prix de revient et marges (migration 0067) : Direction et administrateur
   // seulement (base_role administrateur) — jamais les commerciaux.

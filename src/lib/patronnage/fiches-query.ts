@@ -214,8 +214,9 @@ export async function getProductModelOptions(): Promise<
   const supabase = await createClient();
   const { data } = await supabase
     .from("product_models")
-    .select("id,name,textiles(nom,grammage,laize_cm)")
+    .select("id,name,textiles!product_models_textile_id_fkey(nom,grammage,laize_cm)")
     .eq("active", true)
+    .eq("nature", "pf")
     .order("name");
 
   return (data ?? []).map((m) => {

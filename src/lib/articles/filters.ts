@@ -1,13 +1,13 @@
 /**
  * Filtres de la liste Articles (ART-A) — l'état complet vit dans l'URL
  * (partageable, rechargeable, bouton Précédent fonctionnel), comme la liste
- * des clients. Le catalogue compte quelques dizaines de modèles : le filtrage
+ * des clients. Une seule liste pour toutes les natures (produits finis,
+ * matières premières, consommables — migration 0093). Le catalogue compte
+ * quelques centaines d'articles au plus : le filtrage
  * se fait en mémoire, par ce module pur (testé par npm run test:codification).
  */
 import { normalizeSearch, searchTerms } from "@/lib/clients/filters";
-
-export const ARTICLE_TABS = ["produits", "matieres", "consommables"] as const;
-export type ArticleTab = (typeof ARTICLE_TABS)[number];
+import { ARTICLE_NATURES, TYPES_APPRO, type ArticleNature, type TypeAppro } from "@/lib/articles/natures";
 
 export const ARTICLE_PAGE_SIZES = [25, 50, 100] as const;
 export const ARTICLE_DEFAULT_PAGE_SIZE = 25;
@@ -16,8 +16,11 @@ export const ARTICLE_SORTS = ["nom", "code", "categorie", "declinaisons", "stock
 export type ArticleSortKey = (typeof ARTICLE_SORTS)[number];
 
 export interface ArticleFilters {
-  onglet: ArticleTab;
   q: string;
+  nature: "" | ArticleNature;
+  type: "" | TypeAppro;
+  famille: string;
+  sousFamille: string;
   categorie: string;
   actif: "oui" | "non" | "tous";
   matiere: string;
@@ -46,8 +49,11 @@ export function parseArticleFilters(params: RawParams): ArticleFilters {
   const page = Number.parseInt(one(params, "page"), 10);
   const taille = Number.parseInt(one(params, "taille"), 10);
   return {
-    onglet: oneOf(one(params, "onglet"), ARTICLE_TABS, "produits"),
     q: one(params, "q").slice(0, 100),
+    nature: oneOf(one(params, "nature"), ["", ...ARTICLE_NATURES] as const, ""),
+    type: oneOf(one(params, "type"), ["", ...TYPES_APPRO] as const, ""),
+    famille: one(params, "famille").slice(0, 40),
+    sousFamille: one(params, "sous_famille").slice(0, 40),
     categorie: one(params, "categorie").slice(0, 100),
     actif: oneOf(one(params, "actif"), ["oui", "non", "tous"] as const, "oui"),
     matiere: one(params, "matiere").slice(0, 100),
@@ -62,14 +68,16 @@ export function parseArticleFilters(params: RawParams): ArticleFilters {
   };
 }
 
-export function articleFiltersToSearchParams(f: ArticleFilters, overrides: Partial<Pick<ArticleFilters, "page" | "onglet">> = {}): URLSearchParams {
+export function articleFiltersToSearchParams(f: ArticleFilters, overrides: Partial<Pick<ArticleFilters, "page">> = {}): URLSearchParams {
   const sp = new URLSearchParams();
   const set = (k: string, v: string | number) => {
     if (v !== "" && v !== undefined && v !== null) sp.set(k, String(v));
   };
-  const onglet = overrides.onglet ?? f.onglet;
-  if (onglet !== "produits") set("onglet", onglet);
   set("q", f.q);
+  set("nature", f.nature);
+  set("type", f.type);
+  set("famille", f.famille);
+  set("sous_famille", f.sousFamille);
   set("categorie", f.categorie);
   if (f.actif !== "oui") set("actif", f.actif);
   set("matiere", f.matiere);
@@ -85,17 +93,25 @@ export function articleFiltersToSearchParams(f: ArticleFilters, overrides: Parti
   return sp;
 }
 
-/** Filtres actifs hors valeurs par défaut (et hors onglet). */
+/** Filtres actifs hors valeurs par défaut. */
 export function activeArticleFilterCount(f: ArticleFilters): number {
-  return [f.q, f.categorie, f.actif !== "oui" ? "x" : "", f.matiere, f.grammage, f.couleur, f.grille, f.sage].filter(Boolean)
-    .length;
+  return [f.q, f.nature, f.type, f.famille, f.sousFamille, f.categorie, f.actif !== "oui" ? "x" : "", f.matiere, f.grammage, f.couleur, f.grille, f.sage].filter(
+    Boolean
+  ).length;
 }
 
-/** Une ligne de la liste des produits finis, telle que la page la construit. */
+/** Une ligne de la liste des articles, telle que la page la construit. */
 export interface ArticleRow {
   id: string;
   code: string | null;
   name: string;
+  nature: ArticleNature;
+  typeAppro: TypeAppro;
+  familleId: string | null;
+  sousFamilleId: string | null;
+  /** « Famille › Sous-famille », pour l'affichage. */
+  famille: string | null;
+  unite: string;
   category: string | null;
   active: boolean;
   matiere: string | null;
@@ -134,6 +150,10 @@ export function applyArticleFilters(rows: ArticleRow[], f: ArticleFilters): Arti
   const terms = searchTerms(f.q);
   const filtered = rows.filter((r) => {
     if (terms.some((t) => !r.searchText.includes(t))) return false;
+    if (f.nature && r.nature !== f.nature) return false;
+    if (f.type && r.typeAppro !== f.type) return false;
+    if (f.famille && r.familleId !== f.famille) return false;
+    if (f.sousFamille && r.sousFamilleId !== f.sousFamille) return false;
     if (f.categorie && (r.category ?? "") !== f.categorie) return false;
     if (f.actif === "oui" && !r.active) return false;
     if (f.actif === "non" && r.active) return false;
