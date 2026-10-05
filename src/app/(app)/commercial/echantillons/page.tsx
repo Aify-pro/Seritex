@@ -14,7 +14,14 @@ import { formatDate } from "@/lib/utils";
 import { CreateSampleDialog } from "@/components/samples/create-sample-dialog";
 import { SampleDetailContent } from "@/components/samples/sample-detail-content";
 import type { ProductionOrderLineOption } from "@/components/samples/sample-production-order-link";
-import { getSampleRequestOptions, getSampleQuoteLineOptions, buildSampleLinks } from "@/lib/samples";
+import {
+  getSampleRequestOptions,
+  getSampleQuoteLineOptions,
+  getSampleArticleMediaMap,
+  buildSampleLinks,
+  canEditSampleArticleMedia,
+  emptySampleArticleMedia,
+} from "@/lib/samples";
 
 /**
  * Liste du module Échantillonnage, refondue pour l'équipe commerciale/atelier :
@@ -55,7 +62,10 @@ export default async function CommercialSamplesPage() {
       supabase.from("sample_request_media_files").select("sample_request_id,media_file_id"),
     ]);
 
-  const quoteLines = await getSampleQuoteLineOptions(requests.map((r) => r.id));
+  const [quoteLines, articleMediaBySample] = await Promise.all([
+    getSampleQuoteLineOptions(requests.map((r) => r.id)),
+    getSampleArticleMediaMap(samples ?? []),
+  ]);
   const requestById = new Map(requests.map((r) => [r.id, r]));
 
   const productionOrderLinesByCompany = new Map<string, ProductionOrderLineOption[]>();
@@ -163,6 +173,7 @@ export default async function CommercialSamplesPage() {
                           <SampleDetailContent
                             sample={{ ...s, companyName }}
                             links={buildSampleLinks(s, requests, quoteLines)}
+                            articleMedia={articleMediaBySample.get(s.id) ?? emptySampleArticleMedia()}
                             baseUrl={baseUrl}
                             companyProductionOrderLines={companyProductionOrderLines}
                             attachedMedia={attached}
@@ -173,6 +184,10 @@ export default async function CommercialSamplesPage() {
                               canManageStatus: canManage,
                               canLinkProductionOrder: canManage,
                               canLinkRequestAndQuoteLine: isCommercial,
+                              canManageArticleMedia: canEditSampleArticleMedia(
+                                profile.role,
+                                articleMediaBySample.get(s.id)?.target ?? null
+                              ),
                               canDecide: false,
                             }}
                           />

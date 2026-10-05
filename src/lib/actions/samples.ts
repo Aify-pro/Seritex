@@ -253,3 +253,116 @@ export async function detachMediaFileFromSample(sampleId: string, mediaFileId: s
   revalidateSamplePaths();
   return {};
 }
+
+/**
+ * Dépose un fichier de la médiathèque (maquette ou visuel) sur l'ARTICLE de
+ * la fiche échantillon (0094) — pas sur la fiche : la maquette et les
+ * visuels vivent sur la ligne d'article, là où l'ODF les lit déjà. C'est ce
+ * qui fait entrer le fichier dans le circuit dès l'échantillon, quelle que
+ * soit la technique d'impression.
+ *
+ * Même règle de remplacement que les écrans devis et ODF : une maquette
+ * remplace silencieusement la précédente (une seule par article), un visuel
+ * s'ajoute. Les rôles suivent la RLS de la table ciblée : commercial /
+ * administrateur pour une ligne de devis, responsable production /
+ * administrateur pour un article d'ODF (et seulement tant que l'ODF n'est
+ * pas validé, cf. 0042).
+ */
+async function resolveSampleArticleTarget(sampleId: string) {
+  const supabase = await createClient();
+  const { data: sample } = await supabase
+    .from("sample_requests")
+    .select("id,request_id,quote_line_id,production_order_line_id,quote_lines(quote_id),production_order_lines(production_order_id)")
+    .eq("id", sampleId)
+    .maybeSingle();
+  if (!sample) return { error: "Fiche échantillon introuvable" as const };
+  if (sample.quote_line_id) {
+    const quoteId = (sample.quote_lines as unknown as { quote_id: string } | null)?.quote_id ?? null;
+    return { kind: "quote_line" as const, lineId: sample.quote_line_id, parentId: quoteId, requestId: sample.request_id };
+  }
+  if (sample.production_order_line_id) {
+    const odfId = (sample.production_order_lines as unknown as { production_order_id: string } | null)?.production_order_id ?? null;
+    return { kind: "order_line" as const, lineId: sample.production_order_line_id, parentId: odfId, requestId: sample.request_id };
+  }
+  return { error: "Cette fiche n'est rattachée à aucune ligne d'article : les fichiers se déposent sur l'article." as const };
+}
+
+export async function attachMediaFileToSampleArticle(sampleId: string, mediaFileId: string) {
+  const { authId } = await requireRole(["commercial", "administrateur", "responsable_production"]);
+  const target = await resolveSampleArticleTarget(sampleId);
+  if ("error" in target) return { error: target.error };
+
+  const supabase = await createClient();
+  const { data: media } = await supabase.from("media_files").select("category").eq("id", mediaFileId).maybeSingle();
+
+  const table = target.kind === "quote_line" ? "quote_line_media_files" : "production_order_media_files";
+  const lineColumn = target.kind === "quote_line" ? "quote_line_id" : "production_order_line_id";
+
+  // Maquette unique par article : remplace la précédente (même logique que
+  // attachMediaFileToQuoteLine / attachMediaFileToLine).
+  if (media?.category === "maquette") {
+    const { data: existing } = await supabase
+      .from(table)
+      .select("media_file_id,media_files!inner(category)")
+      .eq(lineColumn, target.lineId)
+      .eq("media_files.category", "maquette");
+    const existingIds = (existing ?? []).map((e) => e.media_file_id);
+    if (existingIds.length > 0) {
+      const { error: delError } = await supabase.from(table).delete().eq(lineColumn, target.lineId).in("media_file_id", existingIds);
+      if (delError) return { error: delError.message };
+    }
+  }
+
+  const { error } =
+    target.kind === "quote_line"
+      ? await supabase
+          .from("quote_line_media_files")
+          .insert({ quote_line_id: target.lineId, media_file_id: mediaFileId, added_by: authId })
+      : await supabase.from("production_order_media_files").insert({
+          production_order_id: target.parentId,
+          production_order_line_id: target.lineId,
+          media_file_id: mediaFileId,
+          added_by: authId,
+        });
+  if (error) return { error: error.message };
+
+  revalidateSampleArticlePaths(target);
+  return {};
+}
+
+export async function detachMediaFileFromSampleArticle(sampleId: string, mediaFileId: string) {
+  await requireRole(["commercial", "administrateur", "responsable_production"]);
+  const target = await resolveSampleArticleTarget(sampleId);
+  if ("error" in target) return { error: target.error };
+
+  const supabase = await createClient();
+  if (target.kind === "order_line") {
+    // Un visuel retiré de l'article ne reste affecté à aucun atelier (0069).
+    const { error: unassignError } = await supabase
+      .from("production_order_line_section_visuels")
+      .delete()
+      .eq("production_order_line_id", target.lineId)
+      .eq("media_file_id", mediaFileId);
+    if (unassignError) return { error: unassignError.message };
+  }
+
+  const table = target.kind === "quote_line" ? "quote_line_media_files" : "production_order_media_files";
+  const lineColumn = target.kind === "quote_line" ? "quote_line_id" : "production_order_line_id";
+  const { error } = await supabase.from(table).delete().eq(lineColumn, target.lineId).eq("media_file_id", mediaFileId);
+  if (error) return { error: error.message };
+
+  revalidateSampleArticlePaths(target);
+  return {};
+}
+
+function revalidateSampleArticlePaths(target: { kind: "quote_line" | "order_line"; parentId: string | null; requestId: string | null }) {
+  revalidateSamplePaths(target.requestId);
+  revalidatePath("/echantillons", "layout");
+  if (target.kind === "quote_line" && target.parentId) {
+    revalidatePath(`/commercial/devis/${target.parentId}`);
+    revalidatePath(`/client/devis/${target.parentId}`);
+  }
+  if (target.kind === "order_line" && target.parentId) {
+    revalidatePath(`/atelier/production/${target.parentId}`);
+  }
+}

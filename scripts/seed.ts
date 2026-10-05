@@ -241,13 +241,17 @@ async function main() {
     })
     .select()
     .single();
-  await admin.from("quote_lines").insert({
-    quote_id: quote1!.id,
-    product_model_id: product.id,
-    description: "T-shirt col rond 180g, marquage sérigraphie 1 couleur",
-    quantity: 500,
-    unit_price: 3500,
-  });
+  const { data: quote1Line } = await admin
+    .from("quote_lines")
+    .insert({
+      quote_id: quote1!.id,
+      product_model_id: product.id,
+      description: "T-shirt col rond 180g, marquage sérigraphie 1 couleur",
+      quantity: 500,
+      unit_price: 3500,
+    })
+    .select("id")
+    .single();
 
   const { data: req2 } = await admin
     .from("requests")
@@ -376,6 +380,8 @@ async function main() {
     company_id: companyA!.id,
     contact_id: contactA!.id,
     request_id: req1!.id,
+    // Un échantillon porte sur une ligne d'article précise (0094).
+    quote_line_id: quote1Line!.id,
     created_by_user_id: commercialId,
     need_description: "Échantillon T-shirt 180g avant commande ferme, coloris à valider.",
     quantity_requested: 1,

@@ -47,7 +47,7 @@ export function QuoteLineSamplePicker({
   if (!editable && linked.length === 0) return null;
 
   return (
-    <div className="mt-3 space-y-1.5">
+    <div className="space-y-1.5">
       <p className="text-xs font-medium text-foreground-muted">Échantillon</p>
       {linked.length === 0 && <p className="text-xs text-foreground-muted">Aucun échantillon lié (facultatif).</p>}
       <div className="flex flex-wrap items-center gap-1.5">

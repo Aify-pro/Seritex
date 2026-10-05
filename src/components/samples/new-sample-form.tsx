@@ -11,15 +11,18 @@ import { Plus } from "lucide-react";
 const PRIORITIES: SamplePriority[] = ["basse", "normale", "haute", "urgente"];
 
 /**
- * Création d'une fiche échantillon (migration 0051) : toujours rattachée à
+ * Création d'une fiche échantillon (0051, revu 0094) : toujours rattachée à
  * une demande — choisie dans la liste depuis le module Échantillonnage, ou
- * imposée quand on crée depuis la fiche de demande — et, facultativement,
- * à une ligne d'article d'un devis de cette demande. Réservée au staff
- * commercial : priorité et délai toujours proposés.
+ * imposée quand on crée depuis la fiche de demande ou depuis une ligne
+ * d'article — et à une LIGNE D'ARTICLE dès que la demande porte un devis :
+ * une proforma peut contenir plusieurs modèles, un échantillon ne concerne
+ * jamais le devis entier. Sans devis encore établi, la fiche se crée sans
+ * ligne et se rattache ensuite. Réservée au staff commercial.
  */
 export function NewSampleForm({
   requests,
   fixedRequest,
+  fixedQuoteLine,
   quoteLines,
   onCreated,
 }: {
@@ -27,6 +30,8 @@ export function NewSampleForm({
   requests?: SampleRequestOption[];
   /** Demande imposée (création depuis la fiche de demande). */
   fixedRequest?: Pick<SampleRequestOption, "id" | "reference" | "companyName">;
+  /** Ligne d'article imposée (création depuis la ligne du devis ou l'article d'ODF). */
+  fixedQuoteLine?: { id: string; label: string };
   /** Lignes des devis des demandes proposées — filtrées ici sur la demande choisie. */
   quoteLines: SampleQuoteLineOption[];
   /** Appelé après une création réussie — utilisé par `CreateSampleDialog` pour refermer la fenêtre. */
@@ -36,6 +41,8 @@ export function NewSampleForm({
   const formRef = useRef<HTMLFormElement>(null);
   const [requestId, setRequestId] = useState(fixedRequest?.id ?? "");
   const requestQuoteLines = quoteLines.filter((l) => l.requestId === requestId);
+  // Un devis existe sur la demande : la ligne devient obligatoire (0094).
+  const lineRequired = requestQuoteLines.length > 0;
 
   return (
     <form
@@ -83,29 +90,46 @@ export function NewSampleForm({
         </div>
       )}
 
-      <div>
-        <label className="mb-1 block text-xs font-medium text-foreground">Ligne d&apos;article du devis (facultatif)</label>
-        <select
-          name="quote_line_id"
-          defaultValue=""
-          key={requestId}
-          disabled={!requestId || requestQuoteLines.length === 0}
-          className="h-9 w-full rounded-md border border-border bg-surface px-2 text-sm disabled:opacity-60"
-        >
-          <option value="">
-            {!requestId ? "— Choisir d'abord la demande —" : requestQuoteLines.length === 0 ? "Aucun devis sur cette demande" : "— Aucune ligne —"}
-          </option>
-          {requestQuoteLines.map((l) => (
-            <option key={l.id} value={l.id}>
-              {l.quoteReference} — {l.description}
-              {l.orderLine ? ` · ${l.orderLine.orderReference}` : ""}
+      {fixedQuoteLine ? (
+        <>
+          <input type="hidden" name="quote_line_id" value={fixedQuoteLine.id} />
+          <p className="text-xs text-foreground-muted">
+            Article <span className="font-medium text-foreground">{fixedQuoteLine.label}</span>
+          </p>
+        </>
+      ) : (
+        <div>
+          <label className="mb-1 block text-xs font-medium text-foreground">
+            Ligne d&apos;article {lineRequired ? "" : "(aucun devis sur cette demande)"}
+          </label>
+          <select
+            name="quote_line_id"
+            required={lineRequired}
+            defaultValue=""
+            key={requestId}
+            disabled={!requestId || requestQuoteLines.length === 0}
+            className="h-9 w-full rounded-md border border-border bg-surface px-2 text-sm disabled:opacity-60"
+          >
+            <option value="">
+              {!requestId
+                ? "— Choisir d'abord la demande —"
+                : requestQuoteLines.length === 0
+                  ? "Aucun devis : la fiche sera à rattacher plus tard"
+                  : "— Choisir l'article concerné —"}
             </option>
-          ))}
-        </select>
-        <p className="mt-1 text-[11px] text-foreground-muted">
-          Une fois le devis passé en ODF, l&apos;échantillon suit l&apos;article correspondant et ce lien n&apos;est plus modifiable.
-        </p>
-      </div>
+            {requestQuoteLines.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.quoteReference} — {l.description}
+                {l.orderLine ? ` · ${l.orderLine.orderReference}` : ""}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-[11px] text-foreground-muted">
+            Un échantillon porte sur un article précis, jamais sur le devis entier. Une fois le devis passé en ODF, ce
+            lien suit l&apos;article et n&apos;est plus modifiable.
+          </p>
+        </div>
+      )}
 
       <textarea
         name="need_description"

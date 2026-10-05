@@ -17,6 +17,8 @@ import { ZoneColorSummary } from "@/components/product/zone-color-picker";
 import { QuoteLineVisuelPicker } from "./quote-line-visuel-picker";
 import { QuoteLineMaquettePicker } from "./quote-line-maquette-picker";
 import { QuoteLineSamplePicker, type QuoteSample } from "./quote-line-sample-picker";
+import { CreateSampleDialog } from "@/components/samples/create-sample-dialog";
+import type { SampleQuoteLineOption } from "@/lib/samples";
 
 export function QuoteDetail({
   quote,
@@ -26,6 +28,7 @@ export function QuoteDetail({
   editable = false,
   availableMediaFiles = [],
   samples = [],
+  sampleCreation,
   canValidate = false,
   validators = [],
   validatedBy = null,
@@ -41,6 +44,12 @@ export function QuoteDetail({
   availableMediaFiles?: AttachableMediaFile[];
   /** Échantillons de la demande du devis (migration 0051), liables par ligne. */
   samples?: QuoteSample[];
+  /**
+   * Création d'un échantillon depuis une ligne d'article (0094) : un
+   * échantillon se fait par article, jamais pour le devis entier. Absent
+   * côté client (consultation seule).
+   */
+  sampleCreation?: { requestReference: string; quoteLineOptions: SampleQuoteLineOption[] };
   /** Vue commercial : l'utilisateur a une signature active et peut valider (migration 0063). */
   canValidate?: boolean;
   /** Noms des personnes habilitées, affichés tant que le devis attend sa validation. */
@@ -174,12 +183,27 @@ export function QuoteDetail({
                         available={availableMediaFiles}
                       />
                     </div>
-                    <QuoteLineSamplePicker
-                      quoteLineId={l.id}
-                      samples={samples}
-                      editable={editable}
-                      locked={quote.status === "accepte"}
-                    />
+                    <div className="mt-3 space-y-1.5">
+                      <QuoteLineSamplePicker
+                        quoteLineId={l.id}
+                        samples={samples}
+                        editable={editable}
+                        locked={quote.status === "accepte"}
+                      />
+                      {editable && sampleCreation && (
+                        <CreateSampleDialog
+                          triggerLabel="Créer un échantillon pour cet article"
+                          triggerVariant="secondary"
+                          fixedRequest={{
+                            id: quote.request_id,
+                            reference: sampleCreation.requestReference,
+                            companyName: companyName ?? "",
+                          }}
+                          fixedQuoteLine={{ id: l.id, label: `${quote.reference} — ${l.description}` }}
+                          quoteLines={sampleCreation.quoteLineOptions}
+                        />
+                      )}
+                    </div>
                   </td>
                   <td className="px-5 py-3 text-foreground-muted">{l.quantity}</td>
                   <td className="px-5 py-3 text-foreground-muted">

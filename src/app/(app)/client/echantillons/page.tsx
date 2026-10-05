@@ -12,7 +12,13 @@ import { SAMPLE_STATUS_LABELS, SAMPLE_PRIORITY_LABELS } from "@/lib/types/domain
 import type { SamplePriority, ProductionOrderStatus } from "@/lib/types/domain";
 import { SampleDetailContent } from "@/components/samples/sample-detail-content";
 import type { ProductionOrderLineOption } from "@/components/samples/sample-production-order-link";
-import { getSampleRequestOptions, getSampleQuoteLineOptions, buildSampleLinks } from "@/lib/samples";
+import {
+  getSampleRequestOptions,
+  getSampleQuoteLineOptions,
+  getSampleArticleMediaMap,
+  buildSampleLinks,
+  emptySampleArticleMedia,
+} from "@/lib/samples";
 
 export default async function ClientSamplesPage() {
   const { profile } = await requireRole(["client"]);
@@ -31,7 +37,10 @@ export default async function ClientSamplesPage() {
     supabase.from("sample_request_media_files").select("sample_request_id,media_file_id"),
     getSampleRequestOptions(),
   ]);
-  const quoteLines = await getSampleQuoteLineOptions(requests.map((r) => r.id));
+  const [quoteLines, articleMediaBySample] = await Promise.all([
+    getSampleQuoteLineOptions(requests.map((r) => r.id)),
+    getSampleArticleMediaMap(samples ?? []),
+  ]);
   const requestById = new Map(requests.map((r) => [r.id, r]));
 
   const attachedBySample = new Map<string, string[]>();
@@ -114,6 +123,7 @@ export default async function ClientSamplesPage() {
                           <SampleDetailContent
                             sample={s}
                             links={buildSampleLinks(s, requests, quoteLines)}
+                            articleMedia={articleMediaBySample.get(s.id) ?? emptySampleArticleMedia()}
                             baseUrl={baseUrl}
                             companyProductionOrderLines={linkedLine ? [linkedLine] : []}
                             attachedMedia={attached}
@@ -124,6 +134,7 @@ export default async function ClientSamplesPage() {
                               canManageStatus: false,
                               canLinkProductionOrder: false,
                               canLinkRequestAndQuoteLine: false,
+                              canManageArticleMedia: false,
                               canDecide: true,
                             }}
                           />
