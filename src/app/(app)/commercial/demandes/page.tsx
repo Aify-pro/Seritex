@@ -9,8 +9,9 @@ import Link from "next/link";
 import { ArrowRight, Plus } from "lucide-react";
 
 /**
- * Demandes : celles des clients et celles pour le stock (SF-3), dans une
- * seule liste. La production n'y voit que les demandes pour le stock (RLS).
+ * Demandes : celles des clients, celles du site web (0094, « Client à
+ * rattacher » tant que le prospect n'est pas relié à sa fiche Sage) et celles
+ * pour le stock (SF-3), dans une seule liste. La production n'y voit que les demandes pour le stock (RLS).
  */
 export default async function RequestsPage() {
   await requireRole(["commercial", "administrateur", "responsable_production"]);
@@ -18,7 +19,7 @@ export default async function RequestsPage() {
 
   const { data: requests } = await supabase
     .from("requests")
-    .select("id,reference,status,description,created_at,company_id,companies(name)")
+    .select("id,reference,status,description,created_at,company_id,source,prospect,companies(name)")
     .order("created_at", { ascending: false });
 
   return (
@@ -48,7 +49,23 @@ export default async function RequestsPage() {
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium text-foreground">
                       {r.reference} ·{" "}
-                      {r.company_id ? (r.companies as unknown as { name: string } | null)?.name : <Badge tone="info">Pour le stock</Badge>}
+                      {r.company_id ? (
+                        (r.companies as unknown as { name: string } | null)?.name
+                      ) : r.prospect ? (
+                        <>
+                          {(r.prospect as { entreprise?: string | null; nom: string }).entreprise ??
+                            (r.prospect as { nom: string }).nom}{" "}
+                          <Badge tone="warning">Client à rattacher</Badge>
+                        </>
+                      ) : (
+                        <Badge tone="info">Pour le stock</Badge>
+                      )}
+                      {r.source === "site" && (
+                        <>
+                          {" "}
+                          <Badge tone="neutral">Site web</Badge>
+                        </>
+                      )}
                     </p>
                     <p className="truncate text-xs text-foreground-muted">{r.description}</p>
                   </div>

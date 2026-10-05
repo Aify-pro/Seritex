@@ -18,6 +18,7 @@ import { getSampleQuoteLineOptions } from "@/lib/samples";
 import { getCompanySettings } from "@/lib/company-settings";
 import { getDispatchRules, getSizeOptionsByModel } from "@/lib/quote-dispatch";
 import { StockRequestDetail } from "./stock-request-detail";
+import { SiteRequestDetail, type SiteProspect } from "./site-request-detail";
 import type { RequestArticleLine } from "@/lib/requests/articles";
 
 export default async function RequestDetailPage({
@@ -40,6 +41,24 @@ export default async function RequestDetailPage({
     .single();
 
   if (!request) notFound();
+
+  // Demande du site web pas encore rattachée à un client (migration 0094).
+  if (!request.company_id && request.prospect) {
+    if (profile.role === "responsable_production") notFound();
+    return (
+      <SiteRequestDetail
+        request={{
+          id: request.id,
+          reference: request.reference,
+          status: request.status,
+          description: request.description,
+          created_at: request.created_at,
+          prospect: request.prospect as SiteProspect,
+        }}
+        canLink={profile.role === "commercial" || profile.role === "administrateur"}
+      />
+    );
+  }
 
   // Demande pour le stock (sans client, SF-3) : sa propre fiche, sans devis.
   if (!request.company_id) {
