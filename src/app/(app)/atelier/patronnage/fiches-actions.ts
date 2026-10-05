@@ -107,17 +107,14 @@ async function resolveProductModel(productModelId: string | null): Promise<{
 
   let tissu_type: string | null = null;
   let grammage: number | null = null;
-  let laize_utile_cm: number | null = null;
+  // La laize n'est pas celle de l'article : elle varie d'un rouleau à
+  // l'autre et se saisit sur la fiche, d'après le rouleau coupé.
+  const laize_utile_cm: number | null = null;
   if (model.textile_id) {
-    const { data: textile } = await supabase
-      .from("textiles")
-      .select("nom,grammage,laize_cm")
-      .eq("id", model.textile_id)
-      .single();
+    const { data: textile } = await supabase.from("textiles").select("nom,grammage").eq("id", model.textile_id).single();
     if (textile) {
       tissu_type = textile.nom as string;
       grammage = textile.grammage as number | null;
-      laize_utile_cm = textile.laize_cm as number | null;
     }
   }
   return { designation_article: model.name as string, tissu_type, grammage, laize_utile_cm };

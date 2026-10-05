@@ -59,7 +59,6 @@ export interface LineData {
   textileNom: string | null;
   textileComposition: string | null;
   textileGrammage: number | null;
-  textileLaizeCm: number | null;
   couleurUniqueId: string | null;
   zoneColors: ZoneColorValue[];
   zoneTemplate: ZoneTemplate[];
@@ -349,7 +348,6 @@ function LineCard({
               </>
             )}
             {line.textileGrammage != null && <> · {line.textileGrammage} g/m²</>}
-            {line.textileLaizeCm != null && <> · laize {line.textileLaizeCm} cm</>}
           </p>
 
           <div className="space-y-2">

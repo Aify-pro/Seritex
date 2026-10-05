@@ -301,7 +301,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       tissu: textile?.nom ?? null,
       composition: textile?.composition ?? null,
       grammageLaize:
-        [textile?.grammage ? `${textile.grammage} g/m²` : null, textile?.laize_cm ? `laize ${textile.laize_cm} cm` : null]
+        [textile?.grammage ? `${textile.grammage} g/m²` : null]
           .filter(Boolean)
           .join(" · ") || null,
       couleurLabel,

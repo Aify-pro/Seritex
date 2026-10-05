@@ -450,7 +450,7 @@ function ProductModelFields({
             </Field>
             <Field label="Laize utile (cm)">
               <p className="rounded-md border border-dashed border-border bg-surface-muted px-2.5 py-2 text-sm text-foreground-muted">
-                {selected?.textile?.laizeCm ?? "—"}
+                Selon le rouleau
               </p>
             </Field>
           </>

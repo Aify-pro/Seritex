@@ -368,7 +368,6 @@ export default async function ProductionOrderDetailPage({
         textileNom: productModel?.textiles?.nom ?? null,
         textileComposition: productModel?.textiles?.composition ?? null,
         textileGrammage: productModel?.textiles?.grammage ?? null,
-        textileLaizeCm: productModel?.textiles?.laize_cm ?? null,
         couleurUniqueId: l.couleur_unique_id,
         zoneColors: (l.zone_colors ?? []).map((z) => ({ zone_key: z.zone_key, color_id: (z.colors as unknown as { id: string } | null)?.id ?? "" })),
         zoneTemplate: (zoneTemplatesAll ?? [])

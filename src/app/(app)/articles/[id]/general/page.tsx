@@ -80,7 +80,7 @@ export default async function ArticleGeneralPage({ params }: { params: Promise<{
 
   if (nature === "mp") {
     const [{ data: textile }, { data: liens }, { data: articles }] = await Promise.all([
-      supabase.from("textiles").select("id,composition,grammage,laize_cm,matiere_id").eq("product_model_id", id).maybeSingle(),
+      supabase.from("textiles").select("id,composition,grammage,matiere_id").eq("product_model_id", id).maybeSingle(),
       supabase.from("textile_sage_articles").select("textile_id,sage_reference,color_id,colors(name)"),
       supabase.from("stock_item_view").select("sage_reference,designation").eq("category", "tissu").order("designation"),
     ]);
@@ -101,7 +101,10 @@ export default async function ArticleGeneralPage({ params }: { params: Promise<{
       <div className="space-y-4">
         {identite}
         <Card>
-          <CardHeader title="Caractéristiques du tissu" description="Elles servent à la coupe, au placement et au prix de revient." />
+          <CardHeader
+            title="Caractéristiques du tissu"
+            description="Grammage nominal de l'article ; la laize et le poids réels sont ceux de chaque rouleau, le grammage réel se mesure à la production."
+          />
           <CardBody>
             <TextileTechniqueForm textile={textile} matieres={matieres ?? []} editable={canModify} />
           </CardBody>
