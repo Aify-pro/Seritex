@@ -48,6 +48,13 @@ const data: SamplePdfData = {
   maquette: null,
   sheetUrl: "https://seritex.example.com/echantillons/ECH-2026-00142",
   generatedAt: "06 oct. 2026",
+  // Cas interessant : le client a deja valide (saisie commercial), la
+  // direction pas encore — le cartouche imprime donc une case remplie et une
+  // case a signer.
+  validations: {
+    client: { at: "06 oct. 2026", byName: "Awa Diallo (Textile Atlantique)", onBehalf: true },
+    direction: { at: null, byName: null },
+  },
 };
 
 async function main() {
@@ -75,6 +82,7 @@ async function main() {
       visuelNames: [],
       requiresVisuel: false,
       maquette: null,
+      validations: { client: { at: null, byName: null, onBehalf: false }, direction: { at: null, byName: null } },
     })
   );
   console.log(`PDF ecrit : ${minimal}`);

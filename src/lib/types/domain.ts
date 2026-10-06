@@ -75,6 +75,9 @@ export type SampleRequestStatus =
   | "en_fabrication"
   | "envoye"
   | "recu_client"
+  // Une des deux validations posée, l'autre attendue (migrations 0099/0100) :
+  // un échantillon n'est « validé » que signé par le client ET la direction.
+  | "en_validation"
   | "valide"
   | "a_ajuster"
   | "refuse"
@@ -1046,6 +1049,7 @@ export const SAMPLE_STATUS_LABELS: Record<SampleRequestStatus, string> = {
   en_fabrication: "En fabrication",
   envoye: "Envoyé au client",
   recu_client: "Reçu par le client",
+  en_validation: "En validation",
   valide: "Validé",
   a_ajuster: "À ajuster",
   refuse: "Refusé",

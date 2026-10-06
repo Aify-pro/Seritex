@@ -14,7 +14,7 @@ import { SampleStatusSelect } from "@/components/samples/sample-status-select";
 import { SampleProductionOrderLink, type ProductionOrderLineOption } from "@/components/samples/sample-production-order-link";
 import { SampleMediaFiles, type AttachableMediaFile } from "@/components/samples/sample-media-files";
 import { SampleEditDialog } from "@/components/samples/sample-edit-dialog";
-import { SampleDecisionForm } from "@/components/samples/sample-decision-form";
+import { SampleValidationPanel, type SampleValidations } from "@/components/samples/sample-validation-panel";
 import { DeleteSampleButton } from "@/components/samples/delete-sample-button";
 import { SampleRequestLink } from "@/components/samples/sample-request-link";
 import { SampleQuoteLineLink } from "@/components/samples/sample-quote-line-link";
@@ -61,6 +61,7 @@ export function SampleDetailContent({
   sample,
   links,
   articleMedia,
+  validations,
   baseUrl,
   companyProductionOrderLines,
   attachedMedia,
@@ -71,6 +72,8 @@ export function SampleDetailContent({
   links: SampleLinksData;
   /** Maquette et visuels de l'article (0094) — stockés sur la ligne, pas sur la fiche. */
   articleMedia: SampleArticleMedia;
+  /** Les deux signatures attendues : client et direction (0100). */
+  validations: SampleValidations;
   baseUrl: string;
   companyProductionOrderLines: ProductionOrderLineOption[];
   attachedMedia: AttachableMediaFile[];
@@ -84,7 +87,13 @@ export function SampleDetailContent({
     canLinkRequestAndQuoteLine: boolean;
     /** Dépôt maquette/visuel sur l'article — voir canEditSampleArticleMedia (0094). */
     canManageArticleMedia: boolean;
-    canDecide: boolean;
+    /** Double validation (0100) : qui peut valider, refuser, retirer. */
+    canValidateClient: boolean;
+    canValidateDirection: boolean;
+    canReject: boolean;
+    canCancelValidation: boolean;
+    /** Le staff enregistre la validation pour le compte du client. */
+    actsForClient: boolean;
   };
 }) {
   const fullUrl = `${baseUrl}/echantillons/${sample.sample_number}`;
@@ -178,8 +187,19 @@ export function SampleDetailContent({
 
           <SampleMediaFiles sampleId={sample.id} attached={attachedMedia} available={availableMedia} />
 
-          {permissions.canDecide && (sample.status === "envoye" || sample.status === "recu_client") && (
-            <SampleDecisionForm sampleId={sample.id} />
+          {(permissions.canValidateClient || permissions.canValidateDirection || permissions.canReject ||
+            validations.client.at || validations.direction.at) && (
+            <SampleValidationPanel
+              sampleId={sample.id}
+              validations={validations}
+              permissions={{
+                canValidateClient: permissions.canValidateClient,
+                canValidateDirection: permissions.canValidateDirection,
+                canReject: permissions.canReject,
+                canCancel: permissions.canCancelValidation,
+                actsForClient: permissions.actsForClient,
+              }}
+            />
           )}
         </div>
 

@@ -312,3 +312,52 @@ export async function getSampleArticleMediaMap(samples: SampleArticleRef[]): Pro
 
   return result;
 }
+
+/** Colonnes de validation portées par la fiche (migrations 0099/0100). */
+export interface SampleValidationRow {
+  id: string;
+  validation_client_le: string | null;
+  validation_client_par: string | null;
+  validation_client_commentaire: string | null;
+  validation_client_pour_le_client: boolean | null;
+  validation_direction_le: string | null;
+  validation_direction_par: string | null;
+  validation_direction_commentaire: string | null;
+}
+
+/** Les colonnes à demander à Supabase pour alimenter `buildSampleValidations`. */
+export const SAMPLE_VALIDATION_COLUMNS =
+  "validation_client_le,validation_client_par,validation_client_commentaire,validation_client_pour_le_client,validation_direction_le,validation_direction_par,validation_direction_commentaire";
+
+/**
+ * Noms des personnes qui ont validé, résolus en une requête pour tout
+ * l'écran (les listes affichent la fiche complète de chaque ligne).
+ */
+export async function getSampleValidatorNames(samples: SampleValidationRow[]): Promise<Map<string, string>> {
+  const ids = [
+    ...new Set(
+      samples.flatMap((s) => [s.validation_client_par, s.validation_direction_par]).filter((v): v is string => !!v)
+    ),
+  ];
+  if (ids.length === 0) return new Map();
+  const supabase = await createClient();
+  const { data } = await supabase.from("app_users").select("id,full_name").in("id", ids);
+  return new Map((data ?? []).map((u) => [u.id as string, (u.full_name as string) ?? ""]));
+}
+
+/** Assemble les deux côtés pour `SampleValidationPanel`, sans requête. */
+export function buildSampleValidations(sample: SampleValidationRow, names: Map<string, string>) {
+  return {
+    client: {
+      at: sample.validation_client_le,
+      byName: sample.validation_client_par ? (names.get(sample.validation_client_par) ?? null) : null,
+      comment: sample.validation_client_commentaire,
+      onBehalf: sample.validation_client_pour_le_client ?? false,
+    },
+    direction: {
+      at: sample.validation_direction_le,
+      byName: sample.validation_direction_par ? (names.get(sample.validation_direction_par) ?? null) : null,
+      comment: sample.validation_direction_commentaire,
+    },
+  };
+}

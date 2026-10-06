@@ -18,6 +18,9 @@ import {
   getSampleArticleMediaMap,
   buildSampleLinks,
   emptySampleArticleMedia,
+  getSampleValidatorNames,
+  buildSampleValidations,
+  SAMPLE_VALIDATION_COLUMNS,
 } from "@/lib/samples";
 
 export default async function ClientSamplesPage() {
@@ -29,7 +32,7 @@ export default async function ClientSamplesPage() {
     supabase
       .from("sample_requests")
       .select(
-        "id,reference,sample_number,need_description,status,priority,request_date,due_date,extra_info,company_id,request_id,quote_line_id,production_order_line_id,production_order_lines(id,description,production_orders(reference,status))"
+        `id,reference,sample_number,need_description,status,priority,request_date,due_date,extra_info,company_id,request_id,quote_line_id,production_order_line_id,production_order_lines(id,description,production_orders(reference,status)),${SAMPLE_VALIDATION_COLUMNS}`
       )
       .eq("company_id", profile.company_id!)
       .order("created_at", { ascending: false }),
@@ -37,9 +40,10 @@ export default async function ClientSamplesPage() {
     supabase.from("sample_request_media_files").select("sample_request_id,media_file_id"),
     getSampleRequestOptions(),
   ]);
-  const [quoteLines, articleMediaBySample] = await Promise.all([
+  const [quoteLines, articleMediaBySample, validatorNames] = await Promise.all([
     getSampleQuoteLineOptions(requests.map((r) => r.id)),
     getSampleArticleMediaMap(samples ?? []),
+    getSampleValidatorNames(samples ?? []),
   ]);
   const requestById = new Map(requests.map((r) => [r.id, r]));
 
@@ -124,6 +128,7 @@ export default async function ClientSamplesPage() {
                             sample={s}
                             links={buildSampleLinks(s, requests, quoteLines)}
                             articleMedia={articleMediaBySample.get(s.id) ?? emptySampleArticleMedia()}
+                            validations={buildSampleValidations(s, validatorNames)}
                             baseUrl={baseUrl}
                             companyProductionOrderLines={linkedLine ? [linkedLine] : []}
                             attachedMedia={attached}
@@ -135,7 +140,13 @@ export default async function ClientSamplesPage() {
                               canLinkProductionOrder: false,
                               canLinkRequestAndQuoteLine: false,
                               canManageArticleMedia: false,
-                              canDecide: true,
+                              // Le client pose sa propre validation ; la direction
+                              // valide de son côté (0100).
+                              canValidateClient: true,
+                              canValidateDirection: false,
+                              canReject: true,
+                              canCancelValidation: false,
+                              actsForClient: false,
                             }}
                           />
                         </Dialog>

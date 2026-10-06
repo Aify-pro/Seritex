@@ -73,6 +73,7 @@ const SAMPLE_TONE: Record<string, Tone> = {
   en_fabrication: "brand",
   envoye: "warning",
   recu_client: "warning",
+  en_validation: "brand",
   valide: "success",
   a_ajuster: "warning",
   refuse: "danger",

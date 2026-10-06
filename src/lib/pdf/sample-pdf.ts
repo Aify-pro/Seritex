@@ -73,6 +73,15 @@ export interface SamplePdfData {
   maquette: { bytes: Buffer; format: "png" | "jpg"; fileName: string } | null;
   sheetUrl: string;
   generatedAt: string;
+  /**
+   * Validations déjà posées dans l'outil (0100) : le cartouche imprime alors
+   * le nom et la date au lieu des cases à cocher, pour que le papier dise la
+   * même chose que l'écran.
+   */
+  validations: {
+    client: { at: string | null; byName: string | null; onBehalf: boolean };
+    direction: { at: string | null; byName: string | null };
+  };
 }
 
 /**
@@ -360,11 +369,15 @@ export async function buildSamplePdf(data: SamplePdfData): Promise<Uint8Array> {
   // Posé à une ordonnée fixe juste au-dessus du trait de découpe, pour que
   // la découpe tombe toujours au même endroit d'une fiche à l'autre.
   y = DECISION_TOP;
-  sectionTitle("Décision sur l'échantillon", "à reporter ensuite dans Seritex");
+  sectionTitle("Décision sur l'échantillon", "signer ici, ou valider dans Seritex");
 
   const halfW = (CONTENT_W - gutter) / 2;
   const decisionBoxH = 52;
-  (["Client", "Direction"] as const).forEach((who, col) => {
+  const sides = [
+    { who: "Client", done: data.validations.client as { at: string | null; byName: string | null; onBehalf?: boolean } },
+    { who: "Direction", done: data.validations.direction as { at: string | null; byName: string | null; onBehalf?: boolean } },
+  ];
+  sides.forEach(({ who, done }, col) => {
     const x = LEFT + col * (halfW + gutter);
     page.drawRectangle({
       x,
@@ -376,14 +389,31 @@ export async function buildSamplePdf(data: SamplePdfData): Promise<Uint8Array> {
       borderWidth: 0.5,
     });
     text(who.toUpperCase(), { x: x + 8, baseline: y - 13, size: 7.5, font: bold, color: BRAND });
-    let boxX = x + 8;
-    for (const choice of ["Validé", "À ajuster", "Refusé"]) {
-      page.drawRectangle({ x: boxX, y: y - 28, width: 8, height: 8, borderColor: INK, borderWidth: 0.7 });
-      text(choice, { x: boxX + 11, baseline: y - 27, size: 8 });
-      boxX += 11 + w(choice, 8, font) + 10;
+
+    if (done.at) {
+      // Déjà validé dans Seritex : le papier le rappelle, case cochée, plus
+      // rien à signer de ce côté.
+      page.drawRectangle({ x: x + 8, y: y - 28, width: 8, height: 8, borderColor: BRAND, borderWidth: 0.7, color: BRAND_SOFT });
+      page.drawLine({ start: { x: x + 9.8, y: y - 24.2 }, end: { x: x + 11.6, y: y - 26.3 }, thickness: 1.1, color: BRAND });
+      page.drawLine({ start: { x: x + 11.6, y: y - 26.3 }, end: { x: x + 14.8, y: y - 21.4 }, thickness: 1.1, color: BRAND });
+      text("VALIDÉ", { x: x + 21, baseline: y - 27, size: 8, font: bold, color: BRAND });
+      text(ellipsize(done.byName ?? "—", halfW - 32, 8, font), { x: x + 21, baseline: y - 38, size: 8 });
+      text(`${done.at}${done.onBehalf ? " - enregistré par le commercial" : " - validé dans Seritex"}`, {
+        x: x + 21,
+        baseline: y - 48,
+        size: 7,
+        color: MUTED,
+      });
+    } else {
+      let boxX = x + 8;
+      for (const choice of ["Validé", "À ajuster", "Refusé"]) {
+        page.drawRectangle({ x: boxX, y: y - 28, width: 8, height: 8, borderColor: INK, borderWidth: 0.7 });
+        text(choice, { x: boxX + 11, baseline: y - 27, size: 8 });
+        boxX += 11 + w(choice, 8, font) + 10;
+      }
+      hLine(y - 42, x + 8, x + halfW - 8, 0.5, RULE);
+      text("Nom, date et signature", { x: x + 8, baseline: y - 50, size: 7, color: MUTED });
     }
-    hLine(y - 42, x + 8, x + halfW - 8, 0.5, RULE);
-    text("Nom, date et signature", { x: x + 8, baseline: y - 50, size: 7, color: MUTED });
   });
 
   // -------------------------------------------------------------------------
