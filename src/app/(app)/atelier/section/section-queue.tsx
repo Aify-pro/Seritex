@@ -23,6 +23,7 @@ import { recordWorkOrderQuantity, closeMatelas, createArticleLot } from "./actio
 import { reportAnomaly } from "../production/actions";
 import { QrScanButton } from "./qr-scan-button";
 import { MatelasClosedDialog } from "./matelas-closed-dialog";
+import { MatelasRolls } from "./matelas-rolls";
 import { QueueSearch, normalizeSearch, type Suggestion } from "./queue-search";
 import { WasteBagsDialog, MatelasWastePesee, formatKg } from "./waste-bags";
 import {
@@ -980,6 +981,16 @@ function MatelasDetailDialog({
             />
             <p className="mt-0.5 text-[11px] text-foreground-muted">Repris dans le rapport de fin de production.</p>
           </div>
+
+          <MatelasRolls
+            workOrderId={workOrderId}
+            traceId={matelas.id}
+            initial={matelas.rouleaux ?? []}
+            // La laize réelle du matelas est celle du rouleau, si elle n'est pas encore saisie.
+            onRoll={(roll) => {
+              if (!laize.trim() && roll.laizeCm) setLaize(String(roll.laizeCm));
+            }}
+          />
 
           <div className="space-y-1.5">
             <p className="text-xs text-foreground-muted">Déchets du matelas</p>

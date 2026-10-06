@@ -28,6 +28,7 @@ import type { WorkOrderFlowRow } from "@/lib/types/domain";
 import { RemaindersPanel, type RemainderRow } from "./remainders-panel";
 import { OdfTabs, type OdfTab } from "./odf-tabs";
 import { RealCostTab } from "./real-cost-tab";
+import { OdfRolls } from "./odf-rolls";
 import { ConsumptionPanel, type ConsumptionRow } from "./consumption-panel";
 import { odfClientLabel } from "@/lib/production/client-label";
 import { SHIPMENT_STATUS_LABELS, type ShipmentStatus } from "@/lib/delivery/status";
@@ -1186,6 +1187,7 @@ export default async function ProductionOrderDetailPage({
 
       {tab === "stock" && (
         <>
+          <OdfRolls productionOrderId={order.id} />
         {canManageStock && (
           <p className="text-xs text-foreground-muted">
             Mouvements de stock consultables ci-dessous — pour en enregistrer un nouveau, direction{" "}
