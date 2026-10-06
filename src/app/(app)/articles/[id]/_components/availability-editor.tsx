@@ -7,7 +7,7 @@ import { setProductModelSizes, setProductModelColors } from "../../actions";
 type Option = { id: string; label: string; groupe?: string };
 
 /**
- * Disponibilité d'un modèle : dans quelles tailles et quelles couleurs il
+ * Axes de déclinaison taille et couleur d'un modèle (onglet Déclinaisons) : dans quelles tailles et quelles couleurs il
  * existe. Le dispatching d'un ODF s'y limitera.
  *
  * Rien de coché = aucune restriction déclarée, donc tout le référentiel actif
@@ -55,13 +55,7 @@ export function AvailabilityEditor({
   const groupes = [...new Set(sizes.map((s) => s.groupe ?? ""))];
 
   return (
-    <div className="space-y-3 rounded-md border border-border p-3">
-      <div>
-        <p className="text-xs font-medium text-foreground">Disponibilité</p>
-        <p className="text-xs text-foreground-muted">
-          Ce que ce modèle propose au dispatching. Rien de coché = tout le référentiel actif reste proposable.
-        </p>
-      </div>
+    <div className="space-y-5">
 
       <div>
         <p className="mb-1.5 text-xs font-medium text-foreground-muted">

@@ -6,8 +6,9 @@ import { toast } from "sonner";
 import { setProductModelClassification, setProductModelTextiles } from "../../actions";
 
 /**
- * Catégorie (→ code du modèle), matière (A6) et textiles autorisés (axe
- * grammage des déclinaisons).
+ * Catégorie (→ code du modèle) et matière (A6), dans l'onglet Général
+ * (`part="codification"`) ; textiles autorisés — l'axe grammage des
+ * déclinaisons — dans l'onglet Déclinaisons (`part="grammages"`).
  */
 export function ModelClassification({
   productModelId,
@@ -19,6 +20,7 @@ export function ModelClassification({
   textiles,
   allowedTextileIds,
   editable,
+  part,
 }: {
   productModelId: string;
   code: string | null;
@@ -29,6 +31,7 @@ export function ModelClassification({
   textiles: { id: string; nom: string; grammage: number | null; matiere_id: string | null }[];
   allowedTextileIds: string[];
   editable: boolean;
+  part: "codification" | "grammages";
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -50,6 +53,28 @@ export function ModelClassification({
     const next = allowed.includes(id) ? allowed.filter((x) => x !== id) : [...allowed, id];
     setAllowed(next);
     save(() => setProductModelTextiles(productModelId, next), "Grammages enregistrés");
+  }
+
+  if (part === "grammages") {
+    if (candidats.length === 0) {
+      return (
+        <p className="text-xs text-foreground-muted">
+          Aucun textile {matiereId ? "de cette matière" : ""} — choisissez la matière (onglet Général) et rattachez les textiles à leur
+          matière dans Paramètres &gt; Codification.
+        </p>
+      );
+    }
+    return (
+      <div className="flex flex-wrap gap-2">
+        {candidats.map((t) => (
+          <label key={t.id} className="flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-sm">
+            <input type="checkbox" checked={allowed.includes(t.id)} disabled={!editable || pending} onChange={() => toggleTextile(t.id)} />
+            {t.nom}
+            {t.grammage ? <span className="text-xs text-foreground-muted">{t.grammage} g/m²</span> : null}
+          </label>
+        ))}
+      </div>
+    );
   }
 
   return (
@@ -93,24 +118,6 @@ export function ModelClassification({
         </label>
       </div>
       {code && <p className="text-[11px] text-foreground-muted">Code attribué : il est figé, la catégorie ne se change plus.</p>}
-      <div>
-        <p className="mb-1 text-xs font-medium text-foreground-muted">Grammages autorisés (textiles de la matière)</p>
-        {candidats.length === 0 ? (
-          <p className="text-xs text-foreground-muted">
-            Aucun textile {matiereId ? "de cette matière" : ""} — rattachez les textiles à leur matière dans Paramètres &gt; Codification.
-          </p>
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            {candidats.map((t) => (
-              <label key={t.id} className="flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-sm">
-                <input type="checkbox" checked={allowed.includes(t.id)} disabled={!editable || pending} onChange={() => toggleTextile(t.id)} />
-                {t.nom}
-                {t.grammage ? <span className="text-xs text-foreground-muted">{t.grammage} g/m²</span> : null}
-              </label>
-            ))}
-          </div>
-        )}
-      </div>
     </div>
   );
 }

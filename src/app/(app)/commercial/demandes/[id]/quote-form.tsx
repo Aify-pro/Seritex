@@ -618,7 +618,7 @@ export function QuoteForm({
               </div>
               {line.productModelId && (products.find((p) => p.id === line.productModelId)?.textiles.length ?? 0) === 0 && (
                 <p className="self-end pb-2 text-xs text-warning">
-                  Aucun grammage déclaré pour ce modèle : renseignez ses textiles dans la fiche article (onglet Général).
+                  Aucun grammage déclaré pour ce modèle : renseignez ses grammages dans la fiche article (onglet Déclinaisons).
                 </p>
               )}
               {(products.find((p) => p.id === line.productModelId)?.textiles.length ?? 0) > 0 && (

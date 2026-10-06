@@ -195,7 +195,7 @@ export function ModelPricingEditor({
               </option>
             ))}
           </select>
-          <span className="text-xs text-foreground-muted">— ce modèle ne déclare pas ses tailles : toutes sont proposées (fiche article, onglet Général).</span>
+          <span className="text-xs text-foreground-muted">— ce modèle ne déclare pas ses tailles : toutes sont proposées (fiche article, onglet Déclinaisons).</span>
         </label>
       )}
 
@@ -453,7 +453,7 @@ function FabricSection({
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs font-medium text-foreground">Grammage de l&apos;aperçu</span>
         <select value={fabricId} onChange={(e) => setFabricId(e.target.value)} className="h-8 rounded-md border border-border bg-surface px-2 text-sm">
-          {fabrics.length === 0 && <option value="">Aucun textile autorisé (onglet Général)</option>}
+          {fabrics.length === 0 && <option value="">Aucun grammage autorisé (onglet Déclinaisons)</option>}
           {fabrics.map((f) => (
             <option key={f.id} value={f.id}>
               {f.nom}
