@@ -149,7 +149,7 @@ export function ShortCodeInput({
   editable,
   max = 4,
 }: {
-  table: "product_categories" | "matieres" | "textiles" | "colors" | "sizes";
+  table: "product_categories" | "matieres" | "textiles" | "colors" | "sizes" | "consumable_families";
   id: string;
   value: string | null;
   editable: boolean;
@@ -185,7 +185,15 @@ export function ShortCodeInput({
 }
 
 /** Ajout d'une catégorie ou d'une matière (nom + code court). */
-export function NamedReferentialForm({ table, label }: { table: "product_categories" | "matieres"; label: string }) {
+export function NamedReferentialForm({
+  table,
+  label,
+  codeLength = 4,
+}: {
+  table: "product_categories" | "matieres" | "consumable_families";
+  label: string;
+  codeLength?: number;
+}) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
   const [pending, startTransition] = useTransition();
@@ -208,7 +216,7 @@ export function NamedReferentialForm({ table, label }: { table: "product_categor
       <input
         name="code_court"
         required
-        maxLength={4}
+        maxLength={codeLength}
         placeholder="Code"
         className="h-8 w-20 rounded-md border border-border bg-surface px-2 font-mono text-xs uppercase"
       />

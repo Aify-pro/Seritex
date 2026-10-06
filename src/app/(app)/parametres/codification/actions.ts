@@ -56,6 +56,8 @@ const SHORT_CODE_TABLES = {
   textiles: { column: "code_court", max: 5 },
   colors: { column: "code_court", max: 4 },
   sizes: { column: "code_court", max: 4 },
+  // Préfixe du code consommable (CO + famille + n°, migration 0087) : exactement 2 caractères.
+  consumable_families: { column: "code_court", max: 2, min: 2 },
 } as const;
 
 /**
@@ -68,8 +70,9 @@ export async function updateShortCode(table: keyof typeof SHORT_CODE_TABLES, id:
   const spec = SHORT_CODE_TABLES[table];
   if (!spec) return { error: "Référentiel inconnu." };
   const code = value.trim().toUpperCase();
-  if (!new RegExp(`^[A-Z0-9]{1,${spec.max}}$`).test(code)) {
-    return { error: `Code court : 1 à ${spec.max} lettres ou chiffres, sans espace.` };
+  const min = "min" in spec ? spec.min : 1;
+  if (!new RegExp(`^[A-Z0-9]{${min},${spec.max}}$`).test(code)) {
+    return { error: min === spec.max ? `Code court : exactement ${spec.max} lettres ou chiffres.` : `Code court : 1 à ${spec.max} lettres ou chiffres, sans espace.` };
   }
   const supabase = await createClient();
   const { data, error } = await supabase.from(table).update({ [spec.column]: code }).eq("id", id).select("id");
@@ -88,13 +91,20 @@ const namedSchema = z.object({
     .regex(/^[A-Z0-9]{1,4}$/, "Code court : 1 à 4 lettres ou chiffres"),
 });
 
-export async function createNamedReferential(table: "product_categories" | "matieres", formData: FormData) {
+export async function createNamedReferential(table: "product_categories" | "matieres" | "consumable_families", formData: FormData) {
   await requireRole(["administrateur", "responsable_production"]);
   const parsed = namedSchema.safeParse({ nom: formData.get("nom"), code_court: formData.get("code_court") });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message };
+  if (table === "consumable_families" && parsed.data.code_court.length !== 2) {
+    return { error: "Code d'une famille de consommables : exactement 2 lettres ou chiffres." };
+  }
   const supabase = await createClient();
   const { error } = await supabase.from(table).insert(parsed.data);
-  if (error) return { error: error.code === "23505" ? "Ce nom ou ce code court existe déjà." : error.message };
+  if (error) {
+    if (error.code === "23505") return { error: "Ce nom ou ce code court existe déjà." };
+    if (error.code === "42501") return { error: "Ajout réservé à l'administration." };
+    return { error: error.message };
+  }
   done();
   return {};
 }
