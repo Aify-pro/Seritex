@@ -30,13 +30,18 @@ const RIGHT = PAGE_W - M;
 const CONTENT_W = RIGHT - LEFT;
 
 /** Hauteur réservée en bas de page à l'étiquette détachable. */
-const ETIQUETTE_H = 186;
-const ETIQUETTE_BOTTOM = 56;
+const ETIQUETTE_H = 180;
+const ETIQUETTE_BOTTOM = 40;
 const ETIQUETTE_TOP = ETIQUETTE_BOTTOM + ETIQUETTE_H;
 /** Trait de découpe, au-dessus de l'étiquette. */
-const CUT_Y = ETIQUETTE_TOP + 30;
-/** Cartouche de décision, posé juste au-dessus du trait de découpe : titre + deux cadres. */
-const DECISION_H = 86;
+const CUT_Y = ETIQUETTE_TOP + 24;
+/**
+ * Cartouche de décision, posé juste au-dessus du trait de découpe : titre +
+ * deux cadres. Assez haut pour recevoir la signature et le cachet de la
+ * direction (demande Ayman, 06/10), à l'image du devis.
+ */
+const DECISION_BOX_H = 80;
+const DECISION_H = DECISION_BOX_H + 28;
 const DECISION_TOP = CUT_Y + DECISION_H + 14;
 
 // Même palette que l'ordre de fabrication (odf-pdf.ts) : les deux documents
@@ -50,6 +55,7 @@ const RULE = rgb(0.85, 0.83, 0.8);
 const HAIRLINE = rgb(0.91, 0.9, 0.88);
 const BOX_FILL = rgb(0.98, 0.977, 0.972);
 const WARN = rgb(0.71, 0.47, 0.1);
+const WARN_SOFT = rgb(0.98, 0.94, 0.86);
 
 export interface SamplePdfData {
   /** Numéro lisible encodé dans le QR (ECH-2026-00012) — la vedette de l'étiquette. */
@@ -82,6 +88,18 @@ export interface SamplePdfData {
     client: { at: string | null; byName: string | null; onBehalf: boolean };
     direction: { at: string | null; byName: string | null };
   };
+  /**
+   * Cachet de la société et signature de la personne qui a validé pour la
+   * direction (document_signatories / company_stamp, migration 0062 — le
+   * même mécanisme que le devis). Null si elle n'a pas de signature
+   * enregistrée : le cadre sort alors avec son nom et une ligne à signer.
+   */
+  directionSeal: { signaturePng: Uint8Array; stampPng: Uint8Array | null; name: string; fonction: string | null } | null;
+  /**
+   * Dernière réponse négative (0100/0101) : elle a son propre bandeau, avec
+   * son motif — le cartouche ne porte que les validations.
+   */
+  negativeDecision: { label: string; motif: string | null; byName: string | null; at: string } | null;
 }
 
 /**
@@ -124,6 +142,26 @@ export async function buildSamplePdf(data: SamplePdfData): Promise<Uint8Array> {
           : await pdfDoc.embedJpg(data.maquette.bytes);
     } catch {
       maquetteImage = null;
+    }
+  }
+
+  // Signature et cachet de la direction, embarqués d'avance : une image
+  // illisible laisse le cadre avec le nom et une ligne à signer, jamais une
+  // génération en échec (même prudence que la maquette).
+  let signatureImage: PDFImage | null = null;
+  let stampImage: PDFImage | null = null;
+  if (data.directionSeal) {
+    try {
+      signatureImage = await pdfDoc.embedPng(data.directionSeal.signaturePng);
+    } catch {
+      signatureImage = null;
+    }
+    if (data.directionSeal.stampPng) {
+      try {
+        stampImage = await pdfDoc.embedPng(data.directionSeal.stampPng);
+      } catch {
+        stampImage = null;
+      }
     }
   }
 
@@ -232,12 +270,28 @@ export async function buildSamplePdf(data: SamplePdfData): Promise<Uint8Array> {
     { label: "Article d'ordre de fabrication", value: data.orderLineLabel ?? "aucun" },
     { label: "Date de la demande", value: data.requestDate },
     { label: "Délai souhaité", value: data.dueDate ?? "—" },
+    // Les NOMS des fichiers vivent ici, dans la grille : la vignette plus bas
+    // n'est qu'un aperçu, et peut sauter sur une fiche chargée sans que
+    // l'information disparaisse du document.
+    { label: "Maquette", value: data.maquette ? data.maquette.fileName : "aucune" },
+    {
+      label: "Visuel(s) de l'article",
+      value:
+        data.visuelNames.length > 0
+          ? data.visuelNames.join(", ")
+          : data.requiresVisuel
+            ? "AUCUN — article imprimé, visuel attendu"
+            : "aucun",
+    },
   ];
   const gutter = 20;
   const colW = (CONTENT_W - gutter) / 2;
   for (let i = 0; i < cells.length; i += 2) {
     const pair = cells.slice(i, i + 2);
-    const rows = pair.map((cell) => wrapClamped(cell.value, colW, 10, font, 2));
+    // Les deux dernières cellules (maquette, visuels) tiennent sur une ligne :
+    // un nom de fichier tronqué reste identifiable, et la place gagnée profite
+    // au besoin exprimé plus bas.
+    const rows = pair.map((cell) => wrapClamped(cell.value, colW, 10, font, i >= 6 ? 1 : 2));
     const rowH = 13 + Math.max(...rows.map((lines) => lines.length)) * 13 + 6;
     const top = y;
     pair.forEach((cell, col) => {
@@ -259,9 +313,36 @@ export async function buildSamplePdf(data: SamplePdfData): Promise<Uint8Array> {
   y -= 6;
   sectionTitle("Besoin exprimé", "ce que l'échantillon doit démontrer");
 
-  const besoinLines = wrapClamped(data.needDescription, CONTENT_W - 24, 10, font, 4);
-  const extraLines = data.extraInfo ? wrapClamped(data.extraInfo, CONTENT_W - 24, 9, font, 2) : [];
-  const besoinH = 12 + besoinLines.length * 13 + (extraLines.length > 0 ? 8 + extraLines.length * 11 : 0) + 10;
+  // Une fiche refusée porte en plus le bandeau de motif : le besoin cède une
+  // ligne pour lui faire de la place.
+  // Hauteur du bandeau de motif, nécessaire dès maintenant : c'est lui, avec
+  // le cartouche de signature, qui fixe le plancher auquel le bloc « besoin »
+  // doit s'arrêter. Mesuré ici, dessiné plus bas.
+  const negativeBandH = data.negativeDecision
+    ? 30 + wrapClamped(data.negativeDecision.motif ?? "Aucun motif précisé.", CONTENT_W - 24, 9, font, 2).length * 12 + 14
+    : 0;
+  const besoinFloor = DECISION_TOP + negativeBandH + 6;
+  const besoinGap = data.negativeDecision ? 10 : 16;
+
+  // Le besoin est servi en premier, puis rogné ligne à ligne tant qu'il
+  // dépasse ce plancher : les informations complémentaires cèdent d'abord,
+  // le besoin lui-même ensuite. Une fiche très remplie imprime donc un
+  // besoin tronqué par « ... » plutôt qu'un texte à cheval sur le reste.
+  let besoinMaxLines = 4;
+  let extraMaxLines = data.extraInfo ? 2 : 0;
+  let besoinLines: string[] = [];
+  let extraLines: string[] = [];
+  let besoinH = 0;
+  for (;;) {
+    besoinLines = wrapClamped(data.needDescription, CONTENT_W - 24, 10, font, besoinMaxLines);
+    extraLines = extraMaxLines > 0 && data.extraInfo ? wrapClamped(data.extraInfo, CONTENT_W - 24, 9, font, extraMaxLines) : [];
+    besoinH = 12 + besoinLines.length * 13 + (extraLines.length > 0 ? 8 + extraLines.length * 11 : 0) + 10;
+    if (y - besoinH - besoinGap >= besoinFloor) break;
+    if (extraMaxLines > 0) extraMaxLines -= 1;
+    else if (besoinMaxLines > 1) besoinMaxLines -= 1;
+    else break;
+  }
+
   page.drawRectangle({
     x: LEFT,
     y: y - besoinH,
@@ -285,136 +366,229 @@ export async function buildSamplePdf(data: SamplePdfData): Promise<Uint8Array> {
       besoinBaseline -= 11;
     }
   }
-  y -= besoinH + 16;
+  y -= besoinH + besoinGap;
 
-  // Maquette à gauche, visuels à droite : les deux fichiers que l'atelier
-  // doit avoir sous les yeux (0094).
-  sectionTitle("Maquette et visuels", "déposés sur l'article, repris sur l'ODF");
+  // Aperçu de la maquette — un bonus, pas un porteur d'information : les
+  // noms de fichiers sont déjà dans la grille ci-dessus. La place restante
+  // est mesurée avant d'écrire quoi que ce soit, le bandeau de motif et le
+  // cartouche de signature étant à ordonnée fixe. Sur une fiche chargée,
+  // l'aperçu saute ; seule l'alerte « visuel attendu » reste, parce qu'elle
+  // engage la production.
+  const mediaAvailableH = y - DECISION_TOP - negativeBandH - 12;
+  const visuelMissing = data.visuelNames.length === 0 && data.requiresVisuel;
 
-  const blockTop = y;
-  const imgBoxW = 150;
-  // -28 : la légende du fichier passe sous la vignette, elle ne doit pas
-  // venir toucher le titre du cartouche de décision.
-  const imgBoxH = Math.max(40, Math.min(104, blockTop - DECISION_TOP - 28));
-  page.drawRectangle({
-    x: LEFT,
-    y: blockTop - imgBoxH,
-    width: imgBoxW,
-    height: imgBoxH,
-    color: WHITE,
-    borderColor: HAIRLINE,
-    borderWidth: 0.5,
-  });
-  if (maquetteImage) {
-    const scale = Math.min((imgBoxW - 12) / maquetteImage.width, (imgBoxH - 12) / maquetteImage.height);
-    const drawW = maquetteImage.width * scale;
-    const drawH = maquetteImage.height * scale;
-    page.drawImage(maquetteImage, {
-      x: LEFT + (imgBoxW - drawW) / 2,
-      y: blockTop - imgBoxH + (imgBoxH - drawH) / 2,
-      width: drawW,
-      height: drawH,
+  if (mediaAvailableH >= 92) {
+    sectionTitle("Maquette", "déposée sur l'article, reprise sur l'ODF");
+    const blockTop = y;
+    const blockH = mediaAvailableH - 28;
+    const imgBoxW = 150;
+    const imgBoxH = Math.min(104, blockH - 14);
+
+    page.drawRectangle({
+      x: LEFT,
+      y: blockTop - imgBoxH,
+      width: imgBoxW,
+      height: imgBoxH,
+      color: WHITE,
+      borderColor: HAIRLINE,
+      borderWidth: 0.5,
     });
-  } else {
-    const message = data.maquette ? "Maquette non affichable" : "Aucune maquette";
-    text(message, { x: LEFT, baseline: blockTop - imgBoxH / 2 - 3, size: 8.5, color: MUTED, width: imgBoxW, align: "center" });
-    if (data.maquette) {
-      text(ellipsize(data.maquette.fileName, imgBoxW - 12, 7, font), {
+    if (maquetteImage) {
+      const scale = Math.min((imgBoxW - 12) / maquetteImage.width, (imgBoxH - 12) / maquetteImage.height);
+      const drawW = maquetteImage.width * scale;
+      const drawH = maquetteImage.height * scale;
+      page.drawImage(maquetteImage, {
+        x: LEFT + (imgBoxW - drawW) / 2,
+        y: blockTop - imgBoxH + (imgBoxH - drawH) / 2,
+        width: drawW,
+        height: drawH,
+      });
+    } else {
+      const message = data.maquette ? "Maquette non affichable" : "Aucune maquette";
+      text(message, { x: LEFT, baseline: blockTop - imgBoxH / 2 - 3, size: 8.5, color: MUTED, width: imgBoxW, align: "center" });
+    }
+
+    const noteX = LEFT + imgBoxW + 20;
+    let noteBaseline = blockTop - 10;
+    if (visuelMissing) {
+      text("AUCUN VISUEL JOINT", { x: noteX, baseline: noteBaseline, size: 9, font: bold, color: WARN });
+      noteBaseline -= 12;
+      for (const line of wrap("Cet article passe par un atelier qui exige un visuel : l'impression ne peut pas travailler sans fichier.", RIGHT - noteX, 8, font)) {
+        text(line, { x: noteX, baseline: noteBaseline, size: 8, color: WARN });
+        noteBaseline -= 10;
+      }
+      noteBaseline -= 4;
+    }
+    text(`Référence interne ${safe(data.reference)}`, { x: noteX, baseline: noteBaseline, size: 7.5, color: MUTED });
+    y = blockTop - blockH;
+  } else if (mediaAvailableH >= 46) {
+    // Place réduite : aperçu plus petit, sans titre de section — mieux vaut
+    // une vignette de 40 points qu'un blanc de 60.
+    const blockTop = y;
+    const imgBoxH = Math.min(70, mediaAvailableH - 10);
+    const imgBoxW = Math.round(imgBoxH * 1.4);
+    page.drawRectangle({
+      x: LEFT,
+      y: blockTop - imgBoxH,
+      width: imgBoxW,
+      height: imgBoxH,
+      color: WHITE,
+      borderColor: HAIRLINE,
+      borderWidth: 0.5,
+    });
+    if (maquetteImage) {
+      const scale = Math.min((imgBoxW - 8) / maquetteImage.width, (imgBoxH - 8) / maquetteImage.height);
+      page.drawImage(maquetteImage, {
+        x: LEFT + (imgBoxW - maquetteImage.width * scale) / 2,
+        y: blockTop - imgBoxH + (imgBoxH - maquetteImage.height * scale) / 2,
+        width: maquetteImage.width * scale,
+        height: maquetteImage.height * scale,
+      });
+    } else {
+      text(data.maquette ? "Maquette non affichable" : "Aucune maquette", {
         x: LEFT,
-        baseline: blockTop - imgBoxH / 2 - 15,
-        size: 7,
+        baseline: blockTop - imgBoxH / 2 - 3,
+        size: 7.5,
         color: MUTED,
         width: imgBoxW,
         align: "center",
       });
     }
-  }
-  if (data.maquette && maquetteImage) {
-    text(ellipsize(data.maquette.fileName, imgBoxW, 7, font), {
+    const noteX = LEFT + imgBoxW + 16;
+    text("MAQUETTE", { x: noteX, baseline: blockTop - 9, size: 7.5, font: bold, color: MUTED });
+    if (visuelMissing) {
+      text("AUCUN VISUEL JOINT — atelier qui en exige un.", { x: noteX, baseline: blockTop - 23, size: 8.5, font: bold, color: WARN });
+    }
+    text(`Référence interne ${safe(data.reference)}`, { x: noteX, baseline: blockTop - imgBoxH + 2, size: 7.5, color: MUTED });
+    y = blockTop - imgBoxH - 10;
+  } else if (visuelMissing && mediaAvailableH >= 14) {
+    text("AUCUN VISUEL JOINT — cet article passe par un atelier qui en exige un.", {
       x: LEFT,
-      baseline: blockTop - imgBoxH - 9,
-      size: 7,
-      color: MUTED,
-      width: imgBoxW,
-      align: "center",
+      baseline: y - 9,
+      size: 8.5,
+      font: bold,
+      color: WARN,
     });
+    y -= 16;
   }
 
-  const visuelX = LEFT + imgBoxW + 20;
-  const visuelW = RIGHT - visuelX;
-  text("VISUEL(S) DE L'ARTICLE", { x: visuelX, baseline: blockTop - 8, size: 7.5, font: bold, color: MUTED });
-  let visuelBaseline = blockTop - 22;
-  if (data.visuelNames.length > 0) {
-    for (const name of data.visuelNames.slice(0, 4)) {
-      text(`- ${ellipsize(name, visuelW - 10, 9, font)}`, { x: visuelX, baseline: visuelBaseline, size: 9 });
-      visuelBaseline -= 12;
+  // Bandeau de réponse négative : « à ajuster » ou « refusé » ne se cochent
+  // pas dans le cartouche de signature (demande Ayman, 06/10) — la décision
+  // et SON MOTIF ont leur propre bloc, juste au-dessus.
+  if (data.negativeDecision) {
+    const motifLines = wrapClamped(data.negativeDecision.motif ?? "Aucun motif précisé.", CONTENT_W - 24, 9, font, 2);
+    const bandH = negativeBandH - 14;
+    const bandTop = DECISION_TOP + 14 + bandH;
+    page.drawRectangle({
+      x: LEFT,
+      y: bandTop - bandH,
+      width: CONTENT_W,
+      height: bandH,
+      color: WARN_SOFT,
+      borderColor: WARN,
+      borderWidth: 0.7,
+    });
+    text(data.negativeDecision.label.toUpperCase(), { x: LEFT + 12, baseline: bandTop - 14, size: 9, font: bold, color: WARN });
+    text(`${data.negativeDecision.byName ?? "—"} - ${data.negativeDecision.at}`, {
+      x: LEFT,
+      baseline: bandTop - 14,
+      size: 8,
+      color: MUTED,
+      width: CONTENT_W - 12,
+      align: "right",
+    });
+    let motifBaseline = bandTop - 28;
+    for (const line of motifLines) {
+      text(line, { x: LEFT + 12, baseline: motifBaseline, size: 9 });
+      motifBaseline -= 12;
     }
-    if (data.visuelNames.length > 4) {
-      text(`+ ${data.visuelNames.length - 4} autre(s)`, { x: visuelX, baseline: visuelBaseline, size: 8, color: MUTED });
-      visuelBaseline -= 12;
-    }
-  } else if (data.requiresVisuel) {
-    text("AUCUN — article imprimé, visuel attendu", { x: visuelX, baseline: visuelBaseline, size: 9, font: bold, color: WARN });
-    visuelBaseline -= 12;
-  } else {
-    text("aucun", { x: visuelX, baseline: visuelBaseline, size: 9, color: MUTED });
-    visuelBaseline -= 12;
   }
-  text(`Référence interne ${safe(data.reference)}`, { x: visuelX, baseline: visuelBaseline - 4, size: 7.5, color: MUTED });
 
-  y = blockTop - imgBoxH - 24;
-
-  // Cartouche de décision : c'est ce papier qui accompagne l'échantillon,
-  // la validation s'y écrit à la main avant d'être reportée dans l'outil.
+  // Cartouche de décision : c'est ce papier qui accompagne l'échantillon.
   // Posé à une ordonnée fixe juste au-dessus du trait de découpe, pour que
-  // la découpe tombe toujours au même endroit d'une fiche à l'autre.
+  // la découpe tombe toujours au même endroit d'une fiche à l'autre. Il ne
+  // porte que les VALIDATIONS : côté client un nom, côté direction une
+  // signature et un cachet.
   y = DECISION_TOP;
   sectionTitle("Décision sur l'échantillon", "signer ici, ou valider dans Seritex");
 
   const halfW = (CONTENT_W - gutter) / 2;
-  const decisionBoxH = 52;
-  const sides = [
-    { who: "Client", done: data.validations.client as { at: string | null; byName: string | null; onBehalf?: boolean } },
-    { who: "Direction", done: data.validations.direction as { at: string | null; byName: string | null; onBehalf?: boolean } },
-  ];
-  sides.forEach(({ who, done }, col) => {
-    const x = LEFT + col * (halfW + gutter);
-    page.drawRectangle({
-      x,
-      y: y - decisionBoxH,
-      width: halfW,
-      height: decisionBoxH,
-      color: WHITE,
-      borderColor: RULE,
-      borderWidth: 0.5,
-    });
-    text(who.toUpperCase(), { x: x + 8, baseline: y - 13, size: 7.5, font: bold, color: BRAND });
 
-    if (done.at) {
-      // Déjà validé dans Seritex : le papier le rappelle, case cochée, plus
-      // rien à signer de ce côté.
-      page.drawRectangle({ x: x + 8, y: y - 28, width: 8, height: 8, borderColor: BRAND, borderWidth: 0.7, color: BRAND_SOFT });
-      page.drawLine({ start: { x: x + 9.8, y: y - 24.2 }, end: { x: x + 11.6, y: y - 26.3 }, thickness: 1.1, color: BRAND });
-      page.drawLine({ start: { x: x + 11.6, y: y - 26.3 }, end: { x: x + 14.8, y: y - 21.4 }, thickness: 1.1, color: BRAND });
-      text("VALIDÉ", { x: x + 21, baseline: y - 27, size: 8, font: bold, color: BRAND });
-      text(ellipsize(done.byName ?? "—", halfW - 32, 8, font), { x: x + 21, baseline: y - 38, size: 8 });
-      text(`${done.at}${done.onBehalf ? " - enregistré par le commercial" : " - validé dans Seritex"}`, {
-        x: x + 21,
-        baseline: y - 48,
-        size: 7,
-        color: MUTED,
+  // ---- Côté client : validé par (le client, ou le commercial pour lui) ----
+  const clientX = LEFT;
+  page.drawRectangle({
+    x: clientX,
+    y: y - DECISION_BOX_H,
+    width: halfW,
+    height: DECISION_BOX_H,
+    color: WHITE,
+    borderColor: RULE,
+    borderWidth: 0.5,
+  });
+  text("CLIENT", { x: clientX + 8, baseline: y - 13, size: 7.5, font: bold, color: BRAND });
+  if (data.validations.client.at) {
+    text("VALIDÉ PAR", { x: clientX + 8, baseline: y - 30, size: 7.5, font: bold, color: MUTED });
+    text(ellipsize(data.validations.client.byName ?? "—", halfW - 16, 11, bold), {
+      x: clientX + 8,
+      baseline: y - 45,
+      size: 11,
+      font: bold,
+    });
+    text(
+      `${data.validations.client.at}${data.validations.client.onBehalf ? " - enregistré par le commercial" : " - validé dans Seritex"}`,
+      { x: clientX + 8, baseline: y - 58, size: 8, color: MUTED }
+    );
+  } else {
+    hLine(y - 58, clientX + 8, clientX + halfW - 8, 0.5, RULE);
+    text("Nom, date et signature", { x: clientX + 8, baseline: y - 68, size: 7, color: MUTED });
+  }
+
+  // ---- Côté direction : signature de celui qui valide, sur le cachet ----
+  const dirX = LEFT + halfW + gutter;
+  page.drawRectangle({
+    x: dirX,
+    y: y - DECISION_BOX_H,
+    width: halfW,
+    height: DECISION_BOX_H,
+    color: WHITE,
+    borderColor: RULE,
+    borderWidth: 0.5,
+  });
+  text("DIRECTION", { x: dirX + 8, baseline: y - 13, size: 7.5, font: bold, color: BRAND });
+  if (data.validations.direction.at) {
+    // Cachet dessous, signature par-dessus (encre sur tampon), comme sur le
+    // devis et comme sur papier.
+    if (stampImage) {
+      const maxH = 54;
+      const maxW = halfW * 0.5;
+      const k = Math.min(maxW / stampImage.width, maxH / stampImage.height);
+      page.drawImage(stampImage, {
+        x: dirX + halfW - stampImage.width * k - 12,
+        y: y - DECISION_BOX_H + 20,
+        width: stampImage.width * k,
+        height: stampImage.height * k,
+        opacity: 0.92,
+      });
+    }
+    if (signatureImage) {
+      const k = Math.min((halfW * 0.5) / signatureImage.width, 34 / signatureImage.height);
+      page.drawImage(signatureImage, {
+        x: dirX + 10,
+        y: y - DECISION_BOX_H + 26,
+        width: signatureImage.width * k,
+        height: signatureImage.height * k,
       });
     } else {
-      let boxX = x + 8;
-      for (const choice of ["Validé", "À ajuster", "Refusé"]) {
-        page.drawRectangle({ x: boxX, y: y - 28, width: 8, height: 8, borderColor: INK, borderWidth: 0.7 });
-        text(choice, { x: boxX + 11, baseline: y - 27, size: 8 });
-        boxX += 11 + w(choice, 8, font) + 10;
-      }
-      hLine(y - 42, x + 8, x + halfW - 8, 0.5, RULE);
-      text("Nom, date et signature", { x: x + 8, baseline: y - 50, size: 7, color: MUTED });
+      text("VALIDÉ PAR", { x: dirX + 8, baseline: y - 30, size: 7.5, font: bold, color: MUTED });
     }
-  });
+    const dirName = data.directionSeal?.name ?? data.validations.direction.byName ?? "—";
+    text(ellipsize(dirName, halfW - 16, 9.5, bold), { x: dirX + 8, baseline: y - DECISION_BOX_H + 19, size: 9.5, font: bold });
+    const dirSub = [data.directionSeal?.fonction, data.validations.direction.at].filter(Boolean).join(" - ");
+    text(ellipsize(dirSub, halfW - 16, 7.5, font), { x: dirX + 8, baseline: y - DECISION_BOX_H + 9, size: 7.5, color: MUTED });
+  } else {
+    hLine(y - 58, dirX + 8, dirX + halfW - 8, 0.5, RULE);
+    text("Nom, date, cachet et signature", { x: dirX + 8, baseline: y - 68, size: 7, color: MUTED });
+  }
 
   // -------------------------------------------------------------------------
   // PARTIE 2 — L'ÉTIQUETTE À DÉTACHER

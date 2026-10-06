@@ -23,6 +23,7 @@ import {
   canEditSampleArticleMedia,
   emptySampleArticleMedia,
   getSampleValidatorNames,
+  getSampleNegativeDecisions,
   buildSampleValidations,
   SAMPLE_VALIDATION_COLUMNS,
 } from "@/lib/samples";
@@ -36,6 +37,8 @@ import {
  * derrière le bouton "Nouvel échantillon" (demande de rattachement
  * obligatoire, migration 0051).
  */
+const negativeLabel = (d: "a_ajuster" | "refuse") => (d === "refuse" ? "Échantillon refusé" : "Échantillon à ajuster");
+
 export default async function CommercialSamplesPage() {
   const { profile } = await requireRole(["commercial", "administrateur", "responsable_production"]);
   const supabase = await createClient();
@@ -66,10 +69,11 @@ export default async function CommercialSamplesPage() {
       supabase.from("sample_request_media_files").select("sample_request_id,media_file_id"),
     ]);
 
-  const [quoteLines, articleMediaBySample, validatorNames, canValidateDirection] = await Promise.all([
+  const [quoteLines, articleMediaBySample, validatorNames, negativeBySample, canValidateDirection] = await Promise.all([
     getSampleQuoteLineOptions(requests.map((r) => r.id)),
     getSampleArticleMediaMap(samples ?? []),
     getSampleValidatorNames(samples ?? []),
+    getSampleNegativeDecisions((samples ?? []).map((s) => s.id)),
     // Direction / administrateur (module validation_echantillon, 0100).
     can("validation_echantillon", "validate"),
   ]);
@@ -182,6 +186,16 @@ export default async function CommercialSamplesPage() {
                             links={buildSampleLinks(s, requests, quoteLines)}
                             articleMedia={articleMediaBySample.get(s.id) ?? emptySampleArticleMedia()}
                             validations={buildSampleValidations(s, validatorNames)}
+                            lastNegativeDecision={
+                              negativeBySample.has(s.id)
+                                ? {
+                                    label: negativeLabel(negativeBySample.get(s.id)!.decision),
+                                    motif: negativeBySample.get(s.id)!.motif,
+                                    byName: negativeBySample.get(s.id)!.byName,
+                                    at: negativeBySample.get(s.id)!.at,
+                                  }
+                                : null
+                            }
                             baseUrl={baseUrl}
                             companyProductionOrderLines={companyProductionOrderLines}
                             attachedMedia={attached}

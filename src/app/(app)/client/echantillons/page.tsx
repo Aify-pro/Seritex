@@ -19,9 +19,12 @@ import {
   buildSampleLinks,
   emptySampleArticleMedia,
   getSampleValidatorNames,
+  getSampleNegativeDecisions,
   buildSampleValidations,
   SAMPLE_VALIDATION_COLUMNS,
 } from "@/lib/samples";
+
+const negativeLabel = (d: "a_ajuster" | "refuse") => (d === "refuse" ? "Échantillon refusé" : "Échantillon à ajuster");
 
 export default async function ClientSamplesPage() {
   const { profile } = await requireRole(["client"]);
@@ -40,10 +43,11 @@ export default async function ClientSamplesPage() {
     supabase.from("sample_request_media_files").select("sample_request_id,media_file_id"),
     getSampleRequestOptions(),
   ]);
-  const [quoteLines, articleMediaBySample, validatorNames] = await Promise.all([
+  const [quoteLines, articleMediaBySample, validatorNames, negativeBySample] = await Promise.all([
     getSampleQuoteLineOptions(requests.map((r) => r.id)),
     getSampleArticleMediaMap(samples ?? []),
     getSampleValidatorNames(samples ?? []),
+    getSampleNegativeDecisions((samples ?? []).map((s) => s.id)),
   ]);
   const requestById = new Map(requests.map((r) => [r.id, r]));
 
@@ -129,6 +133,16 @@ export default async function ClientSamplesPage() {
                             links={buildSampleLinks(s, requests, quoteLines)}
                             articleMedia={articleMediaBySample.get(s.id) ?? emptySampleArticleMedia()}
                             validations={buildSampleValidations(s, validatorNames)}
+                            lastNegativeDecision={
+                              negativeBySample.has(s.id)
+                                ? {
+                                    label: negativeLabel(negativeBySample.get(s.id)!.decision),
+                                    motif: negativeBySample.get(s.id)!.motif,
+                                    byName: negativeBySample.get(s.id)!.byName,
+                                    at: negativeBySample.get(s.id)!.at,
+                                  }
+                                : null
+                            }
                             baseUrl={baseUrl}
                             companyProductionOrderLines={linkedLine ? [linkedLine] : []}
                             attachedMedia={attached}

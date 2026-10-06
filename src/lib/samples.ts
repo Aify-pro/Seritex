@@ -361,3 +361,59 @@ export function buildSampleValidations(sample: SampleValidationRow, names: Map<s
     },
   };
 }
+
+/**
+ * Dernière réponse négative sur la fiche (« à ajuster » ou « refusé »,
+ * migrations 0100/0101) : son motif a sa place à part, hors du cartouche de
+ * signature qui ne porte que les validations (demande Ayman, 06/10).
+ */
+export interface SampleNegativeDecision {
+  decision: "a_ajuster" | "refuse";
+  motif: string | null;
+  byName: string | null;
+  at: string;
+}
+
+/** Chargement groupé, une requête pour tout l'écran. */
+export async function getSampleNegativeDecisions(
+  sampleIds: string[]
+): Promise<Map<string, SampleNegativeDecision>> {
+  const result = new Map<string, SampleNegativeDecision>();
+  if (sampleIds.length === 0) return result;
+
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("sample_feedback")
+    .select("sample_request_id,feedback_text,decision,decided_at,decided_by")
+    .in("sample_request_id", sampleIds)
+    .in("decision", ["a_ajuster", "refuse"])
+    .order("decided_at", { ascending: false });
+
+  const rows = (data ?? []) as {
+    sample_request_id: string;
+    feedback_text: string | null;
+    decision: "a_ajuster" | "refuse";
+    decided_at: string;
+    decided_by: string | null;
+  }[];
+
+  const names = await (async () => {
+    const ids = [...new Set(rows.map((r) => r.decided_by).filter((v): v is string => !!v))];
+    if (ids.length === 0) return new Map<string, string>();
+    const { data: users } = await supabase.from("app_users").select("id,full_name").in("id", ids);
+    return new Map((users ?? []).map((u) => [u.id as string, (u.full_name as string) ?? ""]));
+  })();
+
+  // Lignes triées du plus récent au plus ancien : la première rencontrée pour
+  // une fiche est la bonne.
+  for (const row of rows) {
+    if (result.has(row.sample_request_id)) continue;
+    result.set(row.sample_request_id, {
+      decision: row.decision,
+      motif: row.feedback_text,
+      byName: row.decided_by ? (names.get(row.decided_by) ?? null) : null,
+      at: row.decided_at,
+    });
+  }
+  return result;
+}

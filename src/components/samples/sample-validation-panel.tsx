@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { Check, CircleDashed, ThumbsDown, Undo2, Wrench } from "lucide-react";
+import { AlertTriangle, Check, CircleDashed, ThumbsDown, Undo2, Wrench } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { validateSample, rejectSample, cancelSampleValidation } from "@/lib/actions/samples";
 import { formatDateTime } from "@/lib/utils";
@@ -34,10 +34,13 @@ export interface SampleValidations {
 export function SampleValidationPanel({
   sampleId,
   validations,
+  lastNegative,
   permissions,
 }: {
   sampleId: string;
   validations: SampleValidations;
+  /** Dernière réponse négative et son motif (0101) — à part des validations. */
+  lastNegative: { label: string; motif: string | null; byName: string | null; at: string } | null;
   permissions: {
     /** Le client lui-même, ou le commercial qui enregistre sa réponse. */
     canValidateClient: boolean;
@@ -76,6 +79,18 @@ export function SampleValidationPanel({
           validation et l&apos;ordre de fabrication ne peut pas être lancé.
         </p>
       </div>
+
+      {lastNegative && (
+        <div className="rounded-md border border-warning/40 bg-warning-soft px-2.5 py-2">
+          <p className="flex items-center gap-1.5 text-xs font-semibold text-warning">
+            <AlertTriangle className="h-3.5 w-3.5" /> {lastNegative.label}
+          </p>
+          <p className="mt-0.5 text-[11px] text-foreground">{lastNegative.motif || "Aucun motif précisé."}</p>
+          <p className="mt-0.5 text-[11px] text-foreground-muted">
+            {lastNegative.byName ?? "—"} · {formatDateTime(lastNegative.at)}
+          </p>
+        </div>
+      )}
 
       <div className="grid gap-2 sm:grid-cols-2">
         <Side
