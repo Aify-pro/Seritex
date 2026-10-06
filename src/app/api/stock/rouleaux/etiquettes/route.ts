@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
   const ordered = codes.map((c) => rolls.find((r) => r.code === c)).filter((r): r is NonNullable<typeof r> => !!r);
   const pdf = await buildLabelSheetPdf(
     ordered.map((r) => ({
-      url: `${baseUrl}/atelier/stock/rouleaux?q=${r.code}`,
+      url: `${baseUrl}/atelier/stock?onglet=rouleaux&q=${r.code}`,
       lines: [
         r.code as string,
         `${(r.textiles as unknown as { nom: string } | null)?.nom ?? ""}${r.sage_reference ? ` · ${r.sage_reference}` : ""}`,

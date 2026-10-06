@@ -1191,7 +1191,7 @@ export default async function ProductionOrderDetailPage({
         {canManageStock && (
           <p className="text-xs text-foreground-muted">
             Mouvements de stock consultables ci-dessous — pour en enregistrer un nouveau, direction{" "}
-            <Link href={`/atelier/stock?odf=${order.id}`} className="font-medium text-brand hover:underline">
+            <Link href={`/atelier/stock?onglet=mouvements&odf=${order.id}`} className="font-medium text-brand hover:underline">
               Gestion de stock
             </Link>
             .

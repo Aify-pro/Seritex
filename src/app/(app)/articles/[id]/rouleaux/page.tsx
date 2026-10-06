@@ -61,7 +61,7 @@ export default async function ArticleRollsPage({ params }: { params: Promise<{ i
           title="Stock par coloris et par bain"
           description="Deux bains d'un même coloris peuvent avoir une nuance différente : ils ne se mélangent pas dans un ODF sans motif."
           action={
-            <Link href={`/atelier/stock/rouleaux?tissu=${textile.id}`} className="text-sm font-medium text-brand hover:underline">
+            <Link href={`/atelier/stock?onglet=rouleaux&tissu=${textile.id}`} className="text-sm font-medium text-brand hover:underline">
               Gérer les rouleaux →
             </Link>
           }
