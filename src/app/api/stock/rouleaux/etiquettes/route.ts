@@ -6,6 +6,7 @@ import { buildLabelSheetPdf } from "@/lib/pdf/waste-bag-label";
 
 /**
  * Étiquettes de rouleaux (migration 0096), planche A4 : QR du code du
+ * rouleau ; code article complet (JE180BLA-178-224, migration 0105) et n° de
  * rouleau, tissu et coloris, laize, poids et bain.
  */
 export async function GET(req: NextRequest) {
@@ -22,7 +23,7 @@ export async function GET(req: NextRequest) {
   const supabase = await createClient();
   const { data: rolls } = await supabase
     .from("textile_rolls")
-    .select("code,bain,laize_cm,poids_initial_kg,sage_reference,textiles(nom)")
+    .select("code,code_complet,bain,laize_cm,poids_initial_kg,sage_reference,textiles(nom)")
     .in("code", codes);
   if (!rolls || rolls.length === 0) return NextResponse.json({ error: "Rouleaux introuvables" }, { status: 404 });
 
@@ -32,7 +33,7 @@ export async function GET(req: NextRequest) {
     ordered.map((r) => ({
       url: `${baseUrl}/atelier/stock?onglet=rouleaux&q=${r.code}`,
       lines: [
-        r.code as string,
+        r.code_complet ? `${r.code_complet} · ${r.code}` : (r.code as string),
         `${(r.textiles as unknown as { nom: string } | null)?.nom ?? ""}${r.sage_reference ? ` · ${r.sage_reference}` : ""}`,
         `${r.laize_cm ? `${r.laize_cm} cm · ` : ""}${Number(r.poids_initial_kg).toLocaleString("fr-FR")} kg${r.bain ? ` · bain ${r.bain}` : ""}`,
       ] as [string, string, string],

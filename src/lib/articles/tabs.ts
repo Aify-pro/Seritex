@@ -19,8 +19,7 @@ export const ARTICLE_DETAIL_TABS: ArticleTabDef[] = [
   { slug: "declinaisons", label: "Déclinaisons" },
   { slug: "fabrication", label: "Fabrication", natures: ["pf"] },
   { slug: "ventes", label: "Ventes" },
-  { slug: "stock", label: "Stock", natures: ["pf"] },
-  { slug: "rouleaux", label: "Rouleaux", natures: ["mp"] },
+  { slug: "stock", label: "Stock" },
   { slug: "medias", label: "Médias & e-shop" },
   { slug: "prix-de-revient", label: "Prix de revient", costsOnly: true },
 ];
