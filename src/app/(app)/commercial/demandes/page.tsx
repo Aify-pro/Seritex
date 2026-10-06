@@ -9,7 +9,7 @@ import Link from "next/link";
 import { ArrowRight, Plus } from "lucide-react";
 
 /**
- * Demandes : celles des clients, celles du site web (0094, « Client à
+ * Demandes : celles des clients, celles du site web (0098, « Client à
  * rattacher » tant que le prospect n'est pas relié à sa fiche Sage) et celles
  * pour le stock (SF-3), dans une seule liste. La production n'y voit que les demandes pour le stock (RLS).
  */

@@ -23,7 +23,7 @@ interface SiteRequestView {
 }
 
 /**
- * Demande reçue du site web pour un client encore inconnu (migration 0094).
+ * Demande reçue du site web pour un client encore inconnu (migration 0098).
  * Étapes : créer le client dans Sage, attendre la synchronisation, rattacher
  * ici la demande à la fiche — elle devient alors une demande client normale.
  */
