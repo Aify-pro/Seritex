@@ -40,7 +40,7 @@ export function DispatchEditor({
   const visibles = sizes.filter((s) => s.groupe === groupe);
 
   if (sizes.length === 0) {
-    return <p className="text-xs text-foreground-muted">Aucune taille disponible pour ce modèle — fiche article, onglet Général.</p>;
+    return <p className="text-xs text-foreground-muted">Aucune taille disponible pour ce modèle — fiche article, onglet Déclinaisons.</p>;
   }
 
   const gap = dispatchGap(value, quantity);

@@ -65,7 +65,7 @@ export function VariantMatrix({
       {editable && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-dashed border-border p-3">
           <p className="text-xs text-foreground-muted">
-            Les déclinaisons combinent les grammages autorisés et les couleurs et tailles déclarées (onglet Général). Une
+            Les déclinaisons combinent les grammages autorisés et les couleurs et tailles déclarées (axes de déclinaison, ci-dessus). Une
             combinaison retirée est désactivée, jamais supprimée : son code ne sera jamais réutilisé.
           </p>
           <Button size="sm" onClick={generate} loading={pending}>

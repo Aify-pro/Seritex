@@ -5,20 +5,20 @@ import { IdentityForm } from "../_components/identity-form";
 import { ProductModelActiveToggle } from "../_components/product-model-active-toggle";
 import { ProductModelTextile } from "../_components/product-model-textile";
 import { ProductModelSageReference } from "../_components/product-model-sage-reference";
-import { AvailabilityEditor } from "../_components/availability-editor";
 import { ModelClassification } from "../_components/model-classification";
 import { ArticleClassementForm } from "../_components/article-classement-form";
 import { TextileTechniqueForm } from "../_components/textile-technique-form";
 import { ConsumableTechniqueForm } from "../_components/consumable-technique-form";
-import { TextileArticles } from "../../matieres/textile-articles";
 import Link from "next/link";
 import type { ArticleNature, TypeAppro, Unite } from "@/lib/articles/natures";
 
 /**
- * Onglet Général, commun à toutes les natures (migration 0093) : identité et
- * classement, puis ce qui est propre à la nature — pour un produit fini sa
- * codification, son tissu et sa disponibilité ; pour une matière première
- * ses caractéristiques et ses coloris Sage ; pour un consommable son code.
+ * Onglet Général : ce qu'est l'article, avec la même disposition pour toutes
+ * les natures — Identité et classement, Caractéristiques (codification et
+ * tissu d'un produit fini, composition d'un tissu, famille et étape d'un
+ * consommable), puis Utilisation (les produits finis qui emploient ce tissu
+ * ou ce consommable). Ce qui décline l'article (axes, grille, références
+ * Sage) est dans l'onglet Déclinaisons.
  */
 export default async function ArticleGeneralPage({ params }: { params: Promise<{ id: string }> }) {
   const { canModify } = await requireArticles();
@@ -28,10 +28,6 @@ export default async function ArticleGeneralPage({ params }: { params: Promise<{
   const [
     { data: model },
     { data: textiles },
-    { data: sizes },
-    { data: colors },
-    { data: modelSizes },
-    { data: modelColors },
     { data: categories },
     { data: matieres },
     { data: allowedTextiles },
@@ -42,10 +38,6 @@ export default async function ArticleGeneralPage({ params }: { params: Promise<{
         .eq("id", id)
         .single(),
       supabase.from("textiles").select("id,nom,grammage,matiere_id").eq("active", true).order("nom"),
-      supabase.from("sizes").select("id,groupe,libelle").eq("active", true).order("groupe").order("display_order"),
-      supabase.from("colors").select("id,name").eq("active", true).order("name"),
-      supabase.from("product_model_sizes").select("size_id").eq("product_model_id", id),
-      supabase.from("product_model_colors").select("color_id").eq("product_model_id", id),
       supabase.from("product_categories").select("id,nom,code_court").order("nom"),
       supabase.from("matieres").select("id,nom,code_court").eq("actif", true).order("nom"),
       supabase.from("product_model_textiles").select("textile_id").eq("product_model_id", id),
@@ -80,24 +72,8 @@ export default async function ArticleGeneralPage({ params }: { params: Promise<{
 
   if (nature === "mp") {
     // Un tissu peut avoir plusieurs grammages (migration 0102) : une ligne textile par grammage.
-    const [{ data: grammages }, { data: liens }, { data: articles }] = await Promise.all([
-      supabase.from("textiles").select("id,composition,grammage,matiere_id").eq("product_model_id", id).order("grammage"),
-      supabase.from("textile_sage_articles").select("textile_id,sage_reference,color_id,colors(name)"),
-      supabase.from("stock_item_view").select("sage_reference,designation").eq("category", "tissu").order("designation"),
-    ]);
+    const { data: grammages } = await supabase.from("textiles").select("id,composition,matiere_id").eq("product_model_id", id).order("grammage");
     if (!grammages || grammages.length === 0) return identite;
-    const rattachees = new Set((liens ?? []).map((l) => l.sage_reference as string));
-    const designationDe = new Map((articles ?? []).map((a) => [a.sage_reference, a.designation]));
-    // Le miroir a une ligne par dépôt (migration 0058) : dédoublonnage.
-    const orphelins = [...new Map((articles ?? []).filter((a) => !rattachees.has(a.sage_reference)).map((a) => [a.sage_reference, a])).values()];
-    const attachedOf = (textileId: string) =>
-      (liens ?? [])
-        .filter((l) => l.textile_id === textileId)
-        .map((l) => ({
-          sage_reference: l.sage_reference as string,
-          designation: designationDe.get(l.sage_reference as string) ?? "Article absent du miroir Sage",
-          colorName: (l.colors as unknown as { name: string } | null)?.name ?? null,
-        }));
     const { data: porteurs } = await supabase
       .from("product_models")
       .select("id,name")
@@ -108,8 +84,8 @@ export default async function ArticleGeneralPage({ params }: { params: Promise<{
         {identite}
         <Card>
           <CardHeader
-            title="Caractéristiques du tissu"
-            description="Communes à tous ses grammages. Les grammages (nominaux) sont ses déclinaisons ; la laize et le poids sont ceux de chaque rouleau, le grammage réel se mesure à la production."
+            title="Caractéristiques"
+            description="Communes à tous les grammages du tissu. Les grammages et les couleurs sont ses axes de déclinaison (onglet Déclinaisons) ; la laize et le poids sont ceux de chaque rouleau."
           />
           <CardBody>
             <TextileTechniqueForm
@@ -120,50 +96,12 @@ export default async function ArticleGeneralPage({ params }: { params: Promise<{
             />
           </CardBody>
         </Card>
-        <Card>
-          <CardHeader title="Coloris Sage" description="Les articles Sage (un par coloris) de chaque grammage." />
-          <CardBody className="space-y-4">
-            {grammages.map((g) => {
-              const attached = attachedOf(g.id as string);
-              return (
-                <div key={g.id} className="space-y-1.5">
-                  {grammages.length > 1 && <p className="text-xs font-medium text-foreground-muted">{g.grammage ?? "?"} g/m²</p>}
-                  {canModify ? (
-                    <TextileArticles textileId={g.id as string} attached={attached} candidates={orphelins} colors={colors ?? []} />
-                  ) : (
-                    <ul className="space-y-1 text-sm">
-                      {attached.map((a) => (
-                        <li key={a.sage_reference}>
-                          <span className="font-mono text-xs">{a.sage_reference}</span> — {a.designation}
-                          {a.colorName ? ` (${a.colorName})` : ""}
-                        </li>
-                      ))}
-                      {attached.length === 0 && <li className="text-foreground-muted">Aucun article Sage rattaché.</li>}
-                    </ul>
-                  )}
-                </div>
-              );
-            })}
-          </CardBody>
-        </Card>
-        <Card>
-          <CardHeader title="Produits finis taillés dans ce tissu" />
-          <CardBody>
-            {(porteurs ?? []).length === 0 ? (
-              <p className="text-sm text-foreground-muted">Aucun produit fini n&apos;a ce tissu comme tissu principal.</p>
-            ) : (
-              <ul className="flex flex-wrap gap-2 text-sm">
-                {(porteurs ?? []).map((m) => (
-                  <li key={m.id}>
-                    <Link href={`/articles/${m.id}/general`} className="rounded-md border border-border px-2 py-1 hover:bg-surface-muted">
-                      {m.name}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </CardBody>
-        </Card>
+        <UsageCard
+          title="Utilisation"
+          description="Produits finis taillés dans ce tissu (tissu principal)."
+          empty="Aucun produit fini n'a ce tissu comme tissu principal."
+          models={porteurs ?? []}
+        />
       </div>
     );
   }
@@ -174,12 +112,23 @@ export default async function ArticleGeneralPage({ params }: { params: Promise<{
       .select("id,code,etape,sage_reference,consumable_families(nom,code_court)")
       .eq("product_model_id", id)
       .maybeSingle();
+    const { data: usages } = consumable
+      ? await supabase.from("nomenclature_lines").select("product_models(id,name)").eq("consumable_id", consumable.id as string)
+      : { data: [] };
+    const utilisateurs = [
+      ...new Map(
+        (usages ?? [])
+          .map((u) => u.product_models as unknown as { id: string; name: string } | null)
+          .filter((m): m is { id: string; name: string } => !!m)
+          .map((m) => [m.id, m])
+      ).values(),
+    ].sort((a, b) => a.name.localeCompare(b.name, "fr"));
     return (
       <div className="space-y-4">
         {identite}
         {consumable && (
           <Card>
-            <CardHeader title="Consommable" description="Relié à la nomenclature des produits finis : sa consommation est calculée à la clôture des ODF." />
+            <CardHeader title="Caractéristiques" description="Relié à la nomenclature des produits finis : sa consommation est calculée à la clôture des ODF." />
             <CardBody>
               <ConsumableTechniqueForm
                 consumable={{
@@ -197,6 +146,14 @@ export default async function ArticleGeneralPage({ params }: { params: Promise<{
             </CardBody>
           </Card>
         )}
+        {consumable && (
+          <UsageCard
+            title="Utilisation"
+            description="Produits finis dont la nomenclature contient ce consommable."
+            empty="Aucune nomenclature ne contient ce consommable."
+            models={utilisateurs}
+          />
+        )}
       </div>
     );
   }
@@ -205,7 +162,7 @@ export default async function ArticleGeneralPage({ params }: { params: Promise<{
     <div className="space-y-4">
       {identite}
       <Card>
-        <CardHeader title="Codification et tissu" />
+        <CardHeader title="Caractéristiques" description="Codification et tissu principal. Les grammages, tailles et couleurs proposés sont les axes de déclinaison (onglet Déclinaisons)." />
         <CardBody className="space-y-4">
           <ModelClassification
             productModelId={model.id}
@@ -217,6 +174,7 @@ export default async function ArticleGeneralPage({ params }: { params: Promise<{
             textiles={textiles ?? []}
             allowedTextileIds={(allowedTextiles ?? []).map((t) => t.textile_id)}
             editable={canModify}
+            part="codification"
           />
           {canModify ? (
             <ProductModelTextile productModelId={model.id} textileId={model.textile_id} textiles={textiles ?? []} />
@@ -236,28 +194,30 @@ export default async function ArticleGeneralPage({ params }: { params: Promise<{
           )}
         </CardBody>
       </Card>
-
-      <Card>
-        <CardHeader
-          title="Disponibilité"
-          description="Tailles et couleurs dans lesquelles le modèle existe. Rien de coché : tout le référentiel actif reste proposable."
-        />
-        <CardBody>
-          {canModify ? (
-            <AvailabilityEditor
-              productModelId={model.id}
-              sizes={(sizes ?? []).map((s) => ({ id: s.id, label: s.libelle, groupe: s.groupe }))}
-              colors={(colors ?? []).map((c) => ({ id: c.id, label: c.name }))}
-              initialSizeIds={(modelSizes ?? []).map((r) => r.size_id)}
-              initialColorIds={(modelColors ?? []).map((r) => r.color_id)}
-            />
-          ) : (
-            <p className="text-sm text-foreground-muted">
-              {(modelSizes ?? []).length} taille(s) et {(modelColors ?? []).length} couleur(s) déclarées.
-            </p>
-          )}
-        </CardBody>
-      </Card>
     </div>
+  );
+}
+
+/** Produits finis qui emploient l'article (tissu principal ou nomenclature). */
+function UsageCard({ title, description, empty, models }: { title: string; description: string; empty: string; models: { id: string; name: string }[] }) {
+  return (
+    <Card>
+      <CardHeader title={title} description={description} />
+      <CardBody>
+        {models.length === 0 ? (
+          <p className="text-sm text-foreground-muted">{empty}</p>
+        ) : (
+          <ul className="flex flex-wrap gap-2 text-sm">
+            {models.map((m) => (
+              <li key={m.id}>
+                <Link href={`/articles/${m.id}/general`} className="rounded-md border border-border px-2 py-1 hover:bg-surface-muted">
+                  {m.name}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardBody>
+    </Card>
   );
 }
