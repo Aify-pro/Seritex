@@ -62,6 +62,7 @@ export function SampleDetailContent({
   links,
   articleMedia,
   validations,
+  lastNegativeDecision,
   baseUrl,
   companyProductionOrderLines,
   attachedMedia,
@@ -74,6 +75,8 @@ export function SampleDetailContent({
   articleMedia: SampleArticleMedia;
   /** Les deux signatures attendues : client et direction (0100). */
   validations: SampleValidations;
+  /** Dernière réponse négative et son motif (0101), affichés à part. */
+  lastNegativeDecision: { label: string; motif: string | null; byName: string | null; at: string } | null;
   baseUrl: string;
   companyProductionOrderLines: ProductionOrderLineOption[];
   attachedMedia: AttachableMediaFile[];
@@ -188,10 +191,11 @@ export function SampleDetailContent({
           <SampleMediaFiles sampleId={sample.id} attached={attachedMedia} available={availableMedia} />
 
           {(permissions.canValidateClient || permissions.canValidateDirection || permissions.canReject ||
-            validations.client.at || validations.direction.at) && (
+            validations.client.at || validations.direction.at || lastNegativeDecision) && (
             <SampleValidationPanel
               sampleId={sample.id}
               validations={validations}
+              lastNegative={lastNegativeDecision}
               permissions={{
                 canValidateClient: permissions.canValidateClient,
                 canValidateDirection: permissions.canValidateDirection,

@@ -53,18 +53,34 @@ const data: SamplePdfData = {
   // case a signer.
   validations: {
     client: { at: "06 oct. 2026", byName: "Awa Diallo (Textile Atlantique)", onBehalf: true },
-    direction: { at: null, byName: null },
+    direction: { at: "06 oct. 2026", byName: "Mme Diop" },
   },
+  directionSeal: null,
+  negativeDecision: null,
 };
+
+/**
+ * Faux cachet et fausse signature : deux images du depot, juste pour verifier
+ * le cadrage (cachet dessous, signature par-dessus) sans secret en clair.
+ */
+async function fakeSeal(): Promise<SamplePdfData["directionSeal"]> {
+  const [signaturePng, stampPng] = await Promise.all([
+    readFile(path.join(process.cwd(), "public/logo-seritex.png")),
+    readFile(path.join(process.cwd(), "public/logo-seritex-wide.png")),
+  ]);
+  return { signaturePng, stampPng, name: "Mme Diop", fonction: "Directrice generale" };
+}
 
 async function main() {
   const out = path.resolve(process.argv[2] ?? "apercu-fiche-echantillon.pdf");
-  await writeFile(out, await buildSamplePdf({ ...data, maquette: await fakeMaquette() }));
+  const maquette = await fakeMaquette();
+
+  // 1. Fiche chargee, validee des deux cotes, avec cachet et signature.
+  await writeFile(out, await buildSamplePdf({ ...data, maquette, directionSeal: await fakeSeal() }));
   console.log(`PDF ecrit : ${out}`);
 
-  // Second tirage dans le cas minimal : pas de maquette, pas de visuel, pas
-  // de devis ni d'ODF, besoin tres court — c'est la fiche la plus vide
-  // possible, elle doit rester presentable.
+  // 2. Cas minimal : rien de rempli, aucune validation — la fiche la plus
+  //    vide possible doit rester presentable.
   const minimal = path.resolve(out.replace(/\.pdf$/, "-minimal.pdf"));
   await writeFile(
     minimal,
@@ -83,9 +99,33 @@ async function main() {
       requiresVisuel: false,
       maquette: null,
       validations: { client: { at: null, byName: null, onBehalf: false }, direction: { at: null, byName: null } },
+      directionSeal: null,
+      negativeDecision: null,
     })
   );
   console.log(`PDF ecrit : ${minimal}`);
+
+  // 3. Reponse negative : le motif a son bandeau, le cartouche repart vierge
+  //    (une reponse negative efface les validations, cf. migration 0100).
+  const refus = path.resolve(out.replace(/\.pdf$/, "-a-ajuster.pdf"));
+  await writeFile(
+    refus,
+    await buildSamplePdf({
+      ...data,
+      statusLabel: "A ajuster",
+      maquette,
+      validations: { client: { at: null, byName: null, onBehalf: false }, direction: { at: null, byName: null } },
+      directionSeal: null,
+      negativeDecision: {
+        label: "Echantillon a ajuster",
+        motif:
+          "Col trop serre a la taille L et teinte du bleu plus sombre que la maquette validee. Reprendre le patron du col et refaire un essai avec le bain precedent.",
+        byName: "Awa Diallo (Textile Atlantique)",
+        at: "06 oct. 2026",
+      },
+    })
+  );
+  console.log(`PDF ecrit : ${refus}`);
 }
 
 main();

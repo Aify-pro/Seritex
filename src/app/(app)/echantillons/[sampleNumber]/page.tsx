@@ -15,6 +15,7 @@ import {
   canEditSampleArticleMedia,
   emptySampleArticleMedia,
   getSampleValidatorNames,
+  getSampleNegativeDecisions,
   buildSampleValidations,
   SAMPLE_VALIDATION_COLUMNS,
   type SampleRequestOption,
@@ -68,10 +69,12 @@ export default async function SampleSheetPage({ params }: { params: Promise<{ sa
     getSampleQuoteLineOptions(sample.request_id ? [sample.request_id] : []),
   ]);
   const articleMedia = (await getSampleArticleMediaMap([sample])).get(sample.id) ?? emptySampleArticleMedia();
-  const [validatorNames, canValidateDirection] = await Promise.all([
+  const [validatorNames, negativeBySample, canValidateDirection] = await Promise.all([
     getSampleValidatorNames([sample]),
+    getSampleNegativeDecisions([sample.id]),
     can("validation_echantillon", "validate"),
   ]);
+  const negative = negativeBySample.get(sample.id) ?? null;
   const isClient = profile.role === "client";
   const requests: SampleRequestOption[] = (companyRequests ?? []).map((r) => ({
     id: r.id,
@@ -103,6 +106,16 @@ export default async function SampleSheetPage({ params }: { params: Promise<{ sa
             links={buildSampleLinks(sample, requests, quoteLines)}
             articleMedia={articleMedia}
             validations={buildSampleValidations(sample, validatorNames)}
+            lastNegativeDecision={
+              negative
+                ? {
+                    label: negative.decision === "refuse" ? "Échantillon refusé" : "Échantillon à ajuster",
+                    motif: negative.motif,
+                    byName: negative.byName,
+                    at: negative.at,
+                  }
+                : null
+            }
             baseUrl={baseUrl}
             companyProductionOrderLines={companyProductionOrderLines}
             attachedMedia={attachedMedia}

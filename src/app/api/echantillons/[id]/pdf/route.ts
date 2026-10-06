@@ -5,9 +5,11 @@ import { getMediaFileBuffers } from "@/lib/media/preview";
 import {
   getSampleArticleMediaMap,
   getSampleValidatorNames,
+  getSampleNegativeDecisions,
   buildSampleValidations,
   SAMPLE_VALIDATION_COLUMNS,
 } from "@/lib/samples";
+import { getDocumentSeal } from "@/lib/signatures";
 import { buildSamplePdf, type SamplePdfData } from "@/lib/pdf/sample-pdf";
 import {
   SAMPLE_STATUS_LABELS,
@@ -86,8 +88,16 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     };
   }
 
-  // Validations déjà posées (0100) : imprimées dans le cartouche de décision.
+  // Validations déjà posées (0100) : imprimées dans le cartouche de
+  // décision — côté direction avec la signature et le cachet de celui qui a
+  // validé (même mécanisme que le devis, migration 0062). Une réponse
+  // négative sort du cartouche : elle a son bandeau, avec son motif (0101).
   const validations = buildSampleValidations(sample, await getSampleValidatorNames([sample]));
+  const [directionSeal, negativeDecisions] = await Promise.all([
+    getDocumentSeal(sample.validation_direction_par),
+    getSampleNegativeDecisions([sample.id]),
+  ]);
+  const negative = negativeDecisions.get(sample.id) ?? null;
 
   const baseUrl = await getBaseUrl();
   const pdfBytes = await buildSamplePdf({
@@ -110,6 +120,15 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     maquette,
     sheetUrl: `${baseUrl}/echantillons/${sample.sample_number}`,
     generatedAt: formatFr(new Date().toISOString()),
+    directionSeal,
+    negativeDecision: negative
+      ? {
+          label: negative.decision === "refuse" ? "Échantillon refusé" : "Échantillon à ajuster",
+          motif: negative.motif,
+          byName: negative.byName,
+          at: formatFr(negative.at),
+        }
+      : null,
     validations: {
       client: {
         at: validations.client.at ? formatFr(validations.client.at) : null,
