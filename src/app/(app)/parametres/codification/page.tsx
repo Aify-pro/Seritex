@@ -27,6 +27,8 @@ export default async function CodificationPage() {
     { data: colors },
     { data: sizes },
     { data: depots },
+    { data: families },
+    { data: consumables },
   ] = await Promise.all([
     supabase.from("coding_rules").select("nature,segments,longueur_max,separateur"),
     supabase.from("product_categories").select("id,nom,code_court").order("nom"),
@@ -35,7 +37,11 @@ export default async function CodificationPage() {
     supabase.from("colors").select("id,name,code_court").eq("active", true).order("name"),
     supabase.from("sizes").select("id,cle,groupe,libelle,code_court").eq("active", true).order("groupe").order("display_order"),
     supabase.from("sage_depot_by_nature").select("nature,depot,stock_natures(libelle,ordre)"),
+    supabase.from("consumable_families").select("id,nom,code_court").order("nom"),
+    supabase.from("consumables").select("famille_id"),
   ]);
+  const consumablesPerFamily = new Map<string, number>();
+  for (const c of consumables ?? []) consumablesPerFamily.set(c.famille_id, (consumablesPerFamily.get(c.famille_id) ?? 0) + 1);
   const isAdmin = profile.role === "administrateur";
   const canEditRefs = isAdmin || profile.role === "responsable_production";
   const canEditDepots = isAdmin || profile.role === "gestionnaire_stock";
@@ -79,9 +85,10 @@ export default async function CodificationPage() {
         })}
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      {/* Un référentiel par nature : il fournit le début du code (modèle PF, matière MP, famille de consommable). */}
+      <div className="grid gap-4 lg:grid-cols-3">
         <Card>
-          <CardHeader title="Catégories" description="Préfixe du code modèle (TS → TS012)." />
+          <CardHeader title="Catégories — produits finis" description="Préfixe du code modèle (TS → TS012)." />
           <CardBody className="space-y-3">
             <ul className="divide-y divide-border rounded-md border border-border">
               {(categories ?? []).map((c) => (
@@ -95,7 +102,7 @@ export default async function CodificationPage() {
         </Card>
 
         <Card>
-          <CardHeader title="Matières" description="Portée par le modèle (A6) : jersey JE, piqué PI…" />
+          <CardHeader title="Matières — tissus" description="Début du code d'un tissu et de ses déclinaisons : jersey JE, piqué PI…" />
           <CardBody className="space-y-3">
             <ul className="divide-y divide-border rounded-md border border-border">
               {(matieres ?? []).map((m) => (
@@ -106,6 +113,30 @@ export default async function CodificationPage() {
               {(matieres ?? []).length === 0 && <li className="px-3 py-2 text-sm text-foreground-muted">Aucune matière.</li>}
             </ul>
             {canEditRefs && <NamedReferentialForm table="matieres" label="Nouvelle matière" />}
+          </CardBody>
+        </Card>
+
+        <Card>
+          <CardHeader
+            title="Familles — consommables"
+            description="Préfixe du code consommable, 2 caractères (BO → COBO0001). Un code déjà attribué ne change pas."
+          />
+          <CardBody className="space-y-3">
+            <ul className="divide-y divide-border rounded-md border border-border">
+              {(families ?? []).map((f) => (
+                <li key={f.id} className="flex items-center justify-between gap-2 px-3 py-1.5 text-sm">
+                  <span>
+                    {f.nom}{" "}
+                    <span className="text-xs text-foreground-muted">
+                      {consumablesPerFamily.get(f.id) ?? 0} consommable{(consumablesPerFamily.get(f.id) ?? 0) > 1 ? "s" : ""}
+                    </span>
+                  </span>
+                  <ShortCodeInput table="consumable_families" id={f.id} value={f.code_court} editable={isAdmin} max={2} />
+                </li>
+              ))}
+              {(families ?? []).length === 0 && <li className="px-3 py-2 text-sm text-foreground-muted">Aucune famille.</li>}
+            </ul>
+            {isAdmin && <NamedReferentialForm table="consumable_families" label="Nouvelle famille" codeLength={2} />}
           </CardBody>
         </Card>
       </div>
