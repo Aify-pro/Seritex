@@ -13,7 +13,7 @@ const schema = z.object({
 type Prospect = { nom?: string; email?: string; telephone?: string | null } | null;
 
 /**
- * Demande du site web (migration 0094) : une fois le client créé dans Sage et
+ * Demande du site web (migration 0098) : une fois le client créé dans Sage et
  * synchronisé, le commercial la rattache à sa fiche. Le prospect devient un
  * contact du client (sauf s'il y figure déjà avec le même e-mail) ; la demande
  * suit ensuite le circuit normal jusqu'au devis.

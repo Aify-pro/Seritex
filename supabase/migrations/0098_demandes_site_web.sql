@@ -1,6 +1,11 @@
 -- ============================================================================
--- 0094 — Demandes de devis venues du site www.seritex.ci
+-- 0098 — Demandes de devis venues du site www.seritex.ci
 -- ============================================================================
+--
+-- Renumérotée (anciennement 0094) : la PR #127 avait déjà fait enregistrer
+-- une autre 0094 en base (échantillon par ligne d'article) ; supabase ne
+-- retenant que le numéro, cette migration n'avait jamais été appliquée.
+-- Elle est idempotente (if not exists / drop if exists).
 --
 -- Le formulaire du site public crée une DEMANDE dans la plateforme
 -- (`requests`, source = 'site'), visible des commerciaux dans « Demandes ».

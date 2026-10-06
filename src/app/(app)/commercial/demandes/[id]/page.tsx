@@ -42,7 +42,7 @@ export default async function RequestDetailPage({
 
   if (!request) notFound();
 
-  // Demande du site web pas encore rattachée à un client (migration 0094).
+  // Demande du site web pas encore rattachée à un client (migration 0098).
   if (!request.company_id && request.prospect) {
     if (profile.role === "responsable_production") notFound();
     return (
