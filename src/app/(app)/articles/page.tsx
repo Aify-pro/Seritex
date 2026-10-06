@@ -41,12 +41,17 @@ export default async function ArticlesPage({
         description="Produits finis, matières premières et consommables : une fiche par article, tout peut être vendu."
         action={
           canModify ? (
-            <Link
-              href="/articles/nouveau"
-              className="inline-flex h-9 items-center gap-1.5 rounded-md bg-brand px-4 text-sm font-medium text-brand-foreground hover:bg-brand/90"
-            >
-              <Plus className="h-4 w-4" /> Nouvel article
-            </Link>
+            <div className="flex items-center gap-2">
+              <Link href="/articles/regroupement-tissus" className="text-sm font-medium text-brand hover:underline">
+                Regrouper les tissus
+              </Link>
+              <Link
+                href="/articles/nouveau"
+                className="inline-flex h-9 items-center gap-1.5 rounded-md bg-brand px-4 text-sm font-medium text-brand-foreground hover:bg-brand/90"
+              >
+                <Plus className="h-4 w-4" /> Nouvel article
+              </Link>
+            </div>
           ) : undefined
         }
       />
