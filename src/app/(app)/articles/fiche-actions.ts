@@ -129,12 +129,14 @@ export async function setArticleClassement(productModelId: string, input: z.inpu
 
 const textileSchema = z.object({
   composition: z.string().trim().max(200),
-  grammage: optionalNumber,
   matiere_id: optionalId,
 });
 
-/** Caractéristiques techniques d'une matière première (le nom se change dans l'identité de l'article). */
-export async function updateTextileTechnique(textileId: string, input: z.input<typeof textileSchema>): Promise<Result> {
+/**
+ * Composition et matière d'un tissu, communes à tous ses grammages (le nom se
+ * change dans l'identité de l'article, les grammages dans ses déclinaisons).
+ */
+export async function updateTextileTechnique(productModelId: string, input: z.input<typeof textileSchema>): Promise<Result> {
   try {
     await assertCanModify();
   } catch (e) {
@@ -146,7 +148,7 @@ export async function updateTextileTechnique(textileId: string, input: z.input<t
   const { error } = await supabase
     .from("textiles")
     .update({ ...parsed.data, composition: parsed.data.composition || null })
-    .eq("id", textileId);
+    .eq("product_model_id", productModelId);
   if (error) return { error: error.message };
   revalidatePath("/articles", "layout");
   return {};
@@ -171,6 +173,64 @@ export async function updateConsumableTechnique(consumableId: string, input: z.i
     .from("consumables")
     .update({ etape: parsed.data.etape, sage_reference: parsed.data.sage_reference || null })
     .eq("id", consumableId);
+  if (error) return { error: error.message };
+  revalidatePath("/articles", "layout");
+  return {};
+}
+
+/** Ajoute un grammage à un article tissu (migration 0102) : « Jersey » → 180 g. */
+export async function addTextileGrammage(productModelId: string, grammage: number, codeCourt: string): Promise<Result> {
+  try {
+    await assertCanModify();
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+  if (!Number.isFinite(grammage) || grammage <= 0) return { error: "Grammage invalide" };
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("add_textile_grammage", {
+    p_model_id: productModelId,
+    p_grammage: grammage,
+    p_code_court: codeCourt.trim() || null,
+  });
+  if (error) return { error: error.message };
+  revalidatePath("/articles", "layout");
+  return {};
+}
+
+const dimensionSchema = z.object({
+  libelle: z.string().trim().min(1, "Donnez un libellé (ex. 12 mm)").max(40),
+  code_court: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .regex(/^[A-Z0-9]{1,4}$/, "Code court : 1 à 4 lettres ou chiffres"),
+});
+
+/** Dimension d'un consommable (12 mm, 50 m, S…) : axe de ses déclinaisons. */
+export async function addArticleDimension(productModelId: string, input: z.input<typeof dimensionSchema>): Promise<Result> {
+  try {
+    await assertCanModify();
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+  const parsed = dimensionSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Saisie invalide" };
+  const supabase = await createClient();
+  const { count } = await supabase.from("article_dimensions").select("id", { count: "exact", head: true }).eq("product_model_id", productModelId);
+  const { error } = await supabase.from("article_dimensions").insert({ product_model_id: productModelId, ...parsed.data, ordre: count ?? 0 });
+  if (error) return { error: error.code === "23505" ? "Cette dimension (ou ce code court) existe déjà." : error.message };
+  revalidatePath("/articles", "layout");
+  return {};
+}
+
+export async function setArticleDimensionActive(dimensionId: string, actif: boolean): Promise<Result> {
+  try {
+    await assertCanModify();
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+  const supabase = await createClient();
+  const { error } = await supabase.from("article_dimensions").update({ actif }).eq("id", dimensionId);
   if (error) return { error: error.message };
   revalidatePath("/articles", "layout");
   return {};

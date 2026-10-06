@@ -16,7 +16,7 @@ export interface ArticleTabDef {
 export const ARTICLE_DETAIL_TABS: ArticleTabDef[] = [
   { slug: "general", label: "Général" },
   { slug: "technique", label: "Technique", natures: ["pf"] },
-  { slug: "declinaisons", label: "Déclinaisons", natures: ["pf"] },
+  { slug: "declinaisons", label: "Déclinaisons" },
   { slug: "fabrication", label: "Fabrication", natures: ["pf"] },
   { slug: "ventes", label: "Ventes", natures: ["pf"] },
   { slug: "stock", label: "Stock", natures: ["pf"] },

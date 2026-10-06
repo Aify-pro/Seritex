@@ -16,7 +16,9 @@ export default async function ArticleRollsPage({ params }: { params: Promise<{ i
   await requireArticles();
   const { id } = await params;
   const supabase = await createClient();
-  const { data: textile } = await supabase.from("textiles").select("id,grammage").eq("product_model_id", id).maybeSingle();
+  // Un tissu peut avoir plusieurs grammages (migration 0102).
+  const { data: grammages } = await supabase.from("textiles").select("id,grammage").eq("product_model_id", id).order("grammage");
+  const textile = grammages?.[0];
   if (!textile) {
     return (
       <Card>
@@ -27,7 +29,7 @@ export default async function ArticleRollsPage({ params }: { params: Promise<{ i
   const { data: rolls } = await supabase
     .from("textile_rolls")
     .select("code,statut,bain,laize_cm,poids_kg,sage_reference,colors(name)")
-    .eq("textile_id", textile.id)
+    .in("textile_id", (grammages ?? []).map((g) => g.id as string))
     .order("recu_le", { ascending: false })
     .limit(1000);
   const all = rolls ?? [];
@@ -61,7 +63,7 @@ export default async function ArticleRollsPage({ params }: { params: Promise<{ i
           title="Stock par coloris et par bain"
           description="Deux bains d'un même coloris peuvent avoir une nuance différente : ils ne se mélangent pas dans un ODF sans motif."
           action={
-            <Link href={`/atelier/stock?onglet=rouleaux&tissu=${textile.id}`} className="text-sm font-medium text-brand hover:underline">
+            <Link href={`/atelier/stock?onglet=rouleaux${(grammages ?? []).length === 1 ? `&tissu=${textile.id}` : ""}`} className="text-sm font-medium text-brand hover:underline">
               Gérer les rouleaux →
             </Link>
           }
@@ -98,7 +100,7 @@ export default async function ArticleRollsPage({ params }: { params: Promise<{ i
       <Card>
         <CardHeader
           title="Grammage réel mesuré"
-          description={`Grammage nominal de l'article : ${textile.grammage ?? "—"} g/m². Le réel se calcule sur les rouleaux revenus de la coupe : kg consommés ÷ surface des matelas servis.`}
+          description={`Grammage nominal : ${(grammages ?? []).map((g) => `${g.grammage ?? "—"}`).join(" / ")} g/m². Le réel se calcule sur les rouleaux revenus de la coupe : kg consommés ÷ surface des matelas servis.`}
         />
         <CardBody className="p-0">
           <Table>

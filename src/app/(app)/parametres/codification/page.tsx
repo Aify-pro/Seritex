@@ -2,7 +2,7 @@ import { requireRole } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
-import { DEFAULT_CODING, type CodeSegment } from "@/lib/articles/codification";
+import { CODING_NATURE_RULES, DEFAULT_CODING, type CodeSegment, type CodingNature } from "@/lib/articles/codification";
 import {
   CodingSettingsForm,
   NamedReferentialForm,
@@ -20,7 +20,7 @@ export default async function CodificationPage() {
   const { profile } = await requireRole(["administrateur", "responsable_production", "gestionnaire_stock"]);
   const supabase = await createClient();
   const [
-    { data: settings },
+    { data: rules },
     { data: categories },
     { data: matieres },
     { data: textiles },
@@ -28,7 +28,7 @@ export default async function CodificationPage() {
     { data: sizes },
     { data: depots },
   ] = await Promise.all([
-    supabase.from("coding_settings").select("*").maybeSingle(),
+    supabase.from("coding_rules").select("nature,segments,longueur_max,separateur"),
     supabase.from("product_categories").select("id,nom,code_court").order("nom"),
     supabase.from("matieres").select("id,nom,code_court").order("nom"),
     supabase.from("textiles").select("id,nom,grammage,code_court,matiere_id").eq("active", true).order("nom"),
@@ -47,22 +47,37 @@ export default async function CodificationPage() {
         description="Règle de génération du code Seritex des articles (ex. TS012JE165BLAXL), codes courts des référentiels et dépôt Sage par nature."
       />
 
-      <Card>
-        <CardHeader
-          title="Règle de code"
-          description="Segments du code, dans l'ordre. Le suffixe d'état — P personnalisé, D 2e choix — s'ajoute au code et compte dans la longueur maximale."
-        />
-        <CardBody>
-          <CodingSettingsForm
-            editable={isAdmin}
-            initial={
-              settings
-                ? { segments: settings.segments as CodeSegment[], longueurMax: settings.longueur_max, separateur: settings.separateur }
-                : DEFAULT_CODING
-            }
-          />
-        </CardBody>
-      </Card>
+      {/* Une règle par nature d'article (migration 0102) : les déclinaisons en dépendent. */}
+      <div className="grid gap-4 xl:grid-cols-3">
+        {(Object.keys(CODING_NATURE_RULES) as CodingNature[]).map((nature) => {
+          const rule = (rules ?? []).find((r) => r.nature === nature);
+          return (
+            <Card key={nature}>
+              <CardHeader
+                title={`Règle de code — ${CODING_NATURE_RULES[nature].label}`}
+                description={
+                  nature === "pf"
+                    ? "Le suffixe d'état — P personnalisé, D 2e choix — s'ajoute au code et compte dans la longueur maximale."
+                    : nature === "mp"
+                      ? "Déclinaison d'un tissu : grammage × couleur (ex. JE180BLA). Le rouleau ajoute sa laize et son poids."
+                      : "Déclinaison d'un consommable : couleur et/ou dimension (ex. COBO0001BLA12)."
+                }
+              />
+              <CardBody>
+                <CodingSettingsForm
+                  nature={nature}
+                  editable={isAdmin}
+                  initial={
+                    rule
+                      ? { segments: rule.segments as CodeSegment[], longueurMax: rule.longueur_max, separateur: rule.separateur }
+                      : { ...DEFAULT_CODING, segments: CODING_NATURE_RULES[nature].segments }
+                  }
+                />
+              </CardBody>
+            </Card>
+          );
+        })}
+      </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>

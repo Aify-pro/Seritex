@@ -4,7 +4,7 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { requireRole } from "@/lib/auth/current-user";
-import { CODE_SEGMENTS } from "@/lib/articles/codification";
+import { CODE_SEGMENTS, CODING_NATURE_RULES, type CodingNature } from "@/lib/articles/codification";
 
 /**
  * Paramètres > Codification (COM-0) : règle de code, codes courts des
@@ -17,27 +17,33 @@ function done() {
 }
 
 const settingsSchema = z.object({
-  segments: z.array(z.enum(CODE_SEGMENTS)).min(1).refine((s) => s.includes("modele"), "Le segment Modèle est obligatoire"),
+  segments: z.array(z.enum(CODE_SEGMENTS)).min(1),
   longueurMax: z.number().int().min(8).max(40),
   separateur: z.string().max(1),
 });
 
-export async function saveCodingSettings(input: z.infer<typeof settingsSchema>) {
+/** Règle de codification d'une nature d'article (migration 0102) : produits finis, tissus ou consommables. */
+export async function saveCodingRule(nature: CodingNature, input: z.infer<typeof settingsSchema>) {
   await requireRole(["administrateur"]);
   const parsed = settingsSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message };
+  const rule = CODING_NATURE_RULES[nature];
+  if (!rule) return { error: "Nature inconnue." };
   if (new Set(parsed.data.segments).size !== parsed.data.segments.length) return { error: "Un segment apparaît deux fois." };
+  if (parsed.data.segments.some((s) => !rule.segments.includes(s))) return { error: "Segment non prévu pour cette nature." };
+  const missing = rule.required.find((s) => !parsed.data.segments.includes(s));
+  if (missing) return { error: `Le segment « ${missing} » est obligatoire.` };
   const supabase = await createClient();
   const { error, data } = await supabase
-    .from("coding_settings")
+    .from("coding_rules")
     .update({
       segments: parsed.data.segments,
       longueur_max: parsed.data.longueurMax,
       separateur: parsed.data.separateur,
       updated_at: new Date().toISOString(),
     })
-    .eq("id", true)
-    .select("id");
+    .eq("nature", nature)
+    .select("nature");
   if (error) return { error: error.message };
   if (!data?.length) return { error: "Réglage réservé à l'administration." };
   done();

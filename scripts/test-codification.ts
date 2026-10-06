@@ -13,6 +13,8 @@ import {
   nextModelCode,
   stockArticleCode,
   variantCode,
+  rollFullCode,
+  CODING_NATURE_RULES,
 } from "../src/lib/articles/codification";
 import { applyArticleFilters, parseArticleFilters, articleSearchText, type ArticleRow } from "../src/lib/articles/filters";
 
@@ -118,6 +120,25 @@ test("liste unique : filtres nature, type et famille (fiche article unique)", ()
   assert.deepEqual(applyArticleFilters(rows, parseArticleFilters({ type: "negoce" })).map((r) => r.id), ["co", "mp"]);
   assert.deepEqual(applyArticleFilters(rows, parseArticleFilters({ famille: "vet", sous_famille: "ts" })).map((r) => r.id), ["pf"]);
   assert.equal(parseArticleFilters({ nature: "inconnue" }).nature, "");
+});
+
+test("codification par nature : tissu sans suffixe d'état, consommable à axes facultatifs", () => {
+  const mp = CODING_NATURE_RULES.mp;
+  assert.deepEqual(
+    variantCode({ matiere: "JE", grammage: "180", couleur: "BLA" }, { segments: ["matiere", "grammage", "couleur"], longueurMax: 8, separateur: "" }, { etatSuffix: mp.etatSuffix }),
+    { code: "JE180BLA" }
+  );
+  const co = CODING_NATURE_RULES.consommable;
+  const rule = { segments: co.segments, longueurMax: 18, separateur: "" };
+  assert.deepEqual(variantCode({ modele: "COBO0001", couleur: "BLA", dimension: "12" }, rule, { etatSuffix: false, optional: co.optional }), { code: "COBO0001BLA12" });
+  assert.deepEqual(variantCode({ modele: "COBO0001", dimension: "12" }, rule, { etatSuffix: false, optional: co.optional }), { code: "COBO000112" });
+  // Axe présent mais sans code court : erreur.
+  assert.ok("error" in variantCode({ modele: "COBO0001", couleur: null }, rule, { etatSuffix: false, optional: co.optional }));
+});
+
+test("code complet d'un rouleau : déclinaison, laize en cm, poids en hectogrammes", () => {
+  assert.equal(rollFullCode("JE180BLA", 178, 22.4), "JE180BLA-178-224");
+  assert.equal(rollFullCode("JE180BLA", 180.4, 21), "JE180BLA-180-210");
 });
 
 console.log(`\n${n} tests OK`);

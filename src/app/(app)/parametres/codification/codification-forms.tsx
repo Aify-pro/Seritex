@@ -7,29 +7,33 @@ import { ChevronDown, ChevronUp, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   CODE_SEGMENT_LABELS,
-  CODE_SEGMENTS,
+  CODING_NATURE_RULES,
   variantCode,
   type CodeSegment,
+  type CodingNature,
   type CodingSettings,
 } from "@/lib/articles/codification";
 import {
   createNamedReferential,
-  saveCodingSettings,
+  saveCodingRule,
   setSageDepot,
   setTextileMatiere,
   updateShortCode,
 } from "./actions";
 
-const EXEMPLE = { modele: "TS012", matiere: "JE", grammage: "165", couleur: "BLA", taille: "XL" };
-
-/** Règle de codification : segments retenus et leur ordre, longueur maximale, séparateur — avec aperçu. */
-export function CodingSettingsForm({ initial, editable }: { initial: CodingSettings; editable: boolean }) {
+/**
+ * Règle de codification d'une nature d'article (migration 0102) : segments
+ * retenus et leur ordre, longueur maximale, séparateur — avec aperçu.
+ */
+export function CodingSettingsForm({ nature, initial, editable }: { nature: CodingNature; initial: CodingSettings; editable: boolean }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const rule = CODING_NATURE_RULES[nature];
+  const CODE_SEGMENTS = rule.segments;
   const [segments, setSegments] = useState<CodeSegment[]>(initial.segments);
   const [longueurMax, setLongueurMax] = useState(initial.longueurMax);
   const [separateur, setSeparateur] = useState(initial.separateur);
-  const apercu = variantCode(EXEMPLE, { segments, longueurMax, separateur });
+  const apercu = variantCode(rule.exemple, { segments, longueurMax, separateur }, { etatSuffix: rule.etatSuffix, optional: rule.optional });
 
   const move = (i: number, d: -1 | 1) => {
     const j = i + d;
@@ -56,7 +60,7 @@ export function CodingSettingsForm({ initial, editable }: { initial: CodingSetti
                   <button type="button" onClick={() => move(i, 1)} disabled={i === segments.length - 1} className="disabled:opacity-30" aria-label="Descendre">
                     <ChevronDown className="h-4 w-4" />
                   </button>
-                  {s !== "modele" && (
+                  {!rule.required.includes(s) && (
                     <button type="button" onClick={() => setSegments(segments.filter((x) => x !== s))} className="text-xs text-foreground-muted hover:text-danger">
                       Retirer
                     </button>
@@ -105,7 +109,7 @@ export function CodingSettingsForm({ initial, editable }: { initial: CodingSetti
             loading={pending}
             onClick={() =>
               startTransition(async () => {
-                const res = await saveCodingSettings({ segments, longueurMax, separateur });
+                const res = await saveCodingRule(nature, { segments, longueurMax, separateur });
                 if (res.error) toast.error("Réglage refusé", { description: res.error });
                 else {
                   toast.success("Règle de codification enregistrée");
@@ -121,10 +125,14 @@ export function CodingSettingsForm({ initial, editable }: { initial: CodingSetti
       <p className="text-xs text-foreground-muted">
         Aperçu :{" "}
         {"code" in apercu ? (
-          <>
-            <span className="font-mono text-foreground">{apercu.code}</span> · personnalisé{" "}
-            <span className="font-mono">{apercu.code}P</span> · 2e choix <span className="font-mono">{apercu.code}D</span>
-          </>
+          rule.etatSuffix ? (
+            <>
+              <span className="font-mono text-foreground">{apercu.code}</span> · personnalisé{" "}
+              <span className="font-mono">{apercu.code}P</span> · 2e choix <span className="font-mono">{apercu.code}D</span>
+            </>
+          ) : (
+            <span className="font-mono text-foreground">{apercu.code}</span>
+          )
         ) : (
           <span className="text-danger">{apercu.error}</span>
         )}
