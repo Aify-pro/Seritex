@@ -4,9 +4,8 @@ import { Card, CardHeader, CardBody } from "@/components/ui/card";
 import type { StockEtat } from "@/lib/articles/codification";
 import { VariantMatrix, type MatrixVariant } from "../_components/variant-matrix";
 import { ArticleVariantGrid } from "../_components/article-variant-grid";
-import { ColorAxis, DimensionAxis, GrammageAxis } from "../_components/article-variant-axes";
+import { ColorAxis, DimensionAxis, GrammageAxis, SizeAxis } from "../_components/article-variant-axes";
 import { ModelClassification } from "../_components/model-classification";
-import { AvailabilityEditor } from "../_components/availability-editor";
 import { TextileArticles } from "../../matieres/textile-articles";
 
 /**
@@ -43,7 +42,7 @@ export default async function ArticleVariantsPage({ params }: { params: Promise<
       .eq("model_id", id),
     supabase.from("textiles").select("id,nom,grammage,matiere_id").eq("active", true).order("nom"),
     supabase.from("sizes").select("id,groupe,libelle").eq("active", true).order("groupe").order("display_order"),
-    supabase.from("colors").select("id,name").eq("active", true).order("name"),
+    supabase.from("colors").select("id,name,hex,code").eq("active", true).order("name"),
   ]);
 
   // Axes : ce qui est déclaré, plus tout axe encore porté par une déclinaison existante.
@@ -136,26 +135,24 @@ export default async function ArticleVariantsPage({ params }: { params: Promise<
               editable={canModify}
             />
           </div>
-          {canModify ? (
-            <AvailabilityEditor
+          <div className="space-y-1.5">
+            <p className="text-xs font-medium text-foreground-muted">Tailles</p>
+            <SizeAxis
               productModelId={id}
-              sizes={(allSizes ?? []).map((s) => ({
-                id: s.id,
-                label: s.libelle,
-                groupe: s.groupe,
-              }))}
-              colors={(allColors ?? []).map((c) => ({
-                id: c.id,
-                label: c.name,
-              }))}
-              initialSizeIds={(modelSizes ?? []).map((r) => r.size_id)}
-              initialColorIds={(modelColors ?? []).map((r) => r.color_id)}
+              sizes={(allSizes ?? []).map((s) => ({ id: s.id as string, libelle: s.libelle as string, groupe: (s.groupe as string | null) ?? "" }))}
+              selected={(modelSizes ?? []).map((r) => r.size_id as string)}
+              editable={canModify}
             />
-          ) : (
-            <p className="text-sm text-foreground-muted">
-              {(modelSizes ?? []).length} taille(s) et {(modelColors ?? []).length} couleur(s) déclarées.
-            </p>
-          )}
+          </div>
+          <div className="space-y-1.5">
+            <p className="text-xs font-medium text-foreground-muted">Couleurs</p>
+            <ColorAxis
+              productModelId={id}
+              colors={(allColors ?? []).map((c) => ({ id: c.id as string, name: c.name as string, hex: (c.hex as string | null) ?? null, code: (c.code as string | null) ?? null }))}
+              selected={(modelColors ?? []).map((r) => r.color_id as string)}
+              editable={canModify}
+            />
+          </div>
         </CardBody>
       </Card>
       <Card>
