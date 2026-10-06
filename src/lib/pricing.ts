@@ -240,3 +240,24 @@ export function printSignature(zones: { printable_zone_id: string; nb_couleurs: 
     .map((z) => `${z.printable_zone_id}:${z.nb_couleurs}`)
     .join(",");
 }
+
+/**
+ * Prix de vente d'un tissu ou d'un consommable (migration 0104), miroir de
+ * article_variant_prices() : saisi, ou calculé — prix d'achat × (1 + frais
+ * d'approche) × coefficient, arrondi au pas supérieur. null si une donnée
+ * manque (jamais 0 en silence).
+ */
+export function purchasedSalePrice(
+  input: { mode: "calcule" | "saisi"; prixAchat: number | null; fraisPct: number; prixVenteSaisi: number | null },
+  params: PricingParams
+): { prixVente: number | null; prixRevient: number | null; manquant: string | null } {
+  const prixRevient = input.prixAchat != null ? input.prixAchat * (1 + input.fraisPct / 100) : null;
+  if (input.mode === "saisi") {
+    return { prixVente: input.prixVenteSaisi, prixRevient, manquant: input.prixVenteSaisi == null ? "prix de vente non saisi" : null };
+  }
+  if (prixRevient == null) return { prixVente: null, prixRevient: null, manquant: "prix d'achat non saisi" };
+  const coef = coefficient(params);
+  if (coef == null) return { prixVente: null, prixRevient, manquant: "coefficient impossible" };
+  return { prixVente: roundUpTo(prixRevient * coef, params.arrondi), prixRevient, manquant: null };
+}
+

@@ -18,6 +18,7 @@ import assert from "node:assert/strict";
 import {
   coefficient,
   fabricCostPerPiece,
+  purchasedSalePrice,
   printCostPerPiece,
   printSignature,
   priceGrid,
@@ -183,6 +184,16 @@ test("coefficient de vente imposé (A8) : remplace la formule charges / marge", 
   close(coefficient({ chargesPct: 40, margePct: 15, coefPrixVente: null })!, 1 / (0.6 * 0.85));
   const g = priceGrid([{ id: "c", libelle: "Confection", base: 1000, supplements: {} }], [M], { ...jersey, coefPrixVente: 1.75 });
   assert.equal(g.sizes[0].pvCalcule, 1800);
+});
+
+test("tissu ou consommable : prix calculé (achat + frais × coefficient) ou saisi", () => {
+  // 3 000 F le kg + 10 % de frais = 3 300 ; × 1/(0,6 × 0,85) = 6 470,6 → 6 500.
+  const calc = purchasedSalePrice({ mode: "calcule", prixAchat: 3000, fraisPct: 10, prixVenteSaisi: null }, jersey);
+  assert.equal(calc.prixVente, 6500);
+  close(calc.prixRevient!, 3300);
+  assert.equal(purchasedSalePrice({ mode: "saisi", prixAchat: 3000, fraisPct: 10, prixVenteSaisi: 6000 }, jersey).prixVente, 6000);
+  assert.equal(purchasedSalePrice({ mode: "calcule", prixAchat: null, fraisPct: 0, prixVenteSaisi: null }, jersey).manquant, "prix d'achat non saisi");
+  assert.equal(purchasedSalePrice({ mode: "calcule", prixAchat: 1000, fraisPct: 0, prixVenteSaisi: null }, { ...jersey, coefPrixVente: 2 }).prixVente, 2000);
 });
 
 console.log(`\n${n} tests OK`);

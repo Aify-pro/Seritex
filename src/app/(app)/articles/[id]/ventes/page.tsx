@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ArticleVariantPrices } from "../_components/article-variant-prices";
 import { createClient } from "@/lib/supabase/server";
 import { requireArticles } from "@/lib/articles/access";
 import { getSizes } from "@/lib/sizes";
@@ -29,6 +30,9 @@ export default async function ArticleSalesPage({ params }: { params: Promise<{ i
   await requireArticles();
   const { id } = await params;
   const supabase = await createClient();
+  // Tissu ou consommable : prix par déclinaison, calculés ou saisis (migration 0104).
+  const { data: article } = await supabase.from("product_models").select("nature").eq("id", id).maybeSingle();
+  if (article && article.nature !== "pf") return <ArticleVariantPrices productModelId={id} />;
 
   const [{ data: prices, error: pricesError }, { data: memorized }, { data: quoteLines }, { data: odfLines }, sizes] = await Promise.all([
     supabase.rpc("model_sale_prices", { p_model_id: id }),
