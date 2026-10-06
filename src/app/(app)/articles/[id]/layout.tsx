@@ -27,7 +27,7 @@ export default async function ArticleLayout({
   const supabase = await createClient();
   const { data: model } = await supabase
     .from("product_models")
-    .select("id,name,category,active,nature,type_appro,famille:article_families!product_models_famille_id_fkey(nom),sous_famille:article_families!product_models_sous_famille_id_fkey(nom)")
+    .select("id,name,category,active,nature,type_appro,fusionne_dans,famille:article_families!product_models_famille_id_fkey(nom),sous_famille:article_families!product_models_sous_famille_id_fkey(nom)")
     .eq("id", id)
     .maybeSingle();
   if (!model) notFound();
@@ -58,6 +58,15 @@ export default async function ArticleLayout({
           .join(" · ")}
         action={!model.active ? <Badge tone="neutral">Inactif</Badge> : undefined}
       />
+      {model.fusionne_dans && (
+        <p className="rounded-md bg-warning-soft px-3 py-2 text-sm text-warning">
+          Ce tissu a été regroupé dans un autre article :{" "}
+          <Link href={`/articles/${model.fusionne_dans}/declinaisons`} className="font-medium underline">
+            ouvrir l&apos;article regroupé
+          </Link>
+          .
+        </p>
+      )}
       <TabNav items={tabs} label="Onglets de la fiche article" />
       {children}
     </div>

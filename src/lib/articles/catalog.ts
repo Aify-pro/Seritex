@@ -57,6 +57,11 @@ export async function loadArticleCatalog({ canSeeCosts }: { canSeeCosts: boolean
   ]);
   const familleNom = new Map((familles ?? []).map((f) => [f.id as string, f.nom as string]));
   const textileOf = new Map((ownTextiles ?? []).map((t) => [t.product_model_id as string, t]));
+  // Un tissu peut avoir plusieurs grammages (migration 0102).
+  const ownGrammages = new Map<string, number[]>();
+  for (const t of ownTextiles ?? []) {
+    if (t.grammage) ownGrammages.set(t.product_model_id as string, [...(ownGrammages.get(t.product_model_id as string) ?? []), Number(t.grammage)]);
+  }
   const consumableOf = new Map((ownConsumables ?? []).map((c) => [c.product_model_id as string, c]));
   // Vignette (ART-F) : image principale « toutes couleurs », sinon la première principale.
   const { data: principals } = await supabase
@@ -119,8 +124,8 @@ export async function loadArticleCatalog({ canSeeCosts }: { canSeeCosts: boolean
       category: (m.category as string | null) ?? null,
       active: !!m.active,
       matiere: ownMatiere ?? matiere ?? textile?.nom ?? null,
-      grammages: ownTextile?.grammage
-        ? [Number(ownTextile.grammage)]
+      grammages: ownGrammages.get(m.id as string)?.length
+        ? [...new Set(ownGrammages.get(m.id as string))].sort((a, b) => a - b)
         : grammages.length
           ? grammages
           : textile?.grammage

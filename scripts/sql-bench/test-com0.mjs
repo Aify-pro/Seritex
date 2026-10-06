@@ -41,9 +41,9 @@ await test("textiles autorisés : forcément de la matière du modèle", async (
 await test("format TS002JE165BLAXL, ≤ 18 caractères suffixe compris", async () => {
   const c = await one(`select generate_variant_code($1,$2,$3,$4) c`, [model.id, t165.id, blanc.id, xl.id]);
   assert.equal(c.c, "TS002JE165BLAXL");
-  await q(`update coding_settings set longueur_max = 15`);
+  await q(`update coding_rules set longueur_max = 15 where nature = 'pf'`);
   await expectFail(() => q(`select generate_variant_code($1,$2,$3,$4)`, [model.id, t165.id, blanc.id, xl.id]), /dépasse la longueur maximale/);
-  await q(`update coding_settings set longueur_max = 18`);
+  await q(`update coding_rules set longueur_max = 18 where nature = 'pf'`);
 });
 
 await test("une seule déclinaison par combinaison ; vierge, P et D distincts", async () => {

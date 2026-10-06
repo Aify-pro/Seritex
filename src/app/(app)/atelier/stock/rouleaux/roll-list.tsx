@@ -11,6 +11,8 @@ import { issueRoll, returnRoll, scrapRoll } from "./actions";
 
 export interface RollRow {
   code: string;
+  /** Code article complet (déclinaison-laize-poids, migration 0105), null tant que le rouleau n'est rattaché à aucune déclinaison. */
+  codeComplet: string | null;
   textileId: string;
   tissu: string;
   articleId: string | null;
@@ -53,6 +55,7 @@ export function RollList({ rows, odfs, canAct }: { rows: RollRow[]; odfs: OdfOpt
         <li key={r.code} className="px-5 py-3">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
             <span className="font-mono text-xs font-medium">{r.code}</span>
+            {r.codeComplet && <span className="font-mono text-xs text-foreground-muted">{r.codeComplet}</span>}
             <span>
               {r.articleId ? (
                 <Link href={`/articles/${r.articleId}/general`} className="hover:underline">

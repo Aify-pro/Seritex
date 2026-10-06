@@ -29,14 +29,14 @@ export async function RouleauxTab({ params, canAct }: { params: { tissu?: string
 
   let rollsQuery = supabase
     .from("textile_rolls")
-    .select("id,code,statut,bain,numero_fournisseur,laize_cm,poids_kg,poids_initial_kg,emplacement,sage_reference,textile_id,colors(name),textiles(nom,product_model_id),production_orders(id,reference)")
+    .select("id,code,code_complet,statut,bain,numero_fournisseur,laize_cm,poids_kg,poids_initial_kg,emplacement,sage_reference,textile_id,colors(name),textiles(nom,product_model_id),production_orders(id,reference)")
     .order("recu_le", { ascending: false })
     .limit(500);
   if (params.tissu) rollsQuery = rollsQuery.eq("textile_id", params.tissu);
   // Une recherche par code cherche dans tous les états.
   if (!q && statut === "actifs") rollsQuery = rollsQuery.in("statut", ["en_stock", "en_production"]);
   else if (!q && statut !== "tous") rollsQuery = rollsQuery.eq("statut", statut);
-  if (q) rollsQuery = rollsQuery.or(`code.ilike.%${safe}%,bain.ilike.%${safe}%,numero_fournisseur.ilike.%${safe}%`);
+  if (q) rollsQuery = rollsQuery.or(`code.ilike.%${safe}%,code_complet.ilike.%${safe}%,bain.ilike.%${safe}%,numero_fournisseur.ilike.%${safe}%`);
 
   const [{ data: rolls }, { data: textiles }, { data: coloris }, { data: odfs }] = await Promise.all([
     rollsQuery,
@@ -60,6 +60,7 @@ export async function RouleauxTab({ params, canAct }: { params: { tissu?: string
     const tx = r.textiles as unknown as { nom: string; product_model_id: string | null } | null;
     return {
       code: r.code as string,
+      codeComplet: (r.code_complet as string | null) ?? null,
       textileId: r.textile_id as string,
       tissu: tx?.nom ?? "—",
       articleId: tx?.product_model_id ?? null,

@@ -16,11 +16,10 @@ export interface ArticleTabDef {
 export const ARTICLE_DETAIL_TABS: ArticleTabDef[] = [
   { slug: "general", label: "Général" },
   { slug: "technique", label: "Technique", natures: ["pf"] },
-  { slug: "declinaisons", label: "Déclinaisons", natures: ["pf"] },
+  { slug: "declinaisons", label: "Déclinaisons" },
   { slug: "fabrication", label: "Fabrication", natures: ["pf"] },
-  { slug: "ventes", label: "Ventes", natures: ["pf"] },
-  { slug: "stock", label: "Stock", natures: ["pf"] },
-  { slug: "rouleaux", label: "Rouleaux", natures: ["mp"] },
+  { slug: "ventes", label: "Ventes" },
+  { slug: "stock", label: "Stock" },
   { slug: "medias", label: "Médias & e-shop" },
-  { slug: "prix-de-revient", label: "Prix de revient", costsOnly: true, natures: ["pf"] },
+  { slug: "prix-de-revient", label: "Prix de revient", costsOnly: true },
 ];

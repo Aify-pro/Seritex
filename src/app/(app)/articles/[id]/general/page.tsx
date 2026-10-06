@@ -79,52 +79,71 @@ export default async function ArticleGeneralPage({ params }: { params: Promise<{
   );
 
   if (nature === "mp") {
-    const [{ data: textile }, { data: liens }, { data: articles }] = await Promise.all([
-      supabase.from("textiles").select("id,composition,grammage,matiere_id").eq("product_model_id", id).maybeSingle(),
+    // Un tissu peut avoir plusieurs grammages (migration 0102) : une ligne textile par grammage.
+    const [{ data: grammages }, { data: liens }, { data: articles }] = await Promise.all([
+      supabase.from("textiles").select("id,composition,grammage,matiere_id").eq("product_model_id", id).order("grammage"),
       supabase.from("textile_sage_articles").select("textile_id,sage_reference,color_id,colors(name)"),
       supabase.from("stock_item_view").select("sage_reference,designation").eq("category", "tissu").order("designation"),
     ]);
-    if (!textile) return identite;
+    if (!grammages || grammages.length === 0) return identite;
     const rattachees = new Set((liens ?? []).map((l) => l.sage_reference as string));
     const designationDe = new Map((articles ?? []).map((a) => [a.sage_reference, a.designation]));
-    const attached = (liens ?? [])
-      .filter((l) => l.textile_id === textile.id)
-      .map((l) => ({
-        sage_reference: l.sage_reference as string,
-        designation: designationDe.get(l.sage_reference as string) ?? "Article absent du miroir Sage",
-        colorName: (l.colors as unknown as { name: string } | null)?.name ?? null,
-      }));
     // Le miroir a une ligne par dépôt (migration 0058) : dédoublonnage.
     const orphelins = [...new Map((articles ?? []).filter((a) => !rattachees.has(a.sage_reference)).map((a) => [a.sage_reference, a])).values()];
-    const { data: porteurs } = await supabase.from("product_models").select("id,name").eq("textile_id", textile.id).order("name");
+    const attachedOf = (textileId: string) =>
+      (liens ?? [])
+        .filter((l) => l.textile_id === textileId)
+        .map((l) => ({
+          sage_reference: l.sage_reference as string,
+          designation: designationDe.get(l.sage_reference as string) ?? "Article absent du miroir Sage",
+          colorName: (l.colors as unknown as { name: string } | null)?.name ?? null,
+        }));
+    const { data: porteurs } = await supabase
+      .from("product_models")
+      .select("id,name")
+      .in("textile_id", grammages.map((g) => g.id as string))
+      .order("name");
     return (
       <div className="space-y-4">
         {identite}
         <Card>
           <CardHeader
             title="Caractéristiques du tissu"
-            description="Grammage nominal de l'article ; la laize et le poids réels sont ceux de chaque rouleau, le grammage réel se mesure à la production."
+            description="Communes à tous ses grammages. Les grammages (nominaux) sont ses déclinaisons ; la laize et le poids sont ceux de chaque rouleau, le grammage réel se mesure à la production."
           />
           <CardBody>
-            <TextileTechniqueForm textile={textile} matieres={matieres ?? []} editable={canModify} />
+            <TextileTechniqueForm
+              productModelId={id}
+              textile={{ composition: (grammages[0].composition as string | null) ?? null, matiere_id: (grammages[0].matiere_id as string | null) ?? null }}
+              matieres={matieres ?? []}
+              editable={canModify}
+            />
           </CardBody>
         </Card>
         <Card>
-          <CardHeader title="Coloris Sage" description="Les articles Sage (un par coloris) qui sont ce tissu." />
-          <CardBody>
-            {canModify ? (
-              <TextileArticles textileId={textile.id} attached={attached} candidates={orphelins} colors={colors ?? []} />
-            ) : (
-              <ul className="space-y-1 text-sm">
-                {attached.map((a) => (
-                  <li key={a.sage_reference}>
-                    <span className="font-mono text-xs">{a.sage_reference}</span> — {a.designation}
-                    {a.colorName ? ` (${a.colorName})` : ""}
-                  </li>
-                ))}
-                {attached.length === 0 && <li className="text-foreground-muted">Aucun article Sage rattaché.</li>}
-              </ul>
-            )}
+          <CardHeader title="Coloris Sage" description="Les articles Sage (un par coloris) de chaque grammage." />
+          <CardBody className="space-y-4">
+            {grammages.map((g) => {
+              const attached = attachedOf(g.id as string);
+              return (
+                <div key={g.id} className="space-y-1.5">
+                  {grammages.length > 1 && <p className="text-xs font-medium text-foreground-muted">{g.grammage ?? "?"} g/m²</p>}
+                  {canModify ? (
+                    <TextileArticles textileId={g.id as string} attached={attached} candidates={orphelins} colors={colors ?? []} />
+                  ) : (
+                    <ul className="space-y-1 text-sm">
+                      {attached.map((a) => (
+                        <li key={a.sage_reference}>
+                          <span className="font-mono text-xs">{a.sage_reference}</span> — {a.designation}
+                          {a.colorName ? ` (${a.colorName})` : ""}
+                        </li>
+                      ))}
+                      {attached.length === 0 && <li className="text-foreground-muted">Aucun article Sage rattaché.</li>}
+                    </ul>
+                  )}
+                </div>
+              );
+            })}
           </CardBody>
         </Card>
         <Card>

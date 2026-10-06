@@ -132,3 +132,51 @@ export async function proposeFabricAreaFromPlacement(productModelId: string): Pr
   if (error) return { error: error.message };
   return { surface: data === null ? null : Number(data) };
 }
+
+const purchaseSchema = z.object({
+  mode_prix: z.enum(["calcule", "saisi"]),
+  prix_achat: money.nullable(),
+  frais_pct: z.number().min(0, "Frais invalides").max(499),
+  prix_vente: z.number().positive("Prix de vente invalide").nullable(),
+  charges_pct: pct.nullable(),
+  marge_pct: pct.nullable(),
+});
+
+/** Prix d'un tissu ou d'un consommable (migration 0104) : valeurs de l'article. */
+export async function saveArticlePurchasePricing(productModelId: string, input: z.input<typeof purchaseSchema>) {
+  const { profile } = await requireRole(["administrateur"]);
+  const parsed = purchaseSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Saisie invalide" };
+  const supabase = await createClient();
+  const { error } = await supabase.from("model_pricing").upsert({
+    product_model_id: productModelId,
+    ...parsed.data,
+    updated_at: new Date().toISOString(),
+    updated_by: profile.id,
+  });
+  if (error) return { error: error.message };
+  revalidatePath("/articles", "layout");
+  return {};
+}
+
+const variantPurchaseSchema = z.object({
+  mode_prix: z.enum(["calcule", "saisi"]).nullable(),
+  prix_achat: money.nullable(),
+  frais_pct: z.number().min(0).max(499).nullable(),
+  prix_vente: z.number().positive("Prix de vente invalide").nullable(),
+});
+
+/** Prix d'une déclinaison quand il diffère de celui de l'article ; tout vide = valeur de l'article. */
+export async function saveVariantPricing(variantId: string, input: z.input<typeof variantPurchaseSchema>) {
+  const { profile } = await requireRole(["administrateur"]);
+  const parsed = variantPurchaseSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Saisie invalide" };
+  const supabase = await createClient();
+  const vide = Object.values(parsed.data).every((v) => v === null);
+  const { error } = vide
+    ? await supabase.from("variant_pricing").delete().eq("variant_id", variantId)
+    : await supabase.from("variant_pricing").upsert({ variant_id: variantId, ...parsed.data, updated_at: new Date().toISOString(), updated_by: profile.id });
+  if (error) return { error: error.message };
+  revalidatePath("/articles", "layout");
+  return {};
+}
