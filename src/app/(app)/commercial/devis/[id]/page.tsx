@@ -8,20 +8,26 @@ import { getSizeOptionsByModel } from "@/lib/quote-dispatch";
 import { simulateQuote } from "@/lib/quote-pricing";
 import { QuoteSimulationCard } from "@/components/quotes/quote-simulation-card";
 import type { AttachableMediaFile } from "@/lib/types/domain";
+import { getSampleQuoteLineOptions } from "@/lib/samples";
 
 export default async function CommercialQuoteDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { authId, profile } = await requireRole(["commercial", "administrateur"]);
   const { id } = await params;
   const supabase = await createClient();
 
-  const { data: quote } = await supabase.from("quotes").select("*,companies(name)").eq("id", id).single();
+  const { data: quote } = await supabase
+    .from("quotes")
+    .select("*,companies(name),requests(reference)")
+    .eq("id", id)
+    .single();
   if (!quote) notFound();
 
   // Médiathèque proposable pour visuel/maquette (migration 0043) : plus
   // toute la médiathèque du client, seulement ce qui est déjà affilié à
   // cette demande — voir src/app/(app)/atelier/production/[id]/page.tsx
   // pour le même principe côté ODF.
-  const [lines, { data: requestMedia }, { data: samples }, canValidate, validators, validator] = await Promise.all([
+  const [lines, { data: requestMedia }, { data: samples }, sampleQuoteLineOptions, canValidate, validators, validator] =
+    await Promise.all([
     getQuoteLinesWithColorConfig(id),
     supabase.from("request_media_files").select("media_files(id,file_name,category)").eq("request_id", quote.request_id),
     // Échantillons de la demande, liables à une ligne du devis (migration 0051).
@@ -30,6 +36,10 @@ export default async function CommercialQuoteDetailPage({ params }: { params: Pr
       .select("id,sample_number,status,quote_line_id")
       .eq("request_id", quote.request_id)
       .order("created_at", { ascending: false }),
+    // Lignes des devis de la demande, pour créer un échantillon depuis une
+    // ligne d'article (0094) — un échantillon porte sur un article, jamais
+    // sur le devis entier.
+    getSampleQuoteLineOptions([quote.request_id]),
     // Validation interne (migration 0063).
     isQuoteValidator(authId),
     quote.status === "en_validation_interne" ? listQuoteValidatorNames() : Promise.resolve([] as string[]),
@@ -58,6 +68,10 @@ export default async function CommercialQuoteDetailPage({ params }: { params: Pr
       editable
       availableMediaFiles={availableMediaFiles}
       samples={samples ?? []}
+      sampleCreation={{
+        requestReference: (quote.requests as unknown as { reference: string } | null)?.reference ?? "",
+        quoteLineOptions: sampleQuoteLineOptions,
+      }}
       canValidate={canValidate}
       validators={validators}
       validatedBy={validator}

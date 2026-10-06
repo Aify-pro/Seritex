@@ -9,24 +9,32 @@ import type { SampleRequestOption, SampleQuoteLineOption } from "@/lib/samples";
 
 /**
  * Bouton "Nouvel échantillon" + fenêtre de création — placé dans l'action
- * du `PageHeader` du module Échantillonnage (demande à choisir) ou dans la
- * carte Échantillons d'une fiche de demande (demande imposée).
+ * du `PageHeader` du module Échantillonnage (demande à choisir), dans la
+ * carte Échantillons d'une fiche de demande (demande imposée), ou sur une
+ * ligne d'article du devis (demande ET article imposés, 0094).
  */
 export function CreateSampleDialog({
   requests,
   fixedRequest,
+  fixedQuoteLine,
   quoteLines,
+  triggerLabel = "Nouvel échantillon",
+  triggerVariant,
 }: {
   requests?: SampleRequestOption[];
   fixedRequest?: Pick<SampleRequestOption, "id" | "reference" | "companyName">;
+  /** Création depuis une ligne d'article précise (ligne de devis). */
+  fixedQuoteLine?: { id: string; label: string };
   quoteLines: SampleQuoteLineOption[];
+  triggerLabel?: string;
+  triggerVariant?: "primary" | "secondary";
 }) {
   const [open, setOpen] = useState(false);
 
   return (
     <>
-      <Button size="sm" onClick={() => setOpen(true)}>
-        <Plus className="h-3.5 w-3.5" /> Nouvel échantillon
+      <Button size="sm" variant={triggerVariant} onClick={() => setOpen(true)}>
+        <Plus className="h-3.5 w-3.5" /> {triggerLabel}
       </Button>
       <Dialog
         open={open}
@@ -37,6 +45,7 @@ export function CreateSampleDialog({
         <NewSampleForm
           requests={requests}
           fixedRequest={fixedRequest}
+          fixedQuoteLine={fixedQuoteLine}
           quoteLines={quoteLines}
           onCreated={() => setOpen(false)}
         />

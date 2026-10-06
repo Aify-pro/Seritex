@@ -18,7 +18,8 @@ import { SampleDecisionForm } from "@/components/samples/sample-decision-form";
 import { DeleteSampleButton } from "@/components/samples/delete-sample-button";
 import { SampleRequestLink } from "@/components/samples/sample-request-link";
 import { SampleQuoteLineLink } from "@/components/samples/sample-quote-line-link";
-import type { SampleRequestOption, SampleQuoteLineOption } from "@/lib/samples";
+import { SampleArticleMediaFiles } from "@/components/samples/sample-article-media";
+import type { SampleRequestOption, SampleQuoteLineOption, SampleArticleMedia } from "@/lib/samples";
 
 export interface SampleDetailData {
   id: string;
@@ -30,7 +31,8 @@ export interface SampleDetailData {
   request_date: string;
   due_date: string | null;
   extra_info: string | null;
-  company_id: string;
+  // Null = fiche d'une demande interne / stock (0081, 0094).
+  company_id: string | null;
   request_id: string | null;
   quote_line_id: string | null;
   production_order_line_id: string | null;
@@ -58,6 +60,7 @@ export interface SampleLinksData {
 export function SampleDetailContent({
   sample,
   links,
+  articleMedia,
   baseUrl,
   companyProductionOrderLines,
   attachedMedia,
@@ -66,6 +69,8 @@ export function SampleDetailContent({
 }: {
   sample: SampleDetailData;
   links: SampleLinksData;
+  /** Maquette et visuels de l'article (0094) — stockés sur la ligne, pas sur la fiche. */
+  articleMedia: SampleArticleMedia;
   baseUrl: string;
   companyProductionOrderLines: ProductionOrderLineOption[];
   attachedMedia: AttachableMediaFile[];
@@ -77,6 +82,8 @@ export function SampleDetailContent({
     canLinkProductionOrder: boolean;
     /** Demande et ligne de devis : commercial / administrateur uniquement. */
     canLinkRequestAndQuoteLine: boolean;
+    /** Dépôt maquette/visuel sur l'article — voir canEditSampleArticleMedia (0094). */
+    canManageArticleMedia: boolean;
     canDecide: boolean;
   };
 }) {
@@ -160,6 +167,14 @@ export function SampleDetailContent({
                   : "aucun"}
             </div>
           )}
+
+          <SampleArticleMediaFiles
+            sampleId={sample.id}
+            companyId={sample.company_id}
+            requestId={links.request?.id ?? null}
+            media={articleMedia}
+            editable={permissions.canManageArticleMedia}
+          />
 
           <SampleMediaFiles sampleId={sample.id} attached={attachedMedia} available={availableMedia} />
 

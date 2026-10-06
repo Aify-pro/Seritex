@@ -4,6 +4,8 @@ import QRCode from "qrcode";
 import { createClient } from "@/lib/supabase/server";
 import { getBaseUrl } from "@/lib/url";
 import { getLogoPngBytes } from "@/lib/pdf/logo";
+import { getMediaFileBuffers } from "@/lib/media/preview";
+import { getSampleArticleMediaMap } from "@/lib/samples";
 import {
   SAMPLE_STATUS_LABELS,
   SAMPLE_PRIORITY_LABELS,
@@ -40,7 +42,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const { data: sample } = await supabase
     .from("sample_requests")
     .select(
-      "id,reference,sample_number,need_description,status,priority,request_date,due_date,extra_info,companies(name),requests(reference),quote_lines(description,quotes(reference)),production_order_lines(description,production_orders(reference,status))"
+      "id,reference,sample_number,need_description,status,priority,request_date,due_date,extra_info,request_id,quote_line_id,production_order_line_id,companies(name),requests(reference),quote_lines(description,quotes(reference)),production_order_lines(description,production_orders(reference,status))"
     )
     .eq("id", id)
     .maybeSingle();
@@ -56,6 +58,18 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     description: string;
     production_orders: { reference: string; status: ProductionOrderStatus } | null;
   } | null;
+
+  // Maquette et visuels de l'article (0094) : ils vivent sur la ligne
+  // d'article, pas sur la fiche — même source que l'écran.
+  const articleMedia =
+    (await getSampleArticleMediaMap([
+      {
+        id: sample.id,
+        request_id: sample.request_id,
+        quote_line_id: sample.quote_line_id,
+        production_order_line_id: sample.production_order_line_id,
+      },
+    ])).get(sample.id)!;
 
   const baseUrl = await getBaseUrl();
   const sheetUrl = `${baseUrl}/echantillons/${sample.sample_number}`;
@@ -157,11 +171,52 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   if (sample.extra_info) drawField("Informations complémentaires", sample.extra_info);
   drawField("Ligne de devis", quoteLine ? `${quoteLine.quotes?.reference ?? "Devis"} — ${quoteLine.description}` : "aucune");
   drawField(
+    "Visuel(s) de l'article",
+    articleMedia.visuels.length > 0
+      ? articleMedia.visuels.map((f) => f.file_name).join(", ")
+      : articleMedia.requiresVisuel
+        ? "AUCUN — article imprimé, visuel attendu"
+        : "aucun"
+  );
+  drawField(
     "Article d'ordre de fabrication",
     orderLine?.production_orders
       ? `${orderLine.production_orders.reference} — ${orderLine.description} · ${PRODUCTION_ORDER_STATUS_LABELS[orderLine.production_orders.status]}`
       : "aucun"
   );
+
+  // Maquette imprimée sur la fiche : c'est le repère visuel de l'atelier.
+  if (articleMedia.maquette) {
+    const bytes = (await getMediaFileBuffers([articleMedia.maquette.id])).get(articleMedia.maquette.id);
+    page.drawText("MAQUETTE", { x: MARGIN, y, size: 8, font: fontBold, color: muted });
+    y -= 12;
+    let drawn = false;
+    if (bytes) {
+      try {
+        const image =
+          bytes.mimeType === "image/png" || articleMedia.maquette.file_name.toLowerCase().endsWith(".png")
+            ? await pdfDoc.embedPng(bytes.buffer)
+            : await pdfDoc.embedJpg(bytes.buffer);
+        const maxWidth = Math.min(CONTENT_WIDTH, 220);
+        const scale = Math.min(maxWidth / image.width, 160 / image.height);
+        const width = image.width * scale;
+        const height = image.height * scale;
+        page.drawImage(image, { x: MARGIN, y: y - height, width, height });
+        y -= height + 8;
+        drawn = true;
+      } catch {
+        // Format non intégrable (PDF, AI, SVG…) : seul le nom est imprimé.
+      }
+    }
+    page.drawText(articleMedia.maquette.file_name + (drawn ? "" : " (aperçu non intégrable)"), {
+      x: MARGIN,
+      y,
+      size: 9,
+      font,
+      color: ink,
+    });
+    y -= 18;
+  }
 
   page.drawText(`Document généré le ${formatFr(new Date().toISOString())} — ${sheetUrl}`, {
     x: MARGIN,

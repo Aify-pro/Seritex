@@ -7,7 +7,14 @@ import { Card, CardBody } from "@/components/ui/card";
 import { SampleDetailContent } from "@/components/samples/sample-detail-content";
 import type { ProductionOrderStatus, MediaFileCategory } from "@/lib/types/domain";
 import type { ProductionOrderLineOption } from "@/components/samples/sample-production-order-link";
-import { getSampleQuoteLineOptions, buildSampleLinks, type SampleRequestOption } from "@/lib/samples";
+import {
+  getSampleQuoteLineOptions,
+  getSampleArticleMediaMap,
+  buildSampleLinks,
+  canEditSampleArticleMedia,
+  emptySampleArticleMedia,
+  type SampleRequestOption,
+} from "@/lib/samples";
 
 const STAFF_MANAGERS = ["commercial", "administrateur", "responsable_production"] as const;
 
@@ -56,6 +63,7 @@ export default async function SampleSheetPage({ params }: { params: Promise<{ sa
     supabase.from("requests").select("id,reference,company_id,description").eq("company_id", sample.company_id).order("created_at", { ascending: false }),
     getSampleQuoteLineOptions(sample.request_id ? [sample.request_id] : []),
   ]);
+  const articleMedia = (await getSampleArticleMediaMap([sample])).get(sample.id) ?? emptySampleArticleMedia();
   const requests: SampleRequestOption[] = (companyRequests ?? []).map((r) => ({
     id: r.id,
     reference: r.reference,
@@ -84,6 +92,7 @@ export default async function SampleSheetPage({ params }: { params: Promise<{ sa
           <SampleDetailContent
             sample={{ ...sample, companyName }}
             links={buildSampleLinks(sample, requests, quoteLines)}
+            articleMedia={articleMedia}
             baseUrl={baseUrl}
             companyProductionOrderLines={companyProductionOrderLines}
             attachedMedia={attachedMedia}
@@ -94,6 +103,7 @@ export default async function SampleSheetPage({ params }: { params: Promise<{ sa
               canManageStatus: isStaffManager,
               canLinkProductionOrder: isStaffManager,
               canLinkRequestAndQuoteLine: isCommercial,
+              canManageArticleMedia: canEditSampleArticleMedia(profile.role, articleMedia.target),
               canDecide: profile.role === "client",
             }}
           />
