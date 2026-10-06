@@ -89,4 +89,23 @@ await test("rouleau vidé : épuisé ; rebut motivé, impossible en production",
   assert.equal((await one(`select statut from textile_rolls where id=$1`, [r3.id])).statut, "rebut");
 });
 
+await test("mouvements : motif « Coupe pour ODF » et rouleau cité ; vue des articles en stock", async () => {
+  await as(admin);
+  const mvs = await q(`select type, commentaire, textile_roll_id from stock_movements where production_order_id=$1 order by created_at`, [o.po.id]);
+  const sortie = mvs.find((m) => m.type === "sortie_mp" && m.textile_roll_id === r1.id);
+  assert.match(sortie.commentaire, new RegExp(`^Coupe pour ODF ${o.po.reference} — rouleau ${r1.code} \\(bain B12\\)`));
+  const retour = mvs.find((m) => m.type === "retour_mp" && m.textile_roll_id === r1.id);
+  assert.match(retour.commentaire, /^Retour de coupe ODF/);
+  await q(`insert into stock_item_view(sage_reference, designation, category, unit, quantity_available, warehouse, quantite_reelle, quantite_reservee) values ('TJB180BL','Jersey blanc','tissu','KG',250,'D1',250,0)`);
+  const article = await one(`select product_model_id from textiles where id=$1`, [jersey.id]);
+  const row = await one(`select * from stock_articles_overview() where product_model_id=$1`, [article.product_model_id]);
+  assert.equal(row.nature, "mp");
+  assert.equal(Number(row.en_stock), 250);
+  assert.deepEqual(row.references_sage, ["TJB180BL"]);
+  assert.equal(row.rouleaux_stock, 1); // r1 revenu ; r2 épuisé ; r3 au rebut
+  assert.equal(Number(row.rouleaux_kg), 3.06);
+  await as(commercial);
+  assert.ok((await q(`select * from stock_articles_overview()`)).length > 0);
+});
+
 console.log("Rouleaux : tous les tests passent");

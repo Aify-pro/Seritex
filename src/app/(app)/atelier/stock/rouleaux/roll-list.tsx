@@ -11,6 +11,7 @@ import { issueRoll, returnRoll, scrapRoll } from "./actions";
 
 export interface RollRow {
   code: string;
+  textileId: string;
   tissu: string;
   articleId: string | null;
   coloris: string | null;
@@ -41,7 +42,9 @@ const input = "h-8 rounded-md border border-border bg-surface px-2 text-sm";
 const kg = (v: number) => `${v.toLocaleString("fr-FR", { maximumFractionDigits: 2 })} kg`;
 
 /** Rouleaux en stock et en production, avec leurs actions (sortie vers un ODF, retour pesé, rebut, étiquette). */
-export function RollList({ rows, odfs, canAct }: { rows: RollRow[]; odfs: { id: string; label: string }[]; canAct: boolean }) {
+type OdfOption = { id: string; label: string; textileIds: string[] };
+
+export function RollList({ rows, odfs, canAct }: { rows: RollRow[]; odfs: OdfOption[]; canAct: boolean }) {
   const [open, setOpen] = useState<string | null>(null);
   if (rows.length === 0) return <p className="px-5 py-6 text-sm text-foreground-muted">Aucun rouleau ne correspond.</p>;
   return (
@@ -92,10 +95,13 @@ export function RollList({ rows, odfs, canAct }: { rows: RollRow[]; odfs: { id: 
   );
 }
 
-function RollActions({ roll, odfs, onDone }: { roll: RollRow; odfs: { id: string; label: string }[]; onDone: () => void }) {
+function RollActions({ roll, odfs, onDone }: { roll: RollRow; odfs: OdfOption[]; onDone: () => void }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [odf, setOdf] = useState(odfs[0]?.id ?? "");
+  // Les ODF qui coupent ce tissu d'abord : c'est à eux que le rouleau est destiné.
+  const memeTissu = odfs.filter((o) => o.textileIds.includes(roll.textileId));
+  const autres = odfs.filter((o) => !o.textileIds.includes(roll.textileId));
+  const [odf, setOdf] = useState((memeTissu[0] ?? autres[0])?.id ?? "");
   const [poids, setPoids] = useState("");
   const [motif, setMotif] = useState("");
   const run = (fn: () => Promise<{ error?: string; consomme?: number }>, ok: (r: { consomme?: number }) => string) =>
@@ -114,13 +120,26 @@ function RollActions({ roll, odfs, onDone }: { roll: RollRow; odfs: { id: string
       {roll.statut === "en_stock" ? (
         <>
           <label className="text-xs">
-            <span className="mb-1 block text-foreground-muted">Ordre de fabrication</span>
-            <select value={odf} onChange={(e) => setOdf(e.target.value)} className={`${input} w-64`}>
-              {odfs.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.label}
-                </option>
-              ))}
+            <span className="mb-1 block text-foreground-muted">Coupe pour l&apos;ODF</span>
+            <select value={odf} onChange={(e) => setOdf(e.target.value)} className={`${input} w-72`}>
+              {memeTissu.length > 0 && (
+                <optgroup label={`ODF qui coupent ${roll.tissu}`}>
+                  {memeTissu.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.label}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {autres.length > 0 && (
+                <optgroup label="Autres ODF">
+                  {autres.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.label}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
             </select>
           </label>
           <label className="text-xs">
@@ -128,7 +147,7 @@ function RollActions({ roll, odfs, onDone }: { roll: RollRow; odfs: { id: string
             <input value={motif} onChange={(e) => setMotif(e.target.value)} className={`${input} w-64`} />
           </label>
           <Button size="sm" loading={pending} disabled={!odf} onClick={() => run(() => issueRoll(roll.code, odf, motif), () => `${roll.code} sorti vers l'ODF`)}>
-            Sortir vers l&apos;ODF
+            Sortir pour la coupe
           </Button>
           <Button size="sm" variant="ghost" loading={pending} disabled={!motif.trim()} onClick={() => run(() => scrapRoll(roll.code, motif), () => `${roll.code} mis au rebut`)}>
             Mettre au rebut

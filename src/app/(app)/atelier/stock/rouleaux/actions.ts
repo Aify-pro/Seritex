@@ -22,7 +22,7 @@ const rowSchema = z.object({
 });
 
 function done() {
-  revalidatePath("/atelier/stock/rouleaux");
+  revalidatePath("/atelier/stock");
   revalidatePath("/articles", "layout");
   revalidatePath("/atelier/production", "layout");
 }

@@ -30,7 +30,7 @@ export async function OdfRolls({ productionOrderId }: { productionOrderId: strin
         title="Rouleaux de tissu"
         description="Sortis du stock pour cet ODF ; au retour, le reste est pesé et la consommation en découle."
         action={
-          <Link href="/atelier/stock/rouleaux" className="text-sm font-medium text-brand hover:underline">
+          <Link href="/atelier/stock?onglet=rouleaux" className="text-sm font-medium text-brand hover:underline">
             Rouleaux →
           </Link>
         }
