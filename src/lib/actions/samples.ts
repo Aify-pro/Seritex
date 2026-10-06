@@ -193,16 +193,59 @@ export async function updateSampleStatus(sampleId: string, status: SampleRequest
   return {};
 }
 
-export async function submitSampleDecision(sampleId: string, decision: SampleDecision, feedback: string) {
+/**
+ * Validation d'un échantillon par l'une des deux parties (0100). La fiche ne
+ * passe « validée » que lorsque le client ET la direction l'ont validée —
+ * c'est la base qui recalcule le statut, jamais l'application.
+ *
+ * Côté client, la validation peut être posée par le client lui-même ou
+ * enregistrée par le commercial pour son compte (décision du 06/10) ; la
+ * fiche indique ensuite laquelle des deux situations s'est produite.
+ */
+export async function validateSample(sampleId: string, partie: "client" | "direction", commentaire: string) {
   await requireUser();
   const supabase = await createClient();
-  const { error } = await supabase.rpc("submit_sample_decision", {
+  const { error } = await supabase.rpc("valider_echantillon", {
     p_sample_request_id: sampleId,
-    p_decision: decision,
-    p_feedback: feedback || null,
+    p_partie: partie,
+    p_commentaire: commentaire || null,
   });
   if (error) return { error: error.message };
   revalidateSamplePaths();
+  revalidatePath("/atelier/production");
+  return {};
+}
+
+/**
+ * Réponse négative d'une des deux parties : la fiche bascule tout de suite
+ * et la validation déjà posée par l'autre est effacée — la série suivante
+ * repart de zéro (décision du 06/10).
+ */
+export async function rejectSample(sampleId: string, decision: Exclude<SampleDecision, "valide">, commentaire: string) {
+  await requireUser();
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("refuser_echantillon", {
+    p_sample_request_id: sampleId,
+    p_decision: decision,
+    p_commentaire: commentaire || null,
+  });
+  if (error) return { error: error.message };
+  revalidateSamplePaths();
+  revalidatePath("/atelier/production");
+  return {};
+}
+
+/** Retire une validation posée par erreur — direction et administrateur (0100). */
+export async function cancelSampleValidation(sampleId: string, partie: "client" | "direction") {
+  await requireUser();
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("annuler_validation_echantillon", {
+    p_sample_request_id: sampleId,
+    p_partie: partie,
+  });
+  if (error) return { error: error.message };
+  revalidateSamplePaths();
+  revalidatePath("/atelier/production");
   return {};
 }
 

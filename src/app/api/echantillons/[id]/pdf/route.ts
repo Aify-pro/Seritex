@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getBaseUrl } from "@/lib/url";
 import { getMediaFileBuffers } from "@/lib/media/preview";
-import { getSampleArticleMediaMap } from "@/lib/samples";
+import {
+  getSampleArticleMediaMap,
+  getSampleValidatorNames,
+  buildSampleValidations,
+  SAMPLE_VALIDATION_COLUMNS,
+} from "@/lib/samples";
 import { buildSamplePdf, type SamplePdfData } from "@/lib/pdf/sample-pdf";
 import {
   SAMPLE_STATUS_LABELS,
@@ -37,7 +42,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const { data: sample } = await supabase
     .from("sample_requests")
     .select(
-      "id,reference,sample_number,need_description,status,priority,request_date,due_date,extra_info,request_id,quote_line_id,production_order_line_id,companies(name),requests(reference),quote_lines(description,quotes(reference)),production_order_lines(description,production_orders(reference,status))"
+      `id,reference,sample_number,need_description,status,priority,request_date,due_date,extra_info,request_id,quote_line_id,production_order_line_id,companies(name),requests(reference),quote_lines(description,quotes(reference)),production_order_lines(description,production_orders(reference,status)),${SAMPLE_VALIDATION_COLUMNS}`
     )
     .eq("id", id)
     .maybeSingle();
@@ -81,6 +86,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     };
   }
 
+  // Validations déjà posées (0100) : imprimées dans le cartouche de décision.
+  const validations = buildSampleValidations(sample, await getSampleValidatorNames([sample]));
+
   const baseUrl = await getBaseUrl();
   const pdfBytes = await buildSamplePdf({
     sampleNumber: sample.sample_number,
@@ -102,6 +110,17 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     maquette,
     sheetUrl: `${baseUrl}/echantillons/${sample.sample_number}`,
     generatedAt: formatFr(new Date().toISOString()),
+    validations: {
+      client: {
+        at: validations.client.at ? formatFr(validations.client.at) : null,
+        byName: validations.client.byName,
+        onBehalf: validations.client.onBehalf,
+      },
+      direction: {
+        at: validations.direction.at ? formatFr(validations.direction.at) : null,
+        byName: validations.direction.byName,
+      },
+    },
   });
 
   return new NextResponse(Buffer.from(pdfBytes), {

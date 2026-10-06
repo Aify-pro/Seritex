@@ -7,12 +7,16 @@ import { Card, CardBody } from "@/components/ui/card";
 import { SampleDetailContent } from "@/components/samples/sample-detail-content";
 import type { ProductionOrderStatus, MediaFileCategory } from "@/lib/types/domain";
 import type { ProductionOrderLineOption } from "@/components/samples/sample-production-order-link";
+import { can } from "@/lib/auth/permissions";
 import {
   getSampleQuoteLineOptions,
   getSampleArticleMediaMap,
   buildSampleLinks,
   canEditSampleArticleMedia,
   emptySampleArticleMedia,
+  getSampleValidatorNames,
+  buildSampleValidations,
+  SAMPLE_VALIDATION_COLUMNS,
   type SampleRequestOption,
 } from "@/lib/samples";
 
@@ -39,7 +43,7 @@ export default async function SampleSheetPage({ params }: { params: Promise<{ sa
   const { data: sample } = await supabase
     .from("sample_requests")
     .select(
-      "id,reference,sample_number,need_description,status,priority,request_date,due_date,extra_info,company_id,request_id,quote_line_id,production_order_line_id,companies(name)"
+      `id,reference,sample_number,need_description,status,priority,request_date,due_date,extra_info,company_id,request_id,quote_line_id,production_order_line_id,companies(name),${SAMPLE_VALIDATION_COLUMNS}`
     )
     .eq("sample_number", sampleNumber)
     .maybeSingle();
@@ -64,6 +68,11 @@ export default async function SampleSheetPage({ params }: { params: Promise<{ sa
     getSampleQuoteLineOptions(sample.request_id ? [sample.request_id] : []),
   ]);
   const articleMedia = (await getSampleArticleMediaMap([sample])).get(sample.id) ?? emptySampleArticleMedia();
+  const [validatorNames, canValidateDirection] = await Promise.all([
+    getSampleValidatorNames([sample]),
+    can("validation_echantillon", "validate"),
+  ]);
+  const isClient = profile.role === "client";
   const requests: SampleRequestOption[] = (companyRequests ?? []).map((r) => ({
     id: r.id,
     reference: r.reference,
@@ -93,6 +102,7 @@ export default async function SampleSheetPage({ params }: { params: Promise<{ sa
             sample={{ ...sample, companyName }}
             links={buildSampleLinks(sample, requests, quoteLines)}
             articleMedia={articleMedia}
+            validations={buildSampleValidations(sample, validatorNames)}
             baseUrl={baseUrl}
             companyProductionOrderLines={companyProductionOrderLines}
             attachedMedia={attachedMedia}
@@ -104,7 +114,13 @@ export default async function SampleSheetPage({ params }: { params: Promise<{ sa
               canLinkProductionOrder: isStaffManager,
               canLinkRequestAndQuoteLine: isCommercial,
               canManageArticleMedia: canEditSampleArticleMedia(profile.role, articleMedia.target),
-              canDecide: profile.role === "client",
+              // Le client valide pour lui-même ; le commercial peut enregistrer
+              // sa réponse ; la direction valide de son côté (0100).
+              canValidateClient: isClient || isCommercial,
+              canValidateDirection,
+              canReject: isClient || isCommercial || canValidateDirection,
+              canCancelValidation: canValidateDirection,
+              actsForClient: !isClient,
             }}
           />
         </CardBody>

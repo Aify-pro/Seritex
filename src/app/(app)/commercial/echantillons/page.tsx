@@ -14,6 +14,7 @@ import { formatDate } from "@/lib/utils";
 import { CreateSampleDialog } from "@/components/samples/create-sample-dialog";
 import { SampleDetailContent } from "@/components/samples/sample-detail-content";
 import type { ProductionOrderLineOption } from "@/components/samples/sample-production-order-link";
+import { can } from "@/lib/auth/permissions";
 import {
   getSampleRequestOptions,
   getSampleQuoteLineOptions,
@@ -21,6 +22,9 @@ import {
   buildSampleLinks,
   canEditSampleArticleMedia,
   emptySampleArticleMedia,
+  getSampleValidatorNames,
+  buildSampleValidations,
+  SAMPLE_VALIDATION_COLUMNS,
 } from "@/lib/samples";
 
 /**
@@ -51,7 +55,7 @@ export default async function CommercialSamplesPage() {
       supabase
         .from("sample_requests")
         .select(
-          "id,reference,sample_number,need_description,status,priority,request_date,due_date,extra_info,company_id,request_id,quote_line_id,production_order_line_id,companies(name)"
+          `id,reference,sample_number,need_description,status,priority,request_date,due_date,extra_info,company_id,request_id,quote_line_id,production_order_line_id,companies(name),${SAMPLE_VALIDATION_COLUMNS}`
         )
         .order("created_at", { ascending: false }),
       getSampleRequestOptions(),
@@ -62,9 +66,12 @@ export default async function CommercialSamplesPage() {
       supabase.from("sample_request_media_files").select("sample_request_id,media_file_id"),
     ]);
 
-  const [quoteLines, articleMediaBySample] = await Promise.all([
+  const [quoteLines, articleMediaBySample, validatorNames, canValidateDirection] = await Promise.all([
     getSampleQuoteLineOptions(requests.map((r) => r.id)),
     getSampleArticleMediaMap(samples ?? []),
+    getSampleValidatorNames(samples ?? []),
+    // Direction / administrateur (module validation_echantillon, 0100).
+    can("validation_echantillon", "validate"),
   ]);
   const requestById = new Map(requests.map((r) => [r.id, r]));
 
@@ -174,6 +181,7 @@ export default async function CommercialSamplesPage() {
                             sample={{ ...s, companyName }}
                             links={buildSampleLinks(s, requests, quoteLines)}
                             articleMedia={articleMediaBySample.get(s.id) ?? emptySampleArticleMedia()}
+                            validations={buildSampleValidations(s, validatorNames)}
                             baseUrl={baseUrl}
                             companyProductionOrderLines={companyProductionOrderLines}
                             attachedMedia={attached}
@@ -188,7 +196,12 @@ export default async function CommercialSamplesPage() {
                                 profile.role,
                                 articleMediaBySample.get(s.id)?.target ?? null
                               ),
-                              canDecide: false,
+                              // Le commercial enregistre la validation pour le compte du client (0100).
+                              canValidateClient: isCommercial,
+                              canValidateDirection,
+                              canReject: isCommercial || canValidateDirection,
+                              canCancelValidation: canValidateDirection,
+                              actsForClient: true,
                             }}
                           />
                         </Dialog>
