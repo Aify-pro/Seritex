@@ -41,7 +41,6 @@ const createSchema = classementSchema.extend({
   // Matière première (textile)
   composition: z.string().trim().max(200).optional().default(""),
   grammage: optionalNumber.optional().default(null),
-  laize_cm: optionalNumber.optional().default(null),
   // Consommable
   consumable_family_id: optionalId.optional().default(null),
   etape: z.enum(["production", "finition"]).optional().default("production"),
@@ -88,7 +87,6 @@ export async function createArticle(input: z.input<typeof createSchema>): Promis
       nom: d.name,
       composition: d.composition || null,
       grammage: d.grammage,
-      laize_cm: d.laize_cm,
       matiere_id: d.matiere_id,
       product_model_id: model.id,
     });
@@ -132,7 +130,6 @@ export async function setArticleClassement(productModelId: string, input: z.inpu
 const textileSchema = z.object({
   composition: z.string().trim().max(200),
   grammage: optionalNumber,
-  laize_cm: optionalNumber,
   matiere_id: optionalId,
 });
 

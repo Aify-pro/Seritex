@@ -20,6 +20,7 @@ export const ARTICLE_DETAIL_TABS: ArticleTabDef[] = [
   { slug: "fabrication", label: "Fabrication", natures: ["pf"] },
   { slug: "ventes", label: "Ventes", natures: ["pf"] },
   { slug: "stock", label: "Stock", natures: ["pf"] },
+  { slug: "rouleaux", label: "Rouleaux", natures: ["mp"] },
   { slug: "medias", label: "Médias & e-shop" },
   { slug: "prix-de-revient", label: "Prix de revient", costsOnly: true, natures: ["pf"] },
 ];

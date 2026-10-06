@@ -64,7 +64,6 @@ export function NewArticleForm({
     matiere_id: "",
     composition: "",
     grammage: "",
-    laize_cm: "",
     consumable_family_id: consumableFamilies[0]?.id ?? "",
     etape: "production" as "production" | "finition",
     sage_reference: "",
@@ -181,7 +180,7 @@ export function NewArticleForm({
 
       {v.nature === "mp" && (
         <Card>
-          <CardHeader title="Matière première (tissu)" description="Ces caractéristiques servent à la coupe, au placement et au prix de revient." />
+          <CardHeader title="Matière première (tissu)" description="La laize et le poids se renseignent par rouleau, dans le stock." />
           <CardBody className="grid gap-3 sm:grid-cols-2">
             <Field label="Composition">
               <input value={v.composition} onChange={(e) => set({ composition: e.target.value })} className={input} placeholder="100 % coton" />
@@ -196,11 +195,8 @@ export function NewArticleForm({
                 ))}
               </select>
             </Field>
-            <Field label="Grammage (g/m²)">
+            <Field label="Grammage nominal (g/m²)" hint="Le grammage réel d'un rouleau varie (ex. 175 à 185 pour 180) : il se mesure à la production.">
               <input value={v.grammage} onChange={(e) => set({ grammage: e.target.value })} inputMode="decimal" className={input} />
-            </Field>
-            <Field label="Laize (cm)">
-              <input value={v.laize_cm} onChange={(e) => set({ laize_cm: e.target.value })} inputMode="decimal" className={input} />
             </Field>
           </CardBody>
         </Card>

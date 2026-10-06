@@ -198,6 +198,25 @@ export default async function SectionQueuePage({
     const openTraceIds = (fiches ?? [])
       .flatMap((f) => ((f.traces_placement ?? []) as unknown as { id: string }[]).map((t) => t.id))
       .filter((id) => !closedTraceIds.has(id));
+    // Rouleaux déjà scannés sur les matelas ouverts (migration 0096).
+    const rouleauxByTraceId: Record<string, { code: string; laizeCm: number | null; bain: string | null; poidsKg: number }[]> = {};
+    if (openTraceIds.length > 0) {
+      const { data: rollEvents } = await supabase
+        .from("textile_roll_events")
+        .select("trace_id,textile_rolls(code,laize_cm,bain,poids_kg)")
+        .eq("type", "matelas")
+        .in("trace_id", openTraceIds);
+      for (const e of rollEvents ?? []) {
+        const r = e.textile_rolls as unknown as { code: string; laize_cm: number | null; bain: string | null; poids_kg: number } | null;
+        if (r)
+          (rouleauxByTraceId[e.trace_id as string] ??= []).push({
+            code: r.code,
+            laizeCm: r.laize_cm != null ? Number(r.laize_cm) : null,
+            bain: r.bain,
+            poidsKg: Number(r.poids_kg),
+          });
+      }
+    }
     const dechetsByTraceId: Record<string, MatelasDechetRow[]> = {};
     if (openTraceIds.length > 0) {
       const { data: dechets } = await supabase
@@ -252,6 +271,7 @@ export default async function SectionQueuePage({
           estCorrectif: t.est_correctif,
           justification: t.justification,
           dechets: dechetsByTraceId[t.id] ?? [],
+          rouleaux: rouleauxByTraceId[t.id] ?? [],
           cloture: clotureByTraceId.get(t.id) ?? null,
         }));
       // Lot 6 : le tracé d'origine (optionnel) d'un lot article peut être

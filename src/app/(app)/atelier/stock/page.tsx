@@ -142,6 +142,11 @@ export default async function StockManagementPage({
       <PageHeader
         title="Gestion de stock"
         description="Réceptions, sorties et retours de matière — la plupart des mouvements sont saisis depuis les terminaux de section ; cet écran donne la vue d'ensemble et l'export Sage."
+        action={
+          <Link href="/atelier/stock/rouleaux" className="text-sm font-medium text-brand hover:underline">
+            Rouleaux de tissu →
+          </Link>
+        }
       />
 
       <Card>
