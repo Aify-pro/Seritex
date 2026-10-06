@@ -7,7 +7,7 @@ import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { swatchColor } from "@/lib/colors";
-import { setProductModelColors } from "../../actions";
+import { setProductModelColors, setProductModelSizes } from "../../actions";
 import { addArticleDimension, addTextileGrammage, setArticleDimensionActive } from "../../fiche-actions";
 
 const input = "h-8 rounded-md border border-border bg-surface px-2 text-sm";
@@ -65,6 +65,61 @@ export function ColorAxis({
       {editable && dirty && (
         <Button size="sm" loading={pending} onClick={() => run(() => setProductModelColors(productModelId, ids), "Couleurs enregistrées")}>
           Enregistrer les couleurs ({ids.length})
+        </Button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Tailles dans lesquelles un produit fini se décline, par groupe. Comme les
+ * couleurs : on coche, puis on enregistre la sélection. Rien de coché = aucune
+ * restriction déclarée (tout le référentiel actif reste proposable).
+ */
+export function SizeAxis({
+  productModelId,
+  sizes,
+  selected,
+  editable,
+}: {
+  productModelId: string;
+  sizes: { id: string; libelle: string; groupe: string }[];
+  selected: string[];
+  editable: boolean;
+}) {
+  const [pending, run] = useRun();
+  const [ids, setIds] = useState<string[]>(selected);
+  const dirty = ids.length !== selected.length || ids.some((i) => !selected.includes(i));
+  const groupes = [...new Set(sizes.map((s) => s.groupe))];
+  if (sizes.length === 0) return <p className="text-xs text-foreground-muted">Référentiel de tailles vide — alimentez-le dans Couleurs et tailles.</p>;
+  return (
+    <div className="space-y-2">
+      {groupes.map((g) => (
+        <div key={g}>
+          {g && <p className="mb-1 text-[11px] uppercase tracking-wide text-foreground-muted">{g}</p>}
+          <div className="flex flex-wrap gap-1.5">
+            {sizes
+              .filter((s) => s.groupe === g)
+              .map((s) => {
+                const on = ids.includes(s.id);
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    disabled={!editable || pending}
+                    onClick={() => setIds(on ? ids.filter((x) => x !== s.id) : [...ids, s.id])}
+                    className={`rounded-md border px-2 py-1 text-xs ${on ? "border-brand bg-brand-soft text-brand" : "border-border bg-surface"}`}
+                  >
+                    {s.libelle}
+                  </button>
+                );
+              })}
+          </div>
+        </div>
+      ))}
+      {editable && dirty && (
+        <Button size="sm" loading={pending} onClick={() => run(() => setProductModelSizes(productModelId, ids), "Tailles enregistrées")}>
+          Enregistrer les tailles ({ids.length})
         </Button>
       )}
     </div>
