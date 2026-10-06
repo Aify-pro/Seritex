@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { requireArticles } from "@/lib/articles/access";
 import { ARTICLE_DETAIL_TABS } from "@/lib/articles/tabs";
+import { articleCode } from "@/lib/articles/catalog";
 import { NATURE_LABELS, TYPE_APPRO_LABELS, type ArticleNature, type TypeAppro } from "@/lib/articles/natures";
 import { PageHeader } from "@/components/shell/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -27,12 +28,18 @@ export default async function ArticleLayout({
   const supabase = await createClient();
   const { data: model } = await supabase
     .from("product_models")
-    .select("id,name,category,active,nature,type_appro,fusionne_dans,famille:article_families!product_models_famille_id_fkey(nom),sous_famille:article_families!product_models_sous_famille_id_fkey(nom)")
+    .select("id,code,name,category,active,nature,type_appro,fusionne_dans,matieres(code_court),consumables(code),famille:article_families!product_models_famille_id_fkey(nom),sous_famille:article_families!product_models_sous_famille_id_fkey(nom)")
     .eq("id", id)
     .maybeSingle();
   if (!model) notFound();
 
   const nature = model.nature as ArticleNature;
+  const code = articleCode(
+    nature,
+    (model.code as string | null) ?? null,
+    (Array.isArray(model.consumables) ? model.consumables[0]?.code : (model.consumables as { code: string | null } | null)?.code) ?? null,
+    (model.matieres as unknown as { code_court: string | null } | null)?.code_court ?? null
+  );
   const tabs = ARTICLE_DETAIL_TABS.filter((t) => (!t.costsOnly || canSeeCosts) && (!t.natures || t.natures.includes(nature))).map((t) => ({
     href: `/articles/${id}/${t.slug}`,
     label: t.label,
@@ -49,6 +56,7 @@ export default async function ArticleLayout({
       <PageHeader
         title={model.name}
         description={[
+          code,
           NATURE_LABELS[nature],
           TYPE_APPRO_LABELS[model.type_appro as TypeAppro],
           [(model.famille as unknown as { nom: string } | null)?.nom, (model.sous_famille as unknown as { nom: string } | null)?.nom].filter(Boolean).join(" › "),

@@ -38,7 +38,7 @@ export async function loadArticleCatalog({ canSeeCosts }: { canSeeCosts: boolean
     supabase
       .from("product_models")
       .select(
-        "id,code,name,category,active,sage_reference,textile_id,nature,type_appro,famille_id,sous_famille_id,unite,textiles!product_models_textile_id_fkey(nom,grammage),matieres(nom)"
+        "id,code,name,category,active,sage_reference,textile_id,nature,type_appro,famille_id,sous_famille_id,unite,textiles!product_models_textile_id_fkey(nom,grammage),matieres(nom,code_court)"
       )
       .order("name"),
     supabase.from("product_model_colors").select("product_model_id,color_id"),
@@ -52,7 +52,7 @@ export async function loadArticleCatalog({ canSeeCosts }: { canSeeCosts: boolean
   // Fiche unique (migration 0093) : données techniques des matières premières et consommables.
   const [{ data: familles }, { data: ownTextiles }, { data: ownConsumables }] = await Promise.all([
     supabase.from("article_families").select("id,nom,parent_id,ordre").eq("actif", true).order("ordre").order("nom"),
-    supabase.from("textiles").select("product_model_id,composition,grammage,matieres(nom)").not("product_model_id", "is", null),
+    supabase.from("textiles").select("product_model_id,composition,grammage,matieres(nom,code_court)").not("product_model_id", "is", null),
     supabase.from("consumables").select("product_model_id,code,sage_reference").not("product_model_id", "is", null),
   ]);
   const familleNom = new Map((familles ?? []).map((f) => [f.id as string, f.nom as string]));
@@ -110,10 +110,17 @@ export async function loadArticleCatalog({ canSeeCosts }: { canSeeCosts: boolean
     const ownConsumable = consumableOf.get(m.id as string);
     const ownMatiere = (ownTextile?.matieres as unknown as { nom: string } | null)?.nom ?? null;
     const famille = [familleNom.get(m.famille_id as string), familleNom.get(m.sous_famille_id as string)].filter(Boolean).join(" › ") || null;
+    const code = articleCode(
+      m.nature as string,
+      (m.code as string | null) ?? null,
+      (ownConsumable?.code as string | null) ?? null,
+      (m.matieres as unknown as { code_court: string | null } | null)?.code_court ??
+        (ownTextile?.matieres as unknown as { code_court: string | null } | null)?.code_court ??
+        null
+    );
     return {
       id: m.id as string,
-      // Un consommable garde son code COFI… ; les autres, le code du modèle.
-      code: (m.code as string | null) ?? (ownConsumable?.code as string | undefined) ?? null,
+      code,
       name: m.name as string,
       nature: m.nature as ArticleRow["nature"],
       typeAppro: m.type_appro as ArticleRow["typeAppro"],
@@ -140,7 +147,7 @@ export async function loadArticleCatalog({ canSeeCosts }: { canSeeCosts: boolean
       vignetteUrl: vignetteUrl(m.id as string),
       searchText: articleSearchText([
         m.name as string,
-        m.code as string | null,
+        code,
         m.category as string | null,
         matiere,
         textile?.nom,
@@ -174,4 +181,15 @@ export async function loadArticleCatalog({ canSeeCosts }: { canSeeCosts: boolean
       couleurs: countOptions(rows.flatMap((r) => r.couleurIds), (id) => colorName.get(id) ?? id),
     },
   };
+}
+
+/**
+ * Code affiché d'un article : produit fini, le code modèle (TS012) ; consommable,
+ * son code COFI0012 ; tissu, le code de sa matière (JE), début du code de ses
+ * déclinaisons (JE180BLA) — un tissu n'a pas de code modèle propre.
+ */
+export function articleCode(nature: string, modelCode: string | null, consumableCode: string | null, matiereCode: string | null) {
+  if (nature === "consommable") return consumableCode ?? modelCode;
+  if (nature === "mp") return modelCode ?? matiereCode;
+  return modelCode;
 }
