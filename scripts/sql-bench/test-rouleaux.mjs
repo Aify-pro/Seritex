@@ -1,4 +1,4 @@
-// Scénarios SQL des rouleaux de tissu (migration 0095) : réception (saisie et
+// Scénarios SQL des rouleaux de tissu (migration 0096) : réception (saisie et
 // import), sortie vers un ODF (pesée et sortie MP), bain de teinture,
 // scan à la coupe, retour pesé, grammage réel estimé.
 import assert from "node:assert/strict";

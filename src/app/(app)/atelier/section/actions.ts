@@ -481,7 +481,7 @@ export async function scanArticleLot(code: string, sens: "entree" | "sortie", se
 }
 
 /**
- * Rouleau utilisé pour un matelas (migration 0095) : scanné à la coupe ; la
+ * Rouleau utilisé pour un matelas (migration 0096) : scanné à la coupe ; la
  * base vérifie qu'il a été sorti pour cet ODF. Renvoie sa laize et son bain
  * pour l'affichage (et pré-remplir la laize réelle du matelas).
  */

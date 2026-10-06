@@ -6,7 +6,7 @@ import { QrScannerDialog } from "@/components/atelier/qr-scanner-dialog";
 
 /** QR d'un lot : l'URL /lots/LOT-AAAA-NNNNN, ou le code seul (douchette). */
 export const LOT_CODE_PATTERN = /(LOT-\d{4}-\d{5})/i;
-/** QR d'un rouleau de tissu (migration 0095) : ROL-AAAA-NNNNN. */
+/** QR d'un rouleau de tissu (migration 0096) : ROL-AAAA-NNNNN. */
 export const ROLL_CODE_PATTERN = /(ROL-\d{4}-\d{5})/i;
 
 /**

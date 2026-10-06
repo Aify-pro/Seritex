@@ -7,7 +7,7 @@ import { Table, Thead, Tbody, Tr, Th, Td, EmptyRow } from "@/components/ui/table
 const kg = (v: number) => v.toLocaleString("fr-FR", { maximumFractionDigits: 1 });
 
 /**
- * Onglet Rouleaux d'un tissu (migration 0095) : stock par coloris et par bain
+ * Onglet Rouleaux d'un tissu (migration 0096) : stock par coloris et par bain
  * (la laize et le poids sont ceux des rouleaux), et grammage réel mesuré sur
  * les rouleaux revenus de la coupe — le grammage de l'article n'est que
  * nominal (un 180 g peut faire 175 ou 185).

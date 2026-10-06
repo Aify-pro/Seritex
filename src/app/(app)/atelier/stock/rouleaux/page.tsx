@@ -10,7 +10,7 @@ import { RollList, ROLL_STATUT_LABELS, type RollRow } from "./roll-list";
 const STATUTS = ["actifs", "en_stock", "en_production", "epuise", "rebut", "tous"] as const;
 
 /**
- * Rouleaux de tissu (migration 0095) : la laize, le poids et le bain sont
+ * Rouleaux de tissu (migration 0096) : la laize, le poids et le bain sont
  * ceux de chaque rouleau, pas de l'article. Réception (saisie ou liste du
  * fournisseur), étiquette QR, sortie vers un ODF, retour pesé.
  */

@@ -29,7 +29,7 @@ function parsePackingList(text: string): Draft[] {
 }
 
 /**
- * Réception de rouleaux (migration 0095) : saisie rouleau par rouleau, ou
+ * Réception de rouleaux (migration 0096) : saisie rouleau par rouleau, ou
  * liste de colisage du fournisseur collée. Chaque rouleau reçoit un code et
  * une étiquette QR à coller dessus.
  */

@@ -5,7 +5,7 @@ import { getBaseUrl } from "@/lib/url";
 import { buildLabelSheetPdf } from "@/lib/pdf/waste-bag-label";
 
 /**
- * Étiquettes de rouleaux (migration 0095), planche A4 : QR du code du
+ * Étiquettes de rouleaux (migration 0096), planche A4 : QR du code du
  * rouleau, tissu et coloris, laize, poids et bain.
  */
 export async function GET(req: NextRequest) {

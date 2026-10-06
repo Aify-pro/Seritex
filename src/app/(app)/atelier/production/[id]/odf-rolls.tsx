@@ -2,7 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
 
-/** Rouleaux de tissu sortis pour cet ODF (migration 0095) : en cours et déjà revenus. */
+/** Rouleaux de tissu sortis pour cet ODF (migration 0096) : en cours et déjà revenus. */
 export async function OdfRolls({ productionOrderId }: { productionOrderId: string }) {
   const supabase = await createClient();
   const { data: events } = await supabase

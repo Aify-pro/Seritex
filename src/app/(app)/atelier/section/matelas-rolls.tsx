@@ -14,7 +14,7 @@ export interface MatelasRoll {
 }
 
 /**
- * Rouleaux utilisés pour un matelas (migration 0095) : scannés à la coupe.
+ * Rouleaux utilisés pour un matelas (migration 0096) : scannés à la coupe.
  * Le rouleau porte sa laize et son bain ; au retour au stock, son reste est
  * pesé et sa consommation (et son grammage réel) en découle.
  */

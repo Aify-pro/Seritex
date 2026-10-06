@@ -198,7 +198,7 @@ export default async function SectionQueuePage({
     const openTraceIds = (fiches ?? [])
       .flatMap((f) => ((f.traces_placement ?? []) as unknown as { id: string }[]).map((t) => t.id))
       .filter((id) => !closedTraceIds.has(id));
-    // Rouleaux déjà scannés sur les matelas ouverts (migration 0095).
+    // Rouleaux déjà scannés sur les matelas ouverts (migration 0096).
     const rouleauxByTraceId: Record<string, { code: string; laizeCm: number | null; bain: string | null; poidsKg: number }[]> = {};
     if (openTraceIds.length > 0) {
       const { data: rollEvents } = await supabase

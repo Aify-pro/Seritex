@@ -1,5 +1,5 @@
 -- ============================================================================
--- 0095 — Rouleaux de tissu : laize, poids et bain par rouleau
+-- 0096 — Rouleaux de tissu : laize, poids et bain par rouleau
 -- ============================================================================
 --
 -- Retour utilisateur : la laize et le poids appartiennent au rouleau, pas à

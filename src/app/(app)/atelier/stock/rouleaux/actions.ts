@@ -6,7 +6,7 @@ import { requireRole } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server";
 
 /**
- * Rouleaux de tissu (migration 0095) : réception, sortie vers un ODF, retour
+ * Rouleaux de tissu (migration 0096) : réception, sortie vers un ODF, retour
  * pesé, rebut. Les droits sont vérifiés par la base (gestion de stock).
  */
 const STOCK_ROLES = ["administrateur", "responsable_production", "gestionnaire_stock"] as const;
