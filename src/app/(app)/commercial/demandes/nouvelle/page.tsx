@@ -2,11 +2,12 @@ import { requireRole } from "@/lib/auth/current-user";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardBody } from "@/components/ui/card";
 import { getRequestModelOptions } from "@/lib/requests/articles";
+import { getDispatchRules } from "@/lib/quote-dispatch";
 import { NewRequestForm } from "./new-request-form";
 
 export default async function NewRequestPage() {
   const { profile } = await requireRole(["commercial", "administrateur", "responsable_production"]);
-  const models = await getRequestModelOptions();
+  const [models, dispatchRules] = await Promise.all([getRequestModelOptions(), getDispatchRules()]);
 
   return (
     <div className="space-y-6">
@@ -17,7 +18,7 @@ export default async function NewRequestPage() {
       <Card>
         <CardBody>
           {/* La production ne crée que des demandes pour le stock. */}
-          <NewRequestForm models={models} stockOnly={profile.role === "responsable_production"} />
+          <NewRequestForm models={models} dispatchRules={dispatchRules} stockOnly={profile.role === "responsable_production"} />
         </CardBody>
       </Card>
     </div>
