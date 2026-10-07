@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { CompanyPicker } from "@/components/clients/company-picker";
 import { RequestArticlesEditor, type ArticleLineDraft, type ArticleModelOption } from "@/components/requests/request-articles-editor";
 import { listCompanyContacts, type CompanyContactOption, type CompanySearchResult } from "@/lib/actions/companies";
+import type { DispatchRule } from "@/lib/dispatching";
 import { createRequest } from "../../actions";
 
 /**
@@ -18,7 +19,7 @@ import { createRequest } from "../../actions";
  * de Sage : un menu déroulant serait tronqué) ; ses contacts sont chargés à
  * la sélection.
  */
-export function NewRequestForm({ models, stockOnly }: { models: ArticleModelOption[]; stockOnly: boolean }) {
+export function NewRequestForm({ models, dispatchRules, stockOnly }: { models: ArticleModelOption[]; dispatchRules: DispatchRule[]; stockOnly: boolean }) {
   const [pourStock, setPourStock] = useState(stockOnly);
   const [company, setCompany] = useState<CompanySearchResult | null>(null);
   const [contacts, setContacts] = useState<CompanyContactOption[]>([]);
@@ -104,7 +105,7 @@ export function NewRequestForm({ models, stockOnly }: { models: ArticleModelOpti
         <p className="text-xs font-medium text-foreground">
           Articles demandés {pourStock ? "(obligatoire, avec les quantités par taille)" : "(facultatif : ils seront repris dans le devis)"}
         </p>
-        <RequestArticlesEditor models={models} lines={lines} onChange={setLines} disabled={pending} />
+        <RequestArticlesEditor models={models} dispatchRules={dispatchRules} lines={lines} onChange={setLines} disabled={pending} />
       </div>
 
       {!pourStock && (

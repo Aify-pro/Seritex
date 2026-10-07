@@ -276,7 +276,7 @@ export function QuoteForm({
   /** Présent : le formulaire s'ouvre prérempli depuis ce devis Sage (migration 0071). */
   prefill?: SagePrefill;
   /** Articles choisis dans la demande : lignes de départ d'un nouveau devis. */
-  requestLines?: { product_model_id: string; description: string; couleur_unique_id: string | null; tailles: Record<string, number> }[];
+  requestLines?: { product_model_id: string; description: string; couleur_unique_id: string | null; tailles: Record<string, number>; quantite?: number }[];
 }) {
   const [pending, startTransition] = useTransition();
   const [open, setOpen] = useState(!!prefill);
@@ -297,7 +297,10 @@ export function QuoteForm({
               ? correction.lines.map(lineFromCorrection)
               : requestLines.length
                 ? requestLines.map((l) => {
-                    const quantity = Object.values(l.tailles ?? {}).reduce((a, b) => a + b, 0);
+                    // Tout est facultatif dans la demande : répartition saisie, sinon quantité seule
+                    // (répartie par la règle de dispatching), sinon ligne à compléter.
+                    const sized = Object.values(l.tailles ?? {}).reduce((a, b) => a + b, 0);
+                    const quantity = sized || l.quantite || 0;
                     return {
                       ...newLine(),
                       productModelId: l.product_model_id,
@@ -307,8 +310,8 @@ export function QuoteForm({
                       colorDraft: l.couleur_unique_id
                         ? { isUni: true, couleurUniqueId: l.couleur_unique_id, zoneColors: {} }
                         : EMPTY_ZONE_COLOR_DRAFT,
-                      sizes: l.tailles ?? {},
-                      sizesAuto: quantity === 0,
+                      sizes: sized ? l.tailles : quantity ? proposeSizes(l.product_model_id, quantity) : {},
+                      sizesAuto: !sized,
                     };
                   })
                 : [newLine()]
