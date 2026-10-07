@@ -1,7 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { requireRole } from "@/lib/auth/current-user";
+import { requirePermission } from "@/lib/auth/permissions";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { rulePctTotal } from "@/lib/dispatching";
@@ -26,7 +26,7 @@ export type DispatchRuleInput = z.infer<typeof ruleSchema>;
  * l'administrateur (base_role administrateur — la RLS l'impose aussi).
  */
 export async function saveDispatchRule(input: DispatchRuleInput) {
-  await requireRole(["administrateur"]);
+  await requirePermission("dispatching", "modify");
   const parsed = ruleSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Palier invalide" };
   const r = parsed.data;
@@ -55,7 +55,7 @@ export async function saveDispatchRule(input: DispatchRuleInput) {
 }
 
 export async function deleteDispatchRule(id: string) {
-  await requireRole(["administrateur"]);
+  await requirePermission("dispatching", "delete");
   const supabase = await createClient();
   const { error } = await supabase.from("dispatch_rules").delete().eq("id", id);
   if (error) return { error: error.message };

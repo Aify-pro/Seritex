@@ -60,12 +60,12 @@ export const MODULE_META: Record<string, ModuleMeta> = {
   lieux_livraison: { group: "modules", actions: ["create", "modify", "delete"] },
 
   // --- Paramètres --------------------------------------------------------
-  couleurs_tailles: { group: "parametres", actions: VIEW },
-  codification: { group: "parametres", actions: VIEW },
-  tarification: { group: "parametres", actions: VIEW },
-  sections: { group: "parametres", actions: VIEW },
+  couleurs_tailles: { group: "parametres", actions: ["view", "create", "modify", "delete"] },
+  codification: { group: "parametres", actions: ["view", "modify"] },
+  tarification: { group: "parametres", actions: ["view", "create", "modify", "delete"] },
+  sections: { group: "parametres", actions: ["view", "create", "modify", "delete"] },
   fabrication: { group: "parametres", actions: VIEW, platformAdminOnly: true },
-  dispatching: { group: "parametres", actions: VIEW },
+  dispatching: { group: "parametres", actions: ["view", "create", "modify", "delete"] },
   parametres_livraison: { group: "parametres", actions: ["view", "create", "modify", "delete"] },
   stock_sage: { group: "parametres", actions: VIEW },
   clients_sage: { group: "parametres", actions: VIEW },

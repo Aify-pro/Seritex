@@ -3,7 +3,7 @@
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { requireRole } from "@/lib/auth/current-user";
+import { requirePermission } from "@/lib/auth/permissions";
 import { CODE_SEGMENTS, CODING_NATURE_RULES, type CodingNature } from "@/lib/articles/codification";
 
 /**
@@ -24,7 +24,7 @@ const settingsSchema = z.object({
 
 /** Règle de codification d'une nature d'article (migration 0102) : produits finis, tissus ou consommables. */
 export async function saveCodingRule(nature: CodingNature, input: z.infer<typeof settingsSchema>) {
-  await requireRole(["administrateur"]);
+  await requirePermission("codification", "modify");
   const parsed = settingsSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message };
   const rule = CODING_NATURE_RULES[nature];
@@ -66,7 +66,7 @@ const SHORT_CODE_TABLES = {
  * déclinaisons.
  */
 export async function updateShortCode(table: keyof typeof SHORT_CODE_TABLES, id: string, value: string) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("articles", "modify");
   const spec = SHORT_CODE_TABLES[table];
   if (!spec) return { error: "Référentiel inconnu." };
   const code = value.trim().toUpperCase();
@@ -92,7 +92,7 @@ const namedSchema = z.object({
 });
 
 export async function createNamedReferential(table: "product_categories" | "matieres" | "consumable_families", formData: FormData) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("articles", "modify");
   const parsed = namedSchema.safeParse({ nom: formData.get("nom"), code_court: formData.get("code_court") });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message };
   if (table === "consumable_families" && parsed.data.code_court.length !== 2) {
@@ -111,7 +111,7 @@ export async function createNamedReferential(table: "product_categories" | "mati
 
 /** Matière d'un textile (un textile = une matière dans un grammage). */
 export async function setTextileMatiere(textileId: string, matiereId: string | null) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("articles", "modify");
   const supabase = await createClient();
   const { error } = await supabase.from("textiles").update({ matiere_id: matiereId }).eq("id", textileId);
   if (error) return { error: error.message };
@@ -121,7 +121,7 @@ export async function setTextileMatiere(textileId: string, matiereId: string | n
 
 /** Dépôt Sage pré-rempli à l'export pour une nature (D5). */
 export async function setSageDepot(nature: string, depot: string) {
-  await requireRole(["administrateur", "gestionnaire_stock"]);
+  await requirePermission("stock_atelier", "modify");
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("sage_depot_by_nature")

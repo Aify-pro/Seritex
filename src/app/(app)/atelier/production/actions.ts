@@ -1,7 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { requireRole } from "@/lib/auth/current-user";
+
 import { requirePermission } from "@/lib/auth/permissions";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -999,7 +999,7 @@ export async function splitProductionOrderLine(lineId: string, productionOrderId
  * prix du tissu au kg propre à cet ODF (null = prix du textile) et notes.
  */
 export async function saveOdfRealCost(productionOrderId: string, input: { prix_tissu_kg: number | null; notes: string }) {
-  const { profile } = await requireRole(["administrateur"]);
+  const { profile } = await requirePermission("tarification", "modify");
   const parsed = z
     .object({
       prix_tissu_kg: z.number().positive("Prix au kg invalide").nullable(),
