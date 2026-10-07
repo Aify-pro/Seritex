@@ -1,4 +1,4 @@
-import { requireModule } from "@/lib/auth/permissions";
+import { can, requireAnyModule } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
@@ -31,7 +31,13 @@ export default async function RequestDetailPage({
   /** `sage` : n° d'un devis Sage à récupérer (préremplit le devis) ; `sage_q` : recherche par numéro (migration 0071). */
   searchParams: Promise<{ sage?: string; sage_q?: string }>;
 }) {
-  const { authId, profile } = await requireModule("demandes");
+  const { authId } = await requireAnyModule(["demandes", "demandes_stock"]);
+  // Les demandes des clients et du site demandent « Voir » sur Demandes ; la base filtre aussi les lignes.
+  const [canViewRequests, canLink, canCreateOdf] = await Promise.all([
+    can("demandes", "view"),
+    can("demandes", "modify"),
+    can("ordres_fabrication", "create"),
+  ]);
   const { id } = await params;
   const { sage: sageParam, sage_q: sageQuery } = await searchParams;
   const supabase = await createClient();
@@ -46,7 +52,7 @@ export default async function RequestDetailPage({
 
   // Demande du site web pas encore rattachée à un client (migration 0098).
   if (!request.company_id && request.prospect) {
-    if (profile.role === "responsable_production") notFound();
+    if (!canViewRequests) notFound();
     return (
       <SiteRequestDetail
         request={{
@@ -57,7 +63,7 @@ export default async function RequestDetailPage({
           created_at: request.created_at,
           prospect: request.prospect as SiteProspect,
         }}
-        canLink={profile.role === "commercial" || profile.role === "administrateur"}
+        canLink={canLink}
         composition={
           request.personnalisation ? (
             <SiteComposition requestId={request.id} composition={request.personnalisation as SitePersonnalisation} />
@@ -86,12 +92,12 @@ export default async function RequestDetailPage({
           lignes: (request.lignes_stock ?? []) as { description: string; tailles: Record<string, number> }[],
           odf: odfs?.[0] ? { id: odfs[0].id as string, reference: odfs[0].reference as string } : null,
         }}
-        canCreateOdf={profile.role === "administrateur" || profile.role === "responsable_production"}
+        canCreateOdf={canCreateOdf}
       />
     );
   }
-  // La production n'ouvre que les demandes pour le stock.
-  if (profile.role === "responsable_production") notFound();
+  // Sans « Voir » sur Demandes, on n'ouvre que les demandes pour le stock.
+  if (!canViewRequests) notFound();
 
   const [
     { data: messages },

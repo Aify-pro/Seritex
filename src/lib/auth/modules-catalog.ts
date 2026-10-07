@@ -39,7 +39,7 @@ export const MODULE_META: Record<string, ModuleMeta> = {
   // --- Modules -----------------------------------------------------------
   clients: { group: "modules", actions: ["view", "create", "modify", "delete"] },
   demandes: { group: "modules", actions: ["view", "create", "modify"] },
-  demandes_stock: { group: "modules", actions: ["create", "modify"] },
+  demandes_stock: { group: "modules", actions: ["view", "create", "modify"] },
   demandes_graphiques: { group: "modules", actions: VIEW },
   devis: { group: "modules", actions: ["view", "create", "modify", "validate"] },
   echantillons: { group: "modules", actions: ["view", "create", "modify", "delete"] },

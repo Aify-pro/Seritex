@@ -101,6 +101,22 @@ export async function requireModule(moduleKey: string) {
 }
 
 /**
+ * Garde de page ouverte par l'UN des modules (ex. la liste des demandes :
+ * « Demandes » pour celles des clients, « Demandes pour le stock » pour les
+ * autres). La base filtre ensuite les lignes visibles.
+ */
+export async function requireAnyModule(moduleKeys: string[]) {
+  const current = await requireUser();
+  const { role } = current.profile;
+  if (role === "client" || role === "livreur") redirect("/dashboard?erreur=acces_refuse");
+  const checks = await Promise.all(
+    moduleKeys.map(async (key) => (!getModuleMeta(key).platformAdminOnly || (await isPlatformAdmin())) && (await can(key, "view")))
+  );
+  if (!checks.some(Boolean)) redirect("/dashboard?erreur=acces_refuse");
+  return current;
+}
+
+/**
  * Garde d'action : exige que le rôle ait ce droit précis sur le module
  * (Créer, Modifier, Supprimer, Valider…) dans la matrice Rôles & permissions.
  * Même règle que `requireModule` pour le client, le livreur et les écrans
