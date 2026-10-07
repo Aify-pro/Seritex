@@ -12,7 +12,7 @@ export type RequestArticleLine = {
   description: string;
   couleur_unique_id: string | null;
   tailles: Record<string, number>;
-  /** Quantité totale saisie (écran seulement : seul le détail par taille est enregistré). */
+  /** Quantité totale souhaitée, facultative : reprise dans le devis même sans répartition par taille. */
   quantite?: number;
   /** Groupe de tailles choisi pour la répartition (écran seulement). */
   groupe?: string;
@@ -64,5 +64,6 @@ export function cleanRequestLines(lines: RequestArticleLine[]): RequestArticleLi
       description: l.description,
       couleur_unique_id: l.couleur_unique_id,
       tailles: Object.fromEntries(Object.entries(l.tailles ?? {}).filter(([, q]) => Number.isInteger(q) && q > 0)),
+      ...(Number.isInteger(l.quantite) && (l.quantite ?? 0) > 0 ? { quantite: l.quantite } : {}),
     }));
 }

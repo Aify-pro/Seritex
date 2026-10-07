@@ -9,7 +9,7 @@ export type ArticleLineDraft = {
   description: string;
   couleur_unique_id: string | null;
   tailles: Record<string, number>;
-  /** Quantité totale saisie (écran seulement : le détail par taille est seul enregistré). */
+  /** Quantité totale souhaitée (facultative) ; la répartition par taille l'est aussi. */
   quantite?: number;
   /** Groupe de tailles de la répartition (écran seulement). */
   groupe?: string;

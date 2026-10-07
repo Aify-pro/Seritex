@@ -312,16 +312,18 @@ export default async function RequestDetailPage({
                   <p className="text-xs font-medium uppercase tracking-wide text-foreground-muted">Articles demandés</p>
                   <ul className="space-y-0.5 text-sm">
                     {requestArticles.map((l, i) => {
-                      const total = Object.values(l.tailles ?? {}).reduce((a, b) => a + b, 0);
+                      const total = Object.values(l.tailles ?? {}).reduce((a, b) => a + b, 0) || l.quantite || 0;
+                      const couleur = colors?.find((c) => c.id === l.couleur_unique_id)?.name;
                       return (
                         <li key={i}>
                           {l.description}
+                          {couleur && <span className="text-xs text-foreground-muted"> · {couleur}</span>}
                           {total > 0 && <span className="text-xs text-foreground-muted"> · {total} pièce(s)</span>}
                         </li>
                       );
                     })}
                   </ul>
-                  <p className="text-xs text-foreground-muted">Ils sont repris comme lignes de départ du devis.</p>
+                  <p className="text-xs text-foreground-muted">Ces détails sont facultatifs : ils sont repris comme lignes de départ du devis (quantité, couleur, répartition par taille).</p>
                 </div>
               )}
             </CardBody>
