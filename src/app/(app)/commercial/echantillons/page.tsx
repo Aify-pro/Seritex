@@ -1,4 +1,4 @@
-import { requireRole } from "@/lib/auth/current-user";
+import { requireModule, can } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { getBaseUrl } from "@/lib/url";
 import { PageHeader } from "@/components/shell/page-header";
@@ -14,7 +14,6 @@ import { formatDate } from "@/lib/utils";
 import { CreateSampleDialog } from "@/components/samples/create-sample-dialog";
 import { SampleDetailContent } from "@/components/samples/sample-detail-content";
 import type { ProductionOrderLineOption } from "@/components/samples/sample-production-order-link";
-import { can } from "@/lib/auth/permissions";
 import {
   getSampleRequestOptions,
   getSampleQuoteLineOptions,
@@ -40,7 +39,7 @@ import {
 const negativeLabel = (d: "a_ajuster" | "refuse") => (d === "refuse" ? "Échantillon refusé" : "Échantillon à ajuster");
 
 export default async function CommercialSamplesPage() {
-  const { profile } = await requireRole(["commercial", "administrateur", "responsable_production"]);
+  const { profile } = await requireModule("echantillons");
   const supabase = await createClient();
   const baseUrl = await getBaseUrl();
 

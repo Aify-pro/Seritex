@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { requireRole } from "@/lib/auth/current-user";
+import { requireModule } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardBody } from "@/components/ui/card";
@@ -48,7 +48,7 @@ const nf = new Intl.NumberFormat("fr-FR");
  * vit dans l'URL ; l'export CSV (`/api/clients/export`) applique exactement les mêmes.
  */
 export default async function ClientsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
-  await requireRole(["commercial", "administrateur", "responsable_production", "responsable_livraison"]);
+  await requireModule("clients");
   const filters = parseClientFilters(await searchParams);
   const supabase = await createClient();
 

@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { requireRole } from "@/lib/auth/current-user";
-import { can } from "@/lib/auth/permissions";
+import { requireModule, can } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card } from "@/components/ui/card";
@@ -10,7 +9,6 @@ import { Table, Thead, Tbody, Th, Td, EmptyRow } from "@/components/ui/table";
 import { ClickableTr } from "@/components/ui/clickable-row";
 import { cn, formatAmount, formatDate } from "@/lib/utils";
 import { normalizeSearch } from "@/lib/clients/filters";
-import { DELIVERY_ROLES } from "@/lib/delivery/access";
 import {
   REGLEMENT_LABELS,
   SHIPMENT_STATUS_LABELS,
@@ -32,7 +30,7 @@ const one = (p: Params, k: string) => {
  * livrées, échecs et litiges. Filtres : zone, date, client, transporteur.
  */
 export default async function LivraisonsPage({ searchParams }: { searchParams: Promise<Params> }) {
-  const { profile } = await requireRole([...DELIVERY_ROLES]);
+  const { profile } = await requireModule("livraisons");
   if (!(await can("livraisons", "view"))) redirect("/dashboard?erreur=acces_refuse");
   const params = await searchParams;
   const defaultTab: ShipmentTabKey = profile.role === "comptabilite" ? "a_valider" : "a_preparer";

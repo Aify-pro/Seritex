@@ -1,9 +1,9 @@
 import { redirect } from "next/navigation";
 import Image from "next/image";
-import { requireUser } from "@/lib/auth/current-user";
+import { isPlatformAdmin, requireUser } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server";
 import { getPermissionMap } from "@/lib/auth/permissions";
-import { NAV_BY_ROLE } from "@/lib/auth/nav";
+import { getNavItems } from "@/lib/auth/nav";
 import { buildSidebarEntries } from "@/lib/auth/parametres-hubs";
 import { SidebarNav } from "@/components/shell/sidebar-nav";
 import { MobileSidebar } from "@/components/shell/mobile-sidebar";
@@ -14,21 +14,17 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // Compte créé avec un mot de passe provisoire (ou réinitialisation exigée) :
   // rien d'autre n'est accessible tant que l'utilisateur n'a pas choisi le sien.
   if (profile.must_change_password) redirect("/reinitialiser-mot-de-passe");
-  const permissions = await getPermissionMap();
+  const [permissions, platformAdmin] = await Promise.all([getPermissionMap(), isPlatformAdmin()]);
   // Libellé du rôle métier (« Direction »…) plutôt que celui du rôle de base.
   const supabase = await createClient();
   const { data: roleRow } = await supabase.from("roles").select("label").eq("id", profile.role_id).maybeSingle();
 
-  // Une entrée rattachée à un module de droits n'apparaît que si le rôle a
-  // `view` dessus : un module sans droit n'est pas grisé ni refusé à
-  // l'arrivée, il n'existe simplement pas dans le menu. Les entrées sans
-  // module (tableau de bord, portail client, écrans commerciaux, modèles de
-  // produits, couleurs) restent commandées par le seul base_role.
+  // Une entrée n'apparaît que si le rôle a `view` sur son module : un module
+  // sans droit n'est pas grisé ni refusé à l'arrivée, il n'existe simplement
+  // pas dans le menu (le client et le livreur gardent leur portail fixe).
   // Les écrans de Paramètres sont regroupés en un volet repliable, un menu
   // par thème (voir parametres-hubs.ts).
-  const items = buildSidebarEntries(
-    NAV_BY_ROLE[profile.role].filter((item) => !item.module || permissions[item.module]?.view === true)
-  );
+  const items = buildSidebarEntries(getNavItems(profile.role, permissions, platformAdmin));
 
   return (
     <div className="flex min-h-screen">

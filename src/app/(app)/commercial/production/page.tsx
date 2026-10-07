@@ -1,4 +1,4 @@
-import { requireRole } from "@/lib/auth/current-user";
+import { requireModule } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardBody } from "@/components/ui/card";
@@ -7,7 +7,7 @@ import { PRODUCTION_ORDER_STATUS_LABELS } from "@/lib/types/domain";
 import { formatDate } from "@/lib/utils";
 
 export default async function CommercialProductionPage() {
-  await requireRole(["commercial", "administrateur"]);
+  await requireModule("avancement_production");
   const supabase = await createClient();
 
   // Vue volontairement restreinte : statut et dates uniquement, jamais les

@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { requireRole } from "@/lib/auth/current-user";
+import { requireModule } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardBody } from "@/components/ui/card";
@@ -31,7 +31,7 @@ export default async function StockPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { profile } = await requireRole(["administrateur", "responsable_production", "chef_section", "gestionnaire_stock"]);
+  const { profile } = await requireModule("stock_sage");
   if (profile.role !== "chef_section") redirect("/parametres/articles-sage");
 
   const supabase = await createClient();

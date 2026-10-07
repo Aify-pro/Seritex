@@ -1,4 +1,4 @@
-import { requireRole } from "@/lib/auth/current-user";
+import { requireModule } from "@/lib/auth/permissions";
 import { PageHeader } from "@/components/shell/page-header";
 import { QueryTabs } from "@/components/shell/query-tabs";
 import { ArticlesTab } from "./_tabs/articles-tab";
@@ -31,7 +31,7 @@ export default async function StockManagementPage({
 }: {
   searchParams: Promise<{ onglet?: string; odf?: string; q?: string; nature?: string; dispo?: string; tissu?: string; statut?: string }>;
 }) {
-  const { profile } = await requireRole(["administrateur", "responsable_production", "gestionnaire_stock"]);
+  const { profile } = await requireModule("stock_atelier");
   const params = await searchParams;
   // Ancien lien « ?odf=… » : il ouvre la saisie par ODF.
   const onglet: Onglet = ONGLETS.some((o) => o.key === params.onglet)

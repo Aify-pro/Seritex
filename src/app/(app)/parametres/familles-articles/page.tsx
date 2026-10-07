@@ -1,4 +1,4 @@
-import { requireRole } from "@/lib/auth/current-user";
+import { requireModule } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardBody } from "@/components/ui/card";
@@ -10,7 +10,7 @@ import { FamiliesManager } from "./families-manager";
  * codification pourra s'y appuyer plus tard.
  */
 export default async function ArticleFamiliesPage() {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requireModule("articles");
   const supabase = await createClient();
   const [{ data: families }, { data: models }] = await Promise.all([
     supabase.from("article_families").select("id,nom,parent_id,actif").order("ordre").order("nom"),

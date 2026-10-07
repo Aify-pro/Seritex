@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { requireRole } from "@/lib/auth/current-user";
+import { requireModule } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardBody } from "@/components/ui/card";
@@ -8,7 +8,7 @@ import { Folder } from "lucide-react";
 
 /** Index de la médiathèque : un client à la fois (section 3.7 de l'analyse). */
 export default async function MediathequeIndexPage() {
-  await requireRole(["commercial", "administrateur", "responsable_production"]);
+  await requireModule("mediatheque");
   const supabase = await createClient();
 
   const { data: files } = await supabase.from("media_files").select("company_id,created_at");

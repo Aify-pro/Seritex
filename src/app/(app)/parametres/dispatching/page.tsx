@@ -1,4 +1,4 @@
-import { requireRole } from "@/lib/auth/current-user";
+import { requireModule } from "@/lib/auth/permissions";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
 import { getSizes } from "@/lib/sizes";
@@ -12,7 +12,7 @@ import { DispatchRulesManager } from "./rules-manager";
  * la Direction et à l'administrateur.
  */
 export default async function DispatchingSettingsPage() {
-  await requireRole(["administrateur"]);
+  await requireModule("dispatching");
   const [sizes, rules] = await Promise.all([getSizes(), getDispatchRules()]);
   const groupes = [...new Set(sizes.map((s) => s.groupe))];
 

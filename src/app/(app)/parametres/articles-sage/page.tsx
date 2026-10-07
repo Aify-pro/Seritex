@@ -1,4 +1,4 @@
-import { requireRole } from "@/lib/auth/current-user";
+import { requireModule } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardBody } from "@/components/ui/card";
@@ -59,7 +59,7 @@ export default async function ArticlesSagePage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { profile } = await requireRole(["administrateur", "commercial", "responsable_production", "gestionnaire_stock"]);
+  const { profile } = await requireModule("articles_sage");
   const canSeeStock = profile.role !== "commercial";
   const isDirection = profile.role === "administrateur" || profile.role === "responsable_production";
   const supabase = await createClient();

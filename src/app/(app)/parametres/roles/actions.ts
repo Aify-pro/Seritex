@@ -4,18 +4,11 @@ import { createClient } from "@/lib/supabase/server";
 import { requirePlatformAdmin } from "@/lib/auth/current-user";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import type { PermissionAction, UserRole } from "@/lib/types/domain";
+import { ROLE_LABELS, type PermissionAction, type UserRole } from "@/lib/types/domain";
 
-const BASE_ROLES: UserRole[] = [
-  "client",
-  "commercial",
-  "infographiste",
-  "responsable_production",
-  "chef_section",
-  "gestionnaire_stock",
-  "comptabilite",
-  "administrateur",
-];
+// Tous les rôles de base connus (clé de ROLE_LABELS) : une liste écrite à la
+// main ici avait déjà dérivé de celle de l'écran (livreur, responsable livraison).
+const BASE_ROLES = Object.keys(ROLE_LABELS) as [UserRole, ...UserRole[]];
 
 const newRoleSchema = z.object({
   key: z
@@ -25,7 +18,7 @@ const newRoleSchema = z.object({
     .regex(/^[a-z0-9_]+$/, "Utilisez uniquement des minuscules, chiffres et underscores"),
   label: z.string().min(1),
   description: z.string().optional(),
-  base_role: z.enum(BASE_ROLES as [UserRole, ...UserRole[]]),
+  base_role: z.enum(BASE_ROLES),
 });
 
 /**
@@ -110,7 +103,7 @@ const COLUMN_BY_ACTION: Record<PermissionAction, string> = {
 };
 
 /**
- * Bascule un droit (Voir/Créer/Modifier/Archiver/Supprimer) pour un rôle et
+ * Bascule un droit (Voir/Créer/Modifier/Archiver/Supprimer/Valider/Déverrouiller) pour un rôle et
  * un module donnés — c'est l'unique écran qui modifie `role_permissions`,
  * lue ensuite par `has_permission()` côté Postgres pour toutes les actions
  * sensibles (suppression médiathèque, archivage d'un ordre de fabrication,
@@ -126,11 +119,33 @@ export async function setRolePermission(
   const supabase = await createClient();
   const column = COLUMN_BY_ACTION[action];
 
+  // Upsert : si la ligne rôle × module n'existe pas encore (module ajouté après
+  // la création du rôle), elle est créée au lieu de laisser la case sans effet.
   const { error } = await supabase
     .from("role_permissions")
-    .update({ [column]: value, updated_by: profile.id })
-    .eq("role_id", roleId)
-    .eq("module_id", moduleId);
+    .upsert(
+      { role_id: roleId, module_id: moduleId, [column]: value, updated_by: profile.id },
+      { onConflict: "role_id,module_id" }
+    );
+  if (error) return { error: error.message };
+
+  revalidatePath("/parametres/roles");
+  return {};
+}
+
+/**
+ * Donne ou retire le droit « Voir » sur plusieurs modules d'un coup (boutons
+ * « Tout voir / Aucun » d'un groupe de la matrice).
+ */
+export async function setRoleViewBulk(roleId: string, moduleIds: string[], value: boolean) {
+  const { profile } = await requirePlatformAdmin();
+  if (moduleIds.length === 0) return {};
+  const supabase = await createClient();
+
+  const { error } = await supabase.from("role_permissions").upsert(
+    moduleIds.map((moduleId) => ({ role_id: roleId, module_id: moduleId, can_view: value, updated_by: profile.id })),
+    { onConflict: "role_id,module_id" }
+  );
   if (error) return { error: error.message };
 
   revalidatePath("/parametres/roles");

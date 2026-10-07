@@ -1,4 +1,4 @@
-import { requireRole } from "@/lib/auth/current-user";
+import { requireModule } from "@/lib/auth/permissions";
 import { isQuoteValidator, listQuoteValidatorNames } from "@/lib/signatures";
 import { createClient } from "@/lib/supabase/server";
 import { getQuoteLinesWithColorConfig } from "@/lib/quotes";
@@ -11,7 +11,7 @@ import type { AttachableMediaFile } from "@/lib/types/domain";
 import { getSampleQuoteLineOptions } from "@/lib/samples";
 
 export default async function CommercialQuoteDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { authId, profile } = await requireRole(["commercial", "administrateur"]);
+  const { authId, profile } = await requireModule("devis");
   const { id } = await params;
   const supabase = await createClient();
 

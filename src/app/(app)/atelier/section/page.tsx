@@ -1,4 +1,4 @@
-import { requireRole } from "@/lib/auth/current-user";
+import { requireModule } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { getSizes } from "@/lib/sizes";
 import { PageHeader } from "@/components/shell/page-header";
@@ -28,7 +28,7 @@ export default async function SectionQueuePage({
 }: {
   searchParams: Promise<{ section?: string; odf?: string }>;
 }) {
-  const { profile } = await requireRole(["chef_section", "responsable_production", "administrateur", "gestionnaire_stock"]);
+  const { profile } = await requireModule("ordres_travail");
   const supabase = await createClient();
   const params = await searchParams;
   const odfFilterId = params.odf ?? null;

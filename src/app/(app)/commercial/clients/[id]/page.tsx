@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { requireRole } from "@/lib/auth/current-user";
+import { requireModule, can } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
@@ -10,7 +10,6 @@ import { ContactForm } from "./contact-form";
 import { ContactActions } from "./contact-actions";
 import type { Company, Contact } from "@/lib/types/domain";
 import { formatDate } from "@/lib/utils";
-import { can } from "@/lib/auth/permissions";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { DeliveryPlaces, type PlaceWithPhoto } from "./delivery-places";
 import { FolderOpen, Globe, Lock, Mail, MapPin, Phone, Star, User } from "lucide-react";
@@ -22,7 +21,7 @@ import { FolderOpen, Globe, Lock, Mail, MapPin, Phone, Star, User } from "lucide
  * compte utilisateur de rôle client représente désormais (`app_users.contact_id`).
  */
 export default async function ClientDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { profile } = await requireRole(["commercial", "administrateur", "responsable_production", "responsable_livraison"]);
+  const { profile } = await requireModule("clients");
   const { id } = await params;
   const supabase = await createClient();
 

@@ -1,6 +1,8 @@
 import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
-import { requireUser } from "./current-user";
+import { redirect } from "next/navigation";
+import { isPlatformAdmin, requireUser } from "./current-user";
+import { getModuleMeta } from "./modules-catalog";
 import type { PermissionAction } from "@/lib/types/domain";
 
 export type PermissionRow = Record<PermissionAction, boolean>;
@@ -77,4 +79,23 @@ export const getPermissionMap = cache(async (): Promise<PermissionMap> => {
 export async function can(moduleKey: string, action: PermissionAction): Promise<boolean> {
   const map = await getPermissionMap();
   return map[moduleKey]?.[action] ?? EMPTY_PERMISSIONS[action];
+}
+
+/**
+ * Garde de page : exige que le rôle de l'utilisateur ait `view` sur le module
+ * (matrice Paramètres > Rôles & permissions) — c'est la matrice, et non plus
+ * une liste de rôles codée en dur, qui ouvre ou ferme un écran. Le client et
+ * le livreur n'ont jamais accès aux écrans du personnel ; les écrans de
+ * réglage réservés à l'administrateur de la plateforme le restent. Comme
+ * `requireRole`, un refus redirige vers le tableau de bord avec un message.
+ */
+export async function requireModule(moduleKey: string) {
+  const current = await requireUser();
+  const { role } = current.profile;
+  if (role === "client" || role === "livreur") redirect("/dashboard?erreur=acces_refuse");
+  if (getModuleMeta(moduleKey).platformAdminOnly && !(await isPlatformAdmin())) {
+    redirect("/dashboard?erreur=acces_refuse");
+  }
+  if (!(await can(moduleKey, "view"))) redirect("/dashboard?erreur=acces_refuse");
+  return current;
 }

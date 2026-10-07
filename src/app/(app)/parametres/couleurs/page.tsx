@@ -1,4 +1,4 @@
-import { requireRole } from "@/lib/auth/current-user";
+import { requireModule } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardBody } from "@/components/ui/card";
@@ -13,7 +13,7 @@ import { swatchColor } from "@/lib/colors";
 import { Badge } from "@/components/ui/badge";
 
 export default async function ColorsPage() {
-  const { profile } = await requireRole(["administrateur", "responsable_production"]);
+  const { profile } = await requireModule("couleurs_tailles");
   // Suppression réservée à l'administrateur (politique RLS d'origine, conservée).
   const canDelete = profile.role === "administrateur";
   const supabase = await createClient();

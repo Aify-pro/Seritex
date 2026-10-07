@@ -1,4 +1,4 @@
-import { requireRole } from "@/lib/auth/current-user";
+import { requireModule } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardBody } from "@/components/ui/card";
@@ -57,7 +57,7 @@ export default async function ClientsSagePage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  await requireRole(["administrateur", "commercial", "responsable_production"]);
+  await requireModule("clients_sage");
   const supabase = await createClient();
   const params = parseMirrorParams(await searchParams, FILTER_KEYS);
   const { statut, type, rapprochement } = params.filters;

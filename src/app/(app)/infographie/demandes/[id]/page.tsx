@@ -1,4 +1,4 @@
-import { requireRole } from "@/lib/auth/current-user";
+import { requireModule } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
@@ -7,7 +7,7 @@ import { MessageThread, type Message } from "@/app/(app)/commercial/demandes/[id
 import { postMessage } from "@/lib/actions/requests";
 
 export default async function InfographieRequestDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { authId } = await requireRole(["infographiste", "administrateur"]);
+  const { authId } = await requireModule("demandes_graphiques");
   const { id } = await params;
   const supabase = await createClient();
 
