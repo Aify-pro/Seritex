@@ -1,7 +1,8 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { requireUser, requireRole } from "@/lib/auth/current-user";
+import { requireUser } from "@/lib/auth/current-user";
+import { requirePermission } from "@/lib/auth/permissions";
 import type { SampleDecision, SampleRequestStatus } from "@/lib/types/domain";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -31,7 +32,7 @@ function revalidateSamplePaths(requestId?: string | null) {
  * revérifie demande/ligne de devis côté base.
  */
 export async function createSampleRequest(formData: FormData) {
-  const { authId } = await requireRole(["commercial", "administrateur"]);
+  const { authId } = await requirePermission("echantillons", "create");
   const parsed = newSampleSchema.safeParse({
     request_id: formData.get("request_id"),
     quote_line_id: formData.get("quote_line_id") || undefined,
@@ -85,7 +86,7 @@ export async function createSampleRequest(formData: FormData) {
  * fois posée, la demande d'une fiche ne change plus.
  */
 export async function attachSampleToRequest(sampleId: string, requestId: string) {
-  await requireRole(["commercial", "administrateur"]);
+  await requirePermission("echantillons", "modify");
   if (!z.string().uuid().safeParse(requestId).success) return { error: "Demande invalide" };
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -107,7 +108,7 @@ export async function attachSampleToRequest(sampleId: string, requestId: string)
  * la base (enforce_sample_links), pas seulement masqué dans l'écran.
  */
 export async function linkSampleToQuoteLine(sampleId: string, quoteLineId: string | null) {
-  await requireRole(["commercial", "administrateur"]);
+  await requirePermission("devis", "modify");
   const supabase = await createClient();
   const { error } = await supabase.rpc("link_sample_to_quote_line", {
     p_sample_request_id: sampleId,
@@ -137,7 +138,7 @@ const editSchema = z.object({
  * suppression (cf. `deleteSampleRequest`).
  */
 export async function updateSampleRequest(sampleId: string, formData: FormData) {
-  await requireRole(["commercial", "administrateur", "responsable_production"]);
+  await requirePermission("echantillons", "modify");
 
   const parsed = editSchema.safeParse({
     need_description: formData.get("need_description"),
@@ -176,7 +177,7 @@ export async function updateSampleRequest(sampleId: string, formData: FormData) 
  * sensibles du schéma.
  */
 export async function deleteSampleRequest(sampleId: string) {
-  await requireRole(["commercial", "administrateur", "responsable_production"]);
+  await requirePermission("echantillons", "delete");
   const supabase = await createClient();
   const { error } = await supabase.rpc("delete_sample_request", { p_sample_request_id: sampleId });
   if (error) return { error: error.message };
@@ -185,7 +186,7 @@ export async function deleteSampleRequest(sampleId: string) {
 }
 
 export async function updateSampleStatus(sampleId: string, status: SampleRequestStatus) {
-  await requireRole(["commercial", "administrateur", "responsable_production"]);
+  await requirePermission("echantillons", "modify");
   const supabase = await createClient();
   const { error } = await supabase.from("sample_requests").update({ status }).eq("id", sampleId);
   if (error) return { error: error.message };
@@ -258,7 +259,7 @@ export async function cancelSampleValidation(sampleId: string, partie: "client" 
  * travail.
  */
 export async function linkSampleToProductionOrderLine(sampleId: string, productionOrderLineId: string | null) {
-  await requireRole(["commercial", "administrateur", "responsable_production"]);
+  await requirePermission("echantillons", "modify");
   const supabase = await createClient();
   const { error } = await supabase.rpc("link_sample_to_production_order_line", {
     p_sample_request_id: sampleId,
@@ -331,7 +332,7 @@ async function resolveSampleArticleTarget(sampleId: string) {
 }
 
 export async function attachMediaFileToSampleArticle(sampleId: string, mediaFileId: string) {
-  const { authId } = await requireRole(["commercial", "administrateur", "responsable_production"]);
+  const { authId } = await requirePermission("echantillons", "modify");
   const target = await resolveSampleArticleTarget(sampleId);
   if ("error" in target) return { error: target.error };
 
@@ -374,7 +375,7 @@ export async function attachMediaFileToSampleArticle(sampleId: string, mediaFile
 }
 
 export async function detachMediaFileFromSampleArticle(sampleId: string, mediaFileId: string) {
-  await requireRole(["commercial", "administrateur", "responsable_production"]);
+  await requirePermission("echantillons", "modify");
   const target = await resolveSampleArticleTarget(sampleId);
   if ("error" in target) return { error: target.error };
 

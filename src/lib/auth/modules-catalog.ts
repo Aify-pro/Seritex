@@ -37,13 +37,14 @@ const VIEW: PermissionAction[] = ["view"];
 
 export const MODULE_META: Record<string, ModuleMeta> = {
   // --- Modules -----------------------------------------------------------
-  clients: { group: "modules", actions: VIEW },
-  demandes: { group: "modules", actions: VIEW },
+  clients: { group: "modules", actions: ["view", "create", "modify", "delete"] },
+  demandes: { group: "modules", actions: ["view", "create", "modify"] },
+  demandes_stock: { group: "modules", actions: ["create", "modify"] },
   demandes_graphiques: { group: "modules", actions: VIEW },
-  devis: { group: "modules", actions: VIEW },
-  echantillons: { group: "modules", actions: VIEW },
+  devis: { group: "modules", actions: ["view", "create", "modify", "validate"] },
+  echantillons: { group: "modules", actions: ["view", "create", "modify", "delete"] },
   validation_echantillon: { group: "modules", actions: ["validate"] },
-  mediatheque: { group: "modules", actions: ["view", "delete"] },
+  mediatheque: { group: "modules", actions: ["view", "create", "modify", "delete"] },
   articles: { group: "modules", actions: ["view", "modify"] },
   avancement_production: { group: "modules", actions: VIEW },
   ordres_fabrication: { group: "modules", actions: ["view", "modify", "validate", "archive"] },

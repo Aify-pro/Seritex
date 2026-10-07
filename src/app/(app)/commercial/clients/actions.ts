@@ -1,7 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { requireRole } from "@/lib/auth/current-user";
+import { requirePermission } from "@/lib/auth/permissions";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
@@ -21,7 +21,7 @@ const companySchema = z.object({
 
 /** Met à jour la fiche entreprise (coordonnées, SIRET, notes CRM) — notes et NCC/RCCM seuls pour une fiche Sage. */
 export async function updateCompany(formData: FormData) {
-  await requireRole(["commercial", "administrateur"]);
+  await requirePermission("clients", "modify");
   const parsed = companySchema.safeParse({
     company_id: formData.get("company_id"),
     name: formData.get("name"),
@@ -86,7 +86,7 @@ const contactSchema = z.object({
  * plutôt qu'un simple rattachement à l'entreprise seule.
  */
 export async function upsertContact(formData: FormData) {
-  await requireRole(["commercial", "administrateur"]);
+  await requirePermission("clients", "modify");
   const parsed = contactSchema.safeParse({
     // Absent du formulaire à la création (champ caché uniquement en modification) :
     // `get` renvoie alors null, que le schéma refuserait — d'où « Invalid input ».
@@ -128,7 +128,7 @@ export async function upsertContact(formData: FormData) {
 }
 
 export async function setPrimaryContact(contactId: string, companyId: string) {
-  await requireRole(["commercial", "administrateur"]);
+  await requirePermission("clients", "modify");
   const supabase = await createClient();
 
   // Un seul contact principal par entreprise (index unique en base) : on
@@ -142,7 +142,7 @@ export async function setPrimaryContact(contactId: string, companyId: string) {
 }
 
 export async function toggleContactStatus(contactId: string, companyId: string, status: "actif" | "inactif") {
-  await requireRole(["commercial", "administrateur"]);
+  await requirePermission("clients", "modify");
   const supabase = await createClient();
   const { error } = await supabase.from("contacts").update({ status }).eq("id", contactId);
   if (error) return { error: error.message };

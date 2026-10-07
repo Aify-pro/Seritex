@@ -99,3 +99,22 @@ export async function requireModule(moduleKey: string) {
   if (!(await can(moduleKey, "view"))) redirect("/dashboard?erreur=acces_refuse");
   return current;
 }
+
+/**
+ * Garde d'action : exige que le rôle ait ce droit précis sur le module
+ * (Créer, Modifier, Supprimer, Valider…) dans la matrice Rôles & permissions.
+ * Même règle que `requireModule` pour le client, le livreur et les écrans
+ * réservés à l'administrateur de la plateforme. La base re-vérifie le même
+ * droit (`has_permission` dans les règles de sécurité) : cette garde donne
+ * seulement un refus immédiat et lisible avant d'écrire.
+ */
+export async function requirePermission(moduleKey: string, action: PermissionAction) {
+  const current = await requireUser();
+  const { role } = current.profile;
+  if (role === "client" || role === "livreur") redirect("/dashboard?erreur=acces_refuse");
+  if (getModuleMeta(moduleKey).platformAdminOnly && !(await isPlatformAdmin())) {
+    redirect("/dashboard?erreur=acces_refuse");
+  }
+  if (!(await can(moduleKey, action))) redirect("/dashboard?erreur=acces_refuse");
+  return current;
+}
