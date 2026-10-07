@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { requireRole } from "@/lib/auth/current-user";
+import { requirePermission } from "@/lib/auth/permissions";
 import { parseDxfContours } from "@/lib/patronnage/dxf";
 import { normalizeShape, type Point } from "@/lib/patronnage/geometry";
 import { loadReferenceLibrary } from "@/lib/patronnage/bibliotheque";
@@ -11,8 +11,6 @@ import { construireAnalyseDetaillee, type TraceAnalysisDetail } from "@/lib/patr
 import { readDxfFile } from "@/lib/patronnage/upload";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-
-const ALLOWED_ROLES: ("responsable_production" | "administrateur")[] = ["responsable_production", "administrateur"];
 
 export interface PreviewedPiece {
   index: number;
@@ -31,7 +29,7 @@ export interface PreviewedPiece {
 export async function previewDxfPieces(
   formData: FormData
 ): Promise<{ pieces: PreviewedPiece[] } | { error: string }> {
-  await requireRole(ALLOWED_ROLES);
+  await requirePermission("patronnage", "modify");
 
   const read = readDxfFile(formData);
   if ("error" in read) return { error: read.error };
@@ -101,7 +99,7 @@ const pieceMetaSchema = z.array(
 export async function saveReferencePattern(
   formData: FormData
 ): Promise<{ patternId: string } | { error: string }> {
-  const { authId } = await requireRole(ALLOWED_ROLES);
+  const { authId } = await requirePermission("patronnage", "modify");
 
   const read = readDxfFile(formData);
   if ("error" in read) return { error: read.error };
@@ -262,7 +260,7 @@ function sanitizeFileName(name: string) {
  * le point d'entrée seraient un défaut de fiabilité du contrôle.
  */
 export async function analyzeTraceDxf(formData: FormData): Promise<TraceAnalysisDetail | { error: string }> {
-  await requireRole(ALLOWED_ROLES);
+  await requirePermission("patronnage", "modify");
 
   const read = readDxfFile(formData);
   if ("error" in read) return { error: read.error };

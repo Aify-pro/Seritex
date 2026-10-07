@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { requireRole } from "@/lib/auth/current-user";
+import { requirePermission } from "@/lib/auth/permissions";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getSizes } from "@/lib/sizes";
@@ -57,7 +58,7 @@ export async function setProductionOrderLineSections(
   productionOrderId: string,
   sections: { sectionId: string; quantite: number | null; partie: string | null; etape?: number }[]
 ) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("ordres_fabrication", "modify");
   const supabase = await createClient();
 
   if (sections.some((s) => s.quantite !== null && (!Number.isInteger(s.quantite) || s.quantite < 0))) {
@@ -118,7 +119,7 @@ export async function setProductionOrderLineSections(
  * reste ensuite modifiable. Autorité : apply_model_route (base).
  */
 export async function applyModelRoute(lineId: string, productionOrderId: string, routeId: string) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("ordres_fabrication", "modify");
   const supabase = await createClient();
   const { error } = await supabase.rpc("apply_model_route", { p_line_id: lineId, p_route_id: routeId });
   if (error) return { error: error.message };
@@ -138,7 +139,7 @@ export async function setProductionOrderLineSizes(
   productionOrderId: string,
   sizes: { taille: string; quantite_demandee: number }[]
 ) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("ordres_fabrication", "modify");
   const supabase = await createClient();
 
   const rows = sizes.filter((s) => s.taille.trim().length > 0 && s.quantite_demandee > 0);
@@ -235,7 +236,7 @@ export async function setProductionOrderLineSizes(
 
 /** brouillon -> en_attente_validation. */
 export async function submitProductionOrder(productionOrderId: string) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("ordres_fabrication", "modify");
   const supabase = await createClient();
   const { error } = await supabase.rpc("submit_production_order", {
     p_production_order_id: productionOrderId,
@@ -253,7 +254,7 @@ export async function submitProductionOrder(productionOrderId: string) {
  * réglable depuis Paramètres > Rôles & permissions.
  */
 export async function attesterComptabiliteOdf(productionOrderId: string) {
-  await requireRole(["administrateur", "comptabilite"]);
+  await requirePermission("validation_comptable", "validate");
   const supabase = await createClient();
   const { error } = await supabase.rpc("attester_comptabilite_odf", { p_production_order_id: productionOrderId });
   if (error) return { error: error.message };
@@ -269,7 +270,7 @@ export async function attesterComptabiliteOdf(productionOrderId: string) {
  * 'validate')`.
  */
 export async function attesterInfographieOdf(productionOrderId: string) {
-  await requireRole(["administrateur", "infographiste"]);
+  await requirePermission("validation_visuels", "validate");
   const supabase = await createClient();
   const { error } = await supabase.rpc("attester_infographie_odf", { p_production_order_id: productionOrderId });
   if (error) return { error: error.message };
@@ -285,7 +286,7 @@ export async function attesterInfographieOdf(productionOrderId: string) {
  * codé en dur ici (même philosophie que archiveProductionOrder).
  */
 export async function validateProductionOrder(productionOrderId: string) {
-  await requireRole(["administrateur", "responsable_production", "commercial"]);
+  await requirePermission("ordres_fabrication", "validate");
   const supabase = await createClient();
   const { error } = await supabase.rpc("validate_production_order", {
     p_production_order_id: productionOrderId,
@@ -296,7 +297,7 @@ export async function validateProductionOrder(productionOrderId: string) {
 }
 
 export async function refuseProductionOrder(productionOrderId: string, reason?: string) {
-  await requireRole(["administrateur", "responsable_production", "commercial"]);
+  await requirePermission("ordres_fabrication", "validate");
   const supabase = await createClient();
   const { error } = await supabase.rpc("refuse_production_order", {
     p_production_order_id: productionOrderId,
@@ -314,7 +315,7 @@ export async function refuseProductionOrder(productionOrderId: string, reason?: 
  * est exigé (SF-1, migration 0072).
  */
 export async function requestClosure(productionOrderId: string, motif?: string) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("ordres_fabrication", "modify");
   const supabase = await createClient();
   // SF-4 : refusée tant qu'il reste de l'en-cours (destinations à donner d'abord).
   const { error } = await supabase.rpc("request_closure", {
@@ -340,7 +341,7 @@ const settleSchema = z.object({
  * finition puis entré en stock vierge / personnalisé ou livré au client.
  */
 export async function settleEnCours(productionOrderId: string, input: z.input<typeof settleSchema>) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("ordres_fabrication", "modify");
   const parsed = settleSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Saisie invalide" };
   const supabase = await createClient();
@@ -358,7 +359,7 @@ export async function settleEnCours(productionOrderId: string, input: z.input<ty
 
 /** Ajuste la consommation réelle d'un consommable (COM-G), entre la demande de clôture et la clôture. */
 export async function adjustConsumption(productionOrderId: string, consumptionId: string, quantite: number, motif: string) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("ordres_fabrication", "modify");
   if (!Number.isFinite(quantite) || quantite < 0) return { error: "Quantité invalide" };
   const supabase = await createClient();
   const { error } = await supabase.rpc("set_order_consumption", {
@@ -377,7 +378,7 @@ export async function adjustConsumption(productionOrderId: string, consumptionId
  * la direction avant validation définitive (section 4).
  */
 export async function confirmClosure(productionOrderId: string, approve: boolean, note?: string) {
-  await requireRole(["administrateur", "responsable_production", "commercial"]);
+  await requirePermission("ordres_fabrication", "validate");
   const supabase = await createClient();
   const { error } = await supabase.rpc("confirm_closure", {
     p_production_order_id: productionOrderId,
@@ -392,7 +393,7 @@ export async function confirmClosure(productionOrderId: string, approve: boolean
 
 /** Clôture exceptionnelle — réservée à l'administrateur, motif obligatoire (section 6). */
 export async function forceCloseProductionOrder(productionOrderId: string, reason: string) {
-  await requireRole(["administrateur"]);
+  await requirePermission("ordres_fabrication", "unlock");
   const supabase = await createClient();
   const { error } = await supabase.rpc("force_close_production_order", {
     p_production_order_id: productionOrderId,
@@ -406,7 +407,7 @@ export async function forceCloseProductionOrder(productionOrderId: string, reaso
 
 /** Annulation d'un ODF — réservée à l'administrateur, motif obligatoire (section 7). */
 export async function cancelProductionOrder(productionOrderId: string, reason: string) {
-  await requireRole(["administrateur"]);
+  await requirePermission("ordres_fabrication", "delete");
   const supabase = await createClient();
   const { error } = await supabase.rpc("cancel_production_order", {
     p_production_order_id: productionOrderId,
@@ -432,7 +433,7 @@ export async function setReplacementProductionOrder(
   productionOrderId: string,
   replacementId: string | null
 ) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("ordres_fabrication", "modify");
   const supabase = await createClient();
 
   const { data: order, error: orderError } = await supabase
@@ -489,7 +490,7 @@ export async function setReplacementProductionOrder(
  * rôle codé en dur ici — réglable depuis Paramètres > Rôles & permissions.
  */
 export async function archiveProductionOrder(productionOrderId: string, reason?: string) {
-  await requireRole(["administrateur", "responsable_production", "commercial"]);
+  await requirePermission("ordres_fabrication", "archive");
   const supabase = await createClient();
   const { error } = await supabase.rpc("archive_production_order", {
     p_production_order_id: productionOrderId,
@@ -502,7 +503,7 @@ export async function archiveProductionOrder(productionOrderId: string, reason?:
 }
 
 export async function unarchiveProductionOrder(productionOrderId: string) {
-  await requireRole(["administrateur", "responsable_production", "commercial"]);
+  await requirePermission("ordres_fabrication", "archive");
   const supabase = await createClient();
   const { error } = await supabase.rpc("unarchive_production_order", {
     p_production_order_id: productionOrderId,
@@ -565,7 +566,7 @@ export async function resolveAnomaly(anomalyId: string, productionOrderId: strin
  * hérité et non modifiable ici, le client l'a déjà validé.
  */
 export async function setProductionOrderLineProductModel(lineId: string, productModelId: string) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("ordres_fabrication", "modify");
   const supabase = await createClient();
   const { data: line, error } = await supabase
     .from("production_order_lines")
@@ -588,7 +589,7 @@ export async function setProductionOrderLineZoneColors(
   lineId: string,
   entries: { zone_key: string; color_id: string }[]
 ) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("ordres_fabrication", "modify");
   const supabase = await createClient();
 
   const { data: line } = await supabase
@@ -651,7 +652,7 @@ export async function setProductionOrderLineZoneColors(
  * migration 0035).
  */
 export async function setProductionOrderLineColorUnique(lineId: string, colorId: string | null) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("ordres_fabrication", "modify");
   const supabase = await createClient();
 
   const { data: line, error: updError } = await supabase
@@ -676,7 +677,7 @@ export async function setProductionOrderLineColorUnique(lineId: string, colorId:
 
 /** Commentaire libre de disponibilité (achats/stock) — jamais validé par le logiciel (section 9). */
 export async function setProductionOrderColorNote(productionOrderId: string, note: string) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("ordres_fabrication", "modify");
   const supabase = await createClient();
   const { error } = await supabase
     .from("production_orders")
@@ -689,7 +690,7 @@ export async function setProductionOrderColorNote(productionOrderId: string, not
 
 /** Visuel/maquette joint à l'ODF (MEDIA_FILE) — même pattern que attachMediaFileToSample. */
 export async function attachMediaFileToProductionOrder(productionOrderId: string, mediaFileId: string) {
-  const { authId } = await requireRole(["administrateur", "responsable_production"]);
+  const { authId } = await requirePermission("odf_visuels", "modify");
   const supabase = await createClient();
   const { error } = await supabase.from("production_order_media_files").insert({
     production_order_id: productionOrderId,
@@ -702,7 +703,7 @@ export async function attachMediaFileToProductionOrder(productionOrderId: string
 }
 
 export async function detachMediaFileFromProductionOrder(productionOrderId: string, mediaFileId: string) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("odf_visuels", "modify");
   const supabase = await createClient();
   const { error } = await supabase
     .from("production_order_media_files")
@@ -736,7 +737,7 @@ export async function attachMediaFileToLine(
   mediaFileId: string,
   sectionId?: string
 ) {
-  const { authId } = await requireRole(["administrateur", "responsable_production"]);
+  const { authId } = await requirePermission("odf_visuels", "modify");
   const supabase = await createClient();
 
   // Depuis la zone d'un atelier d'impression : le fichier est joint à
@@ -801,7 +802,7 @@ export async function assignVisuelToSection(
   sectionId: string,
   mediaFileId: string
 ) {
-  const { authId } = await requireRole(["administrateur", "responsable_production"]);
+  const { authId } = await requirePermission("ordres_fabrication", "modify");
   const supabase = await createClient();
 
   const { data: chosen } = await supabase
@@ -833,7 +834,7 @@ export async function unassignVisuelFromSection(
   sectionId: string,
   mediaFileId: string
 ) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("ordres_fabrication", "modify");
   const supabase = await createClient();
   const { error } = await supabase
     .from("production_order_line_section_visuels")
@@ -847,7 +848,7 @@ export async function unassignVisuelFromSection(
 }
 
 export async function detachMediaFileFromLine(lineId: string, productionOrderId: string, mediaFileId: string) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("odf_visuels", "modify");
   const supabase = await createClient();
 
   // Un visuel détaché de l'article ne reste affecté à aucun atelier.
@@ -887,7 +888,7 @@ export async function setProductionOrderLinePrintableZones(
   productionOrderId: string,
   printableZones: { printable_zone_id: string; nb_couleurs: number | null }[]
 ) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("ordres_fabrication", "modify");
   const parsed = linePrintableZonesSchema.safeParse(printableZones);
   if (!parsed.success) return { error: "Impressions invalides" };
   const supabase = await createClient();
@@ -914,7 +915,7 @@ export async function setProductionOrderLinePrintableZones(
 }
 
 export async function reassignSectionChief(workOrderId: string, userId: string | null) {
-  await requireRole(["responsable_production", "administrateur"]);
+  await requirePermission("ordres_fabrication", "modify");
   const supabase = await createClient();
 
   // Écriture directe autorisée par la RLS pour ce rôle (voir
@@ -965,7 +966,7 @@ export type GenerateStockExportFicheResult = { error: string } | { id: string; n
  * ensemble, sous peine de refuser ce que le RPC autoriserait.
  */
 export async function generateStockExportFiche(productionOrderId: string): Promise<GenerateStockExportFicheResult> {
-  await requireRole(["administrateur", "responsable_production", "gestionnaire_stock"]);
+  await requirePermission("stock_atelier", "modify");
   const supabase = await createClient();
 
   const { data, error } = await supabase.rpc("generate_stock_export_fiche", {
@@ -985,7 +986,7 @@ export async function generateStockExportFiche(productionOrderId: string): Promi
  * partie prise en stock, une partie fabriquée. Autorité : la base.
  */
 export async function splitProductionOrderLine(lineId: string, productionOrderId: string, tailles: Record<string, number>) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("ordres_fabrication", "modify");
   const supabase = await createClient();
   const { error } = await supabase.rpc("split_production_order_line", { p_line_id: lineId, p_tailles: tailles });
   if (error) return { error: error.message };
