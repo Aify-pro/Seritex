@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
-import { requireRole } from "@/lib/auth/current-user";
+import { requirePermission } from "@/lib/auth/permissions";
 import { searchTerms } from "@/lib/clients/filters";
 
 export interface CompanySearchResult {
@@ -27,7 +27,7 @@ export interface CompanyContactOption {
  * Les clients disparus de Sage (archivés) ne sont pas proposés.
  */
 export async function searchCompanies(term: string): Promise<CompanySearchResult[]> {
-  await requireRole(["commercial", "administrateur"]);
+  await requirePermission("clients", "view");
   const terms = searchTerms(String(term ?? "").slice(0, 100));
   if (terms.length === 0 || terms.join("").length < 2) return [];
 
@@ -41,7 +41,7 @@ export async function searchCompanies(term: string): Promise<CompanySearchResult
 
 /** Contacts d'une entreprise, chargés à la sélection plutôt que tous d'avance. */
 export async function listCompanyContacts(companyId: string): Promise<CompanyContactOption[]> {
-  await requireRole(["commercial", "administrateur"]);
+  await requirePermission("clients", "view");
   const parsed = z.string().uuid().safeParse(companyId);
   if (!parsed.success) return [];
 

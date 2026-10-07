@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
-import { requireRole } from "@/lib/auth/current-user";
+import { requirePermission } from "@/lib/auth/permissions";
 
 const schema = z.object({
   requestId: z.string().uuid(),
@@ -19,7 +19,7 @@ type Prospect = { nom?: string; email?: string; telephone?: string | null } | nu
  * suit ensuite le circuit normal jusqu'au devis.
  */
 export async function linkSiteRequestToCompany(requestId: string, companyId: string) {
-  await requireRole(["commercial", "administrateur"]);
+  await requirePermission("demandes", "modify");
   const parsed = schema.safeParse({ requestId, companyId });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message };
 

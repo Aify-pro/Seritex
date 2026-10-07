@@ -9,6 +9,7 @@ import { MediaLibraryFilter } from "@/components/media/media-library-filter";
 import { MEDIA_CATEGORY_LABELS } from "@/lib/types/domain";
 import { formatDate, formatFileSize } from "@/lib/utils";
 import { can } from "@/lib/auth/permissions";
+import { requireUser } from "@/lib/auth/current-user";
 import { FileText } from "lucide-react";
 
 type MediaFileRow = {
@@ -83,7 +84,16 @@ export async function MediaLibrary({ companyId, requestId = null }: { companyId:
   if (requestId) {
     mediaFiles = mediaFiles.filter((f) => f.request_media_files.some((rl) => rl.requests?.id === requestId));
   }
-  const canDelete = await can("mediatheque", "delete");
+  const { profile } = await requireUser();
+  const [canDelete, canCreate, canModify] = await Promise.all([
+    can("mediatheque", "delete"),
+    can("mediatheque", "create"),
+    can("mediatheque", "modify"),
+  ]);
+  // Le client dépose et met à jour sur sa propre médiathèque ; le personnel selon ses droits.
+  const isStaff = profile.role !== "client";
+  const showUpload = !isStaff || canCreate;
+  const showNewVersion = !isStaff || canModify;
 
   return (
     <div className="space-y-6">
@@ -91,7 +101,7 @@ export async function MediaLibrary({ companyId, requestId = null }: { companyId:
         <MediaLibraryFilter requests={requestOptions} currentRequestId={requestId} />
       </div>
 
-      <UploadMediaForm companyId={companyId} requestId={requestId ?? undefined} />
+      {showUpload && <UploadMediaForm companyId={companyId} requestId={requestId ?? undefined} />}
 
       {error && (
         <p className="rounded-md border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger">
@@ -141,7 +151,7 @@ export async function MediaLibrary({ companyId, requestId = null }: { companyId:
                   <MediaFileRequests mediaFileId={f.id} attached={affiliatedRequests} available={requestOptions} />
                   <MediaFileHistory events={events} copies={copies} />
                   <div className="flex flex-wrap items-center gap-4">
-                    <AddVersionForm mediaFileId={f.id} />
+                    {showNewVersion && <AddVersionForm mediaFileId={f.id} />}
                     {canDelete && <DeleteMediaFileForm mediaFileId={f.id} companyId={companyId} />}
                   </div>
                 </li>

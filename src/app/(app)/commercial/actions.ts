@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { requireRole, requireUser } from "@/lib/auth/current-user";
+import { requirePermission } from "@/lib/auth/permissions";
 import type { RequestStatus } from "@/lib/types/domain";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -17,7 +18,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { simulateQuote, suggestLinePrices } from "@/lib/quote-pricing";
 
 export async function updateRequestStatus(requestId: string, status: RequestStatus) {
-  await requireRole(["commercial", "administrateur"]);
+  await requirePermission("demandes", "modify");
   const supabase = await createClient();
 
   const { data: current } = await supabase.from("requests").select("status").eq("id", requestId).single();
@@ -286,7 +287,7 @@ export async function createQuote(
   /** N° du devis Sage dont ce devis est récupéré (migration 0071), le cas échéant. */
   sagePiece: string | null = null
 ) {
-  const { authId } = await requireRole(["commercial", "administrateur"]);
+  const { authId } = await requirePermission("devis", "create");
   const parsed = createQuoteSchema.safeParse({ lines, date_livraison_prevue: dateLivraisonPrevue, terms });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Devis invalide" };
 
@@ -371,7 +372,7 @@ export async function resubmitQuote(
   dateLivraisonPrevue: string | null,
   terms: QuoteTermsInput
 ) {
-  const { authId } = await requireRole(["commercial", "administrateur"]);
+  const { authId } = await requirePermission("devis", "modify");
   const parsed = createQuoteSchema.safeParse({ lines, date_livraison_prevue: dateLivraisonPrevue, terms });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Devis invalide" };
 
@@ -515,7 +516,7 @@ export async function suggestQuoteLinePrices(input: {
   devise: string;
   tauxChange: number;
 }) {
-  await requireRole(["commercial", "administrateur"]);
+  await requirePermission("devis", "modify");
   const parsed = z
     .object({
       companyId: z.guid(),
@@ -579,7 +580,7 @@ export async function createRequest(formData: FormData) {
 
   // Demande pour le stock (SF-3) : sans client, articles et quantités obligatoires.
   if (formData.get("pour_stock") === "on") {
-    await requireRole(["commercial", "administrateur", "responsable_production"]);
+    await requirePermission("demandes_stock", "create");
     const avecQuantites = lignes.filter((l) => Object.keys(l.tailles).length > 0);
     if (avecQuantites.length === 0) return { error: "Ajoutez au moins un article avec des quantités par taille." };
     const supabase = await createClient();
@@ -592,7 +593,7 @@ export async function createRequest(formData: FormData) {
     return { requestId: data as string };
   }
 
-  const { authId } = await requireRole(["commercial", "administrateur"]);
+  const { authId } = await requirePermission("demandes", "create");
   const parsed = newRequestSchema.safeParse({
     company_id: formData.get("company_id"),
     // Le menu Contact n'est affiché que si le client a des contacts : sans lui
@@ -653,7 +654,7 @@ function revalidateQuote(quoteId: string) {
  * l'ODF ne propose son propre dépôt que si celle-ci est restée vide.
  */
 export async function attachMediaFileToQuoteLine(quoteLineId: string, quoteId: string, mediaFileId: string) {
-  const { authId } = await requireRole(["administrateur", "commercial"]);
+  const { authId } = await requirePermission("devis", "modify");
   const supabase = await createClient();
 
   const { data: media } = await supabase.from("media_files").select("category").eq("id", mediaFileId).maybeSingle();
@@ -685,7 +686,7 @@ export async function attachMediaFileToQuoteLine(quoteLineId: string, quoteId: s
 }
 
 export async function detachMediaFileFromQuoteLine(quoteLineId: string, quoteId: string, mediaFileId: string) {
-  await requireRole(["administrateur", "commercial"]);
+  await requirePermission("devis", "modify");
   const supabase = await createClient();
   const { error } = await supabase
     .from("quote_line_media_files")

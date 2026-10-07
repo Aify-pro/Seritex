@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireUser, requirePlatformAdmin } from "@/lib/auth/current-user";
+import { can } from "@/lib/auth/permissions";
 import { checkTargetConnection, replicateToTargets, selectWriteTargets } from "@/lib/storage";
 import type { ConnectionStatus, StorageTargetRow } from "@/lib/storage/types";
 import { revalidatePath } from "next/cache";
@@ -40,6 +41,10 @@ export async function uploadMediaFile(formData: FormData) {
 
   if (profile.role === "client" && parsed.data.company_id !== profile.company_id) {
     return { error: "Accès refusé" };
+  }
+  // Le personnel dépose selon son droit « Créer » sur la médiathèque (le client, sur sa propre médiathèque).
+  if (profile.role !== "client" && !(await can("mediatheque", "create"))) {
+    return { error: "Votre rôle ne permet pas d'ajouter un fichier à la médiathèque." };
   }
 
   const file = formData.get("file");
@@ -108,7 +113,10 @@ const versionSchema = z.object({
 
 /** Ajoute une nouvelle version (mise à jour) d'un fichier existant — raison obligatoire, l'historique est conservé. */
 export async function addMediaFileVersion(formData: FormData) {
-  await requireUser();
+  const { profile } = await requireUser();
+  if (profile.role !== "client" && !(await can("mediatheque", "modify"))) {
+    return { error: "Votre rôle ne permet pas de mettre à jour un fichier de la médiathèque." };
+  }
 
   const parsed = versionSchema.safeParse({
     media_file_id: formData.get("media_file_id"),
