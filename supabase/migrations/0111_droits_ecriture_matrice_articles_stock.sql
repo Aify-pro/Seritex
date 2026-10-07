@@ -1,7 +1,7 @@
 -- ============================================================================
--- 0110 — Droits d'écriture pilotés par la matrice : articles et stock
+-- 0111 — Droits d'écriture pilotés par la matrice : articles et stock
 -- ============================================================================
--- Lot 2 sur 6 (suite de 0109). Jusqu'ici, modifier un article reposait sur
+-- Lot 2 sur 6 (suite de 0109 ; 0110 est pris par l'e-shop). Jusqu'ici, modifier un article reposait sur
 -- « responsable de production OU droit articles/modifier » : la matrice ne
 -- pouvait qu'AJOUTER des droits, jamais en retirer à la production. Et les
 -- mouvements de rouleaux de tissu étaient réservés à trois rôles codés en dur.

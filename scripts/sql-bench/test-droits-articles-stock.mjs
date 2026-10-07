@@ -1,4 +1,4 @@
-// Scénarios SQL (migration 0110) : écritures des articles et mouvements de
+// Scénarios SQL (migration 0111) : écritures des articles et mouvements de
 // rouleaux pilotés par la matrice. 1) mêmes droits qu'avant pour les rôles
 // qui y avaient accès ; 2) cocher / décocher une case change réellement ce que
 // le rôle peut faire.
