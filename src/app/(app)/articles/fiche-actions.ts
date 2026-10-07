@@ -52,9 +52,14 @@ async function assertCanModify() {
   if (!canModify) throw new Error("Modification des articles non autorisée.");
 }
 
+async function assertCanCreate() {
+  const { canCreate } = await requireArticles();
+  if (!canCreate) throw new Error("Création d'articles non autorisée.");
+}
+
 export async function createArticle(input: z.input<typeof createSchema>): Promise<Result> {
   try {
-    await assertCanModify();
+    await assertCanCreate();
   } catch (e) {
     return { error: (e as Error).message };
   }

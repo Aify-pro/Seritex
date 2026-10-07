@@ -45,7 +45,7 @@ export const MODULE_META: Record<string, ModuleMeta> = {
   echantillons: { group: "modules", actions: ["view", "create", "modify", "delete"] },
   validation_echantillon: { group: "modules", actions: ["validate"] },
   mediatheque: { group: "modules", actions: ["view", "create", "modify", "delete"] },
-  articles: { group: "modules", actions: ["view", "modify"] },
+  articles: { group: "modules", actions: ["view", "create", "modify", "delete"] },
   avancement_production: { group: "modules", actions: VIEW },
   ordres_fabrication: { group: "modules", actions: ["view", "modify", "validate", "archive"] },
   validation_comptable: { group: "modules", actions: ["validate"] },
@@ -54,7 +54,7 @@ export const MODULE_META: Record<string, ModuleMeta> = {
   gammes_operatoires: { group: "modules", actions: VIEW },
   patronnage: { group: "modules", actions: ["view", "create", "modify", "archive", "delete", "validate", "unlock"] },
   patronnage_traces: { group: "modules", actions: ["create", "modify"] },
-  stock_atelier: { group: "modules", actions: VIEW },
+  stock_atelier: { group: "modules", actions: ["view", "create", "modify", "delete"] },
   livraisons: { group: "modules", actions: ["view", "modify", "validate"] },
 
   // --- Paramètres --------------------------------------------------------
