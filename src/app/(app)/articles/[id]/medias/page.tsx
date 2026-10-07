@@ -44,7 +44,7 @@ export default async function ArticleMediaPage({ params }: { params: Promise<{ i
         </CardBody>
       </Card>
       <Card>
-        <CardHeader title="E-shop" description="Texte commercial et publication — préparation de l'e-shop, rien n'est publié automatiquement." />
+        <CardHeader title="E-shop" description="Texte commercial et publication. Un modèle publiable apparaît dans le catalogue et le studio du site www.seritex.ci, sans prix (le prix vient du devis)." />
         <CardBody>
           <EshopForm modelId={id} texte={(model?.texte_commercial as string | null) ?? null} publiable={!!model?.publiable_eshop} canModify={canModify} />
           <div className="mt-4 space-y-1 rounded-md bg-surface-muted/60 p-3 text-sm">
