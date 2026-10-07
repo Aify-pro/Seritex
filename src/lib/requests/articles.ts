@@ -1,5 +1,6 @@
 import "server-only";
 import { createClient } from "@/lib/supabase/server";
+import { colorAlertsByModel, getArticleAvailability } from "@/lib/articles/availability";
 
 /**
  * Article demandé (modèle, couleur, quantités par taille) — le même pour une
@@ -23,6 +24,8 @@ export interface RequestModelOption {
   name: string;
   colors: { id: string; name: string }[];
   sizes: { cle: string; libelle: string; groupe: string }[];
+  /** Couleurs dont le tissu n'est plus en stock → raison. Signalement seulement : ne bloque jamais la demande. */
+  colorAlerts: Record<string, string>;
 }
 
 /** Modèles proposables dans une demande, avec leurs couleurs et tailles. */
@@ -36,6 +39,7 @@ export async function getRequestModelOptions(): Promise<RequestModelOption[]> {
     supabase.from("sizes").select("cle,libelle,groupe,display_order").eq("active", true).order("groupe").order("display_order"),
     supabase.from("colors").select("id,name").eq("active", true).order("name"),
   ]);
+  const alerts = colorAlertsByModel(await getArticleAvailability((models ?? []).map((m) => m.id as string)));
   const fallbackColors = (allColors ?? []).map((c) => ({ id: c.id as string, name: c.name as string }));
   return (models ?? []).map((m) => {
     const ownSizes = (modelSizes ?? [])
@@ -51,6 +55,7 @@ export async function getRequestModelOptions(): Promise<RequestModelOption[]> {
         return own.length ? own : fallbackColors;
       })(),
       sizes: (ownSizes.length ? ownSizes : (sizes ?? [])).map((s) => ({ cle: s.cle as string, libelle: s.libelle as string, groupe: s.groupe as string })),
+      colorAlerts: alerts[m.id as string] ?? {},
     };
   });
 }

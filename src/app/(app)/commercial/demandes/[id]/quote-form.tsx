@@ -247,6 +247,7 @@ export function QuoteForm({
   zoneTemplatesByModel,
   printableZonesByModel,
   sizeOptionsByModel,
+  colorAlerts = {},
   dispatchRules,
   colors,
   defaults,
@@ -266,6 +267,8 @@ export function QuoteForm({
   printableZonesByModel: Record<string, PrintableZoneOption[]>;
   /** Tailles proposables par modèle et règle de dispatching (migration 0066). */
   sizeOptionsByModel: Record<string, SizeOption[]>;
+  /** Article → couleur → raison, pour les couleurs dont le tissu manque en stock (signalement, jamais bloquant). */
+  colorAlerts?: Record<string, Record<string, string>>;
   dispatchRules: DispatchRule[];
   colors: ColorOption[];
   defaults: QuoteDefaults;
@@ -711,6 +714,11 @@ export function QuoteForm({
                   onChange={(next) => updateLine(line.key, { colorDraft: next })}
                   disabled={pending}
                 />
+                {line.colorDraft.isUni && line.colorDraft.couleurUniqueId && colorAlerts[line.productModelId]?.[line.colorDraft.couleurUniqueId] && (
+                  <p className="mt-1 text-xs text-warning">
+                    Tissu indisponible en stock ({colorAlerts[line.productModelId][line.colorDraft.couleurUniqueId]}) : approvisionnement à prévoir. Le devis reste possible.
+                  </p>
+                )}
               </div>
             )}
 
