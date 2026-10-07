@@ -21,7 +21,7 @@ import { FolderOpen, Globe, Lock, Mail, MapPin, Phone, Star, User } from "lucide
  * compte utilisateur de rôle client représente désormais (`app_users.contact_id`).
  */
 export default async function ClientDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { profile } = await requireModule("clients");
+  await requireModule("clients");
   const { id } = await params;
   const supabase = await createClient();
 
@@ -53,8 +53,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
     ...(p as PlaceWithPhoto),
     photoUrl: signed.find((s) => s.path === p.photo_path)?.signedUrl ?? null,
   }));
-  const canEditPlaces =
-    ["commercial", "administrateur", "responsable_livraison"].includes(profile.role) && (await can("livraisons", "modify"));
+  const canEditPlaces = await can("lieux_livraison", "modify");
 
   const fromSage = company.origin === "sage";
   const fullAddress = [company.address, [company.postal_code, company.city].filter(Boolean).join(" "), company.country]

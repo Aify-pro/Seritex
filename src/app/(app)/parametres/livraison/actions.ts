@@ -3,14 +3,13 @@
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { requireRole } from "@/lib/auth/current-user";
+import { requirePermission } from "@/lib/auth/permissions";
 
 /**
  * Référentiels de livraison (LIV-0) : zones, transporteurs, véhicules.
- * Écriture réservée au responsable livraison et à l'administration — la RLS
- * (migration 0075) fait foi.
+ * Écriture selon les droits « Paramètres livraison » de la matrice — la RLS
+ * (migration 0113) fait foi.
  */
-const ROLES = ["administrateur", "responsable_livraison"] as const;
 const done = () => revalidatePath("/parametres/livraison");
 
 const zoneSchema = z.object({
@@ -19,7 +18,7 @@ const zoneSchema = z.object({
 });
 
 export async function createZone(formData: FormData) {
-  await requireRole([...ROLES]);
+  await requirePermission("parametres_livraison", "create");
   const parsed = zoneSchema.safeParse({ nom: formData.get("nom"), type: formData.get("type") });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message };
   const supabase = await createClient();
@@ -31,7 +30,7 @@ export async function createZone(formData: FormData) {
 }
 
 export async function setZoneActive(id: string, actif: boolean) {
-  await requireRole([...ROLES]);
+  await requirePermission("parametres_livraison", "modify");
   const supabase = await createClient();
   const { error } = await supabase.from("delivery_zones").update({ actif }).eq("id", id);
   if (error) return { error: error.message };
@@ -46,7 +45,7 @@ const carrierSchema = z.object({
 
 /** Transporteur en mode « manuel » (seul mode actif en version 1, L6). */
 export async function createCarrier(formData: FormData) {
-  await requireRole([...ROLES]);
+  await requirePermission("parametres_livraison", "create");
   const parsed = carrierSchema.safeParse({ nom: formData.get("nom"), type: formData.get("type") });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message };
   const supabase = await createClient();
@@ -57,7 +56,7 @@ export async function createCarrier(formData: FormData) {
 }
 
 export async function setCarrierActive(id: string, actif: boolean) {
-  await requireRole([...ROLES]);
+  await requirePermission("parametres_livraison", "modify");
   const supabase = await createClient();
   const { error } = await supabase.from("carriers").update({ actif }).eq("id", id);
   if (error) {
@@ -79,7 +78,7 @@ const vehicleSchema = z.object({
 });
 
 export async function createVehicle(formData: FormData) {
-  await requireRole([...ROLES]);
+  await requirePermission("parametres_livraison", "create");
   const parsed = vehicleSchema.safeParse({
     type: formData.get("type"),
     libelle: formData.get("libelle"),
@@ -100,7 +99,7 @@ export async function createVehicle(formData: FormData) {
 }
 
 export async function setVehicleActive(id: string, actif: boolean) {
-  await requireRole([...ROLES]);
+  await requirePermission("parametres_livraison", "modify");
   const supabase = await createClient();
   const { error } = await supabase.from("vehicles").update({ actif }).eq("id", id);
   if (error) return { error: error.message };

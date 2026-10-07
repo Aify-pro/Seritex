@@ -1,14 +1,13 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import { requireRole } from "@/lib/auth/current-user";
+import { requirePermission } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
-import { DELIVERY_MANAGER_ROLES } from "@/lib/delivery/access";
 import { RoundBoard, type Candidate, type RoundView } from "./round-board";
 
 /** Tournées du jour (LIV-2) : composition par le responsable livraison. */
 export default async function RoundsPage({ searchParams }: { searchParams: Promise<{ date?: string }> }) {
-  await requireRole([...DELIVERY_MANAGER_ROLES]);
+  await requirePermission("livraisons", "modify");
   const { date: dateParam } = await searchParams;
   const date = /^\d{4}-\d{2}-\d{2}$/.test(dateParam ?? "") ? dateParam! : new Date().toLocaleDateString("en-CA", { timeZone: "Africa/Abidjan" });
   const supabase = await createClient();

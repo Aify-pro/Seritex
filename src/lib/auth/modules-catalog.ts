@@ -56,7 +56,8 @@ export const MODULE_META: Record<string, ModuleMeta> = {
   patronnage: { group: "modules", actions: ["view", "create", "modify", "archive", "delete", "validate", "unlock"] },
   patronnage_traces: { group: "modules", actions: ["create", "modify"] },
   stock_atelier: { group: "modules", actions: ["view", "create", "modify", "delete"] },
-  livraisons: { group: "modules", actions: ["view", "modify", "validate"] },
+  livraisons: { group: "modules", actions: ["view", "create", "modify", "validate"] },
+  lieux_livraison: { group: "modules", actions: ["create", "modify", "delete"] },
 
   // --- Paramètres --------------------------------------------------------
   couleurs_tailles: { group: "parametres", actions: VIEW },
@@ -65,7 +66,7 @@ export const MODULE_META: Record<string, ModuleMeta> = {
   sections: { group: "parametres", actions: VIEW },
   fabrication: { group: "parametres", actions: VIEW, platformAdminOnly: true },
   dispatching: { group: "parametres", actions: VIEW },
-  parametres_livraison: { group: "parametres", actions: VIEW },
+  parametres_livraison: { group: "parametres", actions: ["view", "create", "modify", "delete"] },
   stock_sage: { group: "parametres", actions: VIEW },
   clients_sage: { group: "parametres", actions: VIEW },
   articles_sage: { group: "parametres", actions: VIEW },
