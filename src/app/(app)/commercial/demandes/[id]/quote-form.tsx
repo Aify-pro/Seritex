@@ -279,7 +279,15 @@ export function QuoteForm({
   /** Présent : le formulaire s'ouvre prérempli depuis ce devis Sage (migration 0071). */
   prefill?: SagePrefill;
   /** Articles choisis dans la demande : lignes de départ d'un nouveau devis. */
-  requestLines?: { product_model_id: string; description: string; couleur_unique_id: string | null; tailles: Record<string, number>; quantite?: number }[];
+  requestLines?: {
+    product_model_id: string;
+    description: string;
+    couleur_unique_id: string | null;
+    tailles: Record<string, number>;
+    quantite?: number;
+    textile_id?: string | null;
+    impressions?: Record<string, number>;
+  }[];
 }) {
   const [pending, startTransition] = useTransition();
   const [open, setOpen] = useState(!!prefill);
@@ -304,10 +312,14 @@ export function QuoteForm({
                     // (répartie par la règle de dispatching), sinon ligne à compléter.
                     const sized = Object.values(l.tailles ?? {}).reduce((a, b) => a + b, 0);
                     const quantity = sized || l.quantite || 0;
+                    const textiles = products.find((p) => p.id === l.product_model_id)?.textiles ?? [];
+                    // Emplacements choisis sur le site (outil « Personnaliser ») : seulement ceux du modèle.
+                    const zonesDuModele = new Set((printableZonesByModel[l.product_model_id] ?? []).map((z) => z.id));
                     return {
                       ...newLine(),
                       productModelId: l.product_model_id,
-                      textileId: products.find((p) => p.id === l.product_model_id)?.textiles[0]?.id ?? "",
+                      textileId: textiles.find((t) => t.id === l.textile_id)?.id ?? textiles[0]?.id ?? "",
+                      printZones: Object.fromEntries(Object.entries(l.impressions ?? {}).filter(([id]) => zonesDuModele.has(id))),
                       description: l.description,
                       quantity: quantity ? String(quantity) : "",
                       colorDraft: l.couleur_unique_id

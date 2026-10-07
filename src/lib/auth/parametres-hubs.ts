@@ -95,6 +95,7 @@ const HUBS: HubDefinition[] = [
       { href: "/parametres/societe", label: "Informations société" },
       { href: "/parametres/stockage", label: "Stockage médiathèque" },
       { href: "/parametres/notifications", label: "Notifications" },
+      { href: "/parametres/site-web", label: "Site web" },
     ],
   },
 ];

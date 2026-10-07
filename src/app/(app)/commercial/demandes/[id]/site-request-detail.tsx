@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Globe, Mail, Phone, Building2 } from "lucide-react";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
@@ -27,7 +28,16 @@ interface SiteRequestView {
  * Étapes : créer le client dans Sage, attendre la synchronisation, rattacher
  * ici la demande à la fiche — elle devient alors une demande client normale.
  */
-export function SiteRequestDetail({ request, canLink }: { request: SiteRequestView; canLink: boolean }) {
+export function SiteRequestDetail({
+  request,
+  canLink,
+  composition = null,
+}: {
+  request: SiteRequestView;
+  canLink: boolean;
+  /** Composition faite avec l'outil « Personnaliser » du site (0110), si la demande en vient. */
+  composition?: ReactNode;
+}) {
   const p = request.prospect;
   return (
     <div className="space-y-6">
@@ -65,6 +75,8 @@ export function SiteRequestDetail({ request, canLink }: { request: SiteRequestVi
           <CardBody className="whitespace-pre-line text-sm">{request.description}</CardBody>
         </Card>
       )}
+
+      {composition}
 
       <Card>
         <CardHeader
