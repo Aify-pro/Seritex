@@ -20,6 +20,8 @@ export interface ArticleModelOption {
   name: string;
   colors: { id: string; name: string }[];
   sizes: { cle: string; libelle: string; groupe: string }[];
+  /** Couleur → raison, pour les couleurs dont le tissu manque en stock (signalement, jamais bloquant). */
+  colorAlerts?: Record<string, string>;
 }
 
 const input = "h-9 rounded-md border border-border bg-surface px-2 text-sm";
@@ -108,6 +110,7 @@ export function RequestArticlesEditor({
                   {m.colors.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
+                      {m.colorAlerts?.[c.id] ? " — tissu indisponible" : ""}
                     </option>
                   ))}
                 </select>
@@ -160,6 +163,11 @@ export function RequestArticlesEditor({
                 <Trash2 className="h-4 w-4" />
               </button>
             </div>
+            {m && l.couleur_unique_id && m.colorAlerts?.[l.couleur_unique_id] && (
+              <p className="text-xs text-warning">
+                Tissu indisponible en stock ({m.colorAlerts[l.couleur_unique_id]}) : approvisionnement à prévoir. La demande et le devis restent possibles.
+              </p>
+            )}
             {m && (
               <div className="flex flex-wrap gap-2">
                 {sizes.map((s) => (

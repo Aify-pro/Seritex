@@ -17,6 +17,7 @@ import { CreateSampleDialog } from "@/components/samples/create-sample-dialog";
 import { getSampleQuoteLineOptions } from "@/lib/samples";
 import { getCompanySettings } from "@/lib/company-settings";
 import { getDispatchRules, getSizeOptionsByModel } from "@/lib/quote-dispatch";
+import { colorAlertsByModel, getArticleAvailability } from "@/lib/articles/availability";
 import { StockRequestDetail } from "./stock-request-detail";
 import { SiteRequestDetail, type SiteProspect } from "./site-request-detail";
 import type { RequestArticleLine } from "@/lib/requests/articles";
@@ -207,10 +208,13 @@ export default async function RequestDetailPage({
   }
 
   // Dispatching (migration 0066) : tailles proposables par modèle et règle de répartition.
-  const [sizeOptionsByModel, dispatchRules] = await Promise.all([
+  const [sizeOptionsByModel, dispatchRules, availability] = await Promise.all([
     getSizeOptionsByModel((products ?? []).map((pm) => pm.id as string)),
     getDispatchRules(),
+    getArticleAvailability((products ?? []).map((pm) => pm.id as string)),
   ]);
+  // Signalement seulement : un devis reste possible même si le tissu manque (réapprovisionnement local, marchandise en route).
+  const colorAlerts = colorAlertsByModel(availability);
 
   const printableZonesByModel = (printableZones ?? []).reduce<Record<string, { id: string; zone_label: string; display_order: number }[]>>((acc, z) => {
     (acc[z.product_model_id] ??= []).push({ id: z.id, zone_label: z.zone_label, display_order: z.display_order });
@@ -252,6 +256,7 @@ export default async function RequestDetailPage({
     zoneTemplatesByModel,
     printableZonesByModel,
     sizeOptionsByModel,
+    colorAlerts,
     dispatchRules,
     colors: colors ?? [],
     defaults: {

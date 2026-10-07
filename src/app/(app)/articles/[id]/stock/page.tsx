@@ -5,6 +5,8 @@ import { Card, CardHeader, CardBody } from "@/components/ui/card";
 import { Table, Thead, Tbody, Tr, Th, Td, EmptyRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { ArticleRolls } from "../_components/article-rolls";
+import { ArticleAvailabilityCard } from "../_components/article-availability";
+import { TextileAvailabilityPanel } from "../_components/textile-availability-panel";
 
 interface StockRow {
   variant_id: string;
@@ -36,11 +38,11 @@ const nf = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 });
  * seule : les mouvements se font en atelier et l'import dans Sage.
  */
 export default async function ArticleStockPage({ params }: { params: Promise<{ id: string }> }) {
-  await requireArticles();
+  const { canModify } = await requireArticles();
   const { id } = await params;
   const supabase = await createClient();
   const { data: article } = await supabase.from("product_models").select("nature").eq("id", id).maybeSingle();
-  if (article && article.nature !== "pf") return <PurchasedArticleStock id={id} nature={article.nature as "mp" | "consommable"} />;
+  if (article && article.nature !== "pf") return <PurchasedArticleStock id={id} nature={article.nature as "mp" | "consommable"} canModify={canModify} />;
   const [{ data, error }, sizes] = await Promise.all([supabase.rpc("variant_stock_overview", { p_model_id: id }), getSizes()]);
   const all = (data ?? []) as StockRow[];
   // Les articles sans aucun mouvement ni stock encombrent la grille : on ne garde que ceux qui ont un chiffre.
@@ -49,6 +51,8 @@ export default async function ArticleStockPage({ params }: { params: Promise<{ i
   const total = (k: "en_stock" | "reserve" | "en_cours_production" | "disponible") => rows.reduce((s, r) => s + Number(r[k]), 0);
 
   return (
+    <div className="space-y-6">
+    <ArticleAvailabilityCard productModelId={id} />
     <Card>
       <CardHeader
         title="Stock par déclinaison"
@@ -114,6 +118,7 @@ export default async function ArticleStockPage({ params }: { params: Promise<{ i
         )}
       </CardBody>
     </Card>
+    </div>
   );
 }
 
@@ -133,7 +138,7 @@ interface VariantStockRow {
  * stock Sage et, pour un tissu, les rouleaux sérialisés (en stock, en kg, en
  * production) ; puis le détail des rouleaux par coloris et par bain.
  */
-async function PurchasedArticleStock({ id, nature }: { id: string; nature: "mp" | "consommable" }) {
+async function PurchasedArticleStock({ id, nature, canModify }: { id: string; nature: "mp" | "consommable"; canModify: boolean }) {
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("article_variant_stock", { p_model_id: id });
   const rows = (data ?? []) as VariantStockRow[];
@@ -196,6 +201,7 @@ async function PurchasedArticleStock({ id, nature }: { id: string; nature: "mp" 
           )}
         </CardBody>
       </Card>
+      {nature === "mp" && <TextileAvailabilityPanel productModelId={id} canModify={canModify} />}
       {nature === "mp" && <ArticleRolls productModelId={id} />}
     </div>
   );
