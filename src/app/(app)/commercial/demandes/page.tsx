@@ -1,4 +1,4 @@
-import { requireModule } from "@/lib/auth/permissions";
+import { requireAnyModule } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardBody } from "@/components/ui/card";
@@ -14,7 +14,7 @@ import { ArrowRight, Plus } from "lucide-react";
  * pour le stock (SF-3), dans une seule liste. La production n'y voit que les demandes pour le stock (RLS).
  */
 export default async function RequestsPage() {
-  await requireModule("demandes");
+  await requireAnyModule(["demandes", "demandes_stock"]);
   const supabase = await createClient();
 
   const { data: requests } = await supabase

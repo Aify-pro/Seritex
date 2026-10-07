@@ -2,16 +2,14 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { requireRole } from "@/lib/auth/current-user";
+import { requirePermission } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 
 type Result = { error: string } | { code: string };
 
-const LOT_ROLES = ["administrateur", "responsable_production", "chef_section"] as const;
-
 /** Découpe un lot (SF-5) : le sous-lot prend la composition donnée, le lot d'origine garde le reste. */
 export async function splitArticleLot(code: string, composition: Record<string, number>): Promise<Result> {
-  await requireRole([...LOT_ROLES]);
+  await requirePermission("ordres_travail", "modify");
   const parsed = z.record(z.string().min(1), z.number().int().positive()).safeParse(composition);
   if (!parsed.success || Object.keys(parsed.data).length === 0) return { error: "Composition du sous-lot invalide" };
   const supabase = await createClient();
@@ -23,7 +21,7 @@ export async function splitArticleLot(code: string, composition: Record<string, 
 
 /** Regroupe ce lot avec d'autres (même article, même catégorie) dans un nouveau lot. */
 export async function mergeArticleLots(codes: string[]): Promise<Result> {
-  await requireRole([...LOT_ROLES]);
+  await requirePermission("ordres_travail", "modify");
   const clean = [...new Set(codes.map((c) => c.trim().toUpperCase()).filter(Boolean))];
   if (clean.length < 2) return { error: "Au moins deux lots à regrouper" };
   const supabase = await createClient();

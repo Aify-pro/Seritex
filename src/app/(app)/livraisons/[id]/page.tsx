@@ -8,7 +8,6 @@ import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatAmount, formatDate, formatDateTime } from "@/lib/utils";
-import { DELIVERY_MANAGER_ROLES } from "@/lib/delivery/access";
 import { loadShipment } from "@/lib/delivery/shipment-data";
 import { REGLEMENT_LABELS, SHIPMENT_STATUS_LABELS, type ShipmentStatus } from "@/lib/delivery/status";
 import { AccountingForm, PlanningForm, PreparationForm, ShipmentLines, StatusActions } from "./shipment-workbench";
@@ -17,14 +16,14 @@ import { LotTraceView, type LotTrace } from "@/components/atelier/lot-trace";
 
 /** Fiche d'une expédition (LIV-1) : préparation, BL, validation comptable, planification, suivi, journal. */
 export default async function ShipmentPage({ params }: { params: Promise<{ id: string }> }) {
-  const { profile } = await requireModule("livraisons");
+  await requireModule("livraisons");
   if (!(await can("livraisons", "view"))) redirect("/dashboard?erreur=acces_refuse");
   const { id } = await params;
   const shipment = await loadShipment(id);
   if (!shipment) notFound();
   const supabase = await createClient();
 
-  const isManager = (DELIVERY_MANAGER_ROLES as readonly string[]).includes(profile.role);
+  const isManager = await can("livraisons", "modify");
   const canValidate = await can("livraisons", "validate");
   const s = shipment.statut;
   const editableLines = isManager && (s === "a_preparer" || s === "preparee");
@@ -61,7 +60,7 @@ export default async function ShipmentPage({ params }: { params: Promise<{ id: s
     : { data: [] };
 
   // Sortie PF au BL (LIV-3) : visible de la Direction et de la production, qui génèrent la fiche Sage.
-  const canExportStock = profile.role === "administrateur" || profile.role === "responsable_production";
+  const canExportStock = await can("stock_atelier", "modify");
   const [{ data: blMovements }, { data: blFiches }] = canExportStock
     ? await Promise.all([
         supabase.from("stock_movements").select("id,article_ref,taille,quantite_ou_poids,depot,exported_in_fiche_id").eq("shipment_id", id).order("created_at"),

@@ -1,7 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { requireRole } from "@/lib/auth/current-user";
+import { requirePermission } from "@/lib/auth/permissions";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
@@ -12,7 +12,7 @@ const newSectionSchema = z.object({
 });
 
 export async function createSection(formData: FormData) {
-  await requireRole(["administrateur"]);
+  await requirePermission("sections", "create");
   const parsed = newSectionSchema.safeParse({
     name: formData.get("name"),
     description: formData.get("description"),
@@ -40,7 +40,7 @@ export async function createSection(formData: FormData) {
 }
 
 export async function toggleSectionActive(sectionId: string, active: boolean) {
-  await requireRole(["administrateur"]);
+  await requirePermission("sections", "modify");
   const supabase = await createClient();
   const { error } = await supabase.from("sections").update({ active }).eq("id", sectionId);
   if (error) return { error: error.message };
@@ -55,7 +55,7 @@ const updateSectionSchema = z.object({
 
 /** Modifie le nom/la description d'une section existante (créée via createSection ci-dessus). */
 export async function updateSectionDetails(sectionId: string, formData: FormData) {
-  await requireRole(["administrateur"]);
+  await requirePermission("sections", "modify");
   const parsed = updateSectionSchema.safeParse({
     name: formData.get("name"),
     description: formData.get("description"),
@@ -81,7 +81,7 @@ export async function updateSectionDetails(sectionId: string, formData: FormData
 
 /** Réaffecte la catégorie d'atelier d'une section existante (ou la détache avec `null`). */
 export async function setSectionCategory(sectionId: string, categorieId: string | null) {
-  await requireRole(["administrateur"]);
+  await requirePermission("sections", "modify");
   const supabase = await createClient();
   const { error } = await supabase.from("sections").update({ categorie_id: categorieId }).eq("id", sectionId);
   if (error) return { error: error.message };
@@ -127,7 +127,7 @@ function colorFields(data: z.infer<typeof colorSchema>) {
  * du fournisseur (blanc/clair/moyen/foncé), dont dépend le prix du tissu.
  */
 export async function createColor(formData: FormData) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("couleurs_tailles", "create");
   const parsed = parseColorForm(formData);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message };
 
@@ -142,7 +142,7 @@ export async function createColor(formData: FormData) {
 }
 
 export async function updateColor(colorId: string, formData: FormData) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("couleurs_tailles", "modify");
   const parsed = parseColorForm(formData);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message };
 
@@ -162,7 +162,7 @@ export async function updateColor(colorId: string, formData: FormData) {
  * uniquement ; une couleur utilisée se désactive plutôt.
  */
 export async function deleteColor(colorId: string) {
-  await requireRole(["administrateur"]);
+  await requirePermission("couleurs_tailles", "delete");
   const supabase = await createClient();
   const { error } = await supabase.rpc("delete_color", { p_id: colorId });
   if (error) return { error: error.message };
@@ -171,7 +171,7 @@ export async function deleteColor(colorId: string) {
 }
 
 export async function toggleColorActive(colorId: string, active: boolean) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("couleurs_tailles", "modify");
   const supabase = await createClient();
   const { error } = await supabase.from("colors").update({ active }).eq("id", colorId);
   if (error) return { error: error.message };
@@ -199,7 +199,7 @@ const newSizeSchema = z.object({
  * s'ordonne ni alphabétiquement ni numériquement : XS < S < M < L < XL.
  */
 export async function createSize(formData: FormData) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("couleurs_tailles", "create");
   const parsed = newSizeSchema.safeParse({
     groupe: formData.get("groupe"),
     libelle: formData.get("libelle"),
@@ -223,7 +223,7 @@ export async function createSize(formData: FormData) {
 }
 
 export async function toggleSizeActive(sizeId: string, active: boolean) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("couleurs_tailles", "modify");
   const supabase = await createClient();
   const { error } = await supabase.from("sizes").update({ active }).eq("id", sizeId);
   if (error) return { error: error.message };
@@ -239,7 +239,7 @@ const sizeEditSchema = newSizeSchema;
  * taille est référencée quelque part, seul l'ordre peut changer.
  */
 export async function updateSize(sizeId: string, formData: FormData) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("couleurs_tailles", "modify");
   const parsed = sizeEditSchema.safeParse({
     groupe: formData.get("groupe"),
     libelle: formData.get("libelle"),
@@ -275,7 +275,7 @@ export async function updateSize(sizeId: string, formData: FormData) {
 
 /** Supprime une taille jamais utilisée (refus côté SQL sinon). Administrateur uniquement. */
 export async function deleteSize(sizeId: string) {
-  await requireRole(["administrateur"]);
+  await requirePermission("couleurs_tailles", "delete");
   const supabase = await createClient();
   const { error } = await supabase.rpc("delete_size", { p_id: sizeId });
   if (error) return { error: error.message };

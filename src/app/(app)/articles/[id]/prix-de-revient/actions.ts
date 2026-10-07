@@ -1,7 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { requireRole } from "@/lib/auth/current-user";
+import { requirePermission } from "@/lib/auth/permissions";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
@@ -42,7 +42,7 @@ export type ModelPricingInput = z.input<typeof modelPricingSchema>;
  * saisit et se relit d'un bloc, sans historique partiel à préserver.
  */
 export async function saveModelPricing(productModelId: string, input: ModelPricingInput) {
-  const { profile } = await requireRole(["administrateur"]);
+  const { profile } = await requirePermission("tarification", "modify");
   const parsed = modelPricingSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Grille invalide" };
   const g = parsed.data;
@@ -102,7 +102,7 @@ export async function saveModelPricing(productModelId: string, input: ModelPrici
  * calculé. Remplace l'ensemble ; une taille vide est retirée.
  */
 export async function saveFabricAreas(productModelId: string, surfaces: Record<string, number | null>, source: "patronnage" | "placement" | "saisie") {
-  const { profile } = await requireRole(["administrateur"]);
+  const { profile } = await requirePermission("tarification", "modify");
   const rows = Object.entries(surfaces).filter(([, v]) => v !== null && Number.isFinite(v) && (v as number) > 0);
   if (rows.some(([, v]) => (v as number) >= 20)) return { error: "Surface invalide (m² par pièce)." };
   const supabase = await createClient();
@@ -126,7 +126,7 @@ export async function saveFabricAreas(productModelId: string, surfaces: Record<s
 
 /** Surface par pièce proposée depuis les tracés de placement du modèle (m²). */
 export async function proposeFabricAreaFromPlacement(productModelId: string): Promise<{ error?: string; surface?: number | null }> {
-  await requireRole(["administrateur"]);
+  await requirePermission("tarification", "modify");
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("propose_fabric_area_from_placement", { p_model_id: productModelId });
   if (error) return { error: error.message };
@@ -144,7 +144,7 @@ const purchaseSchema = z.object({
 
 /** Prix d'un tissu ou d'un consommable (migration 0104) : valeurs de l'article. */
 export async function saveArticlePurchasePricing(productModelId: string, input: z.input<typeof purchaseSchema>) {
-  const { profile } = await requireRole(["administrateur"]);
+  const { profile } = await requirePermission("tarification", "modify");
   const parsed = purchaseSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Saisie invalide" };
   const supabase = await createClient();
@@ -168,7 +168,7 @@ const variantPurchaseSchema = z.object({
 
 /** Prix d'une déclinaison quand il diffère de celui de l'article ; tout vide = valeur de l'article. */
 export async function saveVariantPricing(variantId: string, input: z.input<typeof variantPurchaseSchema>) {
-  const { profile } = await requireRole(["administrateur"]);
+  const { profile } = await requirePermission("tarification", "modify");
   const parsed = variantPurchaseSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Saisie invalide" };
   const supabase = await createClient();

@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { removeTraceFiles, storeTraceFile } from "@/lib/storage/patronnage-files";
-import { requireUser, requireRole } from "@/lib/auth/current-user";
+import { requireUser } from "@/lib/auth/current-user";
 import { can } from "@/lib/auth/permissions";
 import { getSizes, getSizesForProductModel, type Size } from "@/lib/sizes";
 import { parseDxfContours } from "@/lib/patronnage/dxf";
@@ -1054,15 +1054,13 @@ export async function reanalyserTrace(
 // non reconnues à un patron de la bibliothèque
 // ------------------------------------------------------------
 
-const ROLES_BIBLIOTHEQUE: ("responsable_production" | "administrateur")[] = ["responsable_production", "administrateur"];
-
 export interface OptionsAffectation {
   articles: { id: string; code: string; designation: string; patrons: { id: string; taille: string }[] }[];
 }
 
 /** Articles et patrons de la bibliothèque, pour les listes de l'écran d'affectation. */
 export async function listerOptionsAffectation(): Promise<OptionsAffectation | { error: string }> {
-  await requireRole(ROLES_BIBLIOTHEQUE);
+  await requirePermission("view");
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("pattern_articles")
@@ -1111,7 +1109,7 @@ export async function affecterFamille(
   ficheId: string,
   input: AffectationInput
 ): Promise<{ error: string } | { reconnaissanceComplete: boolean }> {
-  const { authId } = await requireRole(ROLES_BIBLIOTHEQUE);
+  const { authId } = await requirePermission("modify");
   const gate = await assertTraceEditable(traceId, ficheId);
   if ("error" in gate) return gate;
 

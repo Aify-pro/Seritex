@@ -1,7 +1,8 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { requireRole, requireUser } from "@/lib/auth/current-user";
+import { requireUser } from "@/lib/auth/current-user";
+
 import { requirePermission } from "@/lib/auth/permissions";
 import type { RequestStatus } from "@/lib/types/domain";
 import { revalidatePath } from "next/cache";
@@ -538,7 +539,7 @@ export async function suggestQuoteLinePrices(input: {
  * fois le devis envoyé ; PU moyen et totaux sont recalculés.
  */
 export async function updateQuoteSizePrices(quoteId: string, quoteLineId: string, prices: Record<string, number>) {
-  await requireRole(["administrateur"]);
+  await requirePermission("tarification", "modify");
   const parsed = z.record(z.string().min(1), z.number().positive("Un prix doit être positif")).safeParse(prices);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Prix invalides" };
 

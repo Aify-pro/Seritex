@@ -56,6 +56,8 @@ export type NavItem = {
    * seulement pour le tableau de bord et les portails client / livreur.
    */
   module?: string;
+  /** Autres modules dont le droit `view` ouvre aussi l'entrée (ex. Demandes pour le stock). */
+  alsoModules?: string[];
   /**
    * Préfixes d'URL qui rendent l'entrée active en plus de `href` — pour une
    * entrée qui regroupe plusieurs pages (ex. « Intégration Sage » couvre
@@ -111,7 +113,7 @@ const PORTAL_NAV: Partial<Record<UserRole, NavItem[]>> = {
 const STAFF_NAV: NavItem[] = [
   { href: "/dashboard", label: "Tableau de bord", icon: navIcon(LayoutDashboard) },
   { href: "/commercial/clients", label: "Clients", icon: navIcon(Contact), module: "clients" },
-  { href: "/commercial/demandes", label: "Demandes", icon: navIcon(Inbox), module: "demandes" },
+  { href: "/commercial/demandes", label: "Demandes", icon: navIcon(Inbox), module: "demandes", alsoModules: ["demandes_stock"] },
   { href: "/infographie/demandes", label: "Demandes graphiques", icon: navIcon(ImageIcon), module: "demandes_graphiques" },
   { href: "/commercial/devis", label: "Devis", icon: navIcon(FileText), module: "devis" },
   { href: "/articles", label: "Articles", icon: navIcon(Tags), module: "articles" },
@@ -160,9 +162,9 @@ export function getNavItems(
   const portal = PORTAL_NAV[role];
   if (portal) return portal;
 
-  const visible = (item: NavItem) =>
-    !item.module ||
-    (permissions[item.module]?.view === true && (platformAdmin || !getModuleMeta(item.module).platformAdminOnly));
+  const opens = (key: string) =>
+    permissions[key]?.view === true && (platformAdmin || !getModuleMeta(key).platformAdminOnly);
+  const visible = (item: NavItem) => !item.module || opens(item.module) || (item.alsoModules ?? []).some(opens);
 
   return STAFF_NAV.filter(visible).map((item) =>
     // La comptabilité n'utilise les livraisons que pour la validation : son menu ouvre directement l'onglet.

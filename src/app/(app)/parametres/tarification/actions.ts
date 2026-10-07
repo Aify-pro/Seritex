@@ -1,7 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { requireRole } from "@/lib/auth/current-user";
+import { requirePermission } from "@/lib/auth/permissions";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
@@ -25,7 +25,7 @@ const settingsSchema = z.object({
 });
 
 export async function updatePricingSettings(input: z.input<typeof settingsSchema>) {
-  const { profile } = await requireRole(["administrateur"]);
+  const { profile } = await requirePermission("tarification", "modify");
   const parsed = settingsSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Paramètres invalides" };
 
@@ -44,7 +44,7 @@ const printCostsSchema = z.record(z.string().regex(/^([1-9]|1[0-2])$/), money.nu
 
 /** Grille impression : un coût par nombre de couleurs ; vide = retiré de la grille (signalé au chiffrage). */
 export async function savePrintCosts(input: Record<string, number | null>) {
-  await requireRole(["administrateur"]);
+  await requirePermission("tarification", "modify");
   const parsed = printCostsSchema.safeParse(input);
   if (!parsed.success) return { error: "Grille impression invalide" };
 
@@ -69,7 +69,7 @@ export async function savePrintCosts(input: Record<string, number | null>) {
 
 /** Prix du tissu au kg, rendu, d'un textile (migration 0070) ; null retire le prix. */
 export async function saveTextilePrice(textileId: string, prixKg: number | null) {
-  const { profile } = await requireRole(["administrateur"]);
+  const { profile } = await requirePermission("tarification", "modify");
   const parsed = z.object({ id: z.guid(), prix: z.number().positive("Prix au kg invalide").nullable() }).safeParse({ id: textileId, prix: prixKg });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Prix invalide" };
 

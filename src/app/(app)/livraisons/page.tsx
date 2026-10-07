@@ -33,6 +33,7 @@ export default async function LivraisonsPage({ searchParams }: { searchParams: P
   const { profile } = await requireModule("livraisons");
   if (!(await can("livraisons", "view"))) redirect("/dashboard?erreur=acces_refuse");
   const params = await searchParams;
+  const canManage = await can("livraisons", "modify");
   const defaultTab: ShipmentTabKey = profile.role === "comptabilite" ? "a_valider" : "a_preparer";
   const tab = (SHIPMENT_TABS.find((t) => t.key === one(params, "onglet"))?.key ?? defaultTab) as ShipmentTabKey;
   const filters = { zone: one(params, "zone"), date: one(params, "date"), client: one(params, "client"), transporteur: one(params, "transporteur") };
@@ -73,7 +74,7 @@ export default async function LivraisonsPage({ searchParams }: { searchParams: P
         title="Livraisons"
         description="Les pièces de 1er choix entrent ici dès la finition. Préparation, validation comptable, planification, livraison ou retrait."
         action={
-          ["administrateur", "responsable_livraison"].includes(profile.role) ? (
+          canManage ? (
             <Link href="/livraisons/tournees" className="text-sm font-medium text-brand hover:underline">
               Tournées du jour →
             </Link>

@@ -1,4 +1,6 @@
-import { requireRole } from "@/lib/auth/current-user";
+import { redirect } from "next/navigation";
+import { requireUser } from "@/lib/auth/current-user";
+import { can } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { LivreurStops, type LivreurStop } from "./livreur-stops";
@@ -9,7 +11,9 @@ import type { ShipmentStatus } from "@/lib/delivery/status";
  * en retard, dans l'ordre de sa tournée. Pensé pour un téléphone.
  */
 export default async function LivreurPage() {
-  const { profile } = await requireRole(["livreur", "responsable_livraison", "administrateur"]);
+  // Le livreur voit SES livraisons (RLS) ; le pilotage des expéditions peut aussi ouvrir l'écran.
+  const { profile } = await requireUser();
+  if (profile.role !== "livreur" && !(await can("livraisons", "modify"))) redirect("/dashboard?erreur=acces_refuse");
   const supabase = await createClient();
   const today = new Date().toLocaleDateString("en-CA", { timeZone: "Africa/Abidjan" });
 
