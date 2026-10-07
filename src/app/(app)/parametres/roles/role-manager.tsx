@@ -293,8 +293,9 @@ export function RoleManager({
                   pour ce rôle : {visibleCount("modules")} module(s), {visibleCount("parametres")} écran(s) de paramètres.
                 </p>
                 <p className="mt-1">
-                  Les autres colonnes n&apos;existent que là où elles agissent (cases grisées : sans effet). Les
-                  modifications de données restent aussi encadrées par le rôle de base ({ROLE_LABELS[selectedRole.base_role]}).
+                  Toutes les cases sont attribuables. Les cases atténuées sont enregistrées mais pas encore lues par
+                  l&apos;application. Les modifications de données restent aussi encadrées par le rôle de base (
+                  {ROLE_LABELS[selectedRole.base_role]}).
                 </p>
               </div>
             </CardBody>
@@ -352,23 +353,25 @@ export function RoleManager({
                                 )}
                               </td>
                               {ACTIONS.map((action) => {
-                                const applicable = meta.actions.includes(action) && !(meta.platformAdminOnly && action === "view");
+                                // Toutes les cases sont attribuables. Celles dont l'application ne lit pas encore
+                                // le droit sont atténuées (enregistrées, sans effet pour l'instant), jamais masquées.
+                                const effective = meta.actions.includes(action) && !(meta.platformAdminOnly && action === "view");
+                                const hint = meta.platformAdminOnly && action === "view"
+                                  ? "Écran réservé à l'administrateur de la plateforme : ce droit est enregistré mais n'ouvre pas l'écran à un autre rôle."
+                                  : !effective
+                                    ? "Droit enregistré, mais pas encore appliqué par l'application pour ce module."
+                                    : undefined;
                                 return (
                                   <td key={action} className="px-2 py-2 text-center">
-                                    {applicable ? (
-                                      <input
-                                        type="checkbox"
-                                        checked={row[COLUMN_BY_ACTION[action]] as boolean}
-                                        disabled={isLocked(selectedRole, mod, action)}
-                                        onChange={(e) => togglePermission(mod.id, action, e.target.checked)}
-                                        aria-label={`${mod.label} — ${PERMISSION_ACTION_LABELS[action]}`}
-                                        className="h-4 w-4 accent-brand"
-                                      />
-                                    ) : (
-                                      <span className="text-foreground-muted/30" aria-hidden>
-                                        —
-                                      </span>
-                                    )}
+                                    <input
+                                      type="checkbox"
+                                      checked={row[COLUMN_BY_ACTION[action]] as boolean}
+                                      disabled={isLocked(selectedRole, mod, action)}
+                                      onChange={(e) => togglePermission(mod.id, action, e.target.checked)}
+                                      aria-label={`${mod.label} — ${PERMISSION_ACTION_LABELS[action]}`}
+                                      title={hint}
+                                      className={`h-4 w-4 accent-brand ${effective ? "" : "opacity-40"}`}
+                                    />
                                   </td>
                                 );
                               })}
