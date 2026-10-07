@@ -1,4 +1,4 @@
-import { requireRole } from "@/lib/auth/current-user";
+import { requireModule } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
@@ -29,7 +29,7 @@ export default async function RequestDetailPage({
   /** `sage` : n° d'un devis Sage à récupérer (préremplit le devis) ; `sage_q` : recherche par numéro (migration 0071). */
   searchParams: Promise<{ sage?: string; sage_q?: string }>;
 }) {
-  const { authId, profile } = await requireRole(["commercial", "administrateur", "responsable_production"]);
+  const { authId, profile } = await requireModule("demandes");
   const { id } = await params;
   const { sage: sageParam, sage_q: sageQuery } = await searchParams;
   const supabase = await createClient();

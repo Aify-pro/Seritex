@@ -1,4 +1,4 @@
-import { requireRole } from "@/lib/auth/current-user";
+import { requireModule } from "@/lib/auth/permissions";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardBody } from "@/components/ui/card";
 import { getRequestModelOptions } from "@/lib/requests/articles";
@@ -6,7 +6,7 @@ import { getDispatchRules } from "@/lib/quote-dispatch";
 import { NewRequestForm } from "./new-request-form";
 
 export default async function NewRequestPage() {
-  const { profile } = await requireRole(["commercial", "administrateur", "responsable_production"]);
+  const { profile } = await requireModule("demandes");
   const [models, dispatchRules] = await Promise.all([getRequestModelOptions(), getDispatchRules()]);
 
   return (

@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { requireRole } from "@/lib/auth/current-user";
+import { requireModule } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { MediaLibrary } from "@/components/media/media-library";
@@ -11,7 +11,7 @@ export default async function MediathequeCompanyPage({
   params: Promise<{ companyId: string }>;
   searchParams: Promise<{ requestId?: string }>;
 }) {
-  await requireRole(["commercial", "administrateur", "responsable_production"]);
+  await requireModule("mediatheque");
   const { companyId } = await params;
   const { requestId } = await searchParams;
   const supabase = await createClient();

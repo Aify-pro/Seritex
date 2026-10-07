@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
-import { requireRole } from "@/lib/auth/current-user";
-import { can } from "@/lib/auth/permissions";
+import { requireModule, can } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
@@ -15,7 +14,7 @@ const INTEGRATION_LABELS = { manuel: "Manuel", yango: "Yango (e-shop)", dhl: "DH
  * véhicules. Les lieux de livraison, eux, se gèrent sur la fiche client.
  */
 export default async function LivraisonSettingsPage() {
-  await requireRole(["administrateur", "responsable_livraison"]);
+  await requireModule("parametres_livraison");
   if (!(await can("livraisons", "view"))) redirect("/dashboard?erreur=acces_refuse");
   const supabase = await createClient();
   const [{ data: zones }, { data: carriers }, { data: vehicles }] = await Promise.all([

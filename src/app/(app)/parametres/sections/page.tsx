@@ -1,4 +1,4 @@
-import { requireRole } from "@/lib/auth/current-user";
+import { requireModule } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardBody } from "@/components/ui/card";
@@ -8,7 +8,7 @@ import { SectionDetailsForm } from "./section-details-form";
 import { SectionCategorySelect } from "./section-category-select";
 
 export default async function SectionsPage() {
-  await requireRole(["administrateur"]);
+  await requireModule("sections");
   const supabase = await createClient();
 
   const [{ data: sections }, { data: categories }] = await Promise.all([

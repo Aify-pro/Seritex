@@ -1,4 +1,4 @@
-import { requireRole } from "@/lib/auth/current-user";
+import { requireModule } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
@@ -45,7 +45,7 @@ export default async function WorkOrderDetailPage({
 }: {
   params: Promise<{ id: string; workOrderId: string }>;
 }) {
-  const { profile } = await requireRole(["responsable_production", "administrateur"]);
+  const { profile } = await requireModule("ordres_fabrication");
   const { id, workOrderId } = await params;
   const supabase = await createClient();
   const sizes = await getSizes();

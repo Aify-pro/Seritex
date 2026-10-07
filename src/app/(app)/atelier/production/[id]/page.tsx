@@ -1,4 +1,4 @@
-import { requireRole } from "@/lib/auth/current-user";
+import { requireModule, can } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { getBaseUrl } from "@/lib/url";
 import { PageHeader } from "@/components/shell/page-header";
@@ -6,7 +6,6 @@ import { Card, CardHeader, CardBody } from "@/components/ui/card";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { PRODUCTION_ORDER_STATUS_LABELS } from "@/lib/types/domain";
 import { formatDate, formatDateTime } from "@/lib/utils";
-import { can } from "@/lib/auth/permissions";
 import { notFound } from "next/navigation";
 import { ArchiveButton } from "./archive-button";
 import { LifecycleActions } from "./lifecycle-actions";
@@ -45,13 +44,7 @@ export default async function ProductionOrderDetailPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ onglet?: string }>;
 }) {
-  const { profile } = await requireRole([
-    "responsable_production",
-    "administrateur",
-    "gestionnaire_stock",
-    "comptabilite",
-    "infographiste",
-  ]);
+  const { profile } = await requireModule("ordres_fabrication");
   const { id } = await params;
   const { onglet } = await searchParams;
   const supabase = await createClient();

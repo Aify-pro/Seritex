@@ -1,11 +1,11 @@
-import { requireRole } from "@/lib/auth/current-user";
+import { requireModule } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardBody } from "@/components/ui/card";
 import { formatDateTime } from "@/lib/utils";
 
 export default async function AuditLogPage() {
-  await requireRole(["administrateur"]);
+  await requireModule("audit");
   const supabase = await createClient();
 
   const { data: logs } = await supabase

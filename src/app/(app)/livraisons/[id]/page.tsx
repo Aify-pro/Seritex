@@ -1,15 +1,14 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ArrowLeft, Printer, MapPin } from "lucide-react";
-import { requireRole } from "@/lib/auth/current-user";
-import { can } from "@/lib/auth/permissions";
+import { requireModule, can } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatAmount, formatDate, formatDateTime } from "@/lib/utils";
-import { DELIVERY_MANAGER_ROLES, DELIVERY_ROLES } from "@/lib/delivery/access";
+import { DELIVERY_MANAGER_ROLES } from "@/lib/delivery/access";
 import { loadShipment } from "@/lib/delivery/shipment-data";
 import { REGLEMENT_LABELS, SHIPMENT_STATUS_LABELS, type ShipmentStatus } from "@/lib/delivery/status";
 import { AccountingForm, PlanningForm, PreparationForm, ShipmentLines, StatusActions } from "./shipment-workbench";
@@ -18,7 +17,7 @@ import { LotTraceView, type LotTrace } from "@/components/atelier/lot-trace";
 
 /** Fiche d'une expédition (LIV-1) : préparation, BL, validation comptable, planification, suivi, journal. */
 export default async function ShipmentPage({ params }: { params: Promise<{ id: string }> }) {
-  const { profile } = await requireRole([...DELIVERY_ROLES]);
+  const { profile } = await requireModule("livraisons");
   if (!(await can("livraisons", "view"))) redirect("/dashboard?erreur=acces_refuse");
   const { id } = await params;
   const shipment = await loadShipment(id);

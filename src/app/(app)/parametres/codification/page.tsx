@@ -1,4 +1,4 @@
-import { requireRole } from "@/lib/auth/current-user";
+import { requireModule } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
@@ -17,7 +17,7 @@ import {
  * abandonnée). Codes courts des référentiels, dépôt Sage par nature (D5).
  */
 export default async function CodificationPage() {
-  const { profile } = await requireRole(["administrateur", "responsable_production", "gestionnaire_stock"]);
+  const { profile } = await requireModule("codification");
   const supabase = await createClient();
   const [
     { data: rules },

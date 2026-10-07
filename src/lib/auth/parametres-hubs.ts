@@ -15,8 +15,8 @@ import { PARAMETRES, type NavItem, type SidebarEntry } from "@/lib/auth/nav";
  * Regroupement des écrans de Paramètres : un seul menu par thème dans la
  * barre latérale (« Intégration Sage »…), et les écrans du thème en onglets
  * au-dessus de chaque page. Les URL des écrans ne changent pas — seul le
- * regroupement est ici ; qui voit quoi reste décidé par NAV_BY_ROLE (rôle +
- * droits `view`), un onglet absent des entrées du rôle n'apparaît pas.
+ * regroupement est ici ; qui voit quoi reste décidé par getNavItems (droits
+ * `view` du rôle), un onglet absent des entrées du rôle n'apparaît pas.
  */
 interface HubDefinition {
   key: string;

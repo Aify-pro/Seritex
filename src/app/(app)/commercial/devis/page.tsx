@@ -1,4 +1,4 @@
-import { requireRole } from "@/lib/auth/current-user";
+import { requireModule } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardBody } from "@/components/ui/card";
@@ -8,7 +8,7 @@ import { formatAmount, formatDate } from "@/lib/utils";
 import Link from "next/link";
 
 export default async function QuotesPage() {
-  await requireRole(["commercial", "administrateur"]);
+  await requireModule("devis");
   const supabase = await createClient();
 
   const { data: quotes } = await supabase

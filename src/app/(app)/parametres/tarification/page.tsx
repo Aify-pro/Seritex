@@ -1,4 +1,4 @@
-import { requireRole } from "@/lib/auth/current-user";
+import { requireModule } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
@@ -12,7 +12,7 @@ import { TextilePricesForm } from "./textile-prices-form";
  * (onglet Prix de revient) ; le prix de revient réel, dans la fiche de l'ODF.
  */
 export default async function TarificationSettingsPage() {
-  await requireRole(["administrateur"]);
+  await requireModule("tarification");
   const supabase = await createClient();
   const [settings, printGrid, { data: textiles }, { data: textilePrices }] = await Promise.all([
     getPricingSettings(),

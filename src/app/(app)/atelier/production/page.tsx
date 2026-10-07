@@ -1,5 +1,5 @@
 import { odfClientLabel } from "@/lib/production/client-label";
-import { requireRole } from "@/lib/auth/current-user";
+import { requireModule } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { getBaseUrl } from "@/lib/url";
 import { PageHeader } from "@/components/shell/page-header";
@@ -19,7 +19,7 @@ export default async function ProductionOrdersPage({
 }: {
   searchParams: Promise<{ archives?: string }>;
 }) {
-  await requireRole(["responsable_production", "administrateur", "gestionnaire_stock"]);
+  await requireModule("ordres_fabrication");
   const { archives } = await searchParams;
   const showArchived = archives === "1";
   const supabase = await createClient();

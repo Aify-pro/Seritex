@@ -1,4 +1,4 @@
-import { requireRole } from "@/lib/auth/current-user";
+import { requireModule } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardBody } from "@/components/ui/card";
@@ -8,7 +8,7 @@ import Link from "next/link";
 import { formatDate } from "@/lib/utils";
 
 export default async function InfographieRequestsPage() {
-  await requireRole(["infographiste", "administrateur"]);
+  await requireModule("demandes_graphiques");
   const supabase = await createClient();
 
   const { data: requests } = await supabase
