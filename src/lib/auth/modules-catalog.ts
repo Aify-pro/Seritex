@@ -20,9 +20,9 @@ export const MODULE_GROUP_LABELS: Record<ModuleGroup, { title: string; descripti
 export interface ModuleMeta {
   group: ModuleGroup;
   /**
-   * Actions qui ont réellement un effet pour ce module. Les autres cases sont
-   * grisées dans la matrice : cocher « Supprimer » sur un module qui n'a rien
-   * à supprimer ne fait rien, autant ne pas le laisser croire.
+   * Actions que l'application lit réellement pour ce module. Les autres cases
+   * restent attribuables dans la matrice (elles sont enregistrées) mais y sont
+   * atténuées : elles n'ont pas encore d'effet.
    */
   actions: PermissionAction[];
   /**
