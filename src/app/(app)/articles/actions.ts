@@ -1,7 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { requireRole } from "@/lib/auth/current-user";
+import { requirePermission } from "@/lib/auth/permissions";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
@@ -22,7 +22,7 @@ function revalidateArticles() {
  * d'un coup tous les modèles existants incomplets.
  */
 export async function setProductModelSizes(productModelId: string, sizeIds: string[]) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("articles", "modify");
   const supabase = await createClient();
 
   const { error: delError } = await supabase
@@ -43,7 +43,7 @@ export async function setProductModelSizes(productModelId: string, sizeIds: stri
 }
 
 export async function setProductModelColors(productModelId: string, colorIds: string[]) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("articles", "modify");
   const supabase = await createClient();
 
   const { error: delError } = await supabase
@@ -64,7 +64,7 @@ export async function setProductModelColors(productModelId: string, colorIds: st
 }
 
 export async function toggleProductModelActive(productModelId: string, active: boolean) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("articles", "modify");
   const supabase = await createClient();
   const { error } = await supabase.from("product_models").update({ active }).eq("id", productModelId);
   if (error) return { error: error.message };
@@ -79,7 +79,7 @@ export async function toggleProductModelActive(productModelId: string, active: b
  * (migration 0020) portent une référence exploitable par Sage.
  */
 export async function setProductModelSageReference(productModelId: string, sageReference: string) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("articles", "modify");
   const supabase = await createClient();
   const { error } = await supabase
     .from("product_models")
@@ -102,7 +102,7 @@ const newZoneSchema = z.object({
 
 /** Ajoute une zone au gabarit d'un modèle de produit (section 8) — placée après les zones existantes. */
 export async function addProductZoneTemplate(formData: FormData) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("articles", "modify");
   const parsed = newZoneSchema.safeParse({
     product_model_id: formData.get("product_model_id"),
     zone_key: formData.get("zone_key"),
@@ -131,7 +131,7 @@ export async function addProductZoneTemplate(formData: FormData) {
 
 /** Retire une zone du gabarit — réservé à l'administrateur (cohérent avec product_zone_templates_delete). */
 export async function removeProductZoneTemplate(zoneTemplateId: string) {
-  await requireRole(["administrateur"]);
+  await requirePermission("articles", "delete");
   const supabase = await createClient();
   const { error } = await supabase.from("product_zone_templates").delete().eq("id", zoneTemplateId);
   if (error) return { error: error.message };
@@ -153,7 +153,7 @@ const newPrintableZoneSchema = z.object({
 
 /** Ajoute une zone imprimable à un modèle de produit — placée après les zones imprimables existantes. */
 export async function addProductPrintableZone(formData: FormData) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("articles", "modify");
   const parsed = newPrintableZoneSchema.safeParse({
     product_model_id: formData.get("product_model_id"),
     zone_key: formData.get("zone_key"),
@@ -182,7 +182,7 @@ export async function addProductPrintableZone(formData: FormData) {
 
 /** Retire une zone imprimable — réservé à l'administrateur (cohérent avec product_printable_zones_delete). */
 export async function removeProductPrintableZone(zoneId: string) {
-  await requireRole(["administrateur"]);
+  await requirePermission("articles", "delete");
   const supabase = await createClient();
   const { error } = await supabase.from("product_printable_zones").delete().eq("id", zoneId);
   if (error) return { error: error.message };
@@ -202,7 +202,7 @@ const newNomenclatureLineSchema = z.object({
 
 /** Ajoute une ligne de nomenclature (composant constant hors tissu) à un modèle de produit. */
 export async function addNomenclatureLine(formData: FormData) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("articles", "modify");
   const parsed = newNomenclatureLineSchema.safeParse({
     product_model_id: formData.get("product_model_id"),
     consumable_id: formData.get("consumable_id"),
@@ -223,7 +223,7 @@ export async function addNomenclatureLine(formData: FormData) {
 
 /** Relie une ligne de nomenclature en texte libre (antérieure à COM-G) à un consommable du référentiel. */
 export async function linkNomenclatureLine(lineId: string, consumableId: string) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("articles", "modify");
   const supabase = await createClient();
   const { error } = await supabase.from("nomenclature_lines").update({ consumable_id: consumableId }).eq("id", lineId);
   if (error) return { error: error.message };
@@ -233,7 +233,7 @@ export async function linkNomenclatureLine(lineId: string, consumableId: string)
 
 /** Retire une ligne de nomenclature — réservé à l'administrateur (cohérent avec nomenclature_lines_delete). */
 export async function removeNomenclatureLine(lineId: string) {
-  await requireRole(["administrateur"]);
+  await requirePermission("articles", "delete");
   const supabase = await createClient();
   const { error } = await supabase.from("nomenclature_lines").delete().eq("id", lineId);
   if (error) return { error: error.message };
@@ -248,7 +248,7 @@ const identitySchema = z.object({
 
 /** Nom et catégorie d'un modèle (onglet Général de la fiche article). */
 export async function updateProductModelIdentity(productModelId: string, formData: FormData) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("articles", "modify");
   const parsed = identitySchema.safeParse({ name: formData.get("name"), category: formData.get("category") ?? undefined });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message };
   const supabase = await createClient();
@@ -268,7 +268,7 @@ export async function updateProductModelIdentity(productModelId: string, formDat
  * l'inventaire de la migration 0073.
  */
 export async function attachPatternArticle(patternArticleId: string, productModelId: string) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("articles", "modify");
   const supabase = await createClient();
   const { error } = await supabase
     .from("pattern_articles")
@@ -290,7 +290,7 @@ export async function setProductModelClassification(
   productModelId: string,
   patch: { categorieId?: string | null; matiereId?: string | null }
 ) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("articles", "modify");
   const supabase = await createClient();
   const update: Record<string, string | null> = {};
   if (patch.categorieId !== undefined) update.categorie_id = patch.categorieId;
@@ -303,7 +303,7 @@ export async function setProductModelClassification(
 
 /** Textiles autorisés (axe grammage des déclinaisons) — remplace la liste. */
 export async function setProductModelTextiles(productModelId: string, textileIds: string[]) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("articles", "modify");
   const supabase = await createClient();
   const { data: current } = await supabase.from("product_model_textiles").select("textile_id").eq("product_model_id", productModelId);
   const before = new Set((current ?? []).map((r) => r.textile_id as string));
@@ -329,7 +329,7 @@ export async function setProductModelTextiles(productModelId: string, textileIds
 
 /** Génère les déclinaisons cochées (textiles × couleurs × tailles) — ensure_variants. */
 export async function generateVariants(productModelId: string) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("articles", "modify");
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("ensure_variants", { p_model_id: productModelId });
   if (error) return { error: error.message };
@@ -338,7 +338,7 @@ export async function generateVariants(productModelId: string) {
 }
 
 export async function setVariantActive(variantId: string, actif: boolean) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("articles", "modify");
   const supabase = await createClient();
   const { error } = await supabase
     .from("product_variants")
@@ -358,7 +358,7 @@ export async function setStockArticleSageReference(
   target: { kind: "stock_article" | "variant"; id: string },
   reference: string
 ): Promise<{ error?: string; warning?: string }> {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("articles", "modify");
   const supabase = await createClient();
   const ref = reference.trim() || null;
   const table = target.kind === "variant" ? "product_variants" : "variant_stock_articles";
@@ -376,7 +376,7 @@ export async function setStockArticleSageReference(
 ============================================================ */
 
 export async function createModelRoute(productModelId: string, nom: string) {
-  const { authId } = await requireRole(["administrateur", "responsable_production"]);
+  const { authId } = await requirePermission("articles", "modify");
   const name = nom.trim();
   if (!name) return { error: "Donnez un nom au parcours." };
   const supabase = await createClient();
@@ -390,7 +390,7 @@ export async function createModelRoute(productModelId: string, nom: string) {
 }
 
 export async function deleteModelRoute(routeId: string) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("articles", "modify");
   const supabase = await createClient();
   const { error } = await supabase.from("model_routes").delete().eq("id", routeId);
   if (error) return { error: error.message };
@@ -399,7 +399,7 @@ export async function deleteModelRoute(routeId: string) {
 }
 
 export async function setDefaultModelRoute(productModelId: string, routeId: string) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("articles", "modify");
   const supabase = await createClient();
   const { error: resetError } = await supabase
     .from("model_routes")
@@ -423,7 +423,7 @@ const stepSchema = z.object({
 
 /** Ajoute une étape (section précise ou catégorie) ; le parcours est contrôlé ensuite. */
 export async function addModelRouteStep(routeId: string, input: z.infer<typeof stepSchema>) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("articles", "modify");
   const parsed = stepSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message };
   const s = parsed.data;
@@ -455,7 +455,7 @@ export async function addModelRouteStep(routeId: string, input: z.infer<typeof s
 }
 
 export async function removeModelRouteStep(stepId: string) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("articles", "modify");
   const supabase = await createClient();
   const { error } = await supabase.from("model_route_steps").delete().eq("id", stepId);
   if (error) return { error: error.message };

@@ -1,7 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { requireRole } from "@/lib/auth/current-user";
+import { requirePermission } from "@/lib/auth/permissions";
 import { revalidatePath } from "next/cache";
 
 /**
@@ -15,7 +15,7 @@ export async function linkSageArticleToTextile(
   sageReference: string,
   colorId: string | null
 ) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("articles", "modify");
   const supabase = await createClient();
 
   const { error } = await supabase.from("textile_sage_articles").insert({
@@ -35,7 +35,7 @@ export async function linkSageArticleToTextile(
 }
 
 export async function unlinkSageArticle(textileId: string, sageReference: string) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("articles", "modify");
   const supabase = await createClient();
   const { error } = await supabase
     .from("textile_sage_articles")
@@ -49,7 +49,7 @@ export async function unlinkSageArticle(textileId: string, sageReference: string
 
 /** Tissu principal d'un modèle de produit — détermine son ordre de tracé. */
 export async function setProductModelTextile(productModelId: string, textileId: string | null) {
-  await requireRole(["administrateur", "responsable_production"]);
+  await requirePermission("articles", "modify");
   const supabase = await createClient();
   const { error } = await supabase
     .from("product_models")

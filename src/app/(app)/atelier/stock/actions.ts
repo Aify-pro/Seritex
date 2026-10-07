@@ -1,7 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { requireRole } from "@/lib/auth/current-user";
+import { requirePermission } from "@/lib/auth/permissions";
 import { revalidatePath } from "next/cache";
 
 export type GenerateStockExportFicheResult = { error: string } | { id: string; numero: string };
@@ -16,7 +16,7 @@ export type GenerateStockExportFicheResult = { error: string } | { id: string; n
  * revalider.
  */
 export async function generateGlobalStockExportFiche(): Promise<GenerateStockExportFicheResult> {
-  await requireRole(["administrateur", "responsable_production", "gestionnaire_stock"]);
+  await requirePermission("stock_atelier", "modify");
   const supabase = await createClient();
 
   const { data, error } = await supabase.rpc("generate_stock_export_fiche", {
@@ -31,7 +31,7 @@ export async function generateGlobalStockExportFiche(): Promise<GenerateStockExp
 
 /** Dépôt Sage d'un mouvement pas encore exporté (LIV-3) — pré-rempli par nature, modifiable. */
 export async function setStockMovementDepot(movementId: string, depot: string): Promise<{ error?: string }> {
-  await requireRole(["administrateur", "responsable_production", "gestionnaire_stock"]);
+  await requirePermission("stock_atelier", "modify");
   const supabase = await createClient();
   const { error } = await supabase.rpc("set_stock_movement_depot", { p_movement_id: movementId, p_depot: depot });
   if (error) return { error: error.message };
@@ -42,7 +42,7 @@ export async function setStockMovementDepot(movementId: string, depot: string): 
 
 /** Fiche d'export Sage d'un bon de livraison (LIV-3) : les sorties PF de cette expédition. */
 export async function generateShipmentStockExportFiche(shipmentId: string): Promise<GenerateStockExportFicheResult> {
-  await requireRole(["administrateur", "responsable_production", "gestionnaire_stock"]);
+  await requirePermission("stock_atelier", "modify");
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("generate_shipment_stock_export_fiche", { p_shipment_id: shipmentId }).single();
   if (error) return { error: error.message };
@@ -62,7 +62,7 @@ export type RecordSageReconciliationResult = { error: string } | { ok: true };
  * changement de ce contrat (même RPC, même colonnes).
  */
 export async function recordSageReconciliation(ficheId: string, sageNumero: string): Promise<RecordSageReconciliationResult> {
-  await requireRole(["administrateur", "responsable_production", "gestionnaire_stock"]);
+  await requirePermission("stock_atelier", "modify");
   const supabase = await createClient();
 
   const { error } = await supabase.rpc("record_sage_reconciliation", {
