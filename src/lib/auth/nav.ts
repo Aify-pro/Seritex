@@ -27,6 +27,7 @@ import {
   ArrowLeftRight,
   Gauge,
   Mail,
+  Globe,
   ChartPie,
   Calculator,
   Barcode,
@@ -143,6 +144,7 @@ const STAFF_NAV: NavItem[] = [
   { href: "/parametres/societe", label: "Informations société", icon: navIcon(Landmark), section: PARAMETRES, module: "societe" },
   { href: "/parametres/stockage", label: "Stockage médiathèque", icon: navIcon(Database), section: PARAMETRES, module: "stockage_cibles" },
   { href: "/parametres/notifications", label: "Notifications", icon: navIcon(Mail), section: PARAMETRES, module: "notifications" },
+  { href: "/parametres/site-web", label: "Site web", icon: navIcon(Globe), section: PARAMETRES, module: "site_web" },
 ];
 
 /**

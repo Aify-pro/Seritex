@@ -17,6 +17,10 @@ export type RequestArticleLine = {
   quantite?: number;
   /** Groupe de tailles choisi pour la répartition (écran seulement). */
   groupe?: string;
+  /** Grammage choisi par le client (outil « Personnaliser » du site, 0110) : repris dans le devis. */
+  textile_id?: string | null;
+  /** Emplacements imprimés → nombre de couleurs (outil « Personnaliser », 0110) : repris dans le devis. */
+  impressions?: Record<string, number>;
 };
 
 export interface RequestModelOption {
@@ -70,5 +74,8 @@ export function cleanRequestLines(lines: RequestArticleLine[]): RequestArticleLi
       couleur_unique_id: l.couleur_unique_id,
       tailles: Object.fromEntries(Object.entries(l.tailles ?? {}).filter(([, q]) => Number.isInteger(q) && q > 0)),
       ...(Number.isInteger(l.quantite) && (l.quantite ?? 0) > 0 ? { quantite: l.quantite } : {}),
+      // Choix faits sur le site : conservés quand le commercial retouche la demande.
+      ...(l.textile_id ? { textile_id: l.textile_id } : {}),
+      ...(l.impressions && Object.keys(l.impressions).length ? { impressions: l.impressions } : {}),
     }));
 }

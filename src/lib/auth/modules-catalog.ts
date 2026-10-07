@@ -75,6 +75,7 @@ export const MODULE_META: Record<string, ModuleMeta> = {
   societe: { group: "parametres", actions: VIEW, platformAdminOnly: true },
   stockage_cibles: { group: "parametres", actions: VIEW, platformAdminOnly: true },
   notifications: { group: "parametres", actions: VIEW, platformAdminOnly: true },
+  site_web: { group: "parametres", actions: ["view", "modify"] },
 };
 
 const FALLBACK_META: ModuleMeta = { group: "modules", actions: VIEW };

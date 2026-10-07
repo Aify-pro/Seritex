@@ -42,6 +42,9 @@ await one(`insert into product_models(name, nature, type_appro, unite, publiable
 const roll = (textile, color, kg) =>
   q(`insert into textile_rolls(textile_id, color_id, poids_initial_kg, poids_kg, statut) values ($1,$2,$3,$3,'en_stock')`, [textile, color, kg]);
 
+// E-shop activé dans Paramètres > Site web (0110) : sinon le catalogue est toujours vide.
+await q(`update site_settings set eshop_actif = true`);
+
 await test("rien n'est publié tant que « publiable sur l'e-shop » n'est pas coché", async () => {
   assert.deepEqual(await catalogue(), []);
 });

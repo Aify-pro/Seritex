@@ -20,6 +20,7 @@ import { getDispatchRules, getSizeOptionsByModel } from "@/lib/quote-dispatch";
 import { colorAlertsByModel, getArticleAvailability } from "@/lib/articles/availability";
 import { StockRequestDetail } from "./stock-request-detail";
 import { SiteRequestDetail, type SiteProspect } from "./site-request-detail";
+import { SiteComposition, type SitePersonnalisation } from "./site-composition";
 import type { RequestArticleLine } from "@/lib/requests/articles";
 
 export default async function RequestDetailPage({
@@ -57,6 +58,11 @@ export default async function RequestDetailPage({
           prospect: request.prospect as SiteProspect,
         }}
         canLink={profile.role === "commercial" || profile.role === "administrateur"}
+        composition={
+          request.personnalisation ? (
+            <SiteComposition requestId={request.id} composition={request.personnalisation as SitePersonnalisation} />
+          ) : null
+        }
       />
     );
   }
@@ -333,6 +339,10 @@ export default async function RequestDetailPage({
               )}
             </CardBody>
           </Card>
+
+          {request.personnalisation ? (
+            <SiteComposition requestId={request.id} composition={request.personnalisation as SitePersonnalisation} />
+          ) : null}
 
           <Card>
             <CardHeader title="Devis" description="Historique et création de devis pour cette demande" />
