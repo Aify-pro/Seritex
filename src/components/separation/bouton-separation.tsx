@@ -6,7 +6,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { SeparationCouleurs } from "./separation-couleurs";
 
 /** Ouvre la séparation des couleurs d'un visuel déjà en ligne (URL signée, lisible en CORS). */
-export function BoutonSeparation({ url, nom }: { url: string; nom: string }) {
+export function BoutonSeparation({ url, nom, largeurCm }: { url: string; nom: string; largeurCm?: number | null }) {
   return (
     <Dialog
       size="lg"
@@ -19,7 +19,7 @@ export function BoutonSeparation({ url, nom }: { url: string; nom: string }) {
         </Button>
       }
     >
-      <SeparationCouleurs source={url} nom={nom} />
+      <SeparationCouleurs source={url} nom={nom} largeurCm={largeurCm} />
     </Dialog>
   );
 }

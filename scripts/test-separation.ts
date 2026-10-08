@@ -7,14 +7,16 @@
  *  3. logo en JPEG très compressé et petit : toujours 3 encres (bruit et bords ignorés) ;
  *  4. texte 2 couleurs : 2 encres ;
  *  5. dégradé : signalé comme dégradé ;
- *  6. nombre de couleurs imposé : respecté.
+ *  6. nombre de couleurs imposé : respecté ;
+ *  7. films en pleine résolution : encres appliquées à 2 400 px, recadrage sur le
+ *     dessin, aucun liseré parasite sur l'écran du petit texte, transparence tranchée.
  *
  * Lancer : npm run test:separation
  */
 import assert from "node:assert/strict";
 import sharp, { type Sharp } from "sharp";
 import reveal from "../src/lib/separation/reveal-core.js";
-import { separer, HORS_DESSIN, type OptionsSeparation } from "../src/lib/separation/separer";
+import { appliquerEncres, separer, HORS_DESSIN, type OptionsSeparation } from "../src/lib/separation/separer";
 
 const logo = (fond: string, texte: boolean) => `<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1600">${fond}
 <circle cx="800" cy="650" r="420" fill="#d62828"/><circle cx="800" cy="650" r="300" fill="#f77f00"/>
@@ -107,6 +109,48 @@ await test("nombre de couleurs imposé (6 sur le dégradé)", async () => {
   const r = await analyser(await encodé(svg(degrade).jpeg({ quality: 85 })), { nbCouleurs: 6 });
   assert.equal(r.couleurs.length, 6, resume(r));
   return resume(r);
+});
+
+await test("films : logo JPEG en pleine résolution", async () => {
+  const fichier = await svg(logo(BLANC, true)).resize(2400).jpeg({ quality: 85 }).toBuffer();
+  const r = await analyser(sharp(fichier));
+  const { data, info } = await sharp(fichier).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const t = Date.now();
+  const f = appliquerEncres(new Uint8ClampedArray(data), info.width, info.height, r.couleurs.map((c) => c.hex), r.fond, r.transparent);
+  const ms = Date.now() - t;
+  // Le dessin occupe x = 380..1220 sur 1600 (cercle et texte) : ~1260 px à 2 400 px.
+  assert.ok(Math.abs(f.largeur - 1260) < 30, `largeur recadrée ${f.largeur}`);
+  const vert = r.couleurs.findIndex((c) => proche(c.hex, "#2A9D8F"));
+  let egares = 0;
+  let verts = 0;
+  for (let p = 0; p < f.indices.length; p++) {
+    if (f.indices[p] !== vert) continue;
+    verts += 1;
+    if (Math.floor(p / f.largeur) < f.hauteur * 0.85) egares += 1;
+  }
+  assert.ok(verts > 1000, "le texte vert est sur son écran");
+  // Aucun îlot de moins de 4 pixels sur aucun écran.
+  for (let p = f.largeur + 1; p < f.indices.length - f.largeur - 1; p++) {
+    const c = f.indices[p];
+    if (c === HORS_DESSIN) continue;
+    const voisins = [p - 1, p + 1, p - f.largeur, p + f.largeur].filter((q) => f.indices[q] === c).length;
+    assert.ok(voisins > 0, `pixel isolé en ${p % f.largeur},${Math.floor(p / f.largeur)}`);
+  }
+  assert.ok(egares < 5, `${egares} pixels verts hors du texte`);
+  return `${f.largeur} × ${f.hauteur} px, ${egares} pixel(s) vert(s) égaré(s) (${ms} ms)`;
+});
+
+await test("films : PNG transparent tranché à 50 % d'opacité", async () => {
+  const fichier = await svg(logo("", false)).resize(2000).png().toBuffer();
+  const r = await analyser(sharp(fichier));
+  const { data, info } = await sharp(fichier).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const f = appliquerEncres(new Uint8ClampedArray(data), info.width, info.height, r.couleurs.map((c) => c.hex), r.fond, r.transparent);
+  const coins = [0, f.largeur - 1, (f.hauteur - 1) * f.largeur].map((p) => f.indices[p]);
+  assert.ok(coins.every((k) => k === HORS_DESSIN), "coins hors du dessin (cercle)");
+  const encres = new Set(f.indices);
+  encres.delete(HORS_DESSIN);
+  assert.equal(encres.size, 3);
+  return `${f.largeur} × ${f.hauteur} px, ${encres.size} encres`;
 });
 
 console.log(`${n} tests réussis`);

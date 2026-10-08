@@ -119,7 +119,13 @@ export async function SiteComposition({ requestId, composition }: { requestId: s
                       </span>
                       <Download className="h-4 w-4 text-foreground-muted" />
                     </a>
-                    {image && lien && <BoutonSeparation url={lien} nom={f.file_name as string} />}
+                    {image && lien && (
+                      <BoutonSeparation
+                        url={lien}
+                        nom={f.file_name as string}
+                        largeurCm={f.marquage ? composition.marquages[(f.marquage as number) - 1]?.largeur_cm : null}
+                      />
+                    )}
                   </li>
                 );
               })}

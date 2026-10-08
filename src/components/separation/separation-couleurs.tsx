@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Info, Loader2 } from "lucide-react";
+import { AlertTriangle, Download, Info, Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { dessiner, lireImage, separerPixels, type ResultatSeparation } from "@/lib/separation/client";
+import { dimensionsFilms, PPP_FILMS } from "@/lib/separation/dimensions-films";
 import { cn } from "@/lib/utils";
 
 /** Fond en damier : montre ce qui n'est pas imprimé (fond retiré, transparence). */
@@ -18,13 +20,29 @@ type Image = Awaited<ReturnType<typeof lireImage>>;
  * proposition des encres (une par écran), aperçu recomposé et écran de
  * chaque couleur en noir sur blanc. Proposition à valider par l'infographie.
  */
-export function SeparationCouleurs({ source, nom }: { source: Blob | string; nom: string }) {
+export function SeparationCouleurs({
+  source,
+  nom,
+  largeurCm: largeurInitiale,
+  reference,
+}: {
+  source: Blob | string;
+  nom: string;
+  /** Largeur du marquage connue (composition du site), en cm. */
+  largeurCm?: number | null;
+  /** Référence de la demande, reprise sur les films. */
+  reference?: string | null;
+}) {
   const [image, setImage] = useState<Image | null>(null);
   const [nb, setNb] = useState<number | null>(null);
   const [resultat, setResultat] = useState<ResultatSeparation | null>(null);
   const [calcul, setCalcul] = useState(true);
   const [erreur, setErreur] = useState<string | null>(null);
   const [actif, setActif] = useState<number | null>(null);
+  const [largeurCm, setLargeurCm] = useState(largeurInitiale && largeurInitiale > 0 ? largeurInitiale : 25);
+  const [miroir, setMiroir] = useState(false);
+  const [etapeFilms, setEtapeFilms] = useState<string | null>(null);
+  const [erreurFilms, setErreurFilms] = useState<string | null>(null);
 
   useEffect(() => {
     let annule = false;
@@ -65,6 +83,28 @@ export function SeparationCouleurs({ source, nom }: { source: Blob | string; nom
 
   const apercu = useMemo(() => (resultat ? dessiner(resultat) : null), [resultat]);
   const ecrans = useMemo(() => (resultat ? resultat.couleurs.map((_, i) => dessiner(resultat, i)) : []), [resultat]);
+
+  const dims = useMemo(() => (resultat && largeurCm > 0 ? dimensionsFilms(resultat, largeurCm) : null), [resultat, largeurCm]);
+
+  async function telechargerFilms() {
+    if (!resultat) return;
+    setErreurFilms(null);
+    setEtapeFilms("Préparation…");
+    try {
+      const { preparerFilms } = await import("@/lib/separation/films");
+      const pdf = await preparerFilms(source, resultat, { largeurCm, miroir, nom, reference }, setEtapeFilms);
+      const url = URL.createObjectURL(pdf);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `films-${nom.replace(/\.[^.]+$/, "")}.pdf`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch {
+      setErreurFilms("Les films n'ont pas pu être préparés (visuel illisible ou mémoire insuffisante : essayez une largeur plus petite).");
+    } finally {
+      setEtapeFilms(null);
+    }
+  }
 
   function changerNb(valeur: string) {
     setCalcul(true);
@@ -185,8 +225,45 @@ export function SeparationCouleurs({ source, nom }: { source: Blob | string; nom
         </div>
       )}
 
+      {resultat && (
+        <section className="space-y-2 border-t border-border pt-4">
+          <p className="text-xs font-medium uppercase tracking-wide text-foreground-muted">Films à taille réelle</p>
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="flex flex-col gap-1 text-xs text-foreground-muted">
+              Largeur du marquage (cm)
+              <input
+                type="number"
+                min={2}
+                max={60}
+                step={0.5}
+                value={largeurCm}
+                onChange={(e) => setLargeurCm(Number(e.target.value))}
+                className="h-8 w-28 rounded-md border border-border bg-surface px-2 text-sm text-foreground"
+              />
+            </label>
+            <label className="flex h-8 items-center gap-2 text-xs text-foreground-muted">
+              <input type="checkbox" checked={miroir} onChange={(e) => setMiroir(e.target.checked)} />
+              Miroir
+            </label>
+            <Button type="button" size="sm" onClick={telechargerFilms} loading={!!etapeFilms} disabled={calcul || !(largeurCm >= 2 && largeurCm <= 60)}>
+              <Download className="h-3.5 w-3.5" />
+              Télécharger les films (PDF)
+            </Button>
+          </div>
+          {dims && (
+            <p className="text-xs text-foreground-muted">
+              {n} page{n > 1 ? "s" : ""}, un écran par page en noir, avec cibles de calage · dessin de{" "}
+              {largeurCm.toLocaleString("fr-FR")} × {dims.hauteurCm.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} cm · {dims.ppp} ppp
+              {dims.ppp < PPP_FILMS ? " (limite du navigateur à cette taille)" : ""}
+            </p>
+          )}
+          {etapeFilms && <p className="text-xs text-foreground-muted">{etapeFilms}</p>}
+          {erreurFilms && <p className="rounded-md bg-danger-soft px-3 py-2 text-xs text-danger">{erreurFilms}</p>}
+        </section>
+      )}
+
       <p className="text-xs text-foreground-muted">
-        Proposition automatique, à valider : le choix final des encres et la préparation des films restent faits par l&apos;infographie.
+        Proposition automatique, à valider : le choix final des encres et le contrôle des films avant insolation restent faits par l&apos;infographie.
       </p>
     </div>
   );
