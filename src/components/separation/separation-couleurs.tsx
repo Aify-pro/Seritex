@@ -5,6 +5,7 @@ import { AlertTriangle, Download, Info, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { dessiner, lireImage, separerPixels, type ResultatSeparation } from "@/lib/separation/client";
 import { dimensionsFilms, PPP_FILMS } from "@/lib/separation/dimensions-films";
+import { encreSousCouche, LIBELLES_QUALITE, qualite, rapprocher, type Encre, type Qualite } from "@/lib/separation/nuancier";
 import { cn } from "@/lib/utils";
 
 /** Fond en damier : montre ce qui n'est pas imprimé (fond retiré, transparence). */
@@ -14,6 +15,19 @@ const DAMIER = "bg-[length:16px_16px] bg-[conic-gradient(#e5e7eb_25%,#fff_0_50%,
 const LARGEUR_MIN_FILMS = 1000;
 
 type Image = Awaited<ReturnType<typeof lireImage>>;
+
+/** Rentré de la sous-couche sous les couleurs, en mm. */
+const RENTRE_SOUS_COUCHE_MM = 0.2;
+/** Vue « sous-couche » dans l'aperçu (les écrans de couleur sont numérotés à partir de 0). */
+const SOUS_COUCHE = -1;
+
+const TONS_QUALITE: Record<Qualite, string> = {
+  identique: "text-success",
+  proche: "text-foreground-muted",
+  "a-melanger": "text-warning",
+};
+
+const libelleEncre = (e: Encre) => (e.reference ? `${e.nom} (${e.reference})` : e.nom);
 
 /**
  * Séparation des couleurs d'un visuel client avec le moteur Reveal :
@@ -25,6 +39,8 @@ export function SeparationCouleurs({
   nom,
   largeurCm: largeurInitiale,
   reference,
+  encres = [],
+  textileFonce = false,
 }: {
   source: Blob | string;
   nom: string;
@@ -32,6 +48,10 @@ export function SeparationCouleurs({
   largeurCm?: number | null;
   /** Référence de la demande, reprise sur les films. */
   reference?: string | null;
+  /** Nuancier d'encres actives (Paramètres > Nuancier d'encres). */
+  encres?: Encre[];
+  /** Textile foncé connu (composition du site) : la sous-couche est conseillée. */
+  textileFonce?: boolean;
 }) {
   const [image, setImage] = useState<Image | null>(null);
   const [nb, setNb] = useState<number | null>(null);
@@ -43,6 +63,9 @@ export function SeparationCouleurs({
   const [miroir, setMiroir] = useState(false);
   const [etapeFilms, setEtapeFilms] = useState<string | null>(null);
   const [erreurFilms, setErreurFilms] = useState<string | null>(null);
+  // Encre choisie par écran (id), quand l'infographiste change la proposition.
+  const [choix, setChoix] = useState<Record<number, string>>({});
+  const [avecSousCouche, setAvecSousCouche] = useState(false);
 
   useEffect(() => {
     let annule = false;
@@ -68,6 +91,7 @@ export function SeparationCouleurs({
         setResultat(r);
         setErreur(null);
         setActif(null);
+        setChoix({});
       })
       .catch(() => !annule && setErreur("La séparation a échoué sur ce visuel."))
       .finally(() => !annule && setCalcul(false));
@@ -84,6 +108,14 @@ export function SeparationCouleurs({
   const apercu = useMemo(() => (resultat ? dessiner(resultat) : null), [resultat]);
   const ecrans = useMemo(() => (resultat ? resultat.couleurs.map((_, i) => dessiner(resultat, i)) : []), [resultat]);
 
+  const sousCoucheApercu = useMemo(() => (resultat && avecSousCouche ? dessiner(resultat, "dessin") : null), [resultat, avecSousCouche]);
+  const proches = useMemo(() => (resultat ? resultat.couleurs.map((c) => rapprocher(c.hex, encres)) : []), [resultat, encres]);
+  const encreDe = (i: number) => {
+    const liste = proches[i] ?? [];
+    return liste.find((x) => x.encre.id === choix[i]) ?? liste[0] ?? null;
+  };
+  const blanc = encreSousCouche(encres);
+
   const dims = useMemo(() => (resultat && largeurCm > 0 ? dimensionsFilms(resultat, largeurCm) : null), [resultat, largeurCm]);
 
   async function telechargerFilms() {
@@ -92,7 +124,22 @@ export function SeparationCouleurs({
     setEtapeFilms("Préparation…");
     try {
       const { preparerFilms } = await import("@/lib/separation/films");
-      const pdf = await preparerFilms(source, resultat, { largeurCm, miroir, nom, reference }, setEtapeFilms);
+      const pdf = await preparerFilms(
+        source,
+        resultat,
+        {
+          largeurCm,
+          miroir,
+          nom,
+          reference,
+          encres: resultat.couleurs.map((_, i) => {
+            const e = encreDe(i);
+            return e ? libelleEncre(e.encre) : null;
+          }),
+          sousCouche: avecSousCouche ? { nom: blanc ? libelleEncre(blanc) : "Blanc", rentreMm: RENTRE_SOUS_COUCHE_MM } : null,
+        },
+        setEtapeFilms,
+      );
       const url = URL.createObjectURL(pdf);
       const a = document.createElement("a");
       a.href = url;
@@ -116,14 +163,23 @@ export function SeparationCouleurs({
   }
 
   const n = resultat?.couleurs.length ?? 0;
-  const couleurActive = actif !== null ? resultat?.couleurs[actif] : null;
-  const vue = actif !== null ? ecrans[actif] : apercu;
+  const nEcrans = n + (avecSousCouche ? 1 : 0);
+  const couleurActive = actif !== null && actif >= 0 ? resultat?.couleurs[actif] : null;
+  const vue = actif === SOUS_COUCHE ? sousCoucheApercu : actif !== null ? ecrans[actif] : apercu;
+  const titreVue =
+    actif === SOUS_COUCHE
+      ? "Sous-couche blanche"
+      : couleurActive
+        ? `Écran ${(actif ?? 0) + 1 + (avecSousCouche ? 1 : 0)} · ${encreDe(actif ?? 0)?.encre.nom ?? couleurActive.hex}`
+        : `Aperçu en ${n} couleur${n > 1 ? "s" : ""}`;
 
   return (
     <div className="space-y-4 text-sm">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-base font-semibold text-foreground">
-          {resultat ? `${n} couleur${n > 1 ? "s" : ""} → ${n} écran${n > 1 ? "s" : ""}` : "Analyse du visuel…"}
+          {resultat
+            ? `${n} couleur${n > 1 ? "s" : ""} → ${nEcrans} écran${nEcrans > 1 ? "s" : ""}${avecSousCouche ? " (dont la sous-couche)" : ""}`
+            : "Analyse du visuel…"}
           {calcul && <Loader2 className="ml-2 inline h-4 w-4 animate-spin text-foreground-muted" />}
         </p>
         <label className="flex items-center gap-2 text-foreground-muted">
@@ -177,19 +233,19 @@ export function SeparationCouleurs({
         </figure>
         <figure className="space-y-1">
           <figcaption className="text-xs font-medium uppercase tracking-wide text-foreground-muted">
-            {couleurActive ? `Écran ${(actif ?? 0) + 1} · ${couleurActive.hex}` : `Aperçu en ${n} couleur${n > 1 ? "s" : ""}`}
+            {titreVue}
           </figcaption>
           <div
             className={cn(
               "flex aspect-square items-center justify-center rounded-md border border-border p-3",
-              couleurActive ? "bg-white" : DAMIER,
+              actif !== null ? "bg-white" : DAMIER,
             )}
           >
             {vue && (
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={vue}
-                alt={couleurActive ? `Écran ${couleurActive.hex}` : "Aperçu séparé"}
+                alt={titreVue}
                 className="max-h-full max-w-full object-contain [image-rendering:pixelated]"
               />
             )}
@@ -198,30 +254,100 @@ export function SeparationCouleurs({
       </div>
 
       {resultat && (
-        <div>
+        <div className="space-y-2">
           <p className="text-xs font-medium uppercase tracking-wide text-foreground-muted">Écrans proposés</p>
-          <ul className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {resultat.couleurs.map((c, i) => (
-              <li key={`${c.hex}-${i}`}>
+          <label
+            className={cn(
+              "flex flex-wrap items-center gap-2 rounded-md px-3 py-2 text-xs",
+              textileFonce ? "bg-warning-soft text-warning" : "text-foreground-muted",
+            )}
+          >
+            <input
+              type="checkbox"
+              checked={avecSousCouche}
+              onChange={(e) => {
+                setAvecSousCouche(e.target.checked);
+                if (!e.target.checked && actif === SOUS_COUCHE) setActif(null);
+              }}
+            />
+            <span className="font-medium text-foreground">Sous-couche blanche</span>
+            {textileFonce
+              ? "— textile foncé : conseillée, sous toutes les couleurs (écran imprimé en premier)."
+              : "— pour un textile foncé : un écran blanc sous toutes les couleurs, imprimé en premier."}
+          </label>
+          <ul className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {avecSousCouche && sousCoucheApercu && (
+              <li>
                 <button
                   type="button"
-                  onClick={() => setActif(actif === i ? null : i)}
+                  onClick={() => setActif(actif === SOUS_COUCHE ? null : SOUS_COUCHE)}
                   className={cn(
                     "w-full rounded-md border p-2 text-left transition-colors hover:bg-surface-muted",
-                    actif === i ? "border-brand ring-1 ring-brand" : "border-border",
+                    actif === SOUS_COUCHE ? "border-brand ring-1 ring-brand" : "border-border",
                   )}
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={ecrans[i]} alt="" className="aspect-square w-full rounded border border-border bg-white object-contain" />
+                  <img src={sousCoucheApercu} alt="" className="aspect-square w-full rounded border border-border bg-white object-contain" />
                   <span className="mt-1.5 flex items-center gap-1.5">
-                    <span className="h-3.5 w-3.5 shrink-0 rounded-full border border-border" style={{ backgroundColor: c.hex }} />
-                    <span className="font-medium">{c.hex}</span>
-                    <span className="ml-auto text-xs text-foreground-muted">{Math.max(1, Math.round(c.part * 100))} %</span>
+                    <span className="h-3.5 w-3.5 shrink-0 rounded-full border border-border" style={{ backgroundColor: blanc?.hex ?? "#FFFFFF" }} />
+                    <span className="font-medium">Sous-couche</span>
+                  </span>
+                  <span className="mt-0.5 block truncate text-xs text-foreground-muted">
+                    {blanc ? libelleEncre(blanc) : "Blanc (aucune encre « Sous-couche » au nuancier)"}
                   </span>
                 </button>
               </li>
-            ))}
+            )}
+            {resultat.couleurs.map((c, i) => {
+              const encre = encreDe(i);
+              const q = encre ? qualite(encre.ecart) : null;
+              return (
+                <li key={`${c.hex}-${i}`} className="rounded-md">
+                  <button
+                    type="button"
+                    onClick={() => setActif(actif === i ? null : i)}
+                    className={cn(
+                      "w-full rounded-md border p-2 text-left transition-colors hover:bg-surface-muted",
+                      actif === i ? "border-brand ring-1 ring-brand" : "border-border",
+                    )}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={ecrans[i]} alt="" className="aspect-square w-full rounded border border-border bg-white object-contain" />
+                    <span className="mt-1.5 flex items-center gap-1.5">
+                      <span className="h-3.5 w-3.5 shrink-0 rounded-full border border-border" style={{ backgroundColor: c.hex }} />
+                      <span className="font-medium">{c.hex}</span>
+                      <span className="ml-auto text-xs text-foreground-muted">{Math.max(1, Math.round(c.part * 100))} %</span>
+                    </span>
+                  </button>
+                  {encre && (
+                    <div className="mt-1 space-y-0.5 px-0.5">
+                      <select
+                        value={encre.encre.id}
+                        onChange={(e) => setChoix({ ...choix, [i]: e.target.value })}
+                        aria-label={`Encre de l'écran ${c.hex}`}
+                        className="h-7 w-full rounded-md border border-border bg-surface px-1.5 text-xs text-foreground"
+                      >
+                        {(proches[i] ?? []).map((x) => (
+                          <option key={x.encre.id} value={x.encre.id}>
+                            {libelleEncre(x.encre)}
+                          </option>
+                        ))}
+                      </select>
+                      <p className={cn("flex items-center gap-1 text-xs", TONS_QUALITE[q!])}>
+                        <span className="h-2.5 w-2.5 shrink-0 rounded-full border border-border" style={{ backgroundColor: encre.encre.hex }} />
+                        {LIBELLES_QUALITE[q!]}
+                      </p>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
           </ul>
+          {encres.length === 0 && (
+            <p className="text-xs text-foreground-muted">
+              Nuancier d&apos;encres vide : ajoutez vos encres dans Paramètres pour que chaque écran propose l&apos;encre la plus proche.
+            </p>
+          )}
         </div>
       )}
 
@@ -252,7 +378,7 @@ export function SeparationCouleurs({
           </div>
           {dims && (
             <p className="text-xs text-foreground-muted">
-              {n} page{n > 1 ? "s" : ""}, un écran par page en noir, avec cibles de calage · dessin de{" "}
+              {nEcrans} page{nEcrans > 1 ? "s" : ""}, un écran par page en noir, avec cibles de calage · dessin de{" "}
               {largeurCm.toLocaleString("fr-FR")} × {dims.hauteurCm.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} cm · {dims.ppp} ppp
               {dims.ppp < PPP_FILMS ? " (limite du navigateur à cette taille)" : ""}
             </p>

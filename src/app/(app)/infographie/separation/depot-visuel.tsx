@@ -3,12 +3,13 @@
 import { useState } from "react";
 import { Upload } from "lucide-react";
 import { SeparationCouleurs } from "@/components/separation/separation-couleurs";
+import type { Encre } from "@/lib/separation/nuancier";
 import { cn } from "@/lib/utils";
 
 const FORMATS = "image/png,image/jpeg,image/webp,image/svg+xml";
 
 /** Dépôt d'un visuel (glisser-déposer ou choix du fichier), analysé dans le navigateur sans envoi. */
-export function DepotVisuel() {
+export function DepotVisuel({ encres }: { encres: Encre[] }) {
   const [fichier, setFichier] = useState<File | null>(null);
   const [survol, setSurvol] = useState(false);
 
@@ -40,7 +41,7 @@ export function DepotVisuel() {
         <input type="file" accept={FORMATS} className="sr-only" onChange={(e) => choisir(e.target.files?.[0])} />
       </label>
 
-      {fichier && <SeparationCouleurs key={`${fichier.name}-${fichier.lastModified}-${fichier.size}`} source={fichier} nom={fichier.name} />}
+      {fichier && <SeparationCouleurs key={`${fichier.name}-${fichier.lastModified}-${fichier.size}`} source={fichier} nom={fichier.name} encres={encres} />}
     </div>
   );
 }

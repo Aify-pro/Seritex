@@ -62,6 +62,7 @@ export const MODULE_META: Record<string, ModuleMeta> = {
   // --- Paramètres --------------------------------------------------------
   couleurs_tailles: { group: "parametres", actions: ["view", "create", "modify", "delete"] },
   codification: { group: "parametres", actions: ["view", "modify"] },
+  encres: { group: "parametres", actions: ["view", "create", "modify", "delete"] },
   tarification: { group: "parametres", actions: ["view", "create", "modify", "delete"] },
   sections: { group: "parametres", actions: ["view", "create", "modify", "delete"] },
   fabrication: { group: "parametres", actions: VIEW, platformAdminOnly: true },

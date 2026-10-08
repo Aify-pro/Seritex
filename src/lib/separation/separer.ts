@@ -400,6 +400,8 @@ export type Films = {
   hauteur: number;
   /** Pour chaque pixel du cadrage : index de l'encre ou HORS_DESSIN. */
   indices: Uint8Array;
+  /** Sous-couche blanche (1 = blanc déposé), si demandée. */
+  sousCouche?: Uint8Array;
 };
 
 /** Côté de la table de correspondance (RVB quantifié sur 6 bits par canal). */
@@ -424,6 +426,8 @@ export function appliquerEncres(
   transparent: boolean,
   /** Îlots plus petits (en pixels) retirés : ce qu'un écran ne sait pas imprimer. */
   pixelsMin = 4,
+  /** Rentré de la sous-couche en pixels ; null = pas de sous-couche. */
+  rentreSousCouchePx: number | null = null,
 ): Films {
   const rgb = (hex: string): Vec => {
     const v = Number.parseInt(hex.slice(1), 16);
@@ -506,5 +510,44 @@ export function appliquerEncres(
   const lh = y1 - y0 + 1;
   const indices = new Uint8Array(lw * lh);
   for (let y = 0; y < lh; y++) indices.set(brut.subarray((y + y0) * w + x0, (y + y0) * w + x0 + lw), y * lw);
-  return { largeur: lw, hauteur: lh, indices: sansIlots(indices, lw, lh, pixelsMin) };
+  const films: Films = { largeur: lw, hauteur: lh, indices: sansIlots(indices, lw, lh, pixelsMin) };
+  if (rentreSousCouchePx !== null) films.sousCouche = sousCouche(films, rentreSousCouchePx);
+  return films;
+}
+
+/**
+ * Sous-couche blanche (lot 3) : 1 là où une encre est déposée, rentré de
+ * `rentrePx` pixels pour que le blanc ne déborde pas des couleurs au calage.
+ * Distance au bord par chanfrein 3-4 (deux passes), en pixels.
+ */
+export function sousCouche(f: Films, rentrePx: number): Uint8Array {
+  const { largeur: w, hauteur: h, indices } = f;
+  // Distances plafonnées à 255 (octets) : seul compte le dépassement du seuil.
+  const seuil = Math.min(250, Math.max(1, Math.round(rentrePx)) * 3);
+  const d = new Uint8Array(w * h);
+  for (let p = 0; p < d.length; p++) d[p] = indices[p] === HORS_DESSIN ? 0 : 255;
+  const m = (a: number, b: number) => (b < a ? b : a);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const p = y * w + x;
+      if (!d[p]) continue;
+      // Hors de l'image = hors du dessin : le bord du cadrage compte comme un bord.
+      let v = m(d[p], m(x > 0 ? d[p - 1] + 3 : 3, y > 0 ? d[p - w] + 3 : 3));
+      if (x > 0 && y > 0) v = m(v, d[p - w - 1] + 4);
+      if (x < w - 1 && y > 0) v = m(v, d[p - w + 1] + 4);
+      d[p] = v > 255 ? 255 : v;
+    }
+  }
+  for (let y = h - 1; y >= 0; y--) {
+    for (let x = w - 1; x >= 0; x--) {
+      const p = y * w + x;
+      if (!d[p]) continue;
+      let v = m(d[p], m(x < w - 1 ? d[p + 1] + 3 : 3, y < h - 1 ? d[p + w] + 3 : 3));
+      if (x < w - 1 && y < h - 1) v = m(v, d[p + w + 1] + 4);
+      if (x > 0 && y < h - 1) v = m(v, d[p + w - 1] + 4);
+      d[p] = v > 255 ? 255 : v;
+    }
+  }
+  for (let p = 0; p < d.length; p++) d[p] = d[p] > seuil ? 1 : 0;
+  return d;
 }
