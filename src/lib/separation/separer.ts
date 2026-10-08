@@ -340,3 +340,171 @@ export async function separer(
     degrade: (lisses > SEUIL_FRONTIERES * frontieres && lisses > LISSES_MIN * m) || ecartTotal / m > SEUIL_PHOTO,
   };
 }
+
+/* ------------------------------------------------------------------------ */
+/* Films : encres appliquées en pleine résolution                           */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Îlots trop petits pour être imprimés (artefacts JPEG au bord d'une forme) :
+ * toute zone d'une même valeur (encre ou fond, voisinage 4) de moins de
+ * `pixelsMin` pixels prend la valeur la plus fréquente sur son pourtour.
+ */
+function sansIlots(v: Uint8Array, w: number, h: number, pixelsMin: number): Uint8Array {
+  const out = v.slice();
+  if (pixelsMin <= 1) return out;
+  const vu = new Uint8Array(v.length);
+  const pile = new Int32Array(v.length);
+  const zone: number[] = [];
+  const bord = new Uint32Array(256);
+  for (let depart = 0; depart < v.length; depart++) {
+    if (vu[depart]) continue;
+    const c = v[depart];
+    let haut = 0;
+    pile[haut++] = depart;
+    vu[depart] = 1;
+    zone.length = 0;
+    bord.fill(0);
+    // Grande zone : on la parcourt pour la marquer, sans retenir ses pixels.
+    let grand = false;
+    while (haut > 0) {
+      const p = pile[--haut];
+      if (!grand) zone.push(p);
+      if (zone.length >= pixelsMin) grand = true;
+      const x = p % w;
+      for (let j = 0; j < 4; j++) {
+        const q = j === 0 ? (x > 0 ? p - 1 : -1) : j === 1 ? (x < w - 1 ? p + 1 : -1) : j === 2 ? p - w : p + w;
+        if (q < 0 || q >= v.length) continue;
+        if (v[q] !== c) {
+          bord[v[q]] += 1;
+          continue;
+        }
+        if (vu[q]) continue;
+        vu[q] = 1;
+        pile[haut++] = q;
+      }
+    }
+    if (grand) continue;
+    let best = -1;
+    for (let k = 0; k < 256; k++) if (bord[k] && (best < 0 || bord[k] > bord[best])) best = k;
+    if (best >= 0) for (const p of zone) out[p] = best;
+  }
+  return out;
+}
+
+/* ------------------------------------------------------------------------ */
+/* ------------------------------------------------------------------------ */
+
+export type Films = {
+  largeur: number;
+  hauteur: number;
+  /** Pour chaque pixel du cadrage : index de l'encre ou HORS_DESSIN. */
+  indices: Uint8Array;
+};
+
+/** Côté de la table de correspondance (RVB quantifié sur 6 bits par canal). */
+const Q = 64;
+
+/**
+ * Applique des encres déjà choisies (séparation à 700 px) à une image en
+ * pleine résolution, puis recadre sur le dessin.
+ *
+ * Un pixel est vu comme le mélange de deux « couleurs pures » (deux encres, ou
+ * une encre et le fond) : on retient la paire qui l'explique le mieux et on
+ * tranche à 50 %, comme une flasheuse sur un bord lissé. Un liseré bleu nuit
+ * sur fond blanc revient donc au bleu nuit ou au fond, jamais à une autre
+ * encre. Une image transparente est tranchée à 50 % d'opacité.
+ */
+export function appliquerEncres(
+  px: Uint8ClampedArray | Uint8Array,
+  w: number,
+  h: number,
+  encres: string[],
+  fond: string | null,
+  transparent: boolean,
+  /** Îlots plus petits (en pixels) retirés : ce qu'un écran ne sait pas imprimer. */
+  pixelsMin = 4,
+): Films {
+  const rgb = (hex: string): Vec => {
+    const v = Number.parseInt(hex.slice(1), 16);
+    return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
+  };
+  const purs: Vec[] = encres.map(rgb);
+  // Le fond (non imprimé) participe aux mélanges des bords.
+  const indexFond = purs.length;
+  const avecFond = !!fond || transparent;
+  if (avecFond) purs.push(fond ? rgb(fond) : [255, 255, 255]);
+
+  const table = new Uint8Array(Q * Q * Q).fill(254);
+  const choisir = (c: Vec) => {
+    let best = 0;
+    let bestD = Infinity;
+    let bestT = 0;
+    let bestA = 0;
+    let bestB = 0;
+    // Une seule couleur pure.
+    for (let a = 0; a < purs.length; a++) {
+      const d = distance(c, purs[a]);
+      if (d < bestD) {
+        bestD = d;
+        best = a;
+        bestA = -1;
+      }
+    }
+    // Mélange de deux couleurs pures : seulement s'il explique nettement mieux.
+    for (let a = 0; a < purs.length; a++) {
+      for (let b = a + 1; b < purs.length; b++) {
+        const A = purs[a];
+        const B = purs[b];
+        const ab = [B[0] - A[0], B[1] - A[1], B[2] - A[2]];
+        const l2 = ab[0] ** 2 + ab[1] ** 2 + ab[2] ** 2 || 1;
+        const t = Math.max(0, Math.min(1, ((c[0] - A[0]) * ab[0] + (c[1] - A[1]) * ab[1] + (c[2] - A[2]) * ab[2]) / l2));
+        const d = distance(c, [A[0] + t * ab[0], A[1] + t * ab[1], A[2] + t * ab[2]]);
+        if (d + 4 < bestD) {
+          bestD = d;
+          bestA = a;
+          bestB = b;
+          bestT = t;
+        }
+      }
+    }
+    if (bestA >= 0) best = bestT < 0.5 ? bestA : bestB;
+    return best === indexFond && avecFond ? HORS_DESSIN : best;
+  };
+
+  const n = w * h;
+  const brut = new Uint8Array(n);
+  let x0 = w;
+  let y0 = h;
+  let x1 = -1;
+  let y1 = -1;
+  for (let y = 0, p = 0; y < h; y++) {
+    for (let x = 0; x < w; x++, p++) {
+      const i = p * 4;
+      if (transparent && px[i + 3] < 128) {
+        brut[p] = HORS_DESSIN;
+        continue;
+      }
+      const cle = ((px[i] >> 2) * Q + (px[i + 1] >> 2)) * Q + (px[i + 2] >> 2);
+      let k = table[cle];
+      if (k === 254) {
+        k = choisir([(px[i] & 0xfc) + 2, (px[i + 1] & 0xfc) + 2, (px[i + 2] & 0xfc) + 2]);
+        table[cle] = k;
+      }
+      brut[p] = k;
+      if (k !== HORS_DESSIN) {
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+      }
+    }
+  }
+  if (x1 < 0) throw new Error("dessin vide");
+
+  const lw = x1 - x0 + 1;
+  const lh = y1 - y0 + 1;
+  const indices = new Uint8Array(lw * lh);
+  for (let y = 0; y < lh; y++) indices.set(brut.subarray((y + y0) * w + x0, (y + y0) * w + x0 + lw), y * lw);
+  return { largeur: lw, hauteur: lh, indices: sansIlots(indices, lw, lh, pixelsMin) };
+}

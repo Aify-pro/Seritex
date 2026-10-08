@@ -3,9 +3,9 @@
  * confie le calcul au Web Worker (repli sur le fil principal si le
  * navigateur refuse le worker) et dessine les écrans.
  */
-import { HORS_DESSIN, type OptionsSeparation, type ResultatSeparation } from "./separer";
+import { HORS_DESSIN, type Films, type OptionsSeparation, type ResultatSeparation } from "./separer";
 
-export type { CouleurSeparee, ResultatSeparation } from "./separer";
+export type { CouleurSeparee, Films, ResultatSeparation } from "./separer";
 export { HORS_DESSIN } from "./separer";
 
 /** Côté maximal de l'image analysée : assez pour les traits fins, rapide à calculer. */
@@ -14,14 +14,15 @@ export const COTE_SEPARATION = 700;
 let worker: Worker | null = null;
 let workerHS = false;
 let suivant = 1;
-const enAttente = new Map<number, { ok: (r: ResultatSeparation) => void; ko: (e: Error) => void }>();
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const enAttente = new Map<number, { ok: (r: any) => void; ko: (e: Error) => void }>();
 
 function obtenirWorker(): Worker | null {
   if (workerHS || typeof Worker === "undefined") return null;
   if (worker) return worker;
   try {
     worker = new Worker(new URL("./separation.worker.ts", import.meta.url), { type: "module" });
-    worker.onmessage = (e: MessageEvent<{ id: number; resultat?: ResultatSeparation; erreur?: string }>) => {
+    worker.onmessage = (e: MessageEvent<{ id: number; resultat?: unknown; erreur?: string }>) => {
       const attente = enAttente.get(e.data.id);
       if (!attente) return;
       enAttente.delete(e.data.id);
@@ -41,6 +42,17 @@ function obtenirWorker(): Worker | null {
   }
 }
 
+/** Envoie un calcul au worker ; null si le navigateur n'en a pas. */
+function viaWorker<T>(message: Record<string, unknown>, transfert: Transferable[]): Promise<T> | null {
+  const w0 = obtenirWorker();
+  if (!w0) return null;
+  return new Promise<T>((ok, ko) => {
+    const id = suivant++;
+    enAttente.set(id, { ok, ko });
+    w0.postMessage({ ...message, id }, transfert);
+  });
+}
+
 async function surFilPrincipal(px: Uint8ClampedArray, w: number, h: number, options: OptionsSeparation) {
   const [{ default: reveal }, { separer }] = await Promise.all([import("./reveal-core.js"), import("./separer")]);
   return separer(reveal, px, w, h, options);
@@ -48,45 +60,84 @@ async function surFilPrincipal(px: Uint8ClampedArray, w: number, h: number, opti
 
 /** Sépare les couleurs de pixels RVBA déjà extraits d'un canvas. */
 export async function separerPixels(px: Uint8ClampedArray, w: number, h: number, options: OptionsSeparation = {}) {
-  const w0 = obtenirWorker();
-  if (!w0) return surFilPrincipal(px, w, h, options);
   try {
-    return await new Promise<ResultatSeparation>((ok, ko) => {
-      const id = suivant++;
-      enAttente.set(id, { ok, ko });
-      w0.postMessage({ id, px, w, h, options });
-    });
+    const r = viaWorker<ResultatSeparation>({ type: "separer", px, w, h, options }, []);
+    if (r) return await r;
   } catch {
-    return surFilPrincipal(px, w, h, options);
+    // repli ci-dessous
   }
+  return surFilPrincipal(px, w, h, options);
 }
 
-/** Charge une image (fichier ou URL accessible en CORS) réduite à COTE_SEPARATION. */
-export async function lireImage(source: Blob | string, cote = COTE_SEPARATION) {
+/**
+ * Applique les encres retenues à une image en pleine résolution et recadre
+ * sur le dessin (voir appliquerEncres). Les pixels sont transférés au worker :
+ * `px` n'est plus utilisable ensuite.
+ */
+export async function appliquerEncresPixels(px: Uint8ClampedArray, w: number, h: number, r: ResultatSeparation, pixelsMin = 4): Promise<Films> {
+  const encres = r.couleurs.map((c) => c.hex);
+  try {
+    const f = viaWorker<Films>({ type: "films", px, w, h, encres, fond: r.fond, transparent: r.transparent, pixelsMin }, [px.buffer]);
+    if (f) return await f;
+  } catch {
+    // repli ci-dessous
+  }
+  const { appliquerEncres } = await import("./separer");
+  return appliquerEncres(px, w, h, encres, r.fond, r.transparent, pixelsMin);
+}
+
+async function chargerImage(source: Blob | string) {
   const blob = typeof source === "string" ? await (await fetch(source)).blob() : source;
   const url = URL.createObjectURL(blob);
   try {
-    const img = await new Promise<HTMLImageElement>((ok, ko) => {
+    return await new Promise<HTMLImageElement>((ok, ko) => {
       const i = new Image();
       i.onload = () => ok(i);
       i.onerror = () => ko(new Error("image illisible"));
       i.src = url;
     });
-    const l0 = img.naturalWidth || cote;
-    const h0 = img.naturalHeight || cote;
-    const echelle = Math.min(1, cote / Math.max(l0, h0));
-    // Un SVG sans taille propre est rendu à la taille d'analyse.
-    const w = Math.max(1, Math.round(img.naturalWidth ? l0 * echelle : cote));
-    const h = Math.max(1, Math.round(img.naturalHeight ? h0 * echelle : cote));
-    const canvas = document.createElement("canvas");
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
-    ctx.drawImage(img, 0, 0, w, h);
-    return { px: ctx.getImageData(0, 0, w, h).data, w, h, largeurOrigine: l0, hauteurOrigine: h0 };
   } finally {
-    URL.revokeObjectURL(url);
+    // L'image décodée reste utilisable après la révocation.
+    setTimeout(() => URL.revokeObjectURL(url), 0);
   }
+}
+
+function pixels(img: HTMLImageElement, w: number, h: number, zone?: { x: number; y: number; l: number; h: number }) {
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+  ctx.imageSmoothingQuality = "high";
+  if (zone) {
+    // Un SVG sans taille propre est rendu à la taille demandée.
+    const l0 = img.naturalWidth || w / zone.l;
+    const h0 = img.naturalHeight || h / zone.h;
+    ctx.drawImage(img, zone.x * l0, zone.y * h0, zone.l * l0, zone.h * h0, 0, 0, w, h);
+  } else {
+    ctx.drawImage(img, 0, 0, w, h);
+  }
+  return ctx.getImageData(0, 0, w, h).data;
+}
+
+/** Charge une image (fichier ou URL accessible en CORS) réduite à `cote` pixels sur son plus grand côté. */
+export async function lireImage(source: Blob | string, cote = COTE_SEPARATION) {
+  const img = await chargerImage(source);
+  const l0 = img.naturalWidth || cote;
+  const h0 = img.naturalHeight || cote;
+  const echelle = Math.min(1, cote / Math.max(l0, h0));
+  // Un SVG sans taille propre est rendu à la taille d'analyse.
+  const w = Math.max(1, Math.round(img.naturalWidth ? l0 * echelle : cote));
+  const h = Math.max(1, Math.round(img.naturalHeight ? h0 * echelle : cote));
+  return { px: pixels(img, w, h), w, h, largeurOrigine: l0, hauteurOrigine: h0 };
+}
+
+/**
+ * Relit une zone de l'image (fractions de l'image) à la taille demandée,
+ * agrandie si besoin : sert aux films en pleine résolution.
+ */
+export async function lireZone(source: Blob | string, zone: { x: number; y: number; l: number; h: number }, w: number, h: number) {
+  const img = await chargerImage(source);
+  return { px: pixels(img, w, h, zone), w, h };
 }
 
 const rvb = (hex: string) => {

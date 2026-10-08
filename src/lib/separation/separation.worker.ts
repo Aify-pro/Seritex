@@ -1,11 +1,15 @@
 /**
  * Web Worker : la séparation tourne hors du fil principal pour ne pas figer
  * la page (1 à 3 s sur un visuel riche). Voir client.ts.
+ *  - « separer » : choix des encres sur l'image d'analyse (moteur Reveal) ;
+ *  - « films » : encres appliquées à l'image en pleine résolution.
  */
 import reveal from "./reveal-core.js";
-import { separer, type OptionsSeparation } from "./separer";
+import { appliquerEncres, separer, type OptionsSeparation } from "./separer";
 
-type Demande = { id: number; px: Uint8ClampedArray; w: number; h: number; options: OptionsSeparation };
+type Demande =
+  | { id: number; type?: "separer"; px: Uint8ClampedArray; w: number; h: number; options: OptionsSeparation }
+  | { id: number; type: "films"; px: Uint8ClampedArray; w: number; h: number; encres: string[]; fond: string | null; transparent: boolean; pixelsMin: number };
 
 const contexte = self as unknown as {
   onmessage: ((e: MessageEvent<Demande>) => void) | null;
@@ -13,11 +17,14 @@ const contexte = self as unknown as {
 };
 
 contexte.onmessage = async (e) => {
-  const { id, px, w, h, options } = e.data;
+  const d = e.data;
   try {
-    const resultat = await separer(reveal, px, w, h, options);
-    contexte.postMessage({ id, resultat }, [resultat.indices.buffer]);
+    const resultat =
+      d.type === "films"
+        ? appliquerEncres(d.px, d.w, d.h, d.encres, d.fond, d.transparent, d.pixelsMin)
+        : await separer(reveal, d.px, d.w, d.h, d.options);
+    contexte.postMessage({ id: d.id, resultat }, [resultat.indices.buffer]);
   } catch (err) {
-    contexte.postMessage({ id, erreur: err instanceof Error ? err.message : String(err) });
+    contexte.postMessage({ id: d.id, erreur: err instanceof Error ? err.message : String(err) });
   }
 };
