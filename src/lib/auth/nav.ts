@@ -34,6 +34,7 @@ import {
   Tags,
   Truck,
   MapPinned,
+  Layers,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { createElement, type ReactNode } from "react";
@@ -115,6 +116,7 @@ const STAFF_NAV: NavItem[] = [
   { href: "/commercial/clients", label: "Clients", icon: navIcon(Contact), module: "clients" },
   { href: "/commercial/demandes", label: "Demandes", icon: navIcon(Inbox), module: "demandes", alsoModules: ["demandes_stock"] },
   { href: "/infographie/demandes", label: "Demandes graphiques", icon: navIcon(ImageIcon), module: "demandes_graphiques" },
+  { href: "/infographie/separation", label: "Séparation des couleurs", icon: navIcon(Layers), module: "demandes_graphiques" },
   { href: "/commercial/devis", label: "Devis", icon: navIcon(FileText), module: "devis" },
   { href: "/articles", label: "Articles", icon: navIcon(Tags), module: "articles" },
   { href: "/commercial/echantillons", label: "Échantillons", icon: navIcon(FlaskConical), module: "echantillons" },

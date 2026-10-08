@@ -2,6 +2,7 @@ import { Download, FileText, ImageIcon } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
+import { BoutonSeparation } from "@/components/separation/bouton-separation";
 
 /** Composition envoyée par le client depuis l'outil « Personnaliser » du site (migration 0110). */
 export interface SitePersonnalisation {
@@ -97,7 +98,7 @@ export async function SiteComposition({ requestId, composition }: { requestId: s
                 const lien = url(f.path as string);
                 const image = (f.mime_type as string | null)?.startsWith("image/");
                 return (
-                  <li key={f.path as string}>
+                  <li key={f.path as string} className="flex items-center gap-2">
                     <a
                       href={lien ?? "#"}
                       target="_blank"
@@ -118,6 +119,7 @@ export async function SiteComposition({ requestId, composition }: { requestId: s
                       </span>
                       <Download className="h-4 w-4 text-foreground-muted" />
                     </a>
+                    {image && lien && <BoutonSeparation url={lien} nom={f.file_name as string} />}
                   </li>
                 );
               })}
