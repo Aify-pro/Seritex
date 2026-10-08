@@ -18,7 +18,8 @@
     "test:en-cours": "tsx scripts/test-en-cours.ts",
     "test:sql": "node scripts/sql-bench/run-all.mjs",
     "test:codification": "tsx scripts/test-codification.ts",
-    "test:livraison": "tsx scripts/test-livraison.ts"
+    "test:livraison": "tsx scripts/test-livraison.ts",
+    "test:separation": "tsx scripts/test-separation.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",
