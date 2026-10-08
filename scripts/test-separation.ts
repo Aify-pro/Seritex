@@ -11,7 +11,9 @@
  *  7. films en pleine résolution : encres appliquées à 2 400 px, recadrage sur le
  *     dessin, aucun liseré parasite sur l'écran du petit texte, transparence tranchée ;
  *  8. nuancier : encre la plus proche et qualité du rapprochement ; textile foncé ;
- *  9. sous-couche : réunion des encres, rentrée de la valeur demandée.
+ *  9. sous-couche : réunion des encres, rentrée de la valeur demandée ;
+ * 10. prix de revient sérigraphie : calcul à la main, grille proposée cohérente
+ *     avec la formule des devis (src/lib/pricing.ts), prix au kg d'un article.
  *
  * Lancer : npm run test:separation
  */
@@ -20,6 +22,8 @@ import sharp, { type Sharp } from "sharp";
 import reveal from "../src/lib/separation/reveal-core.js";
 import { appliquerEncres, separer, sousCouche, HORS_DESSIN, type OptionsSeparation } from "../src/lib/separation/separer";
 import { estFonce, qualite, rapprocher, type Encre } from "../src/lib/separation/nuancier";
+import { chiffrer, grilleProposee, prixAuKg, type ParametresSerigraphie } from "../src/lib/separation/prix-revient";
+import { printCostPerPiece } from "../src/lib/pricing";
 
 const logo = (fond: string, texte: boolean) => `<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1600">${fond}
 <circle cx="800" cy="650" r="420" fill="#d62828"/><circle cx="800" cy="650" r="300" fill="#f77f00"/>
@@ -185,6 +189,67 @@ await test("sous-couche : réunion des encres, rentrée de 3 px", async () => {
   assert.ok(dedans(13, 30) && !dedans(12, 30), "bord gauche rentré de 3 px");
   assert.ok(dedans(46, 30) && !dedans(47, 30), "bord droit rentré de 3 px");
   assert.ok(!dedans(5, 5), "hors du dessin : rien");
+  return "OK";
+});
+
+const PARAMS: ParametresSerigraphie = {
+  coutEcran: 5000,
+  calageMin: 15,
+  tauxHoraire: 2000,
+  impressionS: 18,
+  sechagePiece: 5,
+  gachePct: 5,
+  depotGm2: 120,
+  perteEncrePct: 20,
+  prixEncreKg: 10_000,
+  surfaceRefCm2: 300,
+  quantiteRef: 100,
+};
+
+await test("prix de revient : calcul vérifié à la main (2 écrans, 100 pièces)", async () => {
+  const c = chiffrer(PARAMS, [
+    { libelle: "Rouge", surfaceCm2: 300, prixKg: 12_000 },
+    { libelle: "Bleu", surfaceCm2: 100 },
+  ], 100);
+  // Fixe : 2 × 5 000 + 2 × 15 min × 2 000 F/h = 10 000 + 1 000.
+  assert.equal(c.fixe.total, 11_000);
+  // Encre rouge : 0,03 m² × 120 g × 1,2 = 4,32 g × 12 F/g = 51,84 F ; bleu : 1,44 g × 10 F/g = 14,4 F.
+  assert.equal(c.parPiece.encre, 66.24);
+  // Impression : 2 × 18 s × 2 000 F/h = 20 F ; séchage : 2 × 5 F = 10 F.
+  assert.equal(c.parPiece.impression, 20);
+  assert.equal(c.parPiece.sechage, 10);
+  assert.equal(c.piecesImprimees, 105);
+  assert.equal(c.total, 21_105.2); // 11 000 + 96,24 × 105
+  assert.equal(c.prixManquants.length, 0);
+  return `${c.parPieceBonne} F par pièce bonne`;
+});
+
+await test("prix de revient : encre sans prix signalée (ni article ni défaut)", async () => {
+  const c = chiffrer({ ...PARAMS, prixEncreKg: null }, [{ libelle: "Vert", surfaceCm2: 50 }], 100);
+  assert.deepEqual(c.prixManquants, ["Vert"]);
+  assert.equal(c.ecrans[0].coutEncrePiece, null);
+  return "signalée";
+});
+
+await test("grille proposée : la formule des devis retrouve le prix de revient", async () => {
+  const { lignes, fraisEcran } = grilleProposee(PARAMS);
+  assert.equal(lignes.length, 7);
+  assert.equal(fraisEcran, 5500);
+  const grid = { coutParNbCouleurs: Object.fromEntries(lignes.map((l) => [l.nbCouleurs, l.coutPiece])), fraisEcranParCouleur: fraisEcran };
+  for (const l of lignes) {
+    const devis = printCostPerPiece([{ label: "Poitrine", nbCouleurs: l.nbCouleurs } as never], grid, PARAMS.quantiteRef).cost;
+    // Écart dû aux arrondis au franc supérieur et à la gâche arrondie à la pièce.
+    assert.ok(Math.abs(devis - l.parPieceRef) <= 2 + l.nbCouleurs, `${l.nbCouleurs} couleur(s) : devis ${devis} / revient ${l.parPieceRef}`);
+  }
+  return lignes.map((l) => `${l.nbCouleurs}c ${l.coutPiece} F`).join(", ") + ` + ${fraisEcran} F/écran`;
+});
+
+await test("prix au kg d'un article encre : kg, g, litre, pièce", async () => {
+  assert.equal(prixAuKg(10_000, 10, "kg"), 11_000);
+  assert.equal(prixAuKg(12, 0, "g"), 12_000);
+  assert.equal(prixAuKg(9000, 0, "l"), 9000);
+  assert.equal(prixAuKg(500, 0, "piece"), null);
+  assert.equal(prixAuKg(null, 0, "kg"), null);
   return "OK";
 });
 

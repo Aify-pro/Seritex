@@ -4,7 +4,9 @@ import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Download, Info, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { dessiner, lireImage, separerPixels, type ResultatSeparation } from "@/lib/separation/client";
-import { dimensionsFilms, PPP_FILMS } from "@/lib/separation/dimensions-films";
+import { dimensionsFilms, PPP_FILMS, surfacesCm2 } from "@/lib/separation/dimensions-films";
+import type { EcranChiffre, ParametresSerigraphie } from "@/lib/separation/prix-revient";
+import { PrixRevientSerigraphie } from "./prix-revient-serigraphie";
 import { encreSousCouche, LIBELLES_QUALITE, qualite, rapprocher, type Encre, type Qualite } from "@/lib/separation/nuancier";
 import { cn } from "@/lib/utils";
 
@@ -41,6 +43,8 @@ export function SeparationCouleurs({
   reference,
   encres = [],
   textileFonce = false,
+  parametres = null,
+  quantite = null,
 }: {
   source: Blob | string;
   nom: string;
@@ -48,10 +52,14 @@ export function SeparationCouleurs({
   largeurCm?: number | null;
   /** Référence de la demande, reprise sur les films. */
   reference?: string | null;
-  /** Nuancier d'encres actives (Paramètres > Nuancier d'encres). */
+  /** Encres de l'atelier : articles de la sous-famille Encres utilisables en séparation. */
   encres?: Encre[];
   /** Textile foncé connu (composition du site) : la sous-couche est conseillée. */
   textileFonce?: boolean;
+  /** Paramètres de coût de la sérigraphie : présents seulement pour la Direction (droits Tarification). */
+  parametres?: ParametresSerigraphie | null;
+  /** Quantité connue (composition du site), pour le prix de revient. */
+  quantite?: number | null;
 }) {
   const [image, setImage] = useState<Image | null>(null);
   const [nb, setNb] = useState<number | null>(null);
@@ -115,6 +123,21 @@ export function SeparationCouleurs({
     return liste.find((x) => x.encre.id === choix[i]) ?? liste[0] ?? null;
   };
   const blanc = encreSousCouche(encres);
+
+  const ecransChiffres = useMemo<EcranChiffre[]>(() => {
+    if (!resultat || !parametres || !(largeurCm > 0)) return [];
+    const surfaces = surfacesCm2(resultat, largeurCm);
+    const out: EcranChiffre[] = [];
+    if (avecSousCouche) {
+      out.push({ libelle: `Sous-couche${blanc ? ` · ${blanc.nom}` : ""}`, surfaceCm2: surfaces.dessin, depotGm2: blanc?.depotGm2, prixKg: blanc?.prixKg });
+    }
+    resultat.couleurs.forEach((c, i) => {
+      const e = encreDe(i)?.encre;
+      out.push({ libelle: e ? `${e.nom} · ${c.hex}` : c.hex, surfaceCm2: surfaces.couleurs[i], depotGm2: e?.depotGm2, prixKg: e?.prixKg });
+    });
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resultat, parametres, largeurCm, avecSousCouche, blanc, choix, proches]);
 
   const dims = useMemo(() => (resultat && largeurCm > 0 ? dimensionsFilms(resultat, largeurCm) : null), [resultat, largeurCm]);
 
@@ -293,7 +316,7 @@ export function SeparationCouleurs({
                     <span className="font-medium">Sous-couche</span>
                   </span>
                   <span className="mt-0.5 block truncate text-xs text-foreground-muted">
-                    {blanc ? libelleEncre(blanc) : "Blanc (aucune encre « Sous-couche » au nuancier)"}
+                    {blanc ? libelleEncre(blanc) : "Blanc (aucune encre marquée « Sous-couche »)"}
                   </span>
                 </button>
               </li>
@@ -345,7 +368,7 @@ export function SeparationCouleurs({
           </ul>
           {encres.length === 0 && (
             <p className="text-xs text-foreground-muted">
-              Nuancier d&apos;encres vide : ajoutez vos encres dans Paramètres pour que chaque écran propose l&apos;encre la plus proche.
+              Aucune encre : créez vos encres comme articles (famille Consommables › Encres, options sérigraphie dans la fiche) pour que chaque écran propose l&apos;encre la plus proche.
             </p>
           )}
         </div>
@@ -386,6 +409,10 @@ export function SeparationCouleurs({
           {etapeFilms && <p className="text-xs text-foreground-muted">{etapeFilms}</p>}
           {erreurFilms && <p className="rounded-md bg-danger-soft px-3 py-2 text-xs text-danger">{erreurFilms}</p>}
         </section>
+      )}
+
+      {parametres && ecransChiffres.length > 0 && (
+        <PrixRevientSerigraphie parametres={parametres} ecrans={ecransChiffres} quantiteInitiale={quantite} />
       )}
 
       <p className="text-xs text-foreground-muted">

@@ -240,3 +240,40 @@ export async function setArticleDimensionActive(dimensionId: string, actif: bool
   revalidatePath("/articles", "layout");
   return {};
 }
+
+const encreSchema = z.object({
+  hex: z.string().trim().regex(/^#[0-9a-fA-F]{6}$/, "La couleur doit être au format #RRGGBB"),
+  reference_couleur: z.string().trim().max(80),
+  gamme: z.string().trim().max(60),
+  sous_couche: z.boolean(),
+  depot_g_m2: optionalNumber,
+  separation: z.boolean(),
+});
+
+/**
+ * Options sérigraphie d'un article encre (migration 0117) : couleur pour la
+ * séparation des couleurs, référence Pantone ou autre, gamme, sous-couche,
+ * dépôt (vide = paramètre de l'atelier), proposée ou non par l'outil.
+ */
+export async function saveArticleEncre(productModelId: string, input: z.input<typeof encreSchema>): Promise<Result> {
+  const { canModify, profile } = await requireArticles();
+  if (!canModify) return { error: "Modification des articles non autorisée." };
+  const parsed = encreSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Saisie invalide" };
+  const d = parsed.data;
+  const supabase = await createClient();
+  const { error } = await supabase.from("article_encres").upsert({
+    product_model_id: productModelId,
+    hex: d.hex.toUpperCase(),
+    reference_couleur: d.reference_couleur || null,
+    gamme: d.gamme || null,
+    sous_couche: d.sous_couche,
+    depot_g_m2: d.depot_g_m2,
+    separation: d.separation,
+    updated_by: profile.id,
+  });
+  if (error) return { error: error.message };
+  revalidatePath("/articles", "layout");
+  revalidatePath("/infographie/separation");
+  return {};
+}

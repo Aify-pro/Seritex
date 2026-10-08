@@ -9,6 +9,7 @@ import { ModelClassification } from "../_components/model-classification";
 import { ArticleClassementForm } from "../_components/article-classement-form";
 import { TextileTechniqueForm } from "../_components/textile-technique-form";
 import { ConsumableTechniqueForm } from "../_components/consumable-technique-form";
+import { EncreOptionsForm, type OptionsEncre } from "../_components/encre-options-form";
 import Link from "next/link";
 import type { ArticleNature, TypeAppro, Unite } from "@/lib/articles/natures";
 
@@ -115,6 +116,17 @@ export default async function ArticleGeneralPage({ params }: { params: Promise<{
     const { data: usages } = consumable
       ? await supabase.from("nomenclature_lines").select("product_models(id,name)").eq("consumable_id", consumable.id as string)
       : { data: [] };
+    // Article de la sous-famille « Encres » (0117) : options sérigraphie.
+    const { data: sousFamille } = model.sous_famille_id
+      ? await supabase.from("article_families").select("encres").eq("id", model.sous_famille_id).maybeSingle()
+      : { data: null };
+    const estEncre = !!sousFamille?.encres;
+    const [{ data: optionsEncre }, { data: parametresSerigraphie }] = estEncre
+      ? await Promise.all([
+          supabase.from("article_encres").select("hex,reference_couleur,gamme,sous_couche,depot_g_m2,separation").eq("product_model_id", id).maybeSingle(),
+          supabase.from("serigraphie_parametres").select("depot_g_m2").maybeSingle(),
+        ])
+      : [{ data: null }, { data: null }];
     const utilisateurs = [
       ...new Map(
         (usages ?? [])
@@ -141,6 +153,26 @@ export default async function ArticleGeneralPage({ params }: { params: Promise<{
                   etape: consumable.etape as "production" | "finition",
                   sage_reference: (consumable.sage_reference as string | null) ?? null,
                 }}
+                editable={canModify}
+              />
+            </CardBody>
+          </Card>
+        )}
+        {estEncre && (
+          <Card>
+            <CardHeader
+              title="Options sérigraphie"
+              description="Encre de sérigraphie : sa couleur sert à la séparation des couleurs (encre la plus proche d'un visuel), son nom est repris sur les films, son prix d'achat (onglet Prix de revient) au chiffrage de la sérigraphie."
+            />
+            <CardBody>
+              <EncreOptionsForm
+                productModelId={id}
+                initial={
+                  optionsEncre
+                    ? ({ ...optionsEncre, depot_g_m2: optionsEncre.depot_g_m2 != null ? Number(optionsEncre.depot_g_m2) : null } as OptionsEncre)
+                    : null
+                }
+                depotDefaut={parametresSerigraphie?.depot_g_m2 != null ? Number(parametresSerigraphie.depot_g_m2) : null}
                 editable={canModify}
               />
             </CardBody>

@@ -59,3 +59,21 @@ export function dimensionsFilms(r: ResultatSeparation, largeurCm: number) {
     hauteurCm: largeurCm * ratio,
   };
 }
+
+/**
+ * Surface imprimée par pièce de chaque couleur (cm²) quand le dessin mesure
+ * `largeurCm` de large, et surface totale du dessin (sous-couche).
+ */
+export function surfacesCm2(r: ResultatSeparation, largeurCm: number) {
+  const c = cadre(r);
+  const cadrePx = c.l * r.largeur * c.h * r.hauteur;
+  const hauteurCm = (largeurCm * (c.h * r.hauteur)) / (c.l * r.largeur);
+  const cm2ParPx = (largeurCm * hauteurCm) / Math.max(1, cadrePx);
+  const comptes = new Array<number>(r.couleurs.length).fill(0);
+  for (let p = 0; p < r.indices.length; p++) {
+    const k = r.indices[p];
+    if (k !== HORS_DESSIN) comptes[k] += 1;
+  }
+  const couleurs = comptes.map((n) => n * cm2ParPx);
+  return { couleurs, dessin: couleurs.reduce((s, v) => s + v, 0) };
+}

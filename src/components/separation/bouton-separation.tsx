@@ -4,6 +4,7 @@ import { Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import type { Encre } from "@/lib/separation/nuancier";
+import type { ParametresSerigraphie } from "@/lib/separation/prix-revient";
 import { SeparationCouleurs } from "./separation-couleurs";
 
 /** Ouvre la séparation des couleurs d'un visuel déjà en ligne (URL signée, lisible en CORS). */
@@ -13,12 +14,16 @@ export function BoutonSeparation({
   largeurCm,
   encres,
   textileFonce,
+  parametres,
+  quantite,
 }: {
   url: string;
   nom: string;
   largeurCm?: number | null;
   encres?: Encre[];
   textileFonce?: boolean;
+  parametres?: ParametresSerigraphie | null;
+  quantite?: number | null;
 }) {
   return (
     <Dialog
@@ -32,7 +37,7 @@ export function BoutonSeparation({
         </Button>
       }
     >
-      <SeparationCouleurs source={url} nom={nom} largeurCm={largeurCm} encres={encres} textileFonce={textileFonce} />
+      <SeparationCouleurs source={url} nom={nom} largeurCm={largeurCm} encres={encres} textileFonce={textileFonce} parametres={parametres} quantite={quantite} />
     </Dialog>
   );
 }

@@ -1,15 +1,22 @@
 /**
- * Nuancier d'encres (lot 3) : rapprochement des couleurs trouvées par la
- * séparation avec les encres de l'atelier (Paramètres > Nuancier d'encres).
- * Fonctions pures, sans DOM.
+ * Encres de l'atelier : rapprochement des couleurs trouvées par la
+ * séparation. Une encre est un article consommable de la sous-famille
+ * « Encres » (migration 0117), avec ses options sérigraphie
+ * (article_encres). Fonctions pures, sans DOM.
  */
 
 export type Encre = {
+  /** Article (product_models.id). */
   id: string;
   nom: string;
   hex: string;
+  /** Référence de couleur (Pantone ou autre). */
   reference: string | null;
   sous_couche: boolean;
+  /** Dépôt propre à l'encre, g/m² (vide = paramètre de l'atelier). */
+  depotGm2?: number | null;
+  /** Prix au kg (achat + frais) — seulement pour la Direction. */
+  prixKg?: number | null;
 };
 
 export type Rapprochement = { encre: Encre; ecart: number };
@@ -61,5 +68,5 @@ export function estFonce(hex: string | null | undefined) {
   return lab(hex)[0] < 50;
 }
 
-/** Encre de sous-couche du nuancier (la première marquée), sinon null. */
+/** Encre de sous-couche (la première marquée), sinon null. */
 export const encreSousCouche = (encres: Encre[]) => encres.find((e) => e.sous_couche) ?? null;
