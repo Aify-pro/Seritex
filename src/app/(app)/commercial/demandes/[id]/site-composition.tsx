@@ -3,10 +3,12 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
 import { BoutonSeparation } from "@/components/separation/bouton-separation";
+import { estFonce, type Encre } from "@/lib/separation/nuancier";
 
 /** Composition envoyée par le client depuis l'outil « Personnaliser » du site (migration 0110). */
 export interface SitePersonnalisation {
   modele: string;
+  couleur_id?: string | null;
   couleur?: string | null;
   grammage?: number | null;
   quantite: number;
@@ -40,6 +42,19 @@ export async function SiteComposition({ requestId, composition }: { requestId: s
     ? ((await createAdminClient().storage.from("site-personnalisation").createSignedUrls(paths, 3600)).data ?? [])
     : [];
   const url = (path: string) => signed.find((s) => s.path === path)?.signedUrl ?? null;
+  // Pour la séparation des couleurs : nuancier, et textile foncé (sous-couche conseillée).
+  const avecImages = (files ?? []).some((f) => (f.mime_type as string | null)?.startsWith("image/"));
+  const [{ data: encres }, { data: textile }] = avecImages
+    ? await Promise.all([
+        supabase.from("encres").select("id,nom,hex,reference,sous_couche").eq("active", true).order("nom"),
+        composition.couleur_id
+          ? supabase.from("colors").select("hex,famille").eq("id", composition.couleur_id).maybeSingle()
+          : composition.couleur
+            ? supabase.from("colors").select("hex,famille").eq("name", composition.couleur).limit(1).maybeSingle()
+            : Promise.resolve({ data: null }),
+      ])
+    : [{ data: null }, { data: null }];
+  const textileFonce = textile ? textile.famille === "fonce" || estFonce(textile.hex as string | null) : false;
   const repartition = Object.entries(composition.repartition ?? {});
 
   return (
@@ -124,6 +139,8 @@ export async function SiteComposition({ requestId, composition }: { requestId: s
                         url={lien}
                         nom={f.file_name as string}
                         largeurCm={f.marquage ? composition.marquages[(f.marquage as number) - 1]?.largeur_cm : null}
+                        encres={(encres ?? []) as Encre[]}
+                        textileFonce={textileFonce}
                       />
                     )}
                   </li>

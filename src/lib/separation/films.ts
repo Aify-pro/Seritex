@@ -35,6 +35,10 @@ export type OptionsFilms = {
   nom: string;
   /** Référence de la demande, si connue. */
   reference?: string | null;
+  /** Nom de l'encre retenue pour chaque écran (nuancier), dans l'ordre des couleurs. */
+  encres?: (string | null)[];
+  /** Sous-couche blanche (textile foncé) : écran imprimé en premier, rentré sous les couleurs. */
+  sousCouche?: { nom: string; rentreMm: number } | null;
 };
 
 /**
@@ -42,13 +46,13 @@ export type OptionsFilms = {
  * bit 0 = encre déposée. C'est le format natif d'un film dans un PDF
  * (/ImageMask), net à toute échelle et bien plus léger qu'une image en gris.
  */
-function masqueEcran(f: Films, k: number, miroir: boolean): Uint8Array {
+function masqueEcran(f: Films, encre: (p: number) => boolean, miroir: boolean): Uint8Array {
   const parLigne = Math.ceil(f.largeur / 8);
   const out = new Uint8Array(parLigne * f.hauteur).fill(0xff);
   for (let y = 0; y < f.hauteur; y++) {
     const ligne = y * f.largeur;
     for (let x = 0; x < f.largeur; x++) {
-      if (f.indices[ligne + x] !== k) continue;
+      if (!encre(ligne + x)) continue;
       const xs = miroir ? f.largeur - 1 - x : x;
       out[y * parLigne + (xs >> 3)] &= ~(0x80 >> (xs & 7));
     }
@@ -121,7 +125,8 @@ export async function preparerFilms(
   const image = await lireZone(source, dims.zone, dims.largeurPx, dims.hauteurPx);
   etape("Application des encres…");
   const pxParMm = dims.ppp / 25.4;
-  const films = await appliquerEncresPixels(image.px, image.w, image.h, r, Math.max(4, Math.round((pxParMm * POINT_MIN_MM) ** 2)));
+  const rentrePx = options.sousCouche ? Math.max(1, Math.round(options.sousCouche.rentreMm * pxParMm)) : null;
+  const films = await appliquerEncresPixels(image.px, image.w, image.h, r, Math.max(4, Math.round((pxParMm * POINT_MIN_MM) ** 2)), rentrePx);
 
   const doc = await PDFDocument.create();
   doc.setTitle(sur(`Films ${options.nom}`));
@@ -131,14 +136,25 @@ export async function preparerFilms(
   const lmm = options.largeurCm * 10;
   const hmm = (lmm * films.hauteur) / films.largeur;
   const [pl, ph] = formatPage(lmm, hmm);
-  const n = r.couleurs.length;
+  // Écrans dans l'ordre d'impression : la sous-couche d'abord.
+  type Ecran = { titre: string; encre: (p: number) => boolean };
+  const ecrans: Ecran[] = [];
+  if (options.sousCouche && films.sousCouche) {
+    const blanc = films.sousCouche;
+    ecrans.push({ titre: `Sous-couche · ${options.sousCouche.nom}`, encre: (p) => blanc[p] === 1 });
+  }
+  r.couleurs.forEach((c, k) => {
+    const nomEncre = options.encres?.[k];
+    ecrans.push({ titre: nomEncre ? `${nomEncre} · ${c.hex}` : c.hex, encre: (p) => films.indices[p] === k });
+  });
+  const n = ecrans.length;
 
   for (let k = 0; k < n; k++) {
     etape(`Écran ${k + 1} sur ${n}…`);
     const page = doc.addPage([pl * MM, ph * MM]);
     const x = ((pl - lmm) / 2) * MM;
     const y = (MARGE_MM + LEGENDE_MM) * MM;
-    await dessinerMasque(doc, page, masqueEcran(films, k, options.miroir), films, x, y, lmm * MM, hmm * MM);
+    await dessinerMasque(doc, page, masqueEcran(films, ecrans[k].encre, options.miroir), films, x, y, lmm * MM, hmm * MM);
 
     // Cibles à 12 mm du dessin, au milieu de chaque côté.
     const e = 12 * MM;
@@ -149,7 +165,7 @@ export async function preparerFilms(
     cible(page, x - e, cy);
     cible(page, x + lmm * MM + e, cy);
 
-    const titre = sur(`Écran ${k + 1} / ${n} · ${r.couleurs[k].hex}`);
+    const titre = sur(`Écran ${k + 1} / ${n} · ${ecrans[k].titre}`);
     const detail = sur(
       [
         options.reference,

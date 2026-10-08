@@ -9,14 +9,17 @@
  *  5. dégradé : signalé comme dégradé ;
  *  6. nombre de couleurs imposé : respecté ;
  *  7. films en pleine résolution : encres appliquées à 2 400 px, recadrage sur le
- *     dessin, aucun liseré parasite sur l'écran du petit texte, transparence tranchée.
+ *     dessin, aucun liseré parasite sur l'écran du petit texte, transparence tranchée ;
+ *  8. nuancier : encre la plus proche et qualité du rapprochement ; textile foncé ;
+ *  9. sous-couche : réunion des encres, rentrée de la valeur demandée.
  *
  * Lancer : npm run test:separation
  */
 import assert from "node:assert/strict";
 import sharp, { type Sharp } from "sharp";
 import reveal from "../src/lib/separation/reveal-core.js";
-import { appliquerEncres, separer, HORS_DESSIN, type OptionsSeparation } from "../src/lib/separation/separer";
+import { appliquerEncres, separer, sousCouche, HORS_DESSIN, type OptionsSeparation } from "../src/lib/separation/separer";
+import { estFonce, qualite, rapprocher, type Encre } from "../src/lib/separation/nuancier";
 
 const logo = (fond: string, texte: boolean) => `<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1600">${fond}
 <circle cx="800" cy="650" r="420" fill="#d62828"/><circle cx="800" cy="650" r="300" fill="#f77f00"/>
@@ -151,6 +154,38 @@ await test("films : PNG transparent tranché à 50 % d'opacité", async () => {
   encres.delete(HORS_DESSIN);
   assert.equal(encres.size, 3);
   return `${f.largeur} × ${f.hauteur} px, ${encres.size} encres`;
+});
+
+await test("nuancier : encre la plus proche, qualité, textile foncé", async () => {
+  const encres: Encre[] = [
+    { id: "1", nom: "Rouge vif", hex: "#D52B2B", reference: "PMS 485 C", sous_couche: false },
+    { id: "2", nom: "Orange", hex: "#F58220", reference: null, sous_couche: false },
+    { id: "3", nom: "Bleu nuit", hex: "#0B2545", reference: null, sous_couche: false },
+    { id: "4", nom: "Blanc couvrant", hex: "#FFFFFF", reference: null, sous_couche: true },
+  ];
+  const r = rapprocher("#D62829", encres);
+  assert.equal(r[0].encre.nom, "Rouge vif");
+  assert.equal(qualite(r[0].ecart), "identique", `écart ${r[0].ecart}`);
+  const vert = rapprocher("#2A9D8F", encres);
+  assert.equal(qualite(vert[0].ecart), "a-melanger", "aucun vert dans le nuancier");
+  assert.equal(estFonce("#0B2545"), true);
+  assert.equal(estFonce("#FFFFFF"), false);
+  assert.equal(estFonce(null), false);
+  return `rouge → ${r[0].encre.nom} (ΔE ${r[0].ecart.toFixed(1)}), vert → ${qualite(vert[0].ecart)}`;
+});
+
+await test("sous-couche : réunion des encres, rentrée de 3 px", async () => {
+  // Carré de 40 px de deux encres (gauche 0, droite 1) au centre d'un cadre de 60 px.
+  const w = 60;
+  const indices = new Uint8Array(w * w).fill(HORS_DESSIN);
+  for (let y = 10; y < 50; y++) for (let x = 10; x < 50; x++) indices[y * w + x] = x < 30 ? 0 : 1;
+  const blanc = sousCouche({ largeur: w, hauteur: w, indices }, 3);
+  const dedans = (x: number, y: number) => blanc[y * w + x] === 1;
+  assert.ok(dedans(30, 30), "centre couvert, sans coupure entre les deux encres");
+  assert.ok(dedans(13, 30) && !dedans(12, 30), "bord gauche rentré de 3 px");
+  assert.ok(dedans(46, 30) && !dedans(47, 30), "bord droit rentré de 3 px");
+  assert.ok(!dedans(5, 5), "hors du dessin : rien");
+  return "OK";
 });
 
 console.log(`${n} tests réussis`);

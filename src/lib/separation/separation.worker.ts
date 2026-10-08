@@ -9,7 +9,7 @@ import { appliquerEncres, separer, type OptionsSeparation } from "./separer";
 
 type Demande =
   | { id: number; type?: "separer"; px: Uint8ClampedArray; w: number; h: number; options: OptionsSeparation }
-  | { id: number; type: "films"; px: Uint8ClampedArray; w: number; h: number; encres: string[]; fond: string | null; transparent: boolean; pixelsMin: number };
+  | { id: number; type: "films"; px: Uint8ClampedArray; w: number; h: number; encres: string[]; fond: string | null; transparent: boolean; pixelsMin: number; rentrePx: number | null };
 
 const contexte = self as unknown as {
   onmessage: ((e: MessageEvent<Demande>) => void) | null;
@@ -21,9 +21,11 @@ contexte.onmessage = async (e) => {
   try {
     const resultat =
       d.type === "films"
-        ? appliquerEncres(d.px, d.w, d.h, d.encres, d.fond, d.transparent, d.pixelsMin)
+        ? appliquerEncres(d.px, d.w, d.h, d.encres, d.fond, d.transparent, d.pixelsMin, d.rentrePx)
         : await separer(reveal, d.px, d.w, d.h, d.options);
-    contexte.postMessage({ id: d.id, resultat }, [resultat.indices.buffer]);
+    const transfert: Transferable[] = [resultat.indices.buffer];
+    if ("sousCouche" in resultat && resultat.sousCouche) transfert.push(resultat.sousCouche.buffer);
+    contexte.postMessage({ id: d.id, resultat }, transfert);
   } catch (err) {
     contexte.postMessage({ id: d.id, erreur: err instanceof Error ? err.message : String(err) });
   }

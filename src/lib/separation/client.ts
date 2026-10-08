@@ -74,16 +74,23 @@ export async function separerPixels(px: Uint8ClampedArray, w: number, h: number,
  * sur le dessin (voir appliquerEncres). Les pixels sont transférés au worker :
  * `px` n'est plus utilisable ensuite.
  */
-export async function appliquerEncresPixels(px: Uint8ClampedArray, w: number, h: number, r: ResultatSeparation, pixelsMin = 4): Promise<Films> {
+export async function appliquerEncresPixels(
+  px: Uint8ClampedArray,
+  w: number,
+  h: number,
+  r: ResultatSeparation,
+  pixelsMin = 4,
+  rentrePx: number | null = null,
+): Promise<Films> {
   const encres = r.couleurs.map((c) => c.hex);
   try {
-    const f = viaWorker<Films>({ type: "films", px, w, h, encres, fond: r.fond, transparent: r.transparent, pixelsMin }, [px.buffer]);
+    const f = viaWorker<Films>({ type: "films", px, w, h, encres, fond: r.fond, transparent: r.transparent, pixelsMin, rentrePx }, [px.buffer]);
     if (f) return await f;
   } catch {
     // repli ci-dessous
   }
   const { appliquerEncres } = await import("./separer");
-  return appliquerEncres(px, w, h, encres, r.fond, r.transparent, pixelsMin);
+  return appliquerEncres(px, w, h, encres, r.fond, r.transparent, pixelsMin, rentrePx);
 }
 
 async function chargerImage(source: Blob | string) {
@@ -148,9 +155,10 @@ const rvb = (hex: string) => {
 /**
  * Dessine le résultat en PNG (data URL).
  *  - `index` absent : le visuel recomposé avec ses seules encres, fond transparent ;
- *  - `index` donné : l'écran de cette couleur, en noir sur blanc comme un film.
+ *  - `index` donné : l'écran de cette couleur, en noir sur blanc comme un film ;
+ *  - `index` = "dessin" : tout le dessin en noir (aperçu de la sous-couche).
  */
-export function dessiner(r: ResultatSeparation, index?: number): string {
+export function dessiner(r: ResultatSeparation, index?: number | "dessin"): string {
   const canvas = document.createElement("canvas");
   canvas.width = r.largeur;
   canvas.height = r.hauteur;
@@ -165,7 +173,7 @@ export function dessiner(r: ResultatSeparation, index?: number): string {
       [img.data[o], img.data[o + 1], img.data[o + 2]] = couleurs[k];
       img.data[o + 3] = 255;
     } else {
-      const v = k === index ? 0 : 255;
+      const v = (index === "dessin" ? k !== HORS_DESSIN : k === index) ? 0 : 255;
       img.data[o] = img.data[o + 1] = img.data[o + 2] = v;
       img.data[o + 3] = 255;
     }

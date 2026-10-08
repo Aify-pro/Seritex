@@ -35,6 +35,7 @@ import {
   Truck,
   MapPinned,
   Layers,
+  Palette,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { createElement, type ReactNode } from "react";
@@ -136,6 +137,7 @@ const STAFF_NAV: NavItem[] = [
   { href: "/parametres/sections", label: "Sections d'atelier", icon: navIcon(Boxes), section: PARAMETRES, module: "sections" },
   { href: "/parametres/fabrication", label: "Fabrication", icon: navIcon(Gauge), section: PARAMETRES, module: "fabrication" },
   { href: "/parametres/dispatching", label: "Dispatching des tailles", icon: navIcon(ChartPie), section: PARAMETRES, module: "dispatching" },
+  { href: "/parametres/encres", label: "Nuancier d'encres", icon: navIcon(Palette), section: PARAMETRES, module: "encres" },
   { href: "/parametres/livraison", label: "Livraison", icon: navIcon(MapPinned), section: PARAMETRES, module: "parametres_livraison" },
   { href: "/parametres/sage", label: "Intégration Sage", icon: navIcon(Plug), section: PARAMETRES, module: "parametres_sage" },
   { href: "/parametres/clients-sage", label: "Clients Sage (lecture)", icon: navIcon(Building2), section: PARAMETRES, module: "clients_sage" },
