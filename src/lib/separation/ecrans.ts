@@ -4,7 +4,8 @@
  * maillage, trame AM. Sert à l'aperçu (image d'analyse) et aux films (pleine
  * résolution, dans le Web Worker). Fonctions pures, sans DOM.
  */
-import { HORS_DESSIN, sansIlots, sousCouche } from "./separer";
+import { HORS_DESSIN, sansIlots } from "./separer";
+import { ecransBlancs, luminosites, SOUS_COUCHE_DEFAUT, type OptionsSousCouche } from "./sous-couche";
 import { empaqueter, recouvrir, rvbDeHex, tableMelanges, ton, pur, tramerAM, versCmjn, type Rendu } from "./trame";
 import { ajusterImage, imageNeutre, type ReglagesImage } from "./image";
 
@@ -204,8 +205,11 @@ export type EntreeFilms = Entree & {
   pixelsMin: number;
   /** Recouvrement des encres claires sous les foncées, en pixels (aplats seulement). */
   recouvrementPx: number;
-  /** Sous-couche blanche : rentré en pixels ; null = pas de sous-couche. */
-  sousCouche: { rentrePx: number } | null;
+  /**
+   * Blancs (textile foncé) : rentré de la sous-couche en pixels et options
+   * (mode, source du ton, densité, trame, rehaut) ; null = aucun blanc.
+   */
+  sousCouche: { rentrePx: number; options?: OptionsSousCouche } | null;
   miroir: boolean;
   /** Réglages manuels de l'image, appliqués avant tout (lot 7). */
   image?: ReglagesImage;
@@ -216,7 +220,7 @@ export type EntreeFilms = Entree & {
 export type EcransFilms = {
   largeur: number;
   hauteur: number;
-  /** Masques 1 bit (/ImageMask) dans l'ordre d'impression : sous-couche puis couleurs. */
+  /** Masques 1 bit (/ImageMask) dans l'ordre d'impression : sous-couche, couleurs, rehaut. */
   ecrans: Uint8Array[];
 };
 
@@ -267,22 +271,28 @@ export function ecransFilms(pxSource: Uint8ClampedArray | Uint8Array, w: number,
   const ecrans: Uint8Array[] = [];
   const pack = (m: Uint8Array) => empaqueter(m, lw, lh, e.miroir);
 
-  // Sous-couche : réunion des encres (aplats) rentrée ; en AM, tramée sous le ton le plus fort.
-  if (e.sousCouche) {
-    const plein = sousCouche({ largeur: lw, hauteur: lh, indices }, e.sousCouche.rentrePx);
-    if (am && tons) {
-      const tonsCadres = tons.map(recadrer);
-      const trame = tramerAM(
-        (p) => (plein[p] ? tonsCadres.reduce((m, t) => (t[p] > m ? t[p] : m), 0) : 0),
-        lw,
-        lh,
-        { ppp: e.ppp, lpi: am.lpi, angle: am.angles[0] ?? 22.5, forme: am.forme, pointMinPct: am.pointMinPct, pointMaxPct: am.pointMaxPct },
-      );
-      ecrans.push(pack(trame));
-    } else {
-      ecrans.push(pack(plein));
-    }
-  }
+  // Blancs : sous-couche (en premier) et rehaut (en dernier), selon leurs options.
+  const blancs = e.sousCouche
+    ? (() => {
+        const options = e.sousCouche.options ?? { ...SOUS_COUCHE_DEFAUT, active: true };
+        // Base à plat du dessin : en diffusion ou Bayer, les couleurs tramées ne disent pas où est le dessin.
+        const base = e.rendu.type === "diffusion" || e.rendu.type === "bayer" ? indicesRendu(px, w, h, { ...e, rendu: { type: "aplat" } }) : plats;
+        return ecransBlancs(
+          {
+            largeur: lw,
+            hauteur: lh,
+            plats: recadrer(base),
+            tons: tons ? tons.map(recadrer) : null,
+            lum: recadrer(luminosites(px, w * h)),
+            options,
+            rendu: e.rendu.type,
+            rentrePx: e.sousCouche.rentrePx,
+          },
+          e.ppp,
+        );
+      })()
+    : null;
+  if (blancs?.sousCouche) ecrans.push(pack(blancs.sousCouche));
 
   if (am && tons) {
     tons.forEach((t, k) => {
@@ -308,5 +318,6 @@ export function ecransFilms(pxSource: Uint8ClampedArray | Uint8Array, w: number,
     const masques = recouvrir(indices, lw, lh, luminances, e.rendu.type === "aplat" ? e.recouvrementPx : 0);
     for (const m of masques) ecrans.push(pack(m));
   }
+  if (blancs?.rehaut) ecrans.push(pack(blancs.rehaut));
   return { largeur: lw, hauteur: lh, ecrans };
 }

@@ -20,7 +20,9 @@
  * 13. machines et écrans : format, écran convenable, prix de revient selon la
  *     cadence et le coût horaire de la machine, passages au-delà des têtes ;
  * 14. réglages de l'image, quadrichromie CMJN, palette imposée, paramètres
- *     experts et couleurs suggérées du moteur.
+ *     experts et couleurs suggérées du moteur ;
+ * 15. blancs : sous-couche aplat ou tramée, selon les encres ou la luminosité,
+ *     densité, pas de blanc sous les foncés, rehaut des hautes lumières.
  *
  * Lancer : npm run test:separation
  */
@@ -38,6 +40,7 @@ import { ecranConvient, tientSurMachine } from "../src/lib/atelier/parc";
 import { ajusterImage, IMAGE_NEUTRE } from "../src/lib/separation/image";
 import { versCmjn } from "../src/lib/separation/trame";
 import { CMJN_DEFAUT } from "../src/lib/separation/reglages";
+import { SOUS_COUCHE_DEFAUT, tonsBlancs } from "../src/lib/separation/sous-couche";
 
 const logo = (fond: string, texte: boolean) => `<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1600">${fond}
 <circle cx="800" cy="650" r="420" fill="#d62828"/><circle cx="800" cy="650" r="300" fill="#f77f00"/>
@@ -487,6 +490,53 @@ await test("paramètres experts et couleurs suggérées", async () => {
   assert.notDeepEqual(pochoir.couleurs.map((c) => c.hex), base.couleurs.map((c) => c.hex), "l'algorithme change la palette");
   assert.ok(Array.isArray(base.suggestions));
   return `pochoir : ${pochoir.couleurs.map((c) => c.hex).join(" ")} · suggestions : ${base.suggestions.join(" ") || "aucune"}`;
+});
+
+await test("blancs : aplat, tramée selon la luminosité, densité, foncés exclus, rehaut", async () => {
+  // Bande de 100 px : 0 hors dessin à gauche, puis une rampe de luminosité de 0 à 255 (une encre).
+  const w = 120;
+  const h = 10;
+  const plats = new Uint8Array(w * h).fill(255);
+  const lum = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++)
+    for (let x = 20; x < w; x++) {
+      plats[y * w + x] = 0;
+      lum[y * w + x] = Math.round(((x - 20) / 99) * 255);
+    }
+  const base = { largeur: w, hauteur: h, plats, tons: null, lum, rendu: "aplat" as const, rentrePx: 0 };
+  const aplat = tonsBlancs({ ...base, options: { ...SOUS_COUCHE_DEFAUT, active: true, mode: "aplat" } }).sousCouche!;
+  assert.equal(aplat[5 * w + 10], 0, "hors dessin : rien");
+  assert.equal(aplat[5 * w + 60], 255, "aplat plein");
+  const lumi = tonsBlancs({ ...base, options: { ...SOUS_COUCHE_DEFAUT, active: true, mode: "tramee", source: "luminosite" } }).sousCouche!;
+  assert.ok(lumi[5 * w + 110] > lumi[5 * w + 40], "plus de blanc dans les clairs");
+  const dense = tonsBlancs({ ...base, options: { ...SOUS_COUCHE_DEFAUT, active: true, mode: "tramee", source: "luminosite", densitePct: 50 } }).sousCouche!;
+  assert.ok(Math.abs(dense[5 * w + 110] - lumi[5 * w + 110] / 2) <= 1, "densité 50 %");
+  const sansFonces = tonsBlancs({ ...base, options: { ...SOUS_COUCHE_DEFAUT, active: true, mode: "aplat", sansSousFoncesL: 40 } }).sousCouche!;
+  assert.equal(sansFonces[5 * w + 25], 0, "pas de blanc sous le foncé");
+  assert.equal(sansFonces[5 * w + 100], 255);
+  const rh = tonsBlancs({ ...base, options: { ...SOUS_COUCHE_DEFAUT, active: true, rehaut: { actif: true, seuilL: 75, densitePct: 100 } } }).rehaut!;
+  assert.equal(rh[5 * w + 60], 0, "rehaut : rien dans les tons moyens");
+  assert.ok(rh[5 * w + 118] > 200, "rehaut : plein dans les blancs");
+  return "OK";
+});
+
+await test("films : sous-couche tramée et rehaut dans l'ordre d'impression", async () => {
+  const fichier = await svg(degrade).resize(600).png().toBuffer();
+  const { data, info } = await sharp(fichier).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const r = await analyser(sharp(fichier), { nbCouleurs: 3 });
+  const f = ecransFilms(new Uint8ClampedArray(data), info.width, info.height, {
+    encres: r.couleurs.map((c) => c.hex),
+    fond: r.fond,
+    transparent: r.transparent,
+    rendu: { type: "aplat" },
+    ppp: 300,
+    pixelsMin: 4,
+    recouvrementPx: 0,
+    sousCouche: { rentrePx: 2, options: { ...SOUS_COUCHE_DEFAUT, active: true, mode: "tramee", source: "luminosite", rehaut: { actif: true, seuilL: 60, densitePct: 100 } } },
+    miroir: false,
+  });
+  assert.equal(f.ecrans.length, r.couleurs.length + 2, "sous-couche + couleurs + rehaut");
+  return `${f.ecrans.length} écrans`;
 });
 
 console.log(`${n} tests réussis`);

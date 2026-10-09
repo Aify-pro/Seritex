@@ -537,14 +537,7 @@ export function ReglagesAvances({
                 onChange={(v) => onChange({ ...reglages, recouvrementMm: v })}
                 aide="Aplats : clair sous foncé, contre les défauts de calage."
               />
-              <Nombre
-                label="Rentré sous-couche (mm)"
-                valeur={reglages.rentreMm}
-                min={0}
-                max={2}
-                pas={0.05}
-                onChange={(v) => onChange({ ...reglages, rentreMm: v })}
-              />
+
             </div>
           </div>
         </div>
