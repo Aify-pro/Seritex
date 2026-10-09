@@ -35,7 +35,7 @@ contexte.onmessage = async (e) => {
       resultat = f;
     } else if (d.type === "rendu") {
       const entree = { encres: d.encres, fond: d.fond, transparent: d.transparent, rendu: d.rendu, ppp: d.ppp };
-      if (d.rendu.type === "am") {
+      if (d.rendu.type === "am" || d.rendu.type === "cmjn") {
         const tons = tonsRendu(d.px, d.w, d.h, entree);
         tons.forEach((t) => transfert.push(t.buffer));
         resultat = { tons };

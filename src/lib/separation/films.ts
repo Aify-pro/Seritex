@@ -18,7 +18,8 @@ import {
 import { ecransFilmsPixels, lireZone } from "./client";
 import { dimensionsFilms, PPP_FILMS } from "./dimensions-films";
 import type { ResultatSeparation } from "./separer";
-import type { Rendu } from "./trame";
+import { ENCRES_CMJN, type Rendu } from "./trame";
+import type { ReglagesImage } from "./image";
 
 const MM = 72 / 25.4;
 /** Plus petit point qu'un écran imprime de façon fiable (côté, mm), par défaut. */
@@ -49,13 +50,17 @@ export type OptionsFilms = {
   pointMinMm?: number;
   /** Recouvrement des encres claires sous les foncées (aplats), mm (défaut 0). */
   recouvrementMm?: number;
+  /** Réglages manuels de l'image (lot 7). */
+  image?: ReglagesImage;
+  /** Largeur de l'image d'analyse en pixels (échelle de la netteté et du bruit). */
+  largeurAnalyse?: number;
 };
 
 /** Résumé du rendu pour la légende d'un écran (k : index de couleur, -1 : sous-couche). */
 function legendeRendu(rendu: Rendu, k: number) {
-  if (rendu.type === "am") {
+  if (rendu.type === "am" || rendu.type === "cmjn") {
     const angle = rendu.angles[k < 0 ? 0 : k] ?? rendu.angles[0] ?? 22.5;
-    return `trame AM ${rendu.lpi} lpi · ${angle.toLocaleString("fr-FR")}° · point ${rendu.forme}`;
+    return `${rendu.type === "cmjn" ? "quadri" : "trame AM"} ${rendu.lpi} lpi · ${angle.toLocaleString("fr-FR")}° · point ${rendu.forme}`;
   }
   if (rendu.type === "diffusion") return `diffusion ${rendu.algo}`;
   if (rendu.type === "bayer") return `Bayer ${rendu.maillage} fils/cm`;
@@ -110,6 +115,8 @@ function cible(page: PDFPage, x: number, y: number) {
 /** Polices standard du PDF : caractères hors Latin-1 remplacés. */
 const sur = (s: string) => s.replace(/[’‘]/g, "'").replace(/[–—]/g, "-").replace(/[^\x20-\xFF]/g, "?");
 
+const cmjnRendu = (r: Rendu) => r.type === "cmjn";
+
 const cm = (v: number) => `${v.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} cm`;
 
 /**
@@ -126,10 +133,13 @@ export async function preparerFilms(
   const dims = dimensionsFilms(r, options.largeurCm, options.ppp ?? PPP_FILMS);
   etape("Lecture du visuel en pleine résolution…");
   const image = await lireZone(source, dims.zone, dims.largeurPx, dims.hauteurPx);
-  etape(rendu.type === "am" ? "Trame des écrans…" : "Application des encres…");
+  etape(rendu.type === "am" || cmjnRendu(rendu) ? "Trame des écrans…" : "Application des encres…");
   const pxParMm = dims.ppp / 25.4;
+  const cmjn = rendu.type === "cmjn";
   const films = await ecransFilmsPixels(image.px, image.w, image.h, {
-    encres: r.couleurs.map((c) => c.hex),
+    encres: cmjn ? ENCRES_CMJN.map((e) => e.hex) : r.couleurs.map((c) => c.hex),
+    image: options.image,
+    echelleImage: image.w / Math.max(1, dims.zone.l * (options.largeurAnalyse ?? r.largeur)),
     fond: r.fond,
     transparent: r.transparent,
     rendu,
@@ -151,10 +161,12 @@ export async function preparerFilms(
   // Écrans dans l'ordre d'impression : la sous-couche d'abord (même ordre que films.ecrans).
   const titres: { titre: string; k: number }[] = [];
   if (options.sousCouche) titres.push({ titre: `Sous-couche · ${options.sousCouche.nom}`, k: -1 });
-  r.couleurs.forEach((c, k) => {
-    const nomEncre = options.encres?.[k];
-    titres.push({ titre: nomEncre ? `${nomEncre} · ${c.hex}` : c.hex, k });
-  });
+  if (cmjn) ENCRES_CMJN.forEach((c, k) => titres.push({ titre: `${c.nom} (quadrichromie)`, k }));
+  else
+    r.couleurs.forEach((c, k) => {
+      const nomEncre = options.encres?.[k];
+      titres.push({ titre: nomEncre ? `${nomEncre} · ${c.hex}` : c.hex, k });
+    });
   const n = films.ecrans.length;
 
   for (let k = 0; k < n; k++) {

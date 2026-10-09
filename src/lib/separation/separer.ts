@@ -25,6 +25,10 @@ export interface RevealCore {
     generate(dna: unknown, o: Record<string, unknown>): Record<string, unknown> & { meta?: { archetype?: string; archetypeId?: string } };
   };
   ArchetypeLoader: { loadArchetypes(): { id: string; name: string; group?: string; description?: string }[] };
+  SuggestedColorAnalyzer: {
+    analyze(lab: Uint16Array, w: number, h: number, palette: { L: number; a: number; b: number }[], o?: Record<string, unknown>): { L: number; a: number; b: number }[];
+  };
+  labToRgb(lab: { L: number; a: number; b: number }): { r: number; g: number; b: number };
   generateConfigurationMk2(dna: unknown): Record<string, unknown>;
   generateConfigurationDistilled(dna: unknown): Record<string, unknown>;
   generateConfigurationSalamander(dna: unknown): Record<string, unknown>;
@@ -60,6 +64,8 @@ export type ResultatSeparation = {
   ecartMoyen: number;
   /** Profil effectivement utilisé (archétype reconnu ou choisi). */
   profil: string;
+  /** Couleurs importantes de l'image absentes de la palette (analyse du moteur). */
+  suggestions: string[];
 };
 
 /** Profils du moteur : adaptatifs, sinon l'identifiant d'un archétype Reveal (ex. « spot_color »). */
@@ -89,6 +95,10 @@ export type OptionsSeparation = {
   nettoyage?: boolean;
   /** Part minimale du dessin pour garder une couleur, en % (défaut 0,5). */
   couvertureMinPct?: number;
+  /** Paramètres experts du moteur (voir expert.ts) : remplacent ceux du profil. */
+  expert?: Record<string, number | string | boolean>;
+  /** Palette imposée (#RRGGBB) : le moteur ne choisit plus les couleurs, toutes sont gardées. */
+  palette?: string[];
 };
 
 export const HORS_DESSIN = 255;
@@ -222,6 +232,7 @@ export async function separer(
     });
     profil = config.meta?.archetype ?? profilDemande;
   }
+  if (options.expert) Object.assign(config, options.expert);
   if (options.ecart) config.distanceMetric = options.ecart;
   if (options.forcerBlanc) config.preserveWhite = true;
   if (options.forcerNoir) config.preserveBlack = true;
@@ -241,7 +252,20 @@ export async function separer(
     preservedUnifyThreshold: 0.5,
   };
   const cible = (params.targetColorsSlider ?? params.targetColors) as number;
-  const res = await reveal.posterizeImage(pixelsDessin, ne, 1, cible, params);
+  const paletteImposee = (options.palette ?? []).filter((h) => /^#[0-9a-fA-F]{6}$/.test(h)).slice(0, 15);
+  const res = paletteImposee.length
+    ? {
+        palette: paletteImposee.map((hex) => {
+          const v = Number.parseInt(hex.slice(1), 16);
+          return { r: (v >> 16) & 255, g: (v >> 8) & 255, b: v & 255 };
+        }),
+        paletteLab: [] as { L: number; a: number; b: number }[],
+      }
+    : await reveal.posterizeImage(pixelsDessin, ne, 1, cible, params);
+  if (paletteImposee.length) {
+    res.paletteLab = res.palette.map((c) => reveal.LabEncoding.rgbToLab(c));
+    profil = "Palette manuelle";
+  }
   const palLab: Vec[] = res.paletteLab.map((c) => [c.L, c.a, c.b]);
   const palRgb: Vec[] = res.palette.map((c) => [c.r, c.g, c.b]);
   const P = palLab.length;
@@ -291,7 +315,7 @@ export async function separer(
   // 6. Tri des vraies encres, de la plus présente à la moins présente.
   const ordre = [...Array(P).keys()].sort((a, b) => total[b] - total[a]);
   let gardes: number[] = [];
-  const partMin = Math.max(0, options.couvertureMinPct ?? PART_MIN * 100) / 100;
+  const partMin = paletteImposee.length ? 0 : Math.max(0, options.couvertureMinPct ?? PART_MIN * 100) / 100;
   const nettoyage = options.nettoyage ?? true;
   for (const k of ordre) {
     if (total[k] / m < partMin) continue;
@@ -308,7 +332,7 @@ export async function separer(
     }
     const plein = pleins[k] / Math.max(1, total[k]);
     // Nombre imposé : on garde les mélanges (photos, dégradés), seul le nombre compte.
-    if (nettoyage && !impose && (plein < SEUIL_LISERE || (melange && plein < SEUIL_PLEIN))) continue;
+    if (nettoyage && !impose && !paletteImposee.length && (plein < SEUIL_LISERE || (melange && plein < SEUIL_PLEIN))) continue;
     gardes.push(k);
   }
   if (gardes.length === 0) gardes = [ordre[0]];
@@ -385,6 +409,17 @@ export async function separer(
     }
   }
 
+  // Couleurs suggérées par le moteur : importantes dans l'image, absentes de la palette.
+  let suggestions: string[] = [];
+  try {
+    const palGardee = finales.map((g) => ({ L: palLab[g][0], a: palLab[g][1], b: palLab[g][2] }));
+    suggestions = reveal.SuggestedColorAnalyzer.analyze(lab, w, h, palGardee, { maxSuggestions: 6, substrateMode: fond || transparent ? "white" : "auto" })
+      .map((c) => reveal.labToRgb(c))
+      .map((c) => versHex(c.r, c.g, c.b));
+  } catch {
+    suggestions = [];
+  }
+
   return {
     largeur: w,
     hauteur: h,
@@ -398,6 +433,7 @@ export async function separer(
     degrade: (lisses > SEUIL_FRONTIERES * frontieres && lisses > LISSES_MIN * m) || ecartTotal / m > SEUIL_PHOTO,
     ecartMoyen: Math.round((ecartTotal / m) * 10) / 10,
     profil,
+    suggestions: [...new Set(suggestions)],
   };
 }
 

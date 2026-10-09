@@ -32,6 +32,22 @@ export type Rendu =
       pointMinPct: number;
       /** Ton au-delà duquel l'aplat est plein (points qui se bouchent), %. */
       pointMaxPct: number;
+    }
+  | {
+      /** Quadrichromie : 4 écrans cyan, magenta, jaune, noir tramés en AM. */
+      type: "cmjn";
+      lpi: number;
+      /** Angles cyan, magenta, jaune, noir (défaut 15°, 75°, 0°, 45°). */
+      angles: [number, number, number, number];
+      forme: FormePoint;
+      /** Retrait des sous-couleurs (GCR) : part du gris confiée au noir, %. */
+      gcrPct: number;
+      /** Encrage total maximal (C + M + J + N), %. */
+      limiteEncragePct: number;
+      /** Compensation de l'engraissement du point dans les tons moyens, %. */
+      engraissementPct: number;
+      pointMinPct: number;
+      pointMaxPct: number;
     };
 
 export const LIBELLES_RENDU: Record<Rendu["type"], string> = {
@@ -39,7 +55,45 @@ export const LIBELLES_RENDU: Record<Rendu["type"], string> = {
   diffusion: "Tramage par diffusion (FM)",
   bayer: "Trame Bayer adaptée au maillage",
   am: "Trame classique à points (AM)",
+  cmjn: "Quadrichromie CMJN",
 };
+
+/** Encres de quadrichromie (aperçu, légende, prix des encres). */
+export const ENCRES_CMJN = [
+  { nom: "Cyan", hex: "#00AEEF" },
+  { nom: "Magenta", hex: "#EC008C" },
+  { nom: "Jaune", hex: "#FFF200" },
+  { nom: "Noir", hex: "#231F20" },
+] as const;
+
+export type ReglageCmjn = Extract<Rendu, { type: "cmjn" }>;
+
+/**
+ * Tons C, M, J, N (0 à 255) d'une couleur RVB : gris confié au noir selon le
+ * GCR, encrage total limité (C, M, J réduits), engraissement compensé.
+ */
+export function versCmjn(r: number, g: number, b: number, c: Pick<ReglageCmjn, "gcrPct" | "limiteEncragePct" | "engraissementPct">): [number, number, number, number] {
+  let C = 1 - r / 255;
+  let M = 1 - g / 255;
+  let J = 1 - b / 255;
+  const K = Math.min(C, M, J) * (c.gcrPct / 100);
+  if (K >= 1) return [0, 0, 0, 255];
+  C = (C - K) / (1 - K);
+  M = (M - K) / (1 - K);
+  J = (J - K) / (1 - K);
+  const limite = c.limiteEncragePct / 100;
+  const total = C + M + J + K;
+  if (total > limite && C + M + J > 0) {
+    const f = Math.max(0, (limite - K) / (C + M + J));
+    C *= f;
+    M *= f;
+    J *= f;
+  }
+  const e = c.engraissementPct / 100;
+  // Le point grossit surtout dans les tons moyens : on le réduit d'autant (4·t·(1−t) culmine à 50 %).
+  const comp = (t: number) => Math.round(Math.min(1, Math.max(0, t - e * 4 * t * (1 - t))) * 255);
+  return [comp(C), comp(M), comp(J), comp(K)];
+}
 
 /** Linéature maximale conseillée pour un maillage (fils/cm) : ~ fils par pouce ÷ 4. */
 export const lpiMaxPourMaillage = (maillage: number) => Math.floor((maillage * 2.54) / 4);

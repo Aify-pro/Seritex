@@ -6,6 +6,9 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { dessiner, lireImage, loupeRendu, renduApercu, separerPixels, type ResultatSeparation } from "@/lib/separation/client";
 import { ANGLE_AM_DEFAUT, REGLAGES_DEFAUT, type Reglages } from "@/lib/separation/reglages";
+import { ajusterImage, imageNeutre } from "@/lib/separation/image";
+import { ENCRES_CMJN } from "@/lib/separation/trame";
+import { Plus, X } from "lucide-react";
 import type { Rendu } from "@/lib/separation/trame";
 import { enregistrerRecette, supprimerRecette } from "@/app/(app)/infographie/separation/recettes-actions";
 import { ReglagesAvances, type Recette } from "./reglages-avances";
@@ -82,7 +85,7 @@ export function SeparationCouleurs({
 }) {
   const [image, setImage] = useState<Image | null>(null);
   const [nb, setNb] = useState<number | null>(null);
-  const [resultat, setResultat] = useState<ResultatSeparation | null>(null);
+  const [resultatSepare, setResultat] = useState<ResultatSeparation | null>(null);
   const [calcul, setCalcul] = useState(true);
   const [erreur, setErreur] = useState<string | null>(null);
   const [actif, setActif] = useState<number | null>(null);
@@ -100,6 +103,12 @@ export function SeparationCouleurs({
   const [loupe, setLoupe] = useState<{ cle: string; url: string; cote: number } | null>(null);
   const [calculLoupe, setCalculLoupe] = useState(false);
   const moteur = JSON.stringify(reglages.moteur);
+  const imageCle = JSON.stringify(reglages.image);
+  // Palette imposée par l'infographiste (couleurs modifiées, supprimées, ajoutées) ; null = automatique.
+  const [palette, setPalette] = useState<string[] | null>(null);
+  const [ajout, setAjout] = useState("#000000");
+  const paletteCle = palette ? JSON.stringify(palette) : "";
+  const estCmjn = reglages.rendu.type === "cmjn";
   const [machineId, setMachineId] = useState<string>(machines[0]?.id ?? "");
   const maillagesParc = useMemo(() => [...new Set(ecransParc.map((e) => e.maillage))].sort((a, b) => a - b), [ecransParc]);
   const [maillage, setMaillage] = useState<number | null>(() => {
@@ -130,7 +139,12 @@ export function SeparationCouleurs({
     if (!image) return;
     let annule = false;
     // Copie : le tableau part vers le worker à chaque calcul.
-    separerPixels(new Uint8ClampedArray(image.px), image.w, image.h, { ...(JSON.parse(moteur) as Reglages["moteur"]), ...(nb ? { nbCouleurs: nb } : {}) })
+    const px = ajusterImage(image.px, image.w, image.h, JSON.parse(imageCle) as Reglages["image"]);
+    const pal = paletteCle ? (JSON.parse(paletteCle) as string[]) : null;
+    separerPixels(px, image.w, image.h, {
+      ...(JSON.parse(moteur) as Reglages["moteur"]),
+      ...(pal ? { palette: pal } : nb ? { nbCouleurs: nb } : {}),
+    })
       .then((r) => {
         if (annule) return;
         setResultat(r);
@@ -143,25 +157,32 @@ export function SeparationCouleurs({
     return () => {
       annule = true;
     };
-  }, [image, nb, moteur]);
+  }, [image, nb, moteur, imageCle, paletteCle]);
+
+  // Résultat affiché : en quadrichromie, les 4 encres CMJN remplacent les couleurs séparées.
+  const resultat = useMemo<ResultatSeparation | null>(
+    () => (resultatSepare && estCmjn ? { ...resultatSepare, couleurs: ENCRES_CMJN.map((e) => ({ hex: e.hex, part: 0 })) } : resultatSepare),
+    [resultatSepare, estCmjn],
+  );
+  const pxAjuste = useMemo(() => (image ? ajusterImage(image.px, image.w, image.h, JSON.parse(imageCle) as Reglages["image"]) : null), [image, imageCle]);
 
   // Aperçu du rendu choisi (trame) sur l'image d'analyse ; aplats = séparation telle quelle.
   const renduCle = JSON.stringify(reglages.rendu);
-  const cleVue = `${renduCle}|${largeurCm}|${resultat?.couleurs.map((c) => c.hex).join(",") ?? ""}`;
+  const cleVue = `${renduCle}|${largeurCm}|${resultat?.couleurs.map((c) => c.hex).join(",") ?? ""}|${imageCle}`;
   useEffect(() => {
     if (!image || !resultat) return;
     const choisi = JSON.parse(renduCle) as Rendu;
     if (choisi.type === "aplat") return;
     let annule = false;
     const pppApercu = Math.max(30, image.w / (Math.max(2, largeurCm) / 2.54));
-    const cle = `${renduCle}|${largeurCm}|${resultat.couleurs.map((c) => c.hex).join(",")}`;
-    renduApercu(new Uint8ClampedArray(image.px), image.w, image.h, resultat, renduComplet(choisi, resultat.couleurs.length), pppApercu)
+    const cle = `${renduCle}|${largeurCm}|${resultat.couleurs.map((c) => c.hex).join(",")}|${imageCle}`;
+    renduApercu(ajusterImage(image.px, image.w, image.h, JSON.parse(imageCle) as Reglages["image"]), image.w, image.h, resultat, renduComplet(choisi, resultat.couleurs.length), pppApercu)
       .then((r) => !annule && setRendu({ cle, ...r }))
       .catch(() => !annule && setRendu(null));
     return () => {
       annule = true;
     };
-  }, [image, resultat, renduCle, largeurCm]);
+  }, [image, resultat, renduCle, largeurCm, imageCle]);
 
   const original = useMemo(() => (typeof source === "string" ? source : URL.createObjectURL(source)), [source]);
   useEffect(() => () => {
@@ -170,12 +191,35 @@ export function SeparationCouleurs({
 
   const vueRendu = reglages.rendu.type !== "aplat" && rendu?.cle === cleVue ? rendu : undefined;
   const loupeVisible = loupe?.cle === `${cleVue}|${reglages.ppp}` ? loupe : null;
-  const apercu = useMemo(() => (resultat ? dessiner(resultat, undefined, vueRendu) : null), [resultat, vueRendu]);
-  const ecrans = useMemo(() => (resultat ? resultat.couleurs.map((_, i) => dessiner(resultat, i, vueRendu)) : []), [resultat, vueRendu]);
+  // En quadrichromie, rien à montrer tant que les tons CMJN ne sont pas calculés.
+  const pret = !!resultat && (!estCmjn || !!vueRendu?.tons);
+  const apercu = useMemo(() => (resultat && pret ? dessiner(resultat, undefined, vueRendu) : null), [resultat, vueRendu, pret]);
+  const ecrans = useMemo(() => (resultat && pret ? resultat.couleurs.map((_, i) => dessiner(resultat, i, vueRendu)) : []), [resultat, vueRendu, pret]);
+  // Couverture moyenne de chaque encre CMJN sur le dessin (aperçu des tons).
+  const partsCmjn = useMemo(() => {
+    if (!estCmjn || !vueRendu?.tons) return null;
+    const tons = vueRendu.tons;
+    let dessinPx = 0;
+    const sommes = tons.map(() => 0);
+    for (let p = 0; p < tons[0].length; p++) {
+      if (!tons.some((t) => t[p] > 0)) continue;
+      dessinPx += 1;
+      tons.forEach((t, k) => (sommes[k] += t[p]));
+    }
+    return sommes.map((x) => (dessinPx ? x / 255 / dessinPx : 0));
+  }, [estCmjn, vueRendu]);
+  const imageRetouchee = useMemo(() => {
+    if (!pxAjuste || !image || imageNeutre(reglages.image)) return null;
+    const c = document.createElement("canvas");
+    c.width = image.w;
+    c.height = image.h;
+    c.getContext("2d")!.putImageData(new ImageData(new Uint8ClampedArray(pxAjuste), image.w, image.h), 0, 0);
+    return c.toDataURL("image/png");
+  }, [pxAjuste, image, reglages.image]);
 
   const sousCoucheApercu = useMemo(
-    () => (resultat && avecSousCouche ? dessiner(resultat, "dessin", vueRendu) : null),
-    [resultat, avecSousCouche, vueRendu],
+    () => (resultat && pret && avecSousCouche ? dessiner(resultat, "dessin", vueRendu) : null),
+    [resultat, avecSousCouche, vueRendu, pret],
   );
   const proches = useMemo(() => (resultat ? resultat.couleurs.map((c) => rapprocher(c.hex, encres)) : []), [resultat, encres]);
   const encreDe = (i: number) => {
@@ -193,11 +237,14 @@ export function SeparationCouleurs({
     }
     resultat.couleurs.forEach((c, i) => {
       const e = encreDe(i)?.encre;
-      out.push({ libelle: e ? `${e.nom} · ${c.hex}` : c.hex, surfaceCm2: surfaces.couleurs[i], depotGm2: e?.depotGm2, prixKg: e?.prixKg });
+      // Quadrichromie : surface du dessin × couverture moyenne de l'encre.
+      const surface = estCmjn ? surfaces.dessin * (partsCmjn?.[i] ?? 0) : surfaces.couleurs[i];
+      const libelle = estCmjn ? `${ENCRES_CMJN[i].nom}${e ? ` · ${e.nom}` : ""}` : e ? `${e.nom} · ${c.hex}` : c.hex;
+      out.push({ libelle, surfaceCm2: surface, depotGm2: e?.depotGm2, prixKg: e?.prixKg });
     });
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resultat, parametres, largeurCm, avecSousCouche, blanc, choix, proches]);
+  }, [resultat, parametres, largeurCm, avecSousCouche, blanc, choix, proches, estCmjn, partsCmjn]);
 
   const dims = useMemo(
     () => (resultat && largeurCm > 0 ? dimensionsFilms(resultat, largeurCm, reglages.ppp) : null),
@@ -208,7 +255,7 @@ export function SeparationCouleurs({
     if (!resultat) return;
     setCalculLoupe(true);
     try {
-      const l = await loupeRendu(source, resultat, renduComplet(reglages.rendu, resultat.couleurs.length), dims?.ppp ?? reglages.ppp, largeurCm);
+      const l = await loupeRendu(source, resultat, renduComplet(reglages.rendu, resultat.couleurs.length), dims?.ppp ?? reglages.ppp, largeurCm, reglages.image);
       setLoupe({ cle: `${cleVue}|${reglages.ppp}`, ...l });
     } catch {
       toast.error("Aperçu de la trame impossible sur ce visuel");
@@ -232,6 +279,23 @@ export function SeparationCouleurs({
     const res = await supprimerRecette(id);
     if (res.error) toast.error("Recette non supprimée", { description: res.error });
     else setListeRecettes(listeRecettes.filter((x) => x.id !== id));
+  }
+
+  const couleursActuelles = () => (resultatSepare ? resultatSepare.couleurs.map((c) => c.hex) : []);
+  function modifierPalette(p: string[]) {
+    setCalcul(true);
+    setPalette(p);
+  }
+  function modifierCouleur(i: number, hex: string) {
+    modifierPalette(couleursActuelles().map((h, j) => (j === i ? hex : h)));
+  }
+  function supprimerCouleur(i: number) {
+    modifierPalette(couleursActuelles().filter((_, j) => j !== i));
+  }
+  function ajouterCouleur(hex: string) {
+    const actuelles = couleursActuelles();
+    if (actuelles.includes(hex) || actuelles.length >= 15) return;
+    modifierPalette([...actuelles, hex]);
   }
 
   function angleEcran(i: number, v: number) {
@@ -263,6 +327,8 @@ export function SeparationCouleurs({
           ppp: reglages.ppp,
           pointMinMm: reglages.pointMinMm,
           recouvrementMm: reglages.recouvrementMm,
+          image: reglages.image,
+          largeurAnalyse: resultat.largeur,
         },
         setEtapeFilms,
       );
@@ -306,14 +372,16 @@ export function SeparationCouleurs({
           {resultat
             ? `${n} couleur${n > 1 ? "s" : ""} → ${nEcrans} écran${nEcrans > 1 ? "s" : ""}${avecSousCouche ? " (dont la sous-couche)" : ""}`
             : "Analyse du visuel…"}
+          {palette && !estCmjn && <span className="ml-2 text-xs font-normal text-brand">palette manuelle</span>}
+          {estCmjn && <span className="ml-2 text-xs font-normal text-brand">quadrichromie</span>}
           {calcul && <Loader2 className="ml-2 inline h-4 w-4 animate-spin text-foreground-muted" />}
         </p>
         <label className="flex items-center gap-2 text-foreground-muted">
           Nombre de couleurs
           <select
-            value={nb ?? "auto"}
+            value={palette ? "auto" : (nb ?? "auto")}
             onChange={(e) => changerNb(e.target.value)}
-            disabled={!image}
+            disabled={!image || !!palette || estCmjn}
             className="h-8 rounded-md border border-border bg-surface px-2 text-foreground"
           >
             <option value="auto">Automatique</option>
@@ -383,10 +451,12 @@ export function SeparationCouleurs({
 
       <div className="grid gap-3 sm:grid-cols-2">
         <figure className="space-y-1">
-          <figcaption className="text-xs font-medium uppercase tracking-wide text-foreground-muted">Visuel du client</figcaption>
+          <figcaption className="text-xs font-medium uppercase tracking-wide text-foreground-muted">
+            {imageRetouchee ? "Visuel retouché (réglages de l'image)" : "Visuel du client"}
+          </figcaption>
           <div className={cn("flex aspect-square items-center justify-center rounded-md border border-border p-3", DAMIER)}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={original} alt={nom} className="max-h-full max-w-full object-contain" />
+            <img src={imageRetouchee ?? original} alt={nom} className="max-h-full max-w-full object-contain" />
           </div>
         </figure>
         <figure className="space-y-1">
@@ -499,10 +569,35 @@ export function SeparationCouleurs({
                     <img src={ecrans[i]} alt="" className="aspect-square w-full rounded border border-border bg-white object-contain" />
                     <span className="mt-1.5 flex items-center gap-1.5">
                       <span className="h-3.5 w-3.5 shrink-0 rounded-full border border-border" style={{ backgroundColor: c.hex }} />
-                      <span className="font-medium">{c.hex}</span>
-                      <span className="ml-auto text-xs text-foreground-muted">{Math.max(1, Math.round(c.part * 100))} %</span>
+                      <span className="font-medium">{estCmjn ? ENCRES_CMJN[i].nom : c.hex}</span>
+                      <span className="ml-auto text-xs text-foreground-muted">
+                        {Math.max(estCmjn ? 0 : 1, Math.round((estCmjn ? (partsCmjn?.[i] ?? 0) : c.part) * 100))} %
+                      </span>
                     </span>
                   </button>
+                  {!estCmjn && (
+                    <div className="mt-1 flex items-center gap-1.5 px-0.5 text-xs text-foreground-muted">
+                      <input
+                        type="color"
+                        value={c.hex.toLowerCase()}
+                        onChange={(e) => modifierCouleur(i, e.target.value.toUpperCase())}
+                        aria-label={`Modifier la couleur ${c.hex}`}
+                        title="Modifier la couleur : la séparation se refait sur la palette modifiée"
+                        className="h-6 w-8 cursor-pointer rounded border border-border bg-surface p-0.5"
+                      />
+                      Modifier
+                      <button
+                        type="button"
+                        onClick={() => supprimerCouleur(i)}
+                        disabled={resultat.couleurs.length < 2}
+                        aria-label={`Supprimer la couleur ${c.hex}`}
+                        title="Supprimer cette couleur : ses pixels rejoignent la plus proche"
+                        className="ml-auto rounded p-0.5 hover:bg-surface-muted hover:text-danger disabled:opacity-40"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  )}
                   {reglages.rendu.type === "am" && (
                     <label className="mt-1 flex items-center gap-1.5 px-0.5 text-xs text-foreground-muted">
                       Angle
@@ -519,7 +614,7 @@ export function SeparationCouleurs({
                       °
                     </label>
                   )}
-                  {encre && (
+                  {encre && !estCmjn && (
                     <div className="mt-1 space-y-0.5 px-0.5">
                       <select
                         value={encre.encre.id}
@@ -543,6 +638,38 @@ export function SeparationCouleurs({
               );
             })}
           </ul>
+          {!estCmjn && (
+            <div className="flex flex-wrap items-center gap-2 text-xs text-foreground-muted">
+              <span className="flex items-center gap-1.5">
+                <input type="color" value={ajout.toLowerCase()} onChange={(e) => setAjout(e.target.value.toUpperCase())} className="h-7 w-9 cursor-pointer rounded border border-border bg-surface p-0.5" aria-label="Couleur à ajouter" />
+                <Button type="button" size="sm" variant="secondary" onClick={() => ajouterCouleur(ajout)}>
+                  <Plus className="h-3.5 w-3.5" /> Ajouter cette couleur
+                </Button>
+              </span>
+              {resultat.suggestions.length > 0 && (
+                <span className="flex flex-wrap items-center gap-1.5">
+                  Couleurs suggérées par le moteur :
+                  {resultat.suggestions.map((h) => (
+                    <button
+                      key={h}
+                      type="button"
+                      onClick={() => ajouterCouleur(h)}
+                      title={`Ajouter ${h}`}
+                      className="flex items-center gap-1 rounded-full border border-border px-2 py-0.5 hover:bg-surface-muted"
+                    >
+                      <span className="h-3 w-3 rounded-full border border-border" style={{ backgroundColor: h }} />
+                      {h}
+                    </button>
+                  ))}
+                </span>
+              )}
+              {palette && (
+                <Button type="button" size="sm" variant="ghost" onClick={() => setPalette(null)}>
+                  Revenir à la palette automatique
+                </Button>
+              )}
+            </div>
+          )}
           {encres.length === 0 && (
             <p className="text-xs text-foreground-muted">
               Aucune encre : créez vos encres comme articles (famille Consommables › Encres, options sérigraphie dans la fiche) pour que chaque écran propose l&apos;encre la plus proche.
