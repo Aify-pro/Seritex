@@ -25,7 +25,25 @@ export interface SitePersonnalisation {
     degrade?: boolean;
     consigne?: string;
     alertes?: string[];
+    /** Position ajustée par le client sur l'aperçu : décalage du centre (cm, droite / bas) et inclinaison (degrés). */
+    decalage_x_cm?: number;
+    decalage_y_cm?: number;
+    rotation_deg?: number;
   }[];
+}
+
+/** « 2 cm vers la droite, 1,5 cm plus haut, incliné de 15° » (vue du client, face au vêtement). */
+function position(m: SitePersonnalisation["marquages"][number]): string | null {
+  const n = (v: number) => Math.abs(v).toLocaleString("fr-FR", { maximumFractionDigits: 1 });
+  const dx = m.decalage_x_cm ?? 0;
+  const dy = m.decalage_y_cm ?? 0;
+  const r = m.rotation_deg ?? 0;
+  const parties = [
+    dx ? `${n(dx)} cm vers la ${dx > 0 ? "droite" : "gauche"}` : null,
+    dy ? `${n(dy)} cm plus ${dy > 0 ? "bas" : "haut"}` : null,
+    r ? `incliné de ${r}°` : null,
+  ].filter(Boolean);
+  return parties.length ? parties.join(", ") : null;
 }
 
 /**
@@ -107,6 +125,11 @@ export async function SiteComposition({ requestId, composition }: { requestId: s
                 {m.degrade ? "Dégradés détectés" : m.nb_couleurs ? `${m.nb_couleurs} couleur(s) détectée(s)` : "Pas de logo analysé"}
                 {m.alertes?.length ? ` · À vérifier : ${m.alertes.join(" ; ")}` : ""}
               </p>
+              {position(m) && (
+                <p className="mt-1 text-xs">
+                  <span className="text-foreground-muted">Position ajustée par le client (vue de face) :</span> {position(m)}
+                </p>
+              )}
               {m.consigne && <p className="mt-1">« {m.consigne} »</p>}
             </li>
           ))}
