@@ -287,6 +287,7 @@ export function QuoteForm({
     quantite?: number;
     textile_id?: string | null;
     impressions?: Record<string, number>;
+    couleurs_zones?: Record<string, string>;
   }[];
 }) {
   const [pending, startTransition] = useTransition();
@@ -322,9 +323,12 @@ export function QuoteForm({
                       printZones: Object.fromEntries(Object.entries(l.impressions ?? {}).filter(([id]) => zonesDuModele.has(id))),
                       description: l.description,
                       quantity: quantity ? String(quantity) : "",
-                      colorDraft: l.couleur_unique_id
-                        ? { isUni: true, couleurUniqueId: l.couleur_unique_id, zoneColors: {} }
-                        : EMPTY_ZONE_COLOR_DRAFT,
+                      // Couleur unique, ou couleur par zone choisie sur le site (0121).
+                      colorDraft: l.couleurs_zones && Object.keys(l.couleurs_zones).length
+                        ? { isUni: false, couleurUniqueId: null, zoneColors: l.couleurs_zones }
+                        : l.couleur_unique_id
+                          ? { isUni: true, couleurUniqueId: l.couleur_unique_id, zoneColors: {} }
+                          : EMPTY_ZONE_COLOR_DRAFT,
                       sizes: sized ? l.tailles : quantity ? proposeSizes(l.product_model_id, quantity) : {},
                       sizesAuto: !sized,
                     };

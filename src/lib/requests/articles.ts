@@ -21,6 +21,8 @@ export type RequestArticleLine = {
   textile_id?: string | null;
   /** Emplacements imprimés → nombre de couleurs (outil « Personnaliser », 0110) : repris dans le devis. */
   impressions?: Record<string, number>;
+  /** Couleur par zone (zone_key → couleur), choisie sur le site (0121) : le devis s'ouvre en « couleur par zone ». */
+  couleurs_zones?: Record<string, string>;
 };
 
 export interface RequestModelOption {
@@ -77,5 +79,6 @@ export function cleanRequestLines(lines: RequestArticleLine[]): RequestArticleLi
       // Choix faits sur le site : conservés quand le commercial retouche la demande.
       ...(l.textile_id ? { textile_id: l.textile_id } : {}),
       ...(l.impressions && Object.keys(l.impressions).length ? { impressions: l.impressions } : {}),
+      ...(l.couleurs_zones && Object.keys(l.couleurs_zones).length ? { couleurs_zones: l.couleurs_zones } : {}),
     }));
 }

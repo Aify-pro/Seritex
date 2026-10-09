@@ -9,6 +9,7 @@ import { ZoneTemplateEditor } from "../_components/zone-template-editor";
 import { PrintableZoneEditor } from "../_components/printable-zone-editor";
 import { NomenclatureEditor } from "../_components/nomenclature-editor";
 import { AttachPattern } from "../_components/attach-pattern";
+import { MockupEditor, type MockupData } from "../_components/mockup-editor";
 
 /**
  * Onglet Technique : zones de couleur, zones imprimables, nomenclature,
@@ -21,7 +22,7 @@ export default async function ArticleTechniquePage({ params }: { params: Promise
   const supabase = await createClient();
   const canPatronnage = await can("patronnage", "view");
 
-  const [{ data: zones }, { data: printableZones }, { data: nomenclature }, { data: patterns }, { data: orphans }, { data: fiches }, { data: consumables }] =
+  const [{ data: zones }, { data: printableZones }, { data: nomenclature }, { data: patterns }, { data: orphans }, { data: fiches }, { data: consumables }, { data: mockups }] =
     await Promise.all([
       supabase.from("product_zone_templates").select("*").eq("product_model_id", id).order("display_order"),
       supabase.from("product_printable_zones").select("*").eq("product_model_id", id).order("display_order"),
@@ -37,7 +38,9 @@ export default async function ArticleTechniquePage({ params }: { params: Promise
         .order("date_emission", { ascending: false })
         .limit(20),
       supabase.from("consumables").select("id,code,designation,unite").eq("actif", true).order("code"),
+      supabase.from("product_model_mockups").select("vue,svg,zones,largeur_cm,cadre,reperes").eq("product_model_id", id),
     ]);
+  const mockup = (vue: string) => ((mockups ?? []).find((m) => m.vue === vue) as MockupData | undefined) ?? null;
 
   return (
     <div className="space-y-4">
@@ -55,6 +58,26 @@ export default async function ArticleTechniquePage({ params }: { params: Promise
               <p>Zones imprimables : {(printableZones ?? []).map((z) => z.zone_label).join(", ") || "aucune"}</p>
             </div>
           )}
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader
+          title="Mockups SVG (e-shop)"
+          description="Un dessin par vue, dont les calques portent le nom des zones de couleur : sur l'e-shop, le client voit son vêtement aux bonnes couleurs, zone par zone, et place ses visuels à l'échelle. Les repères positionnent les zones d'impression."
+        />
+        <CardBody className="space-y-4">
+          {(["avant", "dos"] as const).map((vue) => (
+            <MockupEditor
+              key={vue}
+              modelId={id}
+              vue={vue}
+              initial={mockup(vue)}
+              zonesCouleur={(zones ?? []).map((z) => ({ zone_key: z.zone_key as string, zone_label: z.zone_label as string }))}
+              zonesImpression={(printableZones ?? []).map((z) => ({ id: z.id as string, zone_label: z.zone_label as string }))}
+              canModify={canModify}
+            />
+          ))}
         </CardBody>
       </Card>
 
