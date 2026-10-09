@@ -138,6 +138,24 @@ await test("répartition par taille : la quantité devient la somme, tailles inc
   assert.deepEqual(d.lignes_stock[0].tailles, { [taille.cle]: 25 });
 });
 
+await test("deux visuels sur le même emplacement (cœur + ventre) : le devis garde le plus grand nombre de couleurs", async () => {
+  const e = crypto.randomUUID();
+  const r = await envoyer({
+    ...base,
+    envoi_id: e,
+    email: "c@prospect.ci",
+    fichiers: [],
+    marquages: [
+      { emplacement_id: poitrine.id, largeur_cm: 9, technique_libelle: "Sérigraphie", nb_couleurs: 4, decalage_y_cm: -6 },
+      { emplacement_id: poitrine.id, largeur_cm: 25, technique_libelle: "Sérigraphie", nb_couleurs: 2, decalage_y_cm: 8 },
+    ],
+  });
+  const d = await one(`select lignes_stock, personnalisation, description from requests where id=$1`, [r.id]);
+  assert.deepEqual(d.lignes_stock[0].impressions, { [poitrine.id]: 4 });
+  assert.equal(d.personnalisation.marquages.length, 2);
+  assert.match(d.description, /Marquage 1 : Poitrine[\s\S]*Marquage 2 : Poitrine · 25 cm/);
+});
+
 await test("fichiers visibles par qui voit la demande : commercial oui, anonyme non", async () => {
   const vus = await asRole("authenticated", commercial, `select count(*)::int n from request_site_files where request_id=$1`, [demande.id]);
   assert.equal(vus[0].n, 2);
@@ -146,7 +164,7 @@ await test("fichiers visibles par qui voit la demande : commercial oui, anonyme 
 
 await test("couper le site ne touche pas aux demandes déjà reçues", async () => {
   await regler(admin, false, false);
-  assert.equal((await one(`select count(*)::int n from requests where source='site'`)).n, 2);
+  assert.equal((await one(`select count(*)::int n from requests where source='site'`)).n, 3);
   assert.deepEqual(await catalogue(), []);
 });
 
