@@ -6,6 +6,7 @@ import { BoutonSeparation } from "@/components/separation/bouton-separation";
 import { estFonce } from "@/lib/separation/nuancier";
 import { chargerEncres, chargerParametresSerigraphie } from "@/lib/separation/encres-serveur";
 import { chargerRecettes } from "@/lib/separation/recettes-serveur";
+import { chargerParc } from "@/lib/atelier/parc-serveur";
 import { requireUser } from "@/lib/auth/current-user";
 
 /** Composition envoyée par le client depuis l'outil « Personnaliser » du site (migration 0110). */
@@ -47,18 +48,19 @@ export async function SiteComposition({ requestId, composition }: { requestId: s
   const url = (path: string) => signed.find((s) => s.path === path)?.signedUrl ?? null;
   // Pour la séparation des couleurs : nuancier, et textile foncé (sous-couche conseillée).
   const avecImages = (files ?? []).some((f) => (f.mime_type as string | null)?.startsWith("image/"));
-  const [encres, parametres, recettes, { data: textile }] = avecImages
+  const [encres, parametres, recettes, parc, { data: textile }] = avecImages
     ? await Promise.all([
         chargerEncres(supabase),
         chargerParametresSerigraphie(supabase),
         requireUser().then(({ profile }) => chargerRecettes(profile, supabase)),
+        chargerParc(supabase, { actifsSeulement: true }),
         composition.couleur_id
           ? supabase.from("colors").select("hex,famille").eq("id", composition.couleur_id).maybeSingle()
           : composition.couleur
             ? supabase.from("colors").select("hex,famille").eq("name", composition.couleur).limit(1).maybeSingle()
             : Promise.resolve({ data: null }),
       ])
-    : [[], null, [], { data: null }];
+    : [[], null, [], { machines: [], ecrans: [] }, { data: null }];
   const textileFonce = textile ? textile.famille === "fonce" || estFonce(textile.hex as string | null) : false;
   const repartition = Object.entries(composition.repartition ?? {});
 
@@ -149,6 +151,8 @@ export async function SiteComposition({ requestId, composition }: { requestId: s
                         parametres={parametres}
                         quantite={composition.quantite}
                         recettes={recettes}
+                        machines={parc.machines}
+                        ecransParc={parc.ecrans}
                       />
                     )}
                   </li>

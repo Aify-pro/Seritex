@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { AlertTriangle, Lock } from "lucide-react";
-import { chiffrer, type EcranChiffre, type ParametresSerigraphie } from "@/lib/separation/prix-revient";
+import { chiffrer, type EcranChiffre, type MachineChiffrage, type ParametresSerigraphie } from "@/lib/separation/prix-revient";
 
 const QUANTITES = [50, 100, 300, 1000];
 
@@ -18,14 +18,17 @@ export function PrixRevientSerigraphie({
   parametres,
   ecrans,
   quantiteInitiale,
+  machine = null,
 }: {
   parametres: ParametresSerigraphie;
   ecrans: EcranChiffre[];
   quantiteInitiale?: number | null;
+  /** Machine choisie : sa cadence et son coût horaire remplacent les paramètres de l'atelier. */
+  machine?: MachineChiffrage | null;
 }) {
   const [quantite, setQuantite] = useState(quantiteInitiale && quantiteInitiale > 0 ? quantiteInitiale : parametres.quantiteRef);
-  const c = useMemo(() => chiffrer(parametres, ecrans, quantite), [parametres, ecrans, quantite]);
-  const paliers = useMemo(() => QUANTITES.map((q) => ({ q, parPiece: chiffrer(parametres, ecrans, q).parPieceBonne })), [parametres, ecrans]);
+  const c = useMemo(() => chiffrer(parametres, ecrans, quantite, machine), [parametres, ecrans, quantite, machine]);
+  const paliers = useMemo(() => QUANTITES.map((q) => ({ q, parPiece: chiffrer(parametres, ecrans, q, machine).parPieceBonne })), [parametres, ecrans, machine]);
 
   return (
     <section className="space-y-3 border-t border-border pt-4">
@@ -95,6 +98,14 @@ export function PrixRevientSerigraphie({
           <AlertTriangle className="h-4 w-4 shrink-0" />
           Encre sans prix ({c.prixManquants.join(", ")}) : comptée 0. Renseignez le prix d&apos;achat de l&apos;article encre, ou un prix par défaut dans
           Paramètres &gt; Tarification.
+        </p>
+      )}
+      {machine && (
+        <p className="text-xs text-foreground-muted">
+          Machine : {machine.nom}
+          {machine.cadencePiecesH ? ` · ${machine.cadencePiecesH} pièces/h` : " · cadence non renseignée (temps par écran de l'atelier)"}
+          {machine.coutHoraire != null ? ` · ${f(machine.coutHoraire)}/h` : " · taux horaire de l'atelier"}
+          {c.passages > 1 ? ` · ${c.passages} passages` : ""}
         </p>
       )}
       <p className="text-xs text-foreground-muted">

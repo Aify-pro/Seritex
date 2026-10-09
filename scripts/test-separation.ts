@@ -16,7 +16,9 @@
  *     avec la formule des devis (src/lib/pricing.ts), prix au kg d'un article ;
  * 11. trames : AM (surface encrée = ton, linéature), Bayer et diffusion fidèles au
  *     ton, recouvrement, films complets selon le rendu ;
- * 12. réglages avancés : archétype choisi, nettoyage désactivé, recettes relues.
+ * 12. réglages avancés : archétype choisi, nettoyage désactivé, recettes relues ;
+ * 13. machines et écrans : format, écran convenable, prix de revient selon la
+ *     cadence et le coût horaire de la machine, passages au-delà des têtes.
  *
  * Lancer : npm run test:separation
  */
@@ -30,6 +32,7 @@ import { printCostPerPiece } from "../src/lib/pricing";
 import { ecransFilms, indicesRendu } from "../src/lib/separation/ecrans";
 import { recouvrir, seuilsAM, tramerAM } from "../src/lib/separation/trame";
 import { lireReglages, REGLAGES_DEFAUT } from "../src/lib/separation/reglages";
+import { ecranConvient, tientSurMachine } from "../src/lib/atelier/parc";
 
 const logo = (fond: string, texte: boolean) => `<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1600">${fond}
 <circle cx="800" cy="650" r="420" fill="#d62828"/><circle cx="800" cy="650" r="300" fill="#f77f00"/>
@@ -382,6 +385,35 @@ await test("recettes : relecture tolérante, réglages invalides refusés", asyn
   assert.equal(lireReglages({ rendu: { type: "am", lpi: 500, angles: [0], forme: "rond", pointMinPct: 5, pointMaxPct: 95 } }), null, "linéature hors bornes");
   assert.equal(lireReglages({ ppp: "beaucoup" }), null);
   return "OK";
+});
+
+await test("parc : format de la machine (dans un sens ou l'autre), écran convenable avec marge de raclette", async () => {
+  const m = { formatMaxLCm: 40, formatMaxHCm: 50 };
+  assert.equal(tientSurMachine(m, 28, 41), true);
+  assert.equal(tientSurMachine(m, 48, 30), true, "dessin tourné");
+  assert.equal(tientSurMachine(m, 45, 52), false);
+  assert.equal(tientSurMachine({ formatMaxLCm: null, formatMaxHCm: null }, 100, 100), true, "format non renseigné : pas d'alerte");
+  assert.equal(ecranConvient({ largeurCm: 50, hauteurCm: 60 }, 28, 41), true);
+  assert.equal(ecranConvient({ largeurCm: 40, hauteurCm: 50 }, 28, 41), false, "marge de 8 cm de chaque côté");
+  return "OK";
+});
+
+await test("prix de revient avec machine : cadence et coût horaire, passages", async () => {
+  const ecrans4 = Array.from({ length: 4 }, (_, k) => ({ libelle: `C${k}`, surfaceCm2: 100, prixKg: 10_000 }));
+  const sans = chiffrer(PARAMS, ecrans4, 100);
+  const avec = chiffrer(PARAMS, ecrans4, 100, { nom: "Carrousel", nbTetes: 6, cadencePiecesH: 120, coutHoraire: 6000 });
+  // Impression : 6 000 F/h ÷ 120 pièces/h = 50 F, quel que soit le nombre d'écrans (un tour de carrousel).
+  assert.equal(avec.parPiece.impression, 50);
+  assert.equal(avec.passages, 1);
+  // Calage au coût horaire de la machine : 4 × 15 min × 6 000 F/h = 6 000 F, + 4 écrans × 5 000 F.
+  assert.equal(avec.fixe.total, 26_000);
+  assert.notEqual(sans.parPiece.impression, avec.parPiece.impression);
+  const deuxPassages = chiffrer(PARAMS, ecrans4, 100, { nom: "Petit", nbTetes: 2, cadencePiecesH: 120, coutHoraire: 6000 });
+  assert.equal(deuxPassages.passages, 2);
+  assert.equal(deuxPassages.parPiece.impression, 100);
+  const sansCadence = chiffrer(PARAMS, ecrans4, 100, { nom: "Table", nbTetes: 1, cadencePiecesH: null, coutHoraire: null });
+  assert.equal(sansCadence.parPiece.impression, sans.parPiece.impression, "sans cadence ni coût : paramètres de l'atelier");
+  return `${avec.parPieceBonne} F par pièce avec la machine (${sans.parPieceBonne} F sans)`;
 });
 
 console.log(`${n} tests réussis`);

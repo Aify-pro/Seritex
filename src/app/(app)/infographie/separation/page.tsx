@@ -1,13 +1,19 @@
 import { requireModule } from "@/lib/auth/permissions";
 import { chargerEncres, chargerParametresSerigraphie } from "@/lib/separation/encres-serveur";
 import { chargerRecettes } from "@/lib/separation/recettes-serveur";
+import { chargerParc } from "@/lib/atelier/parc-serveur";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardBody } from "@/components/ui/card";
 import { DepotVisuel } from "./depot-visuel";
 
 export default async function SeparationCouleursPage() {
   const { profile } = await requireModule("demandes_graphiques");
-  const [encres, parametres, recettes] = await Promise.all([chargerEncres(), chargerParametresSerigraphie(), chargerRecettes(profile)]);
+  const [encres, parametres, recettes, parc] = await Promise.all([
+    chargerEncres(),
+    chargerParametresSerigraphie(),
+    chargerRecettes(profile),
+    chargerParc(undefined, { actifsSeulement: true }),
+  ]);
 
   return (
     <div className="space-y-6">
@@ -17,7 +23,7 @@ export default async function SeparationCouleursPage() {
       />
       <Card>
         <CardBody>
-          <DepotVisuel encres={encres} parametres={parametres} recettes={recettes} />
+          <DepotVisuel encres={encres} parametres={parametres} recettes={recettes} machines={parc.machines} ecransParc={parc.ecrans} />
         </CardBody>
       </Card>
     </div>

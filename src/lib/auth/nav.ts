@@ -35,6 +35,7 @@ import {
   Truck,
   MapPinned,
   Layers,
+  Printer,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { createElement, type ReactNode } from "react";
@@ -126,6 +127,7 @@ const STAFF_NAV: NavItem[] = [
   { href: "/atelier/patronnage", label: "Patronnage", icon: navIcon(Ruler), module: "patronnage" },
   { href: "/atelier/section", label: "Terminaux de section", icon: navIcon(ClipboardList), module: "ordres_travail" },
   { href: "/atelier/stock", label: "Gestion de stock", icon: navIcon(ArrowLeftRight), module: "stock_atelier" },
+  { href: "/atelier/machines", label: "Machines et écrans", icon: navIcon(Printer), module: "machines_ecrans" },
   { href: "/livraisons", label: "Livraisons", icon: navIcon(Truck), module: "livraisons" },
 
   // --- Paramètres (regroupés en thèmes par parametres-hubs.ts) ------------
