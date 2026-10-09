@@ -6,9 +6,16 @@
 import { z } from "zod";
 import type { OptionsSeparation } from "./separer";
 import type { Rendu } from "./trame";
+import { IMAGE_NEUTRE, type ReglagesImage } from "./image";
+import { nettoyerExpert, type ValeursExpert } from "./expert";
 
 export type Reglages = {
-  moteur: Required<Pick<OptionsSeparation, "profil" | "ecart" | "lissage" | "forcerBlanc" | "forcerNoir" | "niveauxDeGris" | "nettoyage" | "couvertureMinPct">>;
+  /** Réglages manuels de l'image, appliqués avant la séparation (lot 7). */
+  image: ReglagesImage;
+  moteur: Required<Pick<OptionsSeparation, "profil" | "ecart" | "lissage" | "forcerBlanc" | "forcerNoir" | "niveauxDeGris" | "nettoyage" | "couvertureMinPct">> & {
+    /** Paramètres experts du moteur ; absent = valeur du profil. */
+    expert: ValeursExpert;
+  };
   rendu: Rendu;
   /** Résolution visée des films, points par pouce. */
   ppp: number;
@@ -24,7 +31,9 @@ export type Reglages = {
 export const ANGLE_AM_DEFAUT = 22.5;
 
 export const REGLAGES_DEFAUT: Reglages = {
+  image: IMAGE_NEUTRE,
   moteur: {
+    expert: {},
     profil: "auto",
     ecart: "cie76",
     lissage: "leger",
@@ -39,6 +48,19 @@ export const REGLAGES_DEFAUT: Reglages = {
   pointMinMm: 0.5,
   recouvrementMm: 0,
   rentreMm: 0.2,
+};
+
+/** Quadrichromie proposée : angles classiques C 15°, M 75°, J 0°, N 45°. */
+export const CMJN_DEFAUT: Extract<Rendu, { type: "cmjn" }> = {
+  type: "cmjn",
+  lpi: 45,
+  angles: [15, 75, 0, 45],
+  forme: "elliptique",
+  gcrPct: 60,
+  limiteEncragePct: 260,
+  engraissementPct: 10,
+  pointMinPct: 5,
+  pointMaxPct: 95,
 };
 
 /** Réglages AM proposés quand on choisit la trame classique. */
@@ -63,10 +85,36 @@ const renduSchema = z.discriminatedUnion("type", [
     pointMinPct: z.number().min(0).max(50),
     pointMaxPct: z.number().min(50).max(100),
   }),
+  z.object({
+    type: z.literal("cmjn"),
+    lpi: z.number().min(10).max(150),
+    angles: z.tuple([z.number().min(-90).max(180), z.number().min(-90).max(180), z.number().min(-90).max(180), z.number().min(-90).max(180)]),
+    forme: z.enum(["rond", "elliptique", "ligne"]),
+    gcrPct: z.number().min(0).max(100),
+    limiteEncragePct: z.number().min(100).max(400),
+    engraissementPct: z.number().min(0).max(40),
+    pointMinPct: z.number().min(0).max(50),
+    pointMaxPct: z.number().min(50).max(100),
+  }),
 ]);
 
+const imageSchema = z.object({
+  luminosite: z.number().min(-100).max(100),
+  contraste: z.number().min(-100).max(100),
+  saturation: z.number().min(-100).max(100),
+  gamma: z.number().min(0.2).max(3),
+  noir: z.number().min(0).max(254),
+  blanc: z.number().min(1).max(255),
+  teinte: z.number().min(-180).max(180),
+  nettete: z.number().min(0).max(200),
+  bruit: z.union([z.literal(0), z.literal(1), z.literal(2)]),
+  inverser: z.boolean(),
+});
+
 export const reglagesSchema = z.object({
+  image: imageSchema,
   moteur: z.object({
+    expert: z.record(z.string(), z.union([z.number(), z.string(), z.boolean()])),
     profil: z.string().min(1).max(40),
     ecart: z.enum(["cie76", "cie94", "cie2000"]),
     lissage: z.enum(["off", "leger", "fort"]),
@@ -89,7 +137,8 @@ export function lireReglages(v: unknown): Reglages | null {
   const r = reglagesSchema.safeParse({
     ...REGLAGES_DEFAUT,
     ...o,
-    moteur: { ...REGLAGES_DEFAUT.moteur, ...(o.moteur ?? {}) },
+    image: { ...IMAGE_NEUTRE, ...(o.image ?? {}) },
+    moteur: { ...REGLAGES_DEFAUT.moteur, ...(o.moteur ?? {}), expert: nettoyerExpert(o.moteur?.expert) },
     rendu: o.rendu ?? REGLAGES_DEFAUT.rendu,
   });
   return r.success ? (r.data as Reglages) : null;

@@ -5,6 +5,7 @@
  */
 import { HORS_DESSIN, type Films, type OptionsSeparation, type ResultatSeparation } from "./separer";
 import type { EcransFilms, EntreeFilms } from "./ecrans";
+import type { ReglagesImage } from "./image";
 import type { Rendu } from "./trame";
 
 export type { CouleurSeparee, Films, ResultatSeparation } from "./separer";
@@ -145,7 +146,7 @@ export async function renduApercu(
     // repli ci-dessous
   }
   const { indicesRendu, tonsRendu } = await import("./ecrans");
-  return rendu.type === "am" ? { tons: tonsRendu(px, w, h, message) } : { indices: indicesRendu(px, w, h, message) };
+  return rendu.type === "am" || rendu.type === "cmjn" ? { tons: tonsRendu(px, w, h, message) } : { indices: indicesRendu(px, w, h, message) };
 }
 
 /** Films en pleine résolution selon le rendu (voir ecransFilms). `px` est transféré au worker. */
@@ -207,14 +208,14 @@ export function dessiner(r: ResultatSeparation, index?: number | "dessin", rendu
     const o = p * 4;
     if (tons) {
       if (index === undefined) {
-        // Encres déposées l'une sur l'autre, chacune selon son ton.
+        // Encres déposées l'une sur l'autre (mélange soustractif), chacune selon son ton.
         let c = [255, 255, 255];
         let encre = 0;
         tons.forEach((t, k) => {
           const a = t[p] / 255;
           if (!a) return;
           encre = Math.max(encre, t[p]);
-          c = c.map((v, j) => v * (1 - a) + couleurs[k][j] * a);
+          c = c.map((v, j) => v * (1 - a + (a * couleurs[k][j]) / 255));
         });
         if (!encre) continue;
         [img.data[o], img.data[o + 1], img.data[o + 2]] = c;
@@ -252,12 +253,14 @@ export async function loupeRendu(
   rendu: Rendu,
   ppp: number,
   largeurCm: number,
+  image?: ReglagesImage,
   coteCm = 2.5,
 ): Promise<{ url: string; cote: number }> {
-  const [{ dimensionsFilms }, { indicesRendu, tonsRendu }, { tramerAM }] = await Promise.all([
+  const [{ dimensionsFilms }, { indicesRendu, tonsRendu }, { tramerAM, ENCRES_CMJN }, { ajusterImage }] = await Promise.all([
     import("./dimensions-films"),
     import("./ecrans"),
     import("./trame"),
+    import("./image"),
   ]);
   const { zone } = dimensionsFilms(r, largeurCm, ppp);
   // Fraction de l'image couverte par le carré : la largeur du dessin vaut largeurCm.
@@ -268,16 +271,19 @@ export async function loupeRendu(
   const sous = { x: Math.max(0, cx - fl / 2), y: Math.max(0, cy - fh / 2), l: fl, h: fh };
   const cote = Math.max(16, Math.round((coteCm / 2.54) * ppp));
   const hauteur = Math.max(16, Math.round((cote * fh * r.hauteur) / (fl * r.largeur)));
-  const { px, w, h } = await lireZone(source, sous, cote, hauteur);
-  const entree = { encres: r.couleurs.map((c) => c.hex), fond: r.fond, transparent: r.transparent, rendu, ppp };
-  const couleurs = r.couleurs.map((c) => rvb(c.hex));
+  const lu = await lireZone(source, sous, cote, hauteur);
+  const { w, h } = lu;
+  const px = image ? ajusterImage(lu.px, w, h, image, w / Math.max(1, fl * r.largeur)) : lu.px;
+  const hexEncres: string[] = rendu.type === "cmjn" ? ENCRES_CMJN.map((e) => e.hex) : r.couleurs.map((c) => c.hex);
+  const entree = { encres: hexEncres, fond: r.fond, transparent: r.transparent, rendu, ppp };
+  const couleurs = hexEncres.map((hex) => rvb(hex));
   const canvas = document.createElement("canvas");
   canvas.width = w;
   canvas.height = h;
   const ctx = canvas.getContext("2d")!;
   const img = ctx.createImageData(w, h);
   img.data.fill(255);
-  if (rendu.type === "am") {
+  if (rendu.type === "am" || rendu.type === "cmjn") {
     const tons = tonsRendu(px, w, h, entree);
     tons.forEach((t, k) => {
       const m = tramerAM((p) => t[p], w, h, {
@@ -288,8 +294,17 @@ export async function loupeRendu(
         pointMinPct: rendu.pointMinPct,
         pointMaxPct: rendu.pointMaxPct,
       });
-      // Encres l'une sur l'autre, comme à l'impression (la dernière couvre).
-      for (let p = 0; p < m.length; p++) if (m[p]) [img.data[p * 4], img.data[p * 4 + 1], img.data[p * 4 + 2]] = couleurs[k];
+      for (let p = 0; p < m.length; p++) {
+        if (!m[p]) continue;
+        const o = p * 4;
+        if (rendu.type === "cmjn") {
+          // Encres transparentes de quadrichromie : elles se multiplient.
+          for (let j = 0; j < 3; j++) img.data[o + j] = (img.data[o + j] * couleurs[k][j]) / 255;
+        } else {
+          // Encres couvrantes : la dernière imprimée recouvre.
+          [img.data[o], img.data[o + 1], img.data[o + 2]] = couleurs[k];
+        }
+      }
     });
   } else {
     const indices = indicesRendu(px, w, h, entree);

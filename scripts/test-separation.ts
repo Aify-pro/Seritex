@@ -18,7 +18,9 @@
  *     ton, recouvrement, films complets selon le rendu ;
  * 12. réglages avancés : archétype choisi, nettoyage désactivé, recettes relues ;
  * 13. machines et écrans : format, écran convenable, prix de revient selon la
- *     cadence et le coût horaire de la machine, passages au-delà des têtes.
+ *     cadence et le coût horaire de la machine, passages au-delà des têtes ;
+ * 14. réglages de l'image, quadrichromie CMJN, palette imposée, paramètres
+ *     experts et couleurs suggérées du moteur.
  *
  * Lancer : npm run test:separation
  */
@@ -33,6 +35,9 @@ import { ecransFilms, indicesRendu } from "../src/lib/separation/ecrans";
 import { recouvrir, seuilsAM, tramerAM } from "../src/lib/separation/trame";
 import { lireReglages, REGLAGES_DEFAUT } from "../src/lib/separation/reglages";
 import { ecranConvient, tientSurMachine } from "../src/lib/atelier/parc";
+import { ajusterImage, IMAGE_NEUTRE } from "../src/lib/separation/image";
+import { versCmjn } from "../src/lib/separation/trame";
+import { CMJN_DEFAUT } from "../src/lib/separation/reglages";
 
 const logo = (fond: string, texte: boolean) => `<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1600">${fond}
 <circle cx="800" cy="650" r="420" fill="#d62828"/><circle cx="800" cy="650" r="300" fill="#f77f00"/>
@@ -414,6 +419,74 @@ await test("prix de revient avec machine : cadence et coût horaire, passages", 
   const sansCadence = chiffrer(PARAMS, ecrans4, 100, { nom: "Table", nbTetes: 1, cadencePiecesH: null, coutHoraire: null });
   assert.equal(sansCadence.parPiece.impression, sans.parPiece.impression, "sans cadence ni coût : paramètres de l'atelier");
   return `${avec.parPieceBonne} F par pièce avec la machine (${sans.parPieceBonne} F sans)`;
+});
+
+await test("réglages de l'image : neutre, luminosité, contraste, inversion, saturation", async () => {
+  const px = new Uint8ClampedArray([100, 150, 200, 255, 20, 40, 60, 255]);
+  assert.deepEqual([...ajusterImage(px, 2, 1, IMAGE_NEUTRE)], [...px], "neutre : image inchangée");
+  const clair = ajusterImage(px, 2, 1, { ...IMAGE_NEUTRE, luminosite: 40 });
+  assert.ok(clair[0] > px[0] && clair[4] > px[4]);
+  const inverse = ajusterImage(px, 2, 1, { ...IMAGE_NEUTRE, inverser: true });
+  assert.equal(inverse[0], 155);
+  const gris = ajusterImage(px, 2, 1, { ...IMAGE_NEUTRE, saturation: -100 });
+  assert.ok(Math.abs(gris[0] - gris[2]) <= 1, "saturation -100 : gris");
+  const contraste = ajusterImage(new Uint8ClampedArray([64, 64, 64, 255]), 1, 1, { ...IMAGE_NEUTRE, contraste: 50 });
+  assert.ok(contraste[0] < 64, "contraste : les sombres s'assombrissent");
+  assert.equal(ajusterImage(px, 2, 1, { ...IMAGE_NEUTRE, luminosite: 40 })[3], 255, "transparence intacte");
+  return "OK";
+});
+
+await test("quadrichromie : blanc, noir, cyan pur, limite d'encrage, GCR", async () => {
+  const c = { gcrPct: 100, limiteEncragePct: 300, engraissementPct: 0 };
+  assert.deepEqual(versCmjn(255, 255, 255, c), [0, 0, 0, 0]);
+  assert.deepEqual(versCmjn(0, 0, 0, c), [0, 0, 0, 255], "noir : 100 % N avec GCR 100");
+  const cyan = versCmjn(0, 255, 255, c);
+  assert.ok(cyan[0] === 255 && cyan[1] === 0 && cyan[2] === 0 && cyan[3] === 0, `cyan ${cyan}`);
+  const sansGcr = versCmjn(60, 60, 60, { ...c, gcrPct: 0 });
+  assert.equal(sansGcr[3], 0, "GCR 0 : pas de noir");
+  const limite = versCmjn(20, 10, 30, { gcrPct: 30, limiteEncragePct: 240, engraissementPct: 0 });
+  assert.ok(limite.reduce((a, b) => a + b, 0) / 255 <= 2.41, `encrage ${limite}`);
+  const eng = versCmjn(128, 255, 255, { ...c, engraissementPct: 15 });
+  assert.ok(eng[0] < versCmjn(128, 255, 255, c)[0], "engraissement compensé");
+  return "OK";
+});
+
+await test("films en quadrichromie : 4 écrans + sous-couche, tons tramés", async () => {
+  const fichier = await svg(degrade).resize(800).png().toBuffer();
+  const { data, info } = await sharp(fichier).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const f = ecransFilms(new Uint8ClampedArray(data), info.width, info.height, {
+    encres: ["#00AEEF", "#EC008C", "#FFF200", "#231F20"],
+    fond: "#FFFFFF",
+    transparent: false,
+    rendu: { ...CMJN_DEFAUT },
+    ppp: 300,
+    pixelsMin: 4,
+    recouvrementPx: 0,
+    sousCouche: { rentrePx: 2 },
+    miroir: false,
+  });
+  assert.equal(f.ecrans.length, 5);
+  const encre = (paquet: Uint8Array) => paquet.reduce((s, o) => s + 8 - [...o.toString(2).padStart(8, "0")].filter((b) => b === "1").length, 0);
+  // Dégradé #FF0066 → #3300CC : magenta plein partout (100 %), jaune de 60 % à 20 %, cyan de 0 à 80 %.
+  assert.ok(encre(f.ecrans[2]) > encre(f.ecrans[3]) * 1.5, `magenta ${encre(f.ecrans[2])} > jaune ${encre(f.ecrans[3])}`);
+  assert.ok(encre(f.ecrans[1]) > 1000, "cyan présent (violet)");
+  return `${f.largeur} × ${f.hauteur} px`;
+});
+
+await test("palette imposée : couleurs gardées telles quelles, même rares", async () => {
+  const r = await analyser(await encodé(svg(logo(BLANC, true)).jpeg({ quality: 85 })), { palette: ["#D62828", "#F77F00", "#003049", "#2A9D8F", "#FFD700"] });
+  assert.equal(r.profil, "Palette manuelle");
+  assert.equal(r.couleurs.length, 5);
+  assert.ok(r.couleurs.some((c) => c.hex === "#FFD700"), "couleur absente de l'image gardée");
+  return resume(r);
+});
+
+await test("paramètres experts et couleurs suggérées", async () => {
+  const base = await analyser(await encodé(svg(degrade).jpeg({ quality: 85 })), { nbCouleurs: 4 });
+  const pochoir = await analyser(await encodé(svg(degrade).jpeg({ quality: 85 })), { nbCouleurs: 4, expert: { engineType: "stencil" } });
+  assert.notDeepEqual(pochoir.couleurs.map((c) => c.hex), base.couleurs.map((c) => c.hex), "l'algorithme change la palette");
+  assert.ok(Array.isArray(base.suggestions));
+  return `pochoir : ${pochoir.couleurs.map((c) => c.hex).join(" ")} · suggestions : ${base.suggestions.join(" ") || "aucune"}`;
 });
 
 console.log(`${n} tests réussis`);

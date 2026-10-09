@@ -4,7 +4,9 @@ import { useState } from "react";
 import { ChevronDown, Save, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ARCHETYPES } from "@/lib/separation/archetypes";
-import { AM_DEFAUT, ANGLE_AM_DEFAUT, REGLAGES_DEFAUT, type Reglages } from "@/lib/separation/reglages";
+import { AM_DEFAUT, ANGLE_AM_DEFAUT, CMJN_DEFAUT, REGLAGES_DEFAUT, type Reglages } from "@/lib/separation/reglages";
+import { IMAGE_NEUTRE, imageNeutre, type ReglagesImage } from "@/lib/separation/image";
+import { PARAMS_EXPERT } from "@/lib/separation/expert";
 import { PROFILS_ADAPTATIFS } from "@/lib/separation/separer";
 import { LIBELLES_RENDU, lpiMaxPourMaillage, type Rendu } from "@/lib/separation/trame";
 import { cn } from "@/lib/utils";
@@ -58,6 +60,36 @@ function Nombre({
   );
 }
 
+function Curseur({
+  label,
+  valeur,
+  onChange,
+  min,
+  max,
+  pas = 1,
+  neutre,
+}: {
+  label: string;
+  valeur: number;
+  onChange: (v: number) => void;
+  min: number;
+  max: number;
+  pas?: number;
+  neutre: number;
+}) {
+  return (
+    <label className="block text-xs text-foreground-muted">
+      <span className="flex items-center justify-between">
+        {label}
+        <button type="button" onClick={() => onChange(neutre)} className={cn("tabular-nums", valeur !== neutre && "font-medium text-foreground")} title="Revenir à la valeur neutre">
+          {valeur.toLocaleString("fr-FR")}
+        </button>
+      </span>
+      <input type="range" min={min} max={max} step={pas} value={valeur} onChange={(e) => onChange(Number(e.target.value))} className="mt-1 w-full accent-brand" />
+    </label>
+  );
+}
+
 function Case({ label, valeur, onChange }: { label: string; valeur: boolean; onChange: (v: boolean) => void }) {
   return (
     <label className="flex items-center gap-2 text-xs text-foreground">
@@ -96,6 +128,15 @@ export function ReglagesAvances({
   const r = reglages.rendu;
   const majMoteur = (v: Partial<Reglages["moteur"]>) => onChange({ ...reglages, moteur: { ...m, ...v } });
   const majRendu = (v: Rendu) => onChange({ ...reglages, rendu: v });
+  const img = reglages.image;
+  const majImage = (v: Partial<ReglagesImage>) => onChange({ ...reglages, image: { ...img, ...v } });
+  const [expertOuvert, setExpertOuvert] = useState(Object.keys(m.expert).length > 0);
+  const majExpert = (cle: string, v: number | string | boolean | null) => {
+    const expert = { ...m.expert };
+    if (v === null || v === "") delete expert[cle];
+    else expert[cle] = v;
+    majMoteur({ expert });
+  };
   const maillageConseil = r.type === "bayer" ? r.maillage : (maillage ?? null);
 
   function changerType(type: Rendu["type"]) {
@@ -103,6 +144,7 @@ export function ReglagesAvances({
     if (type === "aplat") majRendu({ type: "aplat" });
     else if (type === "diffusion") majRendu({ type: "diffusion", algo: "floyd-steinberg" });
     else if (type === "bayer") majRendu({ type: "bayer", maillage: maillage ?? 77 });
+    else if (type === "cmjn") majRendu({ ...CMJN_DEFAUT, lpi: maillage ? Math.min(CMJN_DEFAUT.lpi, lpiMaxPourMaillage(maillage)) : CMJN_DEFAUT.lpi });
     else majRendu({ ...AM_DEFAUT, lpi: maillage ? Math.min(AM_DEFAUT.lpi, lpiMaxPourMaillage(maillage)) : AM_DEFAUT.lpi });
   }
 
@@ -113,7 +155,9 @@ export function ReglagesAvances({
           Réglages avancés
           <span className="ml-2 text-xs font-normal text-foreground-muted">
             {LIBELLES_RENDU[r.type]}
-            {r.type === "am" ? ` · ${r.lpi} lpi` : ""} · {reglages.ppp} ppp
+            {r.type === "am" || r.type === "cmjn" ? ` · ${r.lpi} lpi` : ""} · {reglages.ppp} ppp
+            {!imageNeutre(img) ? " · image retouchée" : ""}
+            {Object.keys(m.expert).length ? ` · ${Object.keys(m.expert).length} réglage(s) expert(s)` : ""}
           </span>
         </span>
         <ChevronDown className={cn("h-4 w-4 text-foreground-muted transition-transform", ouvert && "rotate-180")} />
@@ -182,6 +226,37 @@ export function ReglagesAvances({
             )}
           </div>
 
+          {/* Image */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <p className={titre}>Image (avant séparation, appliqué aussi aux films)</p>
+              <Button type="button" size="sm" variant="ghost" disabled={imageNeutre(img)} onClick={() => onChange({ ...reglages, image: IMAGE_NEUTRE })}>
+                Image d&apos;origine
+              </Button>
+            </div>
+            <div className="grid gap-x-5 gap-y-3 sm:grid-cols-2 lg:grid-cols-4">
+              <Curseur label="Luminosité" valeur={img.luminosite} min={-100} max={100} neutre={0} onChange={(v) => majImage({ luminosite: v })} />
+              <Curseur label="Contraste" valeur={img.contraste} min={-100} max={100} neutre={0} onChange={(v) => majImage({ contraste: v })} />
+              <Curseur label="Saturation" valeur={img.saturation} min={-100} max={100} neutre={0} onChange={(v) => majImage({ saturation: v })} />
+              <Curseur label="Teinte (°)" valeur={img.teinte} min={-180} max={180} neutre={0} onChange={(v) => majImage({ teinte: v })} />
+              <Curseur label="Gamma (tons moyens)" valeur={img.gamma} min={0.2} max={3} pas={0.05} neutre={1} onChange={(v) => majImage({ gamma: v })} />
+              <Curseur label="Niveau noir" valeur={img.noir} min={0} max={Math.min(254, img.blanc - 1)} neutre={0} onChange={(v) => majImage({ noir: v })} />
+              <Curseur label="Niveau blanc" valeur={img.blanc} min={Math.max(1, img.noir + 1)} max={255} neutre={255} onChange={(v) => majImage({ blanc: v })} />
+              <Curseur label="Netteté (%)" valeur={img.nettete} min={0} max={200} pas={5} neutre={0} onChange={(v) => majImage({ nettete: v })} />
+            </div>
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5">
+              <label className="flex items-center gap-2 text-xs text-foreground-muted">
+                Réduction du bruit
+                <select value={img.bruit} onChange={(e) => majImage({ bruit: Number(e.target.value) as ReglagesImage["bruit"] })} className={cn(champ, "w-32")}>
+                  <option value={0}>Aucune</option>
+                  <option value={1}>Légère</option>
+                  <option value={2}>Forte</option>
+                </select>
+              </label>
+              <Case label="Inverser (négatif)" valeur={img.inverser} onChange={(v) => majImage({ inverser: v })} />
+            </div>
+          </div>
+
           {/* Moteur */}
           <div className="space-y-2">
             <p className={titre}>Séparation (moteur Reveal)</p>
@@ -243,6 +318,63 @@ export function ReglagesAvances({
               <Case label="Forcer le noir" valeur={m.forcerNoir} onChange={(v) => majMoteur({ forcerNoir: v })} />
               <Case label="Niveaux de gris" valeur={m.niveauxDeGris} onChange={(v) => majMoteur({ niveauxDeGris: v })} />
             </div>
+            <button type="button" onClick={() => setExpertOuvert(!expertOuvert)} className="flex items-center gap-1 text-xs font-medium text-foreground">
+              <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", expertOuvert && "rotate-180")} />
+              Paramètres experts du moteur
+              {Object.keys(m.expert).length > 0 && <span className="text-foreground-muted">({Object.keys(m.expert).length} modifié(s))</span>}
+            </button>
+            {expertOuvert && (
+              <div className="space-y-2 rounded-md bg-surface-muted/50 p-3">
+                <p className="text-[11px] text-foreground-muted">Vide ou « Profil » : la valeur du profil choisi. Chaque changement relance la séparation.</p>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {PARAMS_EXPERT.map((p) => {
+                    const v = m.expert[p.cle];
+                    return (
+                      <label key={p.cle} className="block text-xs text-foreground-muted" title={p.aide}>
+                        {p.libelle}
+                        {p.type === "nombre" ? (
+                          <input
+                            type="number"
+                            min={p.min}
+                            max={p.max}
+                            step={p.pas}
+                            value={typeof v === "number" ? v : ""}
+                            placeholder="profil"
+                            onChange={(e) => majExpert(p.cle, e.target.value === "" ? null : Math.min(p.max, Math.max(p.min, Number(e.target.value))))}
+                            className={cn(champ, "mt-1")}
+                          />
+                        ) : p.type === "choix" ? (
+                          <select value={typeof v === "string" ? v : ""} onChange={(e) => majExpert(p.cle, e.target.value || null)} className={cn(champ, "mt-1")}>
+                            <option value="">Profil</option>
+                            {p.choix.map((c) => (
+                              <option key={c.valeur} value={c.valeur}>
+                                {c.libelle}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <select
+                            value={v === true ? "oui" : v === false ? "non" : ""}
+                            onChange={(e) => majExpert(p.cle, e.target.value === "" ? null : e.target.value === "oui")}
+                            className={cn(champ, "mt-1")}
+                          >
+                            <option value="">Profil</option>
+                            <option value="oui">Oui</option>
+                            <option value="non">Non</option>
+                          </select>
+                        )}
+                        <span className="mt-0.5 block text-[11px]">{p.aide}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+                {Object.keys(m.expert).length > 0 && (
+                  <Button type="button" size="sm" variant="ghost" onClick={() => majMoteur({ expert: {} })}>
+                    Revenir aux valeurs du profil
+                  </Button>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Trame */}
@@ -323,6 +455,51 @@ export function ReglagesAvances({
                     {r.lpi} lpi dépasse ce que tient un écran de {maillageConseil} fils/cm ({lpiMaxPourMaillage(maillageConseil)} lpi) : les points risquent de se perdre.
                   </p>
                 )}
+              </div>
+            )}
+            {r.type === "cmjn" && (
+              <div className="space-y-2">
+                <div className="grid gap-3 sm:grid-cols-4">
+                  <Nombre
+                    label="Linéature (lpi)"
+                    valeur={r.lpi}
+                    min={10}
+                    max={150}
+                    onChange={(v) => majRendu({ ...r, lpi: v })}
+                    aide={maillageConseil ? `Max conseillé : ${lpiMaxPourMaillage(maillageConseil)} lpi.` : "Textile : 45 à 65 lpi."}
+                  />
+                  <label className="block text-xs text-foreground-muted">
+                    Forme du point
+                    <select value={r.forme} onChange={(e) => majRendu({ ...r, forme: e.target.value as typeof r.forme })} className={cn(champ, "mt-1")}>
+                      <option value="elliptique">Elliptique (conseillé en quadri)</option>
+                      <option value="rond">Rond</option>
+                      <option value="ligne">Ligne</option>
+                    </select>
+                  </label>
+                  <Nombre label="Point minimum (%)" valeur={r.pointMinPct} min={0} max={50} onChange={(v) => majRendu({ ...r, pointMinPct: v })} />
+                  <Nombre label="Point maximum (%)" valeur={r.pointMaxPct} min={50} max={100} onChange={(v) => majRendu({ ...r, pointMaxPct: v })} />
+                </div>
+                <div className="grid gap-3 sm:grid-cols-4">
+                  {(["Cyan", "Magenta", "Jaune", "Noir"] as const).map((nom, i) => (
+                    <Nombre
+                      key={nom}
+                      label={`Angle ${nom} (°)`}
+                      valeur={r.angles[i]}
+                      min={-90}
+                      max={180}
+                      pas={0.5}
+                      onChange={(v) => majRendu({ ...r, angles: r.angles.map((a, j) => (j === i ? v : a)) as typeof r.angles })}
+                    />
+                  ))}
+                </div>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <Nombre label="Retrait des sous-couleurs, GCR (%)" valeur={r.gcrPct} min={0} max={100} onChange={(v) => majRendu({ ...r, gcrPct: v })} aide="Part du gris confiée au noir : moins d'encre, gris plus stables." />
+                  <Nombre label="Encrage total max (%)" valeur={r.limiteEncragePct} min={100} max={400} pas={10} onChange={(v) => majRendu({ ...r, limiteEncragePct: v })} aide="C + M + J + N ; textile : 240 à 280 %." />
+                  <Nombre label="Engraissement (%)" valeur={r.engraissementPct} min={0} max={40} onChange={(v) => majRendu({ ...r, engraissementPct: v })} aide="Le point grossit sur le textile : compensé dans les tons moyens." />
+                </div>
+                <p className="text-[11px] text-foreground-muted">
+                  Quadrichromie : 4 écrans Cyan, Magenta, Jaune, Noir à la place des couleurs séparées ; la sous-couche reste possible sur textile foncé.
+                </p>
               </div>
             )}
           </div>

@@ -5,7 +5,8 @@
  * résolution, dans le Web Worker). Fonctions pures, sans DOM.
  */
 import { HORS_DESSIN, sansIlots, sousCouche } from "./separer";
-import { empaqueter, recouvrir, rvbDeHex, tableMelanges, ton, pur, tramerAM, type Rendu } from "./trame";
+import { empaqueter, recouvrir, rvbDeHex, tableMelanges, ton, pur, tramerAM, versCmjn, type Rendu } from "./trame";
+import { ajusterImage, imageNeutre, type ReglagesImage } from "./image";
 
 type Vec = [number, number, number];
 
@@ -153,8 +154,42 @@ export function indicesRendu(px: Uint8ClampedArray | Uint8Array, w: number, h: n
   return out;
 }
 
+/**
+ * Tons C, M, J, N de chaque pixel (quadrichromie) ; le fond (uni ou
+ * transparent) n'est pas imprimé. Mis en cache par teinte.
+ */
+export function tonsCmjn(px: Uint8ClampedArray | Uint8Array, w: number, h: number, e: Entree): Uint8Array[] {
+  if (e.rendu.type !== "cmjn") throw new Error("rendu CMJN attendu");
+  const reglage = e.rendu;
+  const n = w * h;
+  const out = [0, 1, 2, 3].map(() => new Uint8Array(n));
+  const fond = e.fond ? rvbDeHex(e.fond) : null;
+  const cache = new Map<number, number>();
+  for (let p = 0; p < n; p++) {
+    const i = p * 4;
+    if (e.transparent && px[i + 3] < 128) continue;
+    const r = px[i];
+    const g = px[i + 1];
+    const b = px[i + 2];
+    if (fond && Math.abs(r - fond[0]) + Math.abs(g - fond[1]) + Math.abs(b - fond[2]) < 24) continue;
+    const cle = (r << 16) | (g << 8) | b;
+    let v = cache.get(cle);
+    if (v === undefined) {
+      const t = versCmjn(r, g, b, reglage);
+      v = (t[0] << 24) | (t[1] << 16) | (t[2] << 8) | t[3];
+      cache.set(cle, v);
+    }
+    out[0][p] = (v >>> 24) & 255;
+    out[1][p] = (v >>> 16) & 255;
+    out[2][p] = (v >>> 8) & 255;
+    out[3][p] = v & 255;
+  }
+  return out;
+}
+
 /** Ton (0 à 255) de chaque encre en chaque pixel : base de la trame AM et de son aperçu. */
 export function tonsRendu(px: Uint8ClampedArray | Uint8Array, w: number, h: number, e: Entree): Uint8Array[] {
+  if (e.rendu.type === "cmjn") return tonsCmjn(px, w, h, e);
   const n = w * h;
   const { vals } = melanges(px, n, e);
   return e.encres.map((_, k) => {
@@ -172,6 +207,10 @@ export type EntreeFilms = Entree & {
   /** Sous-couche blanche : rentré en pixels ; null = pas de sous-couche. */
   sousCouche: { rentrePx: number } | null;
   miroir: boolean;
+  /** Réglages manuels de l'image, appliqués avant tout (lot 7). */
+  image?: ReglagesImage;
+  /** Pixels de cette image par pixel de l'image d'analyse (netteté, bruit). */
+  echelleImage?: number;
 };
 
 export type EcransFilms = {
@@ -185,13 +224,21 @@ export type EcransFilms = {
  * Films en pleine résolution : rendu, recadrage sur le dessin, nettoyage,
  * recouvrement, sous-couche, trame AM, puis masques 1 bit prêts pour le PDF.
  */
-export function ecransFilms(px: Uint8ClampedArray | Uint8Array, w: number, h: number, e: EntreeFilms): EcransFilms {
-  const am = e.rendu.type === "am" ? e.rendu : null;
-  // Aplats tranchés à 50 % : base des films d'aplats, du cadrage et de la sous-couche.
-  const plats = indicesRendu(px, w, h, am ? { ...e, rendu: { type: "aplat" } } : e);
-
+export function ecransFilms(pxSource: Uint8ClampedArray | Uint8Array, w: number, h: number, e: EntreeFilms): EcransFilms {
+  const px = e.image && !imageNeutre(e.image) ? ajusterImage(pxSource, w, h, e.image, e.echelleImage ?? 1) : pxSource;
+  const cmjn = e.rendu.type === "cmjn" ? e.rendu : null;
+  const am = e.rendu.type === "am" ? e.rendu : cmjn ? { ...cmjn, type: "am" as const, angles: [...cmjn.angles] } : null;
   // Cadrage sur le dessin (en AM, un ton faible compte aussi).
   const tons = am ? tonsRendu(px, w, h, e) : null;
+  // Aplats tranchés à 50 % : base des films d'aplats, du cadrage et de la sous-couche.
+  // En quadrichromie, le dessin est ce qui reçoit de l'encre (ton ≥ 10 %).
+  const plats = cmjn && tons
+    ? (() => {
+        const v = new Uint8Array(w * h).fill(HORS_DESSIN);
+        for (let p = 0; p < v.length; p++) if (tons.some((t) => t[p] >= 26)) v[p] = 0;
+        return v;
+      })()
+    : indicesRendu(px, w, h, am ? { ...e, rendu: { type: "aplat" } } : e);
   let x0 = w;
   let y0 = h;
   let x1 = -1;
