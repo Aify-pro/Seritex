@@ -56,6 +56,7 @@ export const MODULE_META: Record<string, ModuleMeta> = {
   patronnage: { group: "modules", actions: ["view", "create", "modify", "archive", "delete", "validate", "unlock"] },
   patronnage_traces: { group: "modules", actions: ["create", "modify"] },
   stock_atelier: { group: "modules", actions: ["view", "create", "modify", "delete"] },
+  machines_ecrans: { group: "modules", actions: ["view", "create", "modify", "delete"] },
   livraisons: { group: "modules", actions: ["view", "create", "modify", "validate"] },
   lieux_livraison: { group: "modules", actions: ["create", "modify", "delete"] },
 

@@ -6,6 +6,7 @@ import { Dialog } from "@/components/ui/dialog";
 import type { Encre } from "@/lib/separation/nuancier";
 import type { ParametresSerigraphie } from "@/lib/separation/prix-revient";
 import type { Recette } from "./reglages-avances";
+import type { EcranCadre, Machine } from "@/lib/atelier/parc";
 import { SeparationCouleurs } from "./separation-couleurs";
 
 /** Ouvre la séparation des couleurs d'un visuel déjà en ligne (URL signée, lisible en CORS). */
@@ -18,6 +19,8 @@ export function BoutonSeparation({
   parametres,
   quantite,
   recettes,
+  machines,
+  ecransParc,
 }: {
   url: string;
   nom: string;
@@ -27,6 +30,8 @@ export function BoutonSeparation({
   parametres?: ParametresSerigraphie | null;
   quantite?: number | null;
   recettes?: Recette[];
+  machines?: Machine[];
+  ecransParc?: EcranCadre[];
 }) {
   return (
     <Dialog
@@ -40,7 +45,7 @@ export function BoutonSeparation({
         </Button>
       }
     >
-      <SeparationCouleurs source={url} nom={nom} largeurCm={largeurCm} encres={encres} textileFonce={textileFonce} parametres={parametres} quantite={quantite} recettes={recettes} />
+      <SeparationCouleurs source={url} nom={nom} largeurCm={largeurCm} encres={encres} textileFonce={textileFonce} parametres={parametres} quantite={quantite} recettes={recettes} machines={machines} ecransParc={ecransParc} />
     </Dialog>
   );
 }

@@ -6,12 +6,25 @@ import { SeparationCouleurs } from "@/components/separation/separation-couleurs"
 import type { Encre } from "@/lib/separation/nuancier";
 import type { ParametresSerigraphie } from "@/lib/separation/prix-revient";
 import type { Recette } from "@/components/separation/reglages-avances";
+import type { EcranCadre, Machine } from "@/lib/atelier/parc";
 import { cn } from "@/lib/utils";
 
 const FORMATS = "image/png,image/jpeg,image/webp,image/svg+xml";
 
 /** Dépôt d'un visuel (glisser-déposer ou choix du fichier), analysé dans le navigateur sans envoi. */
-export function DepotVisuel({ encres, parametres, recettes }: { encres: Encre[]; parametres: ParametresSerigraphie | null; recettes: Recette[] }) {
+export function DepotVisuel({
+  encres,
+  parametres,
+  recettes,
+  machines,
+  ecransParc,
+}: {
+  encres: Encre[];
+  parametres: ParametresSerigraphie | null;
+  recettes: Recette[];
+  machines: Machine[];
+  ecransParc: EcranCadre[];
+}) {
   const [fichier, setFichier] = useState<File | null>(null);
   const [survol, setSurvol] = useState(false);
 
@@ -43,7 +56,7 @@ export function DepotVisuel({ encres, parametres, recettes }: { encres: Encre[];
         <input type="file" accept={FORMATS} className="sr-only" onChange={(e) => choisir(e.target.files?.[0])} />
       </label>
 
-      {fichier && <SeparationCouleurs key={`${fichier.name}-${fichier.lastModified}-${fichier.size}`} source={fichier} nom={fichier.name} encres={encres} parametres={parametres} recettes={recettes} />}
+      {fichier && <SeparationCouleurs key={`${fichier.name}-${fichier.lastModified}-${fichier.size}`} source={fichier} nom={fichier.name} encres={encres} parametres={parametres} recettes={recettes} machines={machines} ecransParc={ecransParc} />}
     </div>
   );
 }

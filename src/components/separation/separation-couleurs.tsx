@@ -9,6 +9,7 @@ import { ANGLE_AM_DEFAUT, REGLAGES_DEFAUT, type Reglages } from "@/lib/separatio
 import type { Rendu } from "@/lib/separation/trame";
 import { enregistrerRecette, supprimerRecette } from "@/app/(app)/infographie/separation/recettes-actions";
 import { ReglagesAvances, type Recette } from "./reglages-avances";
+import { ecranConvient, tientSurMachine, type EcranCadre, type Machine } from "@/lib/atelier/parc";
 import { dimensionsFilms, surfacesCm2 } from "@/lib/separation/dimensions-films";
 import type { EcranChiffre, ParametresSerigraphie } from "@/lib/separation/prix-revient";
 import { PrixRevientSerigraphie } from "./prix-revient-serigraphie";
@@ -55,7 +56,8 @@ export function SeparationCouleurs({
   parametres = null,
   quantite = null,
   recettes = [],
-  maillage = null,
+  machines = [],
+  ecransParc = [],
 }: {
   source: Blob | string;
   nom: string;
@@ -73,8 +75,10 @@ export function SeparationCouleurs({
   quantite?: number | null;
   /** Recettes de réglages enregistrées (migration 0118). */
   recettes?: Recette[];
-  /** Maillage de l'écran (fils/cm) de la machine choisie, pour les conseils de trame. */
-  maillage?: number | null;
+  /** Machines actives du parc (migration 0119). */
+  machines?: Machine[];
+  /** Écrans du parc : maillages, formats, disponibilité. */
+  ecransParc?: EcranCadre[];
 }) {
   const [image, setImage] = useState<Image | null>(null);
   const [nb, setNb] = useState<number | null>(null);
@@ -96,6 +100,17 @@ export function SeparationCouleurs({
   const [loupe, setLoupe] = useState<{ cle: string; url: string; cote: number } | null>(null);
   const [calculLoupe, setCalculLoupe] = useState(false);
   const moteur = JSON.stringify(reglages.moteur);
+  const [machineId, setMachineId] = useState<string>(machines[0]?.id ?? "");
+  const maillagesParc = useMemo(() => [...new Set(ecransParc.map((e) => e.maillage))].sort((a, b) => a - b), [ecransParc]);
+  const [maillage, setMaillage] = useState<number | null>(() => {
+    // Maillage le plus courant parmi les écrans disponibles.
+    const dispo = ecransParc.filter((e) => e.etat === "disponible");
+    if (!dispo.length) return maillagesParc[0] ?? null;
+    const compte = new Map<number, number>();
+    for (const e of dispo) compte.set(e.maillage, (compte.get(e.maillage) ?? 0) + 1);
+    return [...compte.entries()].sort((a, b) => b[1] - a[1])[0][0];
+  });
+  const machine = machines.find((m) => m.id === machineId) ?? null;
 
   useEffect(() => {
     let annule = false;
@@ -322,6 +337,21 @@ export function SeparationCouleurs({
         onSupprimer={supprimer}
         maillage={maillage}
       />
+
+      {resultat && (machines.length > 0 || ecransParc.length > 0) && dims && (
+        <ParcAlertes
+          machines={machines}
+          machine={machine}
+          onMachine={setMachineId}
+          maillages={maillagesParc}
+          maillage={maillage}
+          onMaillage={setMaillage}
+          ecransParc={ecransParc}
+          nEcrans={nEcrans}
+          largeurCm={largeurCm}
+          hauteurCm={dims.hauteurCm}
+        />
+      )}
 
       {resultat && (
         <ul className="space-y-1.5 text-xs">
@@ -560,12 +590,101 @@ export function SeparationCouleurs({
       )}
 
       {parametres && ecransChiffres.length > 0 && (
-        <PrixRevientSerigraphie parametres={parametres} ecrans={ecransChiffres} quantiteInitiale={quantite} />
+        <PrixRevientSerigraphie
+          parametres={parametres}
+          ecrans={ecransChiffres}
+          quantiteInitiale={quantite}
+          machine={machine ? { nom: machine.nom, nbTetes: machine.nbTetes, cadencePiecesH: machine.cadencePiecesH, coutHoraire: machine.coutHoraire } : null}
+        />
       )}
 
       <p className="text-xs text-foreground-muted">
         Proposition automatique, à valider : le choix final des encres et le contrôle des films avant insolation restent faits par l&apos;infographie.
       </p>
+    </div>
+  );
+}
+
+/** Machine et écrans du parc : choix, et ce qui ne passe pas (têtes, format, écrans disponibles). */
+function ParcAlertes({
+  machines,
+  machine,
+  onMachine,
+  maillages,
+  maillage,
+  onMaillage,
+  ecransParc,
+  nEcrans,
+  largeurCm,
+  hauteurCm,
+}: {
+  machines: Machine[];
+  machine: Machine | null;
+  onMachine: (id: string) => void;
+  maillages: number[];
+  maillage: number | null;
+  onMaillage: (m: number | null) => void;
+  ecransParc: EcranCadre[];
+  nEcrans: number;
+  largeurCm: number;
+  hauteurCm: number;
+}) {
+  const disponibles = ecransParc.filter((e) => e.etat === "disponible" && (maillage == null || e.maillage === maillage));
+  const convenables = disponibles.filter((e) => ecranConvient(e, largeurCm, hauteurCm));
+  const alertes: string[] = [];
+  if (machine && nEcrans > machine.nbTetes) {
+    const passages = Math.ceil(nEcrans / machine.nbTetes);
+    alertes.push(`${nEcrans} écrans pour ${machine.nbTetes} têtes : ${passages} passages sur ${machine.nom}, ou réduisez le nombre de couleurs.`);
+  }
+  if (machine && !tientSurMachine(machine, largeurCm, hauteurCm)) {
+    alertes.push(
+      `Le dessin (${largeurCm.toLocaleString("fr-FR")} × ${hauteurCm.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} cm) dépasse le format d'impression de ${machine.nom} (${machine.formatMaxLCm} × ${machine.formatMaxHCm} cm).`,
+    );
+  }
+  if (ecransParc.length > 0 && convenables.length < nEcrans) {
+    alertes.push(
+      `${convenables.length} écran${convenables.length > 1 ? "s" : ""} disponible${convenables.length > 1 ? "s" : ""}${maillage ? ` en ${maillage} fils/cm` : ""} au bon format pour ${nEcrans} écran${nEcrans > 1 ? "s" : ""} à insoler.`,
+    );
+  }
+  return (
+    <div className="space-y-2 rounded-md border border-border p-3 text-xs">
+      <div className="flex flex-wrap items-center gap-3">
+        {machines.length > 0 && (
+          <label className="flex items-center gap-2 text-foreground-muted">
+            Machine
+            <select value={machine?.id ?? ""} onChange={(e) => onMachine(e.target.value)} className="h-8 rounded-md border border-border bg-surface px-2 text-sm text-foreground">
+              {machines.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.nom} · {m.nbTetes} têtes{m.cadencePiecesH ? ` · ${m.cadencePiecesH} p/h` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {maillages.length > 0 && (
+          <label className="flex items-center gap-2 text-foreground-muted">
+            Maillage
+            <select
+              value={maillage ?? ""}
+              onChange={(e) => onMaillage(e.target.value ? Number(e.target.value) : null)}
+              className="h-8 rounded-md border border-border bg-surface px-2 text-sm text-foreground"
+            >
+              {maillages.map((m) => (
+                <option key={m} value={m}>
+                  {m} fils/cm ({ecransParc.filter((e) => e.maillage === m && e.etat === "disponible").length} disponibles)
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {alertes.length === 0 && <span className="text-success">Machine, format et écrans disponibles : tout passe.</span>}
+      </div>
+      {alertes.map((a) => (
+        <p key={a} className="flex gap-2 rounded-md bg-warning-soft px-3 py-2 text-warning">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          {a}
+        </p>
+      ))}
     </div>
   );
 }

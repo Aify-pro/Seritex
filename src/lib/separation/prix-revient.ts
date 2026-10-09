@@ -9,7 +9,15 @@
  *     séchage    = écrans × coût de séchage par pièce et par passage
  *   pièces imprimées = quantité × (1 + gâche) : la gâche ne compte que la
  *   sérigraphie (le textile gâché relève du prix de revient de l'article).
+ *
+ * Avec une machine (lot 6) : son coût horaire remplace le taux horaire de
+ * l'atelier ; avec sa cadence (pièces/heure, toutes couleurs comprises sur
+ * un carrousel), impression = coût horaire ÷ cadence, quel que soit le
+ * nombre d'écrans. Au-delà de ses têtes, un second passage est compté.
  */
+
+/** Ce que le prix de revient retient d'une machine du parc. */
+export type MachineChiffrage = { nom: string; nbTetes: number; cadencePiecesH: number | null; coutHoraire?: number | null };
 
 export type ParametresSerigraphie = {
   /** Film, émulsion, insolation, récupération : F CFA par écran. */
@@ -63,12 +71,16 @@ export type Chiffrage = {
   parPieceBonne: number;
   /** Écrans dont l'encre n'a aucun prix (ni article ni défaut) : encre comptée 0, à signaler. */
   prixManquants: string[];
+  /** Passages sur la machine (plus de couleurs que de têtes : plusieurs passages). */
+  passages: number;
 };
 
 const arrondi = (v: number) => Math.round(v * 100) / 100;
 
-export function chiffrer(p: ParametresSerigraphie, ecrans: EcranChiffre[], quantite: number): Chiffrage {
+export function chiffrer(p: ParametresSerigraphie, ecrans: EcranChiffre[], quantite: number, machine?: MachineChiffrage | null): Chiffrage {
   const n = ecrans.length;
+  const taux = machine?.coutHoraire ?? p.tauxHoraire;
+  const passages = machine ? Math.max(1, Math.ceil(n / Math.max(1, machine.nbTetes))) : 1;
   const prixManquants: string[] = [];
   const lignes: LigneEcran[] = ecrans.map((e) => {
     const depot = e.depotGm2 && e.depotGm2 > 0 ? e.depotGm2 : p.depotGm2;
@@ -83,9 +95,9 @@ export function chiffrer(p: ParametresSerigraphie, ecrans: EcranChiffre[], quant
     };
   });
   const fixeEcrans = n * p.coutEcran;
-  const fixeCalage = n * (p.calageMin / 60) * p.tauxHoraire;
+  const fixeCalage = n * (p.calageMin / 60) * taux;
   const encre = lignes.reduce((s, l) => s + (l.coutEncrePiece ?? 0), 0);
-  const impression = n * (p.impressionS / 3600) * p.tauxHoraire;
+  const impression = machine?.cadencePiecesH ? (passages * taux) / machine.cadencePiecesH : n * (p.impressionS / 3600) * taux;
   const sechage = n * p.sechagePiece;
   const variable = encre + impression + sechage;
   const q = Math.max(1, Math.round(quantite));
@@ -100,6 +112,7 @@ export function chiffrer(p: ParametresSerigraphie, ecrans: EcranChiffre[], quant
     total: arrondi(total),
     parPieceBonne: arrondi(total / q),
     prixManquants,
+    passages,
   };
 }
 
