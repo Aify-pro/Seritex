@@ -35,7 +35,7 @@ export type OptionsFilms = {
   nom: string;
   /** Référence de la demande, si connue. */
   reference?: string | null;
-  /** Nom de l'encre retenue pour chaque écran (nuancier), dans l'ordre des couleurs. */
+  /** Nom de l'encre retenue pour chaque écran, dans l'ordre des couleurs. */
   encres?: (string | null)[];
   /** Sous-couche blanche (textile foncé) : écran imprimé en premier, rentré sous les couleurs. */
   sousCouche?: { nom: string; rentreMm: number } | null;

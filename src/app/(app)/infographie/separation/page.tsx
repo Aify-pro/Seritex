@@ -1,14 +1,12 @@
 import { requireModule } from "@/lib/auth/permissions";
-import { createClient } from "@/lib/supabase/server";
-import type { Encre } from "@/lib/separation/nuancier";
+import { chargerEncres, chargerParametresSerigraphie } from "@/lib/separation/encres-serveur";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardBody } from "@/components/ui/card";
 import { DepotVisuel } from "./depot-visuel";
 
 export default async function SeparationCouleursPage() {
   await requireModule("demandes_graphiques");
-  const supabase = await createClient();
-  const { data: encres } = await supabase.from("encres").select("id,nom,hex,reference,sous_couche").eq("active", true).order("nom");
+  const [encres, parametres] = await Promise.all([chargerEncres(), chargerParametresSerigraphie()]);
 
   return (
     <div className="space-y-6">
@@ -18,7 +16,7 @@ export default async function SeparationCouleursPage() {
       />
       <Card>
         <CardBody>
-          <DepotVisuel encres={(encres ?? []) as Encre[]} />
+          <DepotVisuel encres={encres} parametres={parametres} />
         </CardBody>
       </Card>
     </div>
