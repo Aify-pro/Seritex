@@ -17,6 +17,8 @@ export interface SitePersonnalisation {
   grammage?: number | null;
   quantite: number;
   repartition?: Record<string, number>;
+  /** Couleur par zone choisie sur le site (0121). */
+  couleurs_zones?: Record<string, { zone: string; couleur: string }> | null;
   marquages: {
     emplacement_libelle?: string;
     largeur_cm?: number;
@@ -102,6 +104,16 @@ export async function SiteComposition({ requestId, composition }: { requestId: s
             <>
               <dt className="text-foreground-muted">Tissu</dt>
               <dd>{composition.grammage} g/m²</dd>
+            </>
+          )}
+          {composition.couleurs_zones && Object.keys(composition.couleurs_zones).length > 0 && (
+            <>
+              <dt className="text-foreground-muted">Couleurs par zone</dt>
+              <dd>
+                {Object.values(composition.couleurs_zones)
+                  .map((z) => `${z.zone} : ${z.couleur}`)
+                  .join(" · ")}
+              </dd>
             </>
           )}
           <dt className="text-foreground-muted">Quantité</dt>
