@@ -13,7 +13,10 @@
  *  8. nuancier : encre la plus proche et qualité du rapprochement ; textile foncé ;
  *  9. sous-couche : réunion des encres, rentrée de la valeur demandée ;
  * 10. prix de revient sérigraphie : calcul à la main, grille proposée cohérente
- *     avec la formule des devis (src/lib/pricing.ts), prix au kg d'un article.
+ *     avec la formule des devis (src/lib/pricing.ts), prix au kg d'un article ;
+ * 11. trames : AM (surface encrée = ton, linéature), Bayer et diffusion fidèles au
+ *     ton, recouvrement, films complets selon le rendu ;
+ * 12. réglages avancés : archétype choisi, nettoyage désactivé, recettes relues.
  *
  * Lancer : npm run test:separation
  */
@@ -24,6 +27,9 @@ import { appliquerEncres, separer, sousCouche, HORS_DESSIN, type OptionsSeparati
 import { estFonce, qualite, rapprocher, type Encre } from "../src/lib/separation/nuancier";
 import { chiffrer, grilleProposee, prixAuKg, type ParametresSerigraphie } from "../src/lib/separation/prix-revient";
 import { printCostPerPiece } from "../src/lib/pricing";
+import { ecransFilms, indicesRendu } from "../src/lib/separation/ecrans";
+import { recouvrir, seuilsAM, tramerAM } from "../src/lib/separation/trame";
+import { lireReglages, REGLAGES_DEFAUT } from "../src/lib/separation/reglages";
 
 const logo = (fond: string, texte: boolean) => `<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1600">${fond}
 <circle cx="800" cy="650" r="420" fill="#d62828"/><circle cx="800" cy="650" r="300" fill="#f77f00"/>
@@ -250,6 +256,131 @@ await test("prix au kg d'un article encre : kg, g, litre, pièce", async () => {
   assert.equal(prixAuKg(9000, 0, "l"), 9000);
   assert.equal(prixAuKg(500, 0, "piece"), null);
   assert.equal(prixAuKg(null, 0, "kg"), null);
+  return "OK";
+});
+
+/** Image unie d'un mélange : part `t` de l'encre rouge sur fond blanc (bande blanche en bord, pour le fond). */
+function melangeUni(t: number, w = 400, h = 400) {
+  const px = new Uint8ClampedArray(w * h * 4);
+  const [r, g, b] = [214 * t + 255 * (1 - t), 40 * t + 255 * (1 - t), 40 * t + 255 * (1 - t)];
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const o = (y * w + x) * 4;
+      const bord = x < 4 || y < 4 || x >= w - 4 || y >= h - 4;
+      px[o] = bord ? 255 : r;
+      px[o + 1] = bord ? 255 : g;
+      px[o + 2] = bord ? 255 : b;
+      px[o + 3] = 255;
+    }
+  return px;
+}
+const couverture = (m: Uint8Array) => m.reduce((s, v) => s + (v ? 1 : 0), 0) / m.length;
+
+await test("trame AM : la surface encrée suit le ton (rond, elliptique, ligne)", async () => {
+  for (const forme of ["rond", "elliptique", "ligne"] as const) {
+    const s = seuilsAM(forme);
+    assert.equal(s.length, 64 * 64);
+    for (const ton of [25, 50, 75]) {
+      const m = tramerAM(() => Math.round((ton / 100) * 255), 600, 600, { ppp: 360, lpi: 45, angle: 22.5, forme, pointMinPct: 0, pointMaxPct: 100 });
+      const c = couverture(m) * 100;
+      assert.ok(Math.abs(c - ton) < 2.5, `${forme} ${ton} % → ${c.toFixed(1)} %`);
+    }
+  }
+  return "écart < 2,5 points";
+});
+
+await test("trame AM : linéature respectée (nombre de points sur une ligne)", async () => {
+  // 45 lpi à 360 ppp et angle 0° : 1 point tous les 8 px → 50 points sur 400 px.
+  const m = tramerAM(() => 60, 400, 64, { ppp: 360, lpi: 45, angle: 0, forme: "rond", pointMinPct: 0, pointMaxPct: 100 });
+  let points = 0;
+  const y = 4; // milieu d'une rangée de cellules (8 px)
+  for (let x = 1; x < 400; x++) if (m[y * 400 + x] && !m[y * 400 + x - 1]) points += 1;
+  assert.ok(Math.abs(points - 50) <= 1, `${points} points`);
+  return `${points} points sur 400 px`;
+});
+
+await test("trame AM : points minimum et maximum", async () => {
+  const r = { ppp: 360, lpi: 45, angle: 22.5, forme: "rond" as const, pointMinPct: 8, pointMaxPct: 92 };
+  assert.equal(couverture(tramerAM(() => Math.round(0.05 * 255), 200, 200, r)), 0, "ton sous le minimum : rien");
+  assert.equal(couverture(tramerAM(() => Math.round(0.95 * 255), 200, 200, r)), 1, "ton au-dessus du maximum : aplat plein");
+  return "OK";
+});
+
+await test("Bayer et diffusion : la part d'encre suit le mélange", async () => {
+  for (const t of [0.25, 0.5, 0.75]) {
+    const px = melangeUni(t);
+    for (const rendu of [{ type: "bayer", maillage: 77 } as const, { type: "diffusion", algo: "floyd-steinberg" } as const, { type: "diffusion", algo: "atkinson" } as const]) {
+      const idx = indicesRendu(px, 400, 400, { encres: ["#D62828"], fond: "#FFFFFF", transparent: false, rendu, ppp: 360 });
+      let encre = 0;
+      let dedans = 0;
+      for (let y = 20; y < 380; y++)
+        for (let x = 20; x < 380; x++) {
+          dedans += 1;
+          if (idx[y * 400 + x] === 0) encre += 1;
+        }
+      const c = encre / dedans;
+      // Atkinson perd 1/4 de l'erreur : tons moyens plus contrastés, tolérance plus large.
+      const tol = rendu.type === "diffusion" && rendu.algo === "atkinson" ? 0.12 : 0.04;
+      assert.ok(Math.abs(c - t) < tol, `${JSON.stringify(rendu)} ${t} → ${c.toFixed(3)}`);
+    }
+  }
+  return "OK";
+});
+
+await test("recouvrement : l'encre claire passe de 3 px sous la foncée, jamais sur le fond", async () => {
+  const w = 40;
+  const indices = new Uint8Array(w * w).fill(255);
+  for (let y = 10; y < 30; y++) for (let x = 10; x < 30; x++) indices[y * w + x] = x < 20 ? 0 : 1; // 0 clair, 1 foncé
+  const [clair, fonce] = recouvrir(indices, w, w, [200, 40], 3);
+  assert.ok(clair[15 * w + 22] && !clair[15 * w + 23], "clair déborde de 3 px sous le foncé");
+  assert.ok(!clair[15 * w + 8], "jamais sur le fond");
+  assert.ok(!fonce[15 * w + 19], "le foncé garde son bord");
+  return "OK";
+});
+
+await test("films selon le rendu : aplats, AM avec sous-couche, diffusion", async () => {
+  const fichier = await svg(logo(BLANC, false)).resize(1200).jpeg({ quality: 85 }).toBuffer();
+  const r = await analyser(sharp(fichier));
+  const { data, info } = await sharp(fichier).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const base = { encres: r.couleurs.map((c) => c.hex), fond: r.fond, transparent: r.transparent, ppp: 300, pixelsMin: 4, recouvrementPx: 2, miroir: false };
+  const aplat = ecransFilms(new Uint8ClampedArray(data), info.width, info.height, { ...base, rendu: { type: "aplat" }, sousCouche: null });
+  assert.equal(aplat.ecrans.length, 3);
+  const am = ecransFilms(new Uint8ClampedArray(data), info.width, info.height, {
+    ...base,
+    rendu: { type: "am", lpi: 45, angles: [22.5, 52.5, 82.5], forme: "rond", pointMinPct: 5, pointMaxPct: 95 },
+    sousCouche: { rentrePx: 2 },
+  });
+  assert.equal(am.ecrans.length, 4, "sous-couche + 3 couleurs");
+  assert.equal(am.ecrans[1].length, Math.ceil(am.largeur / 8) * am.hauteur);
+  const fm = ecransFilms(new Uint8ClampedArray(data), info.width, info.height, { ...base, rendu: { type: "diffusion", algo: "stucki" }, sousCouche: null });
+  assert.equal(fm.ecrans.length, 3);
+  return `${aplat.largeur} × ${aplat.hauteur} px`;
+});
+
+await test("réglages avancés : archétype « Spot Color », écart CIE2000, sans lissage", async () => {
+  const r = await analyser(await encodé(svg(logo(BLANC, true)).jpeg({ quality: 85 })), { profil: "spot_color", ecart: "cie2000", lissage: "off" });
+  assert.equal(r.profil, "Spot Color");
+  assert.ok(r.couleurs.length >= 3 && r.couleurs.length <= 5, resume(r));
+  assert.ok(r.ecartMoyen >= 0);
+  return `${resume(r)} · ΔE ${r.ecartMoyen}`;
+});
+
+await test("réglages avancés : sans nettoyage, les nuances de bord restent des couleurs", async () => {
+  const source = await encodé(svg(logo(BLANC, false)).resize(300).jpeg({ quality: 35 }));
+  const avec = await analyser(sharp(await source.toBuffer()));
+  const sans = await analyser(sharp(await source.toBuffer()), { nettoyage: false, couvertureMinPct: 0.2 });
+  assert.ok(sans.couleurs.length > avec.couleurs.length, `${sans.couleurs.length} vs ${avec.couleurs.length}`);
+  return `${avec.couleurs.length} → ${sans.couleurs.length} couleurs`;
+});
+
+await test("recettes : relecture tolérante, réglages invalides refusés", async () => {
+  assert.deepEqual(lireReglages({}), REGLAGES_DEFAUT);
+  const am = lireReglages({ rendu: { type: "am", lpi: 55, angles: [22.5, 52.5], forme: "elliptique", pointMinPct: 6, pointMaxPct: 94 }, ppp: 600 });
+  assert.equal(am?.rendu.type, "am");
+  assert.equal(am?.ppp, 600);
+  assert.equal(am?.moteur.profil, "auto", "moteur complété par défaut");
+  assert.equal(lireReglages({ rendu: { type: "am", lpi: 500, angles: [0], forme: "rond", pointMinPct: 5, pointMaxPct: 95 } }), null, "linéature hors bornes");
+  assert.equal(lireReglages({ ppp: "beaucoup" }), null);
   return "OK";
 });
 

@@ -1,10 +1,15 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Download, Info, Loader2 } from "lucide-react";
+import { AlertTriangle, Download, Info, Loader2, ZoomIn } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { dessiner, lireImage, separerPixels, type ResultatSeparation } from "@/lib/separation/client";
-import { dimensionsFilms, PPP_FILMS, surfacesCm2 } from "@/lib/separation/dimensions-films";
+import { dessiner, lireImage, loupeRendu, renduApercu, separerPixels, type ResultatSeparation } from "@/lib/separation/client";
+import { ANGLE_AM_DEFAUT, REGLAGES_DEFAUT, type Reglages } from "@/lib/separation/reglages";
+import type { Rendu } from "@/lib/separation/trame";
+import { enregistrerRecette, supprimerRecette } from "@/app/(app)/infographie/separation/recettes-actions";
+import { ReglagesAvances, type Recette } from "./reglages-avances";
+import { dimensionsFilms, surfacesCm2 } from "@/lib/separation/dimensions-films";
 import type { EcranChiffre, ParametresSerigraphie } from "@/lib/separation/prix-revient";
 import { PrixRevientSerigraphie } from "./prix-revient-serigraphie";
 import { encreSousCouche, LIBELLES_QUALITE, qualite, rapprocher, type Encre, type Qualite } from "@/lib/separation/nuancier";
@@ -18,8 +23,12 @@ const LARGEUR_MIN_FILMS = 1000;
 
 type Image = Awaited<ReturnType<typeof lireImage>>;
 
-/** Rentré de la sous-couche sous les couleurs, en mm. */
-const RENTRE_SOUS_COUCHE_MM = 0.2;
+/** Rendu avec un angle AM pour chaque écran de couleur. */
+function renduComplet(rendu: Rendu, n: number): Rendu {
+  if (rendu.type !== "am") return rendu;
+  const angles = Array.from({ length: Math.max(1, n) }, (_, i) => rendu.angles[i] ?? rendu.angles[0] ?? ANGLE_AM_DEFAUT);
+  return { ...rendu, angles };
+}
 /** Vue « sous-couche » dans l'aperçu (les écrans de couleur sont numérotés à partir de 0). */
 const SOUS_COUCHE = -1;
 
@@ -45,6 +54,8 @@ export function SeparationCouleurs({
   textileFonce = false,
   parametres = null,
   quantite = null,
+  recettes = [],
+  maillage = null,
 }: {
   source: Blob | string;
   nom: string;
@@ -60,6 +71,10 @@ export function SeparationCouleurs({
   parametres?: ParametresSerigraphie | null;
   /** Quantité connue (composition du site), pour le prix de revient. */
   quantite?: number | null;
+  /** Recettes de réglages enregistrées (migration 0118). */
+  recettes?: Recette[];
+  /** Maillage de l'écran (fils/cm) de la machine choisie, pour les conseils de trame. */
+  maillage?: number | null;
 }) {
   const [image, setImage] = useState<Image | null>(null);
   const [nb, setNb] = useState<number | null>(null);
@@ -74,6 +89,13 @@ export function SeparationCouleurs({
   // Encre choisie par écran (id), quand l'infographiste change la proposition.
   const [choix, setChoix] = useState<Record<number, string>>({});
   const [avecSousCouche, setAvecSousCouche] = useState(false);
+  const [reglages, setReglages] = useState<Reglages>(REGLAGES_DEFAUT);
+  const [listeRecettes, setListeRecettes] = useState<Recette[]>(recettes);
+  // Aperçu du rendu et loupe, marqués des réglages qui les ont produits.
+  const [rendu, setRendu] = useState<{ cle: string; indices?: Uint8Array; tons?: Uint8Array[] } | null>(null);
+  const [loupe, setLoupe] = useState<{ cle: string; url: string; cote: number } | null>(null);
+  const [calculLoupe, setCalculLoupe] = useState(false);
+  const moteur = JSON.stringify(reglages.moteur);
 
   useEffect(() => {
     let annule = false;
@@ -93,7 +115,7 @@ export function SeparationCouleurs({
     if (!image) return;
     let annule = false;
     // Copie : le tableau part vers le worker à chaque calcul.
-    separerPixels(new Uint8ClampedArray(image.px), image.w, image.h, nb ? { nbCouleurs: nb } : {})
+    separerPixels(new Uint8ClampedArray(image.px), image.w, image.h, { ...(JSON.parse(moteur) as Reglages["moteur"]), ...(nb ? { nbCouleurs: nb } : {}) })
       .then((r) => {
         if (annule) return;
         setResultat(r);
@@ -106,17 +128,40 @@ export function SeparationCouleurs({
     return () => {
       annule = true;
     };
-  }, [image, nb]);
+  }, [image, nb, moteur]);
+
+  // Aperçu du rendu choisi (trame) sur l'image d'analyse ; aplats = séparation telle quelle.
+  const renduCle = JSON.stringify(reglages.rendu);
+  const cleVue = `${renduCle}|${largeurCm}|${resultat?.couleurs.map((c) => c.hex).join(",") ?? ""}`;
+  useEffect(() => {
+    if (!image || !resultat) return;
+    const choisi = JSON.parse(renduCle) as Rendu;
+    if (choisi.type === "aplat") return;
+    let annule = false;
+    const pppApercu = Math.max(30, image.w / (Math.max(2, largeurCm) / 2.54));
+    const cle = `${renduCle}|${largeurCm}|${resultat.couleurs.map((c) => c.hex).join(",")}`;
+    renduApercu(new Uint8ClampedArray(image.px), image.w, image.h, resultat, renduComplet(choisi, resultat.couleurs.length), pppApercu)
+      .then((r) => !annule && setRendu({ cle, ...r }))
+      .catch(() => !annule && setRendu(null));
+    return () => {
+      annule = true;
+    };
+  }, [image, resultat, renduCle, largeurCm]);
 
   const original = useMemo(() => (typeof source === "string" ? source : URL.createObjectURL(source)), [source]);
   useEffect(() => () => {
     if (typeof source !== "string") URL.revokeObjectURL(original);
   }, [source, original]);
 
-  const apercu = useMemo(() => (resultat ? dessiner(resultat) : null), [resultat]);
-  const ecrans = useMemo(() => (resultat ? resultat.couleurs.map((_, i) => dessiner(resultat, i)) : []), [resultat]);
+  const vueRendu = reglages.rendu.type !== "aplat" && rendu?.cle === cleVue ? rendu : undefined;
+  const loupeVisible = loupe?.cle === `${cleVue}|${reglages.ppp}` ? loupe : null;
+  const apercu = useMemo(() => (resultat ? dessiner(resultat, undefined, vueRendu) : null), [resultat, vueRendu]);
+  const ecrans = useMemo(() => (resultat ? resultat.couleurs.map((_, i) => dessiner(resultat, i, vueRendu)) : []), [resultat, vueRendu]);
 
-  const sousCoucheApercu = useMemo(() => (resultat && avecSousCouche ? dessiner(resultat, "dessin") : null), [resultat, avecSousCouche]);
+  const sousCoucheApercu = useMemo(
+    () => (resultat && avecSousCouche ? dessiner(resultat, "dessin", vueRendu) : null),
+    [resultat, avecSousCouche, vueRendu],
+  );
   const proches = useMemo(() => (resultat ? resultat.couleurs.map((c) => rapprocher(c.hex, encres)) : []), [resultat, encres]);
   const encreDe = (i: number) => {
     const liste = proches[i] ?? [];
@@ -139,7 +184,46 @@ export function SeparationCouleurs({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resultat, parametres, largeurCm, avecSousCouche, blanc, choix, proches]);
 
-  const dims = useMemo(() => (resultat && largeurCm > 0 ? dimensionsFilms(resultat, largeurCm) : null), [resultat, largeurCm]);
+  const dims = useMemo(
+    () => (resultat && largeurCm > 0 ? dimensionsFilms(resultat, largeurCm, reglages.ppp) : null),
+    [resultat, largeurCm, reglages.ppp],
+  );
+
+  async function voirLoupe() {
+    if (!resultat) return;
+    setCalculLoupe(true);
+    try {
+      const l = await loupeRendu(source, resultat, renduComplet(reglages.rendu, resultat.couleurs.length), dims?.ppp ?? reglages.ppp, largeurCm);
+      setLoupe({ cle: `${cleVue}|${reglages.ppp}`, ...l });
+    } catch {
+      toast.error("Aperçu de la trame impossible sur ce visuel");
+    } finally {
+      setCalculLoupe(false);
+    }
+  }
+
+  async function enregistrer(nomRecette: string) {
+    const res = await enregistrerRecette(nomRecette, reglages);
+    if (res.error || !res.id) {
+      toast.error("Recette non enregistrée", { description: res.error });
+      return false;
+    }
+    setListeRecettes([...listeRecettes, { id: res.id, nom: nomRecette, reglages, peutSupprimer: true }].sort((a, b) => a.nom.localeCompare(b.nom, "fr")));
+    toast.success(`Recette « ${nomRecette} » enregistrée`);
+    return true;
+  }
+
+  async function supprimer(id: string) {
+    const res = await supprimerRecette(id);
+    if (res.error) toast.error("Recette non supprimée", { description: res.error });
+    else setListeRecettes(listeRecettes.filter((x) => x.id !== id));
+  }
+
+  function angleEcran(i: number, v: number) {
+    if (reglages.rendu.type !== "am" || !resultat) return;
+    const r = renduComplet(reglages.rendu, resultat.couleurs.length) as Extract<Rendu, { type: "am" }>;
+    setReglages({ ...reglages, rendu: { ...r, angles: r.angles.map((a, j) => (j === i ? v : a)) } });
+  }
 
   async function telechargerFilms() {
     if (!resultat) return;
@@ -159,7 +243,11 @@ export function SeparationCouleurs({
             const e = encreDe(i);
             return e ? libelleEncre(e.encre) : null;
           }),
-          sousCouche: avecSousCouche ? { nom: blanc ? libelleEncre(blanc) : "Blanc", rentreMm: RENTRE_SOUS_COUCHE_MM } : null,
+          sousCouche: avecSousCouche ? { nom: blanc ? libelleEncre(blanc) : "Blanc", rentreMm: reglages.rentreMm } : null,
+          rendu: renduComplet(reglages.rendu, resultat.couleurs.length),
+          ppp: reglages.ppp,
+          pointMinMm: reglages.pointMinMm,
+          recouvrementMm: reglages.recouvrementMm,
         },
         setEtapeFilms,
       );
@@ -223,12 +311,29 @@ export function SeparationCouleurs({
         </label>
       </div>
 
+      <ReglagesAvances
+        reglages={reglages}
+        onChange={(r) => {
+          if (JSON.stringify(r.moteur) !== moteur) setCalcul(true);
+          setReglages(r);
+        }}
+        recettes={listeRecettes}
+        onEnregistrer={enregistrer}
+        onSupprimer={supprimer}
+        maillage={maillage}
+      />
+
       {resultat && (
         <ul className="space-y-1.5 text-xs">
+          <li className="flex gap-2 text-foreground-muted">
+            <Info className="h-4 w-4 shrink-0" />
+            Fidélité : écart moyen ΔE {resultat.ecartMoyen.toLocaleString("fr-FR")}
+            {resultat.ecartMoyen < 4 ? " (excellente)" : resultat.ecartMoyen < 8 ? " (bonne)" : " (visuel simplifié)"} · profil {resultat.profil}
+          </li>
           {resultat.degrade && (
             <li className="flex gap-2 rounded-md bg-warning-soft px-3 py-2 text-warning">
               <AlertTriangle className="h-4 w-4 shrink-0" />
-              Dégradé ou photo : ces couleurs simplifient le visuel. Ajustez le nombre de couleurs ou prévoyez une trame.
+              Dégradé ou photo : ces couleurs simplifient le visuel. Ajustez le nombre de couleurs ou choisissez une trame (Réglages avancés).
             </li>
           )}
           {(resultat.fond || resultat.transparent) && (
@@ -275,6 +380,32 @@ export function SeparationCouleurs({
           </div>
         </figure>
       </div>
+
+      {resultat && reglages.rendu.type !== "aplat" && (
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" size="sm" variant="secondary" loading={calculLoupe} onClick={voirLoupe}>
+              <ZoomIn className="h-3.5 w-3.5" /> Voir la trame à 100 %
+            </Button>
+            <span className="text-xs text-foreground-muted">
+              {reglages.rendu.type === "am"
+                ? "L'aperçu ci-dessus montre les tons ; la loupe montre les vrais points du film."
+                : "La loupe montre le film à sa vraie résolution."}
+            </span>
+          </div>
+          {loupeVisible && (
+            <figure className="space-y-1">
+              <figcaption className="text-xs text-foreground-muted">
+                Carré de 2,5 cm au centre du dessin, à {dims?.ppp ?? reglages.ppp} ppp (agrandi 2 fois)
+              </figcaption>
+              <div className="overflow-auto rounded-md border border-border bg-white p-2">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={loupeVisible.url} alt="Trame à 100 %" style={{ width: loupeVisible.cote * 2, maxWidth: "none" }} className="[image-rendering:pixelated]" />
+              </div>
+            </figure>
+          )}
+        </div>
+      )}
 
       {resultat && (
         <div className="space-y-2">
@@ -342,6 +473,22 @@ export function SeparationCouleurs({
                       <span className="ml-auto text-xs text-foreground-muted">{Math.max(1, Math.round(c.part * 100))} %</span>
                     </span>
                   </button>
+                  {reglages.rendu.type === "am" && (
+                    <label className="mt-1 flex items-center gap-1.5 px-0.5 text-xs text-foreground-muted">
+                      Angle
+                      <input
+                        type="number"
+                        step={0.5}
+                        min={-90}
+                        max={180}
+                        value={renduComplet(reglages.rendu, n).type === "am" ? (renduComplet(reglages.rendu, n) as Extract<Rendu, { type: "am" }>).angles[i] : ANGLE_AM_DEFAUT}
+                        onChange={(e) => Number.isFinite(Number(e.target.value)) && angleEcran(i, Number(e.target.value))}
+                        className="h-7 w-20 rounded-md border border-border bg-surface px-1.5 text-xs text-foreground"
+                        aria-label={`Angle de trame de l'écran ${c.hex}`}
+                      />
+                      °
+                    </label>
+                  )}
                   {encre && (
                     <div className="mt-1 space-y-0.5 px-0.5">
                       <select
@@ -401,9 +548,10 @@ export function SeparationCouleurs({
           </div>
           {dims && (
             <p className="text-xs text-foreground-muted">
-              {nEcrans} page{nEcrans > 1 ? "s" : ""}, un écran par page en noir, avec cibles de calage · dessin de{" "}
+              {nEcrans} page{nEcrans > 1 ? "s" : ""}, un écran par page en noir, avec cibles de calage
+              {reglages.rendu.type === "am" ? ` · trame AM ${reglages.rendu.lpi} lpi` : reglages.rendu.type !== "aplat" ? " · tramés" : ""} · dessin de{" "}
               {largeurCm.toLocaleString("fr-FR")} × {dims.hauteurCm.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} cm · {dims.ppp} ppp
-              {dims.ppp < PPP_FILMS ? " (limite du navigateur à cette taille)" : ""}
+              {dims.ppp < reglages.ppp ? ` (${reglages.ppp} ppp demandés : limite du navigateur à cette taille)` : ""}
             </p>
           )}
           {etapeFilms && <p className="text-xs text-foreground-muted">{etapeFilms}</p>}

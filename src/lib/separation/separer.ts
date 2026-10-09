@@ -20,8 +20,14 @@ export interface RevealCore {
   LabEncoding: { rgbToLab(rgb: { r: number; g: number; b: number }): { L: number; a: number; b: number } };
   BilateralFilter: { applyBilateralFilterLab(lab: Uint16Array, w: number, h: number, rayon: number, sigma: number): void };
   DNAGenerator: { fromPixels(lab: Uint16Array, w: number, h: number, o: { bitDepth: number }): unknown };
-  ParameterGenerator: { toEngineOptions(config: unknown, o: { bitDepth: number }): Record<string, unknown> };
+  ParameterGenerator: {
+    toEngineOptions(config: unknown, o: { bitDepth: number }): Record<string, unknown>;
+    generate(dna: unknown, o: Record<string, unknown>): Record<string, unknown> & { meta?: { archetype?: string; archetypeId?: string } };
+  };
+  ArchetypeLoader: { loadArchetypes(): { id: string; name: string; group?: string; description?: string }[] };
   generateConfigurationMk2(dna: unknown): Record<string, unknown>;
+  generateConfigurationDistilled(dna: unknown): Record<string, unknown>;
+  generateConfigurationSalamander(dna: unknown): Record<string, unknown>;
   posterizeImage(
     lab: Uint16Array,
     w: number,
@@ -50,7 +56,19 @@ export type ResultatSeparation = {
   fond: string | null;
   /** Dégradé ou photo : les couleurs proposées sont une simplification. */
   degrade: boolean;
+  /** Écart moyen (ΔE76) entre le visuel et sa version séparée : qualité du rendu. */
+  ecartMoyen: number;
+  /** Profil effectivement utilisé (archétype reconnu ou choisi). */
+  profil: string;
 };
+
+/** Profils du moteur : adaptatifs, sinon l'identifiant d'un archétype Reveal (ex. « spot_color »). */
+export const PROFILS_ADAPTATIFS = {
+  auto: "Automatique (Chameleon)",
+  reconnu: "Archétype reconnu par l'analyse",
+  distilled: "Distilled (couleurs les plus distinctes)",
+  salamander: "Salamander (nombre de couleurs selon l'image)",
+} as const;
 
 export type OptionsSeparation = {
   /**
@@ -58,6 +76,19 @@ export type OptionsSeparation = {
    * lui-même le nombre d'encres nécessaires.
    */
   nbCouleurs?: number;
+  /** Profil du moteur (voir PROFILS_ADAPTATIFS) ou identifiant d'archétype. */
+  profil?: string;
+  /** Calcul d'écart de couleur du moteur. */
+  ecart?: "cie76" | "cie94" | "cie2000";
+  /** Lissage préalable (filtre bilatéral) : atténue le bruit JPEG. */
+  lissage?: "off" | "leger" | "fort";
+  forcerBlanc?: boolean;
+  forcerNoir?: boolean;
+  niveauxDeGris?: boolean;
+  /** Rattache les liserés de bord et le bruit à l'encre voisine (défaut : oui). */
+  nettoyage?: boolean;
+  /** Part minimale du dessin pour garder une couleur, en % (défaut 0,5). */
+  couvertureMinPct?: number;
 };
 
 export const HORS_DESSIN = 255;
@@ -157,7 +188,8 @@ export async function separer(
   // 3. Lissage qui préserve les bords (atténue le bruit JPEG), puis réduction
   //    des couleurs sur un échantillon régulier des pixels du dessin : la
   //    palette est la même, le calcul bien plus court.
-  reveal.BilateralFilter.applyBilateralFilterLab(lab, w, h, 3, 5000);
+  const lissage = options.lissage ?? "leger";
+  if (lissage !== "off") reveal.BilateralFilter.applyBilateralFilterLab(lab, w, h, lissage === "fort" ? 5 : 3, 5000);
   const pas = Math.max(1, Math.ceil(m / ECHANTILLON_MAX));
   const ne = Math.ceil(m / pas);
   const pixelsDessin = new Uint16Array(ne * 3);
@@ -169,7 +201,31 @@ export async function separer(
     pixelsDessin[k++] = lab[p * 3 + 2];
   }
   const dna = reveal.DNAGenerator.fromPixels(pixelsDessin, ne, 1, { bitDepth: 16 });
-  const config = reveal.generateConfigurationMk2(dna);
+  const profilDemande = options.profil ?? "auto";
+  let config: Record<string, unknown> & { meta?: { archetype?: string } };
+  let profil: string = PROFILS_ADAPTATIFS.auto;
+  if (profilDemande === "distilled") {
+    config = reveal.generateConfigurationDistilled(dna);
+    profil = PROFILS_ADAPTATIFS.distilled;
+  } else if (profilDemande === "salamander") {
+    config = reveal.generateConfigurationSalamander(dna);
+    profil = PROFILS_ADAPTATIFS.salamander;
+  } else if (profilDemande === "auto") {
+    config = reveal.generateConfigurationMk2(dna);
+  } else {
+    config = reveal.ParameterGenerator.generate(dna, {
+      imageData: null,
+      width: ne,
+      height: 1,
+      preprocessingIntensity: "off",
+      ...(profilDemande === "reconnu" ? {} : { manualArchetypeId: profilDemande }),
+    });
+    profil = config.meta?.archetype ?? profilDemande;
+  }
+  if (options.ecart) config.distanceMetric = options.ecart;
+  if (options.forcerBlanc) config.preserveWhite = true;
+  if (options.forcerNoir) config.preserveBlack = true;
+  if (options.niveauxDeGris) config.colorMode = "grayscale";
   const impose = options.nbCouleurs ? Math.max(1, Math.min(12, Math.round(options.nbCouleurs))) : null;
   if (impose) {
     // Marge : le moteur fusionne ensuite les couleurs trop proches.
@@ -235,8 +291,10 @@ export async function separer(
   // 6. Tri des vraies encres, de la plus présente à la moins présente.
   const ordre = [...Array(P).keys()].sort((a, b) => total[b] - total[a]);
   let gardes: number[] = [];
+  const partMin = Math.max(0, options.couvertureMinPct ?? PART_MIN * 100) / 100;
+  const nettoyage = options.nettoyage ?? true;
   for (const k of ordre) {
-    if (total[k] / m < PART_MIN) continue;
+    if (total[k] / m < partMin) continue;
     if ((fond || transparent) && distance(palRgb[k], base) < 30) continue;
     const refs = [...gardes.map((g) => palRgb[g]), base];
     let melange = false;
@@ -250,7 +308,7 @@ export async function separer(
     }
     const plein = pleins[k] / Math.max(1, total[k]);
     // Nombre imposé : on garde les mélanges (photos, dégradés), seul le nombre compte.
-    if (!impose && (plein < SEUIL_LISERE || (melange && plein < SEUIL_PLEIN))) continue;
+    if (nettoyage && !impose && (plein < SEUIL_LISERE || (melange && plein < SEUIL_PLEIN))) continue;
     gardes.push(k);
   }
   if (gardes.length === 0) gardes = [ordre[0]];
@@ -338,6 +396,8 @@ export async function separer(
     // Frontières lisses : en proportion ET en nombre (deux couleurs qui se
     // touchent à peine ne font pas un dégradé).
     degrade: (lisses > SEUIL_FRONTIERES * frontieres && lisses > LISSES_MIN * m) || ecartTotal / m > SEUIL_PHOTO,
+    ecartMoyen: Math.round((ecartTotal / m) * 10) / 10,
+    profil,
   };
 }
 
@@ -350,7 +410,7 @@ export async function separer(
  * toute zone d'une même valeur (encre ou fond, voisinage 4) de moins de
  * `pixelsMin` pixels prend la valeur la plus fréquente sur son pourtour.
  */
-function sansIlots(v: Uint8Array, w: number, h: number, pixelsMin: number): Uint8Array {
+export function sansIlots(v: Uint8Array, w: number, h: number, pixelsMin: number): Uint8Array {
   const out = v.slice();
   if (pixelsMin <= 1) return out;
   const vu = new Uint8Array(v.length);

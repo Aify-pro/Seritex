@@ -4,6 +4,8 @@
  * navigateur refuse le worker) et dessine les écrans.
  */
 import { HORS_DESSIN, type Films, type OptionsSeparation, type ResultatSeparation } from "./separer";
+import type { EcransFilms, EntreeFilms } from "./ecrans";
+import type { Rendu } from "./trame";
 
 export type { CouleurSeparee, Films, ResultatSeparation } from "./separer";
 export { HORS_DESSIN } from "./separer";
@@ -126,6 +128,38 @@ function pixels(img: HTMLImageElement, w: number, h: number, zone?: { x: number;
   return ctx.getImageData(0, 0, w, h).data;
 }
 
+/** Aperçu d'un rendu (image d'analyse) : couleur pure par pixel, ou tons par encre en trame AM. */
+export async function renduApercu(
+  px: Uint8ClampedArray,
+  w: number,
+  h: number,
+  r: ResultatSeparation,
+  rendu: Rendu,
+  ppp: number,
+): Promise<{ indices?: Uint8Array; tons?: Uint8Array[] }> {
+  const message = { type: "rendu", px, w, h, encres: r.couleurs.map((c) => c.hex), fond: r.fond, transparent: r.transparent, rendu, ppp };
+  try {
+    const res = viaWorker<{ indices?: Uint8Array; tons?: Uint8Array[] }>(message, [px.buffer]);
+    if (res) return await res;
+  } catch {
+    // repli ci-dessous
+  }
+  const { indicesRendu, tonsRendu } = await import("./ecrans");
+  return rendu.type === "am" ? { tons: tonsRendu(px, w, h, message) } : { indices: indicesRendu(px, w, h, message) };
+}
+
+/** Films en pleine résolution selon le rendu (voir ecransFilms). `px` est transféré au worker. */
+export async function ecransFilmsPixels(px: Uint8ClampedArray, w: number, h: number, entree: EntreeFilms): Promise<EcransFilms> {
+  try {
+    const f = viaWorker<EcransFilms>({ type: "ecrans", px, w, h, entree }, [px.buffer]);
+    if (f) return await f;
+  } catch {
+    // repli ci-dessous
+  }
+  const { ecransFilms } = await import("./ecrans");
+  return ecransFilms(px, w, h, entree);
+}
+
 /** Charge une image (fichier ou URL accessible en CORS) réduite à `cote` pixels sur son plus grand côté. */
 export async function lireImage(source: Blob | string, cote = COTE_SEPARATION) {
   const img = await chargerImage(source);
@@ -157,17 +191,42 @@ const rvb = (hex: string) => {
  *  - `index` absent : le visuel recomposé avec ses seules encres, fond transparent ;
  *  - `index` donné : l'écran de cette couleur, en noir sur blanc comme un film ;
  *  - `index` = "dessin" : tout le dessin en noir (aperçu de la sous-couche).
+ * `indices` remplace ceux du résultat (rendu tramé) ; `tons` (trame AM) donne
+ * des écrans en niveaux de gris et une recomposition par mélange des encres.
  */
-export function dessiner(r: ResultatSeparation, index?: number | "dessin"): string {
+export function dessiner(r: ResultatSeparation, index?: number | "dessin", rendu?: { indices?: Uint8Array; tons?: Uint8Array[] }): string {
   const canvas = document.createElement("canvas");
   canvas.width = r.largeur;
   canvas.height = r.hauteur;
   const ctx = canvas.getContext("2d")!;
   const img = ctx.createImageData(r.largeur, r.hauteur);
   const couleurs = r.couleurs.map((c) => rvb(c.hex));
-  for (let p = 0; p < r.indices.length; p++) {
-    const k = r.indices[p];
+  const indices = rendu?.indices ?? r.indices;
+  const tons = rendu?.tons;
+  for (let p = 0; p < indices.length; p++) {
     const o = p * 4;
+    if (tons) {
+      if (index === undefined) {
+        // Encres déposées l'une sur l'autre, chacune selon son ton.
+        let c = [255, 255, 255];
+        let encre = 0;
+        tons.forEach((t, k) => {
+          const a = t[p] / 255;
+          if (!a) return;
+          encre = Math.max(encre, t[p]);
+          c = c.map((v, j) => v * (1 - a) + couleurs[k][j] * a);
+        });
+        if (!encre) continue;
+        [img.data[o], img.data[o + 1], img.data[o + 2]] = c;
+        img.data[o + 3] = 255;
+      } else {
+        const t = index === "dessin" ? tons.reduce((m, x) => Math.max(m, x[p]), 0) : tons[index][p];
+        img.data[o] = img.data[o + 1] = img.data[o + 2] = 255 - t;
+        img.data[o + 3] = 255;
+      }
+      continue;
+    }
+    const k = indices[p];
     if (index === undefined) {
       if (k === HORS_DESSIN) continue;
       [img.data[o], img.data[o + 1], img.data[o + 2]] = couleurs[k];
@@ -180,4 +239,62 @@ export function dessiner(r: ResultatSeparation, index?: number | "dessin"): stri
   }
   ctx.putImageData(img, 0, 0);
   return canvas.toDataURL("image/png");
+}
+
+/**
+ * Loupe : un carré de `coteCm` du film, au centre du dessin, à sa vraie
+ * résolution et selon le rendu choisi — pour juger la trame (taille et angle
+ * des points) avant de télécharger les films. Image recomposée (data URL).
+ */
+export async function loupeRendu(
+  source: Blob | string,
+  r: ResultatSeparation,
+  rendu: Rendu,
+  ppp: number,
+  largeurCm: number,
+  coteCm = 2.5,
+): Promise<{ url: string; cote: number }> {
+  const [{ dimensionsFilms }, { indicesRendu, tonsRendu }, { tramerAM }] = await Promise.all([
+    import("./dimensions-films"),
+    import("./ecrans"),
+    import("./trame"),
+  ]);
+  const { zone } = dimensionsFilms(r, largeurCm, ppp);
+  // Fraction de l'image couverte par le carré : la largeur du dessin vaut largeurCm.
+  const fl = Math.min(zone.l, ((coteCm / largeurCm) * zone.l) / 1.04);
+  const fh = Math.min(zone.h, (fl * r.largeur) / r.hauteur);
+  const cx = zone.x + zone.l / 2;
+  const cy = zone.y + zone.h / 2;
+  const sous = { x: Math.max(0, cx - fl / 2), y: Math.max(0, cy - fh / 2), l: fl, h: fh };
+  const cote = Math.max(16, Math.round((coteCm / 2.54) * ppp));
+  const hauteur = Math.max(16, Math.round((cote * fh * r.hauteur) / (fl * r.largeur)));
+  const { px, w, h } = await lireZone(source, sous, cote, hauteur);
+  const entree = { encres: r.couleurs.map((c) => c.hex), fond: r.fond, transparent: r.transparent, rendu, ppp };
+  const couleurs = r.couleurs.map((c) => rvb(c.hex));
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d")!;
+  const img = ctx.createImageData(w, h);
+  img.data.fill(255);
+  if (rendu.type === "am") {
+    const tons = tonsRendu(px, w, h, entree);
+    tons.forEach((t, k) => {
+      const m = tramerAM((p) => t[p], w, h, {
+        ppp,
+        lpi: rendu.lpi,
+        angle: rendu.angles[k] ?? rendu.angles[0] ?? 22.5,
+        forme: rendu.forme,
+        pointMinPct: rendu.pointMinPct,
+        pointMaxPct: rendu.pointMaxPct,
+      });
+      // Encres l'une sur l'autre, comme à l'impression (la dernière couvre).
+      for (let p = 0; p < m.length; p++) if (m[p]) [img.data[p * 4], img.data[p * 4 + 1], img.data[p * 4 + 2]] = couleurs[k];
+    });
+  } else {
+    const indices = indicesRendu(px, w, h, entree);
+    for (let p = 0; p < indices.length; p++) if (indices[p] !== HORS_DESSIN) [img.data[p * 4], img.data[p * 4 + 1], img.data[p * 4 + 2]] = couleurs[indices[p]];
+  }
+  ctx.putImageData(img, 0, 0);
+  return { url: canvas.toDataURL("image/png"), cote: w };
 }

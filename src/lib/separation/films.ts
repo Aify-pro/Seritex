@@ -1,7 +1,8 @@
 /**
- * Films de sérigraphie (lot 2) : un PDF, une page par écran, l'écran en noir
- * à la taille réelle du marquage, avec cibles de calage et légende. Généré
- * dans le navigateur (canvas + pdf-lib), sans envoi du visuel.
+ * Films de sérigraphie (lots 2 et 5) : un PDF, une page par écran, l'écran en
+ * noir à la taille réelle du marquage, avec cibles de calage et légende, selon
+ * le rendu choisi (aplats, diffusion, Bayer, trame AM). Généré dans le
+ * navigateur (Web Worker + pdf-lib), sans envoi du visuel.
  */
 import {
   concatTransformationMatrix,
@@ -14,12 +15,13 @@ import {
   StandardFonts,
   type PDFPage,
 } from "pdf-lib";
-import { appliquerEncresPixels, lireZone } from "./client";
-import { dimensionsFilms } from "./dimensions-films";
-import type { Films, ResultatSeparation } from "./separer";
+import { ecransFilmsPixels, lireZone } from "./client";
+import { dimensionsFilms, PPP_FILMS } from "./dimensions-films";
+import type { ResultatSeparation } from "./separer";
+import type { Rendu } from "./trame";
 
 const MM = 72 / 25.4;
-/** Plus petit point qu'un écran imprime de façon fiable (diamètre, mm). */
+/** Plus petit point qu'un écran imprime de façon fiable (côté, mm), par défaut. */
 const POINT_MIN_MM = 0.5;
 const MARGE_MM = 20;
 const LEGENDE_MM = 28;
@@ -39,25 +41,25 @@ export type OptionsFilms = {
   encres?: (string | null)[];
   /** Sous-couche blanche (textile foncé) : écran imprimé en premier, rentré sous les couleurs. */
   sousCouche?: { nom: string; rentreMm: number } | null;
+  /** Rendu des écrans (défaut : aplats). */
+  rendu?: Rendu;
+  /** Résolution visée des films, points par pouce (défaut 360). */
+  ppp?: number;
+  /** Îlots plus petits retirés (aplats), côté en mm (défaut 0,5). */
+  pointMinMm?: number;
+  /** Recouvrement des encres claires sous les foncées (aplats), mm (défaut 0). */
+  recouvrementMm?: number;
 };
 
-/**
- * Écran k en masque 1 bit (8 pixels par octet, lignes complétées à l'octet) :
- * bit 0 = encre déposée. C'est le format natif d'un film dans un PDF
- * (/ImageMask), net à toute échelle et bien plus léger qu'une image en gris.
- */
-function masqueEcran(f: Films, encre: (p: number) => boolean, miroir: boolean): Uint8Array {
-  const parLigne = Math.ceil(f.largeur / 8);
-  const out = new Uint8Array(parLigne * f.hauteur).fill(0xff);
-  for (let y = 0; y < f.hauteur; y++) {
-    const ligne = y * f.largeur;
-    for (let x = 0; x < f.largeur; x++) {
-      if (!encre(ligne + x)) continue;
-      const xs = miroir ? f.largeur - 1 - x : x;
-      out[y * parLigne + (xs >> 3)] &= ~(0x80 >> (xs & 7));
-    }
+/** Résumé du rendu pour la légende d'un écran (k : index de couleur, -1 : sous-couche). */
+function legendeRendu(rendu: Rendu, k: number) {
+  if (rendu.type === "am") {
+    const angle = rendu.angles[k < 0 ? 0 : k] ?? rendu.angles[0] ?? 22.5;
+    return `trame AM ${rendu.lpi} lpi · ${angle.toLocaleString("fr-FR")}° · point ${rendu.forme}`;
   }
-  return out;
+  if (rendu.type === "diffusion") return `diffusion ${rendu.algo}`;
+  if (rendu.type === "bayer") return `Bayer ${rendu.maillage} fils/cm`;
+  return null;
 }
 
 /** Compression zlib (FlateDecode) par le navigateur, bien plus rapide que pdf-lib. */
@@ -68,7 +70,7 @@ async function compresser(octets: Uint8Array): Promise<Uint8Array | null> {
 }
 
 /** Dessine un masque 1 bit en noir, à (x, y) et à la taille (l, h) en points. */
-async function dessinerMasque(doc: PDFDocument, page: PDFPage, masque: Uint8Array, f: Films, x: number, y: number, l: number, h: number) {
+async function dessinerMasque(doc: PDFDocument, page: PDFPage, masque: Uint8Array, f: { largeur: number; hauteur: number }, x: number, y: number, l: number, h: number) {
   const dict = { Type: "XObject", Subtype: "Image", Width: f.largeur, Height: f.hauteur, ImageMask: true, BitsPerComponent: 1 };
   const compresse = await compresser(masque);
   const flux = compresse
@@ -120,13 +122,23 @@ export async function preparerFilms(
   options: OptionsFilms,
   etape: (message: string) => void = () => {},
 ): Promise<Blob> {
-  const dims = dimensionsFilms(r, options.largeurCm);
+  const rendu: Rendu = options.rendu ?? { type: "aplat" };
+  const dims = dimensionsFilms(r, options.largeurCm, options.ppp ?? PPP_FILMS);
   etape("Lecture du visuel en pleine résolution…");
   const image = await lireZone(source, dims.zone, dims.largeurPx, dims.hauteurPx);
-  etape("Application des encres…");
+  etape(rendu.type === "am" ? "Trame des écrans…" : "Application des encres…");
   const pxParMm = dims.ppp / 25.4;
-  const rentrePx = options.sousCouche ? Math.max(1, Math.round(options.sousCouche.rentreMm * pxParMm)) : null;
-  const films = await appliquerEncresPixels(image.px, image.w, image.h, r, Math.max(4, Math.round((pxParMm * POINT_MIN_MM) ** 2)), rentrePx);
+  const films = await ecransFilmsPixels(image.px, image.w, image.h, {
+    encres: r.couleurs.map((c) => c.hex),
+    fond: r.fond,
+    transparent: r.transparent,
+    rendu,
+    ppp: dims.ppp,
+    pixelsMin: Math.max(4, Math.round((pxParMm * (options.pointMinMm ?? POINT_MIN_MM)) ** 2)),
+    recouvrementPx: Math.round((options.recouvrementMm ?? 0) * pxParMm),
+    sousCouche: options.sousCouche ? { rentrePx: Math.max(1, Math.round(options.sousCouche.rentreMm * pxParMm)) } : null,
+    miroir: options.miroir,
+  });
 
   const doc = await PDFDocument.create();
   doc.setTitle(sur(`Films ${options.nom}`));
@@ -136,25 +148,21 @@ export async function preparerFilms(
   const lmm = options.largeurCm * 10;
   const hmm = (lmm * films.hauteur) / films.largeur;
   const [pl, ph] = formatPage(lmm, hmm);
-  // Écrans dans l'ordre d'impression : la sous-couche d'abord.
-  type Ecran = { titre: string; encre: (p: number) => boolean };
-  const ecrans: Ecran[] = [];
-  if (options.sousCouche && films.sousCouche) {
-    const blanc = films.sousCouche;
-    ecrans.push({ titre: `Sous-couche · ${options.sousCouche.nom}`, encre: (p) => blanc[p] === 1 });
-  }
+  // Écrans dans l'ordre d'impression : la sous-couche d'abord (même ordre que films.ecrans).
+  const titres: { titre: string; k: number }[] = [];
+  if (options.sousCouche) titres.push({ titre: `Sous-couche · ${options.sousCouche.nom}`, k: -1 });
   r.couleurs.forEach((c, k) => {
     const nomEncre = options.encres?.[k];
-    ecrans.push({ titre: nomEncre ? `${nomEncre} · ${c.hex}` : c.hex, encre: (p) => films.indices[p] === k });
+    titres.push({ titre: nomEncre ? `${nomEncre} · ${c.hex}` : c.hex, k });
   });
-  const n = ecrans.length;
+  const n = films.ecrans.length;
 
   for (let k = 0; k < n; k++) {
     etape(`Écran ${k + 1} sur ${n}…`);
     const page = doc.addPage([pl * MM, ph * MM]);
     const x = ((pl - lmm) / 2) * MM;
     const y = (MARGE_MM + LEGENDE_MM) * MM;
-    await dessinerMasque(doc, page, masqueEcran(films, ecrans[k].encre, options.miroir), films, x, y, lmm * MM, hmm * MM);
+    await dessinerMasque(doc, page, films.ecrans[k], films, x, y, lmm * MM, hmm * MM);
 
     // Cibles à 12 mm du dessin, au milieu de chaque côté.
     const e = 12 * MM;
@@ -165,13 +173,14 @@ export async function preparerFilms(
     cible(page, x - e, cy);
     cible(page, x + lmm * MM + e, cy);
 
-    const titre = sur(`Écran ${k + 1} / ${n} · ${ecrans[k].titre}`);
+    const titre = sur(`Écran ${k + 1} / ${n} · ${titres[k]?.titre ?? ""}`);
     const detail = sur(
       [
         options.reference,
         options.nom,
         `${cm(options.largeurCm)} × ${cm(hmm / 10)}`,
         `${Math.round(films.largeur / (options.largeurCm / 2.54))} ppp`,
+        legendeRendu(rendu, titres[k]?.k ?? 0),
         options.miroir ? "miroir" : null,
         "Seritex",
       ]

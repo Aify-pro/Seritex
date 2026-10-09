@@ -36,11 +36,11 @@ function cadre(r: ResultatSeparation): Zone {
  * Zone à relire (dessin + petite marge, en fractions de l'image), taille de
  * relecture en pixels, résolution obtenue et hauteur imprimée.
  */
-export function dimensionsFilms(r: ResultatSeparation, largeurCm: number) {
+export function dimensionsFilms(r: ResultatSeparation, largeurCm: number, pppVise = PPP_FILMS) {
   const c = cadre(r);
   const ratio = (c.h * r.hauteur) / (c.l * r.largeur);
   const pouces = largeurCm / 2.54;
-  let lpx = pouces * PPP_FILMS;
+  let lpx = pouces * pppVise;
   const reduction = Math.min(1, Math.sqrt(PIXELS_MAX / (lpx * lpx * ratio * (1 + 2 * MARGE) ** 2)));
   lpx *= reduction;
   const zone: Zone = {
