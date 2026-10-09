@@ -8,6 +8,9 @@ import { dessiner, lireImage, loupeRendu, renduApercu, separerPixels, type Resul
 import { ANGLE_AM_DEFAUT, REGLAGES_DEFAUT, type Reglages } from "@/lib/separation/reglages";
 import { ajusterImage, imageNeutre } from "@/lib/separation/image";
 import { ENCRES_CMJN } from "@/lib/separation/trame";
+import { luminosites, modeSousCouche, tonsBlancs } from "@/lib/separation/sous-couche";
+import { OptionsBlancs } from "./options-blancs";
+import { HORS_DESSIN } from "@/lib/separation/separer";
 import { Plus, X } from "lucide-react";
 import type { Rendu } from "@/lib/separation/trame";
 import { enregistrerRecette, supprimerRecette } from "@/app/(app)/infographie/separation/recettes-actions";
@@ -35,6 +38,24 @@ function renduComplet(rendu: Rendu, n: number): Rendu {
 }
 /** Vue « sous-couche » dans l'aperçu (les écrans de couleur sont numérotés à partir de 0). */
 const SOUS_COUCHE = -1;
+/** Vue « rehaut » dans l'aperçu. */
+const REHAUT = -2;
+
+/** Tons (0 à 255) en image PNG : noir = blanc déposé, comme un film. */
+function dessinerTons(t: Uint8Array, w: number, h: number): string {
+  const c = document.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  const ctx = c.getContext("2d")!;
+  const img = ctx.createImageData(w, h);
+  for (let p = 0; p < t.length; p++) {
+    const o = p * 4;
+    img.data[o] = img.data[o + 1] = img.data[o + 2] = 255 - t[p];
+    img.data[o + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  return c.toDataURL("image/png");
+}
 
 const TONS_QUALITE: Record<Qualite, string> = {
   identique: "text-success",
@@ -95,7 +116,7 @@ export function SeparationCouleurs({
   const [erreurFilms, setErreurFilms] = useState<string | null>(null);
   // Encre choisie par écran (id), quand l'infographiste change la proposition.
   const [choix, setChoix] = useState<Record<number, string>>({});
-  const [avecSousCouche, setAvecSousCouche] = useState(false);
+
   const [reglages, setReglages] = useState<Reglages>(REGLAGES_DEFAUT);
   const [listeRecettes, setListeRecettes] = useState<Recette[]>(recettes);
   // Aperçu du rendu et loupe, marqués des réglages qui les ont produits.
@@ -103,6 +124,8 @@ export function SeparationCouleurs({
   const [loupe, setLoupe] = useState<{ cle: string; url: string; cote: number } | null>(null);
   const [calculLoupe, setCalculLoupe] = useState(false);
   const moteur = JSON.stringify(reglages.moteur);
+  const avecSousCouche = reglages.blancs.active;
+  const setAvecSousCouche = (v: boolean) => setReglages({ ...reglages, blancs: { ...reglages.blancs, active: v } });
   const imageCle = JSON.stringify(reglages.image);
   // Palette imposée par l'infographiste (couleurs modifiées, supprimées, ajoutées) ; null = automatique.
   const [palette, setPalette] = useState<string[] | null>(null);
@@ -217,10 +240,47 @@ export function SeparationCouleurs({
     return c.toDataURL("image/png");
   }, [pxAjuste, image, reglages.image]);
 
+  // Blancs (sous-couche, rehaut) sur l'image d'analyse, avec leurs options.
+  const blancsApercu = useMemo(() => {
+    if (!resultat || !pret || !avecSousCouche || !pxAjuste || !image) return null;
+    const n0 = image.w * image.h;
+    const tons = vueRendu?.tons ?? null;
+    const plats = estCmjn && tons
+      ? (() => {
+          const v = new Uint8Array(n0).fill(HORS_DESSIN);
+          for (let p = 0; p < n0; p++) if (tons.some((t) => t[p] >= 26)) v[p] = 0;
+          return v;
+        })()
+      : resultat.indices;
+    const pppApercu = Math.max(30, image.w / (Math.max(2, largeurCm) / 2.54));
+    return tonsBlancs({
+      largeur: image.w,
+      hauteur: image.h,
+      plats,
+      tons: reglages.rendu.type === "am" || estCmjn ? tons : null,
+      lum: luminosites(pxAjuste, n0),
+      options: reglages.blancs,
+      rendu: reglages.rendu.type,
+      rentrePx: Math.max(1, Math.round((reglages.rentreMm * pppApercu) / 25.4)),
+    });
+  }, [resultat, pret, avecSousCouche, pxAjuste, image, vueRendu, estCmjn, largeurCm, reglages.blancs, reglages.rendu.type, reglages.rentreMm]);
   const sousCoucheApercu = useMemo(
-    () => (resultat && pret && avecSousCouche ? dessiner(resultat, "dessin", vueRendu) : null),
-    [resultat, avecSousCouche, vueRendu, pret],
+    () => (blancsApercu?.sousCouche && image ? dessinerTons(blancsApercu.sousCouche, image.w, image.h) : null),
+    [blancsApercu, image],
   );
+  const rehautApercu = useMemo(() => (blancsApercu?.rehaut && image ? dessinerTons(blancsApercu.rehaut, image.w, image.h) : null), [blancsApercu, image]);
+  /** Couverture moyenne (0 à 1) d'un ton de blanc sur le dessin. */
+  const couvertureBlanc = (t: Uint8Array | null | undefined) => {
+    if (!t || !resultat) return 0;
+    let dessinPx = 0;
+    let somme = 0;
+    for (let p = 0; p < t.length; p++) {
+      if (resultat.indices[p] === HORS_DESSIN && !t[p]) continue;
+      dessinPx += 1;
+      somme += t[p];
+    }
+    return dessinPx ? somme / 255 / dessinPx : 0;
+  };
   const proches = useMemo(() => (resultat ? resultat.couleurs.map((c) => rapprocher(c.hex, encres)) : []), [resultat, encres]);
   const encreDe = (i: number) => {
     const liste = proches[i] ?? [];
@@ -233,7 +293,12 @@ export function SeparationCouleurs({
     const surfaces = surfacesCm2(resultat, largeurCm);
     const out: EcranChiffre[] = [];
     if (avecSousCouche) {
-      out.push({ libelle: `Sous-couche${blanc ? ` · ${blanc.nom}` : ""}`, surfaceCm2: surfaces.dessin, depotGm2: blanc?.depotGm2, prixKg: blanc?.prixKg });
+      out.push({
+        libelle: `Sous-couche${blanc ? ` · ${blanc.nom}` : ""}`,
+        surfaceCm2: surfaces.dessin * couvertureBlanc(blancsApercu?.sousCouche),
+        depotGm2: blanc?.depotGm2,
+        prixKg: blanc?.prixKg,
+      });
     }
     resultat.couleurs.forEach((c, i) => {
       const e = encreDe(i)?.encre;
@@ -242,9 +307,17 @@ export function SeparationCouleurs({
       const libelle = estCmjn ? `${ENCRES_CMJN[i].nom}${e ? ` · ${e.nom}` : ""}` : e ? `${e.nom} · ${c.hex}` : c.hex;
       out.push({ libelle, surfaceCm2: surface, depotGm2: e?.depotGm2, prixKg: e?.prixKg });
     });
+    if (avecSousCouche && blancsApercu?.rehaut) {
+      out.push({
+        libelle: `Rehaut${blanc ? ` · ${blanc.nom}` : ""}`,
+        surfaceCm2: surfaces.dessin * couvertureBlanc(blancsApercu.rehaut),
+        depotGm2: blanc?.depotGm2,
+        prixKg: blanc?.prixKg,
+      });
+    }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resultat, parametres, largeurCm, avecSousCouche, blanc, choix, proches, estCmjn, partsCmjn]);
+  }, [resultat, parametres, largeurCm, avecSousCouche, blanc, choix, proches, estCmjn, partsCmjn, blancsApercu]);
 
   const dims = useMemo(
     () => (resultat && largeurCm > 0 ? dimensionsFilms(resultat, largeurCm, reglages.ppp) : null),
@@ -322,7 +395,7 @@ export function SeparationCouleurs({
             const e = encreDe(i);
             return e ? libelleEncre(e.encre) : null;
           }),
-          sousCouche: avecSousCouche ? { nom: blanc ? libelleEncre(blanc) : "Blanc", rentreMm: reglages.rentreMm } : null,
+          sousCouche: avecSousCouche ? { nom: blanc ? libelleEncre(blanc) : "Blanc", rentreMm: reglages.rentreMm, options: reglages.blancs } : null,
           rendu: renduComplet(reglages.rendu, resultat.couleurs.length),
           ppp: reglages.ppp,
           pointMinMm: reglages.pointMinMm,
@@ -355,12 +428,15 @@ export function SeparationCouleurs({
   }
 
   const n = resultat?.couleurs.length ?? 0;
-  const nEcrans = n + (avecSousCouche ? 1 : 0);
+  const avecRehaut = avecSousCouche && reglages.blancs.rehaut.actif;
+  const nEcrans = n + (avecSousCouche ? 1 : 0) + (avecRehaut ? 1 : 0);
   const couleurActive = actif !== null && actif >= 0 ? resultat?.couleurs[actif] : null;
-  const vue = actif === SOUS_COUCHE ? sousCoucheApercu : actif !== null ? ecrans[actif] : apercu;
+  const vue = actif === SOUS_COUCHE ? sousCoucheApercu : actif === REHAUT ? rehautApercu : actif !== null ? ecrans[actif] : apercu;
   const titreVue =
     actif === SOUS_COUCHE
-      ? "Sous-couche blanche"
+      ? `Sous-couche blanche (${modeSousCouche(reglages.blancs, reglages.rendu.type) === "tramee" ? "tramée : tons" : "aplat"})`
+      : actif === REHAUT
+        ? "Blanc de rehaut (tons, tramé sur le film)"
       : couleurActive
         ? `Écran ${(actif ?? 0) + 1 + (avecSousCouche ? 1 : 0)} · ${encreDe(actif ?? 0)?.encre.nom ?? couleurActive.hex}`
         : `Aperçu en ${n} couleur${n > 1 ? "s" : ""}`;
@@ -370,7 +446,7 @@ export function SeparationCouleurs({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-base font-semibold text-foreground">
           {resultat
-            ? `${n} couleur${n > 1 ? "s" : ""} → ${nEcrans} écran${nEcrans > 1 ? "s" : ""}${avecSousCouche ? " (dont la sous-couche)" : ""}`
+            ? `${n} couleur${n > 1 ? "s" : ""} → ${nEcrans} écran${nEcrans > 1 ? "s" : ""}${avecSousCouche ? ` (dont la sous-couche${avecRehaut ? " et le rehaut" : ""})` : ""}`
             : "Analyse du visuel…"}
           {palette && !estCmjn && <span className="ml-2 text-xs font-normal text-brand">palette manuelle</span>}
           {estCmjn && <span className="ml-2 text-xs font-normal text-brand">quadrichromie</span>}
@@ -521,7 +597,7 @@ export function SeparationCouleurs({
               checked={avecSousCouche}
               onChange={(e) => {
                 setAvecSousCouche(e.target.checked);
-                if (!e.target.checked && actif === SOUS_COUCHE) setActif(null);
+                if (!e.target.checked && (actif === SOUS_COUCHE || actif === REHAUT)) setActif(null);
               }}
             />
             <span className="font-medium text-foreground">Sous-couche blanche</span>
@@ -529,6 +605,15 @@ export function SeparationCouleurs({
               ? "— textile foncé : conseillée, sous toutes les couleurs (écran imprimé en premier)."
               : "— pour un textile foncé : un écran blanc sous toutes les couleurs, imprimé en premier."}
           </label>
+          {avecSousCouche && (
+            <OptionsBlancs
+              options={reglages.blancs}
+              onChange={(blancs) => setReglages({ ...reglages, blancs })}
+              rentreMm={reglages.rentreMm}
+              onRentre={(rentreMm) => setReglages({ ...reglages, rentreMm })}
+              rendu={reglages.rendu.type}
+            />
+          )}
           <ul className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             {avecSousCouche && sousCoucheApercu && (
               <li>
@@ -637,6 +722,26 @@ export function SeparationCouleurs({
                 </li>
               );
             })}
+            {avecRehaut && rehautApercu && (
+              <li>
+                <button
+                  type="button"
+                  onClick={() => setActif(actif === REHAUT ? null : REHAUT)}
+                  className={cn(
+                    "w-full rounded-md border p-2 text-left transition-colors hover:bg-surface-muted",
+                    actif === REHAUT ? "border-brand ring-1 ring-brand" : "border-border",
+                  )}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={rehautApercu} alt="" className="aspect-square w-full rounded border border-border bg-white object-contain" />
+                  <span className="mt-1.5 flex items-center gap-1.5">
+                    <span className="h-3.5 w-3.5 shrink-0 rounded-full border border-border" style={{ backgroundColor: blanc?.hex ?? "#FFFFFF" }} />
+                    <span className="font-medium">Rehaut</span>
+                    <span className="ml-auto text-xs text-foreground-muted">en dernier</span>
+                  </span>
+                </button>
+              </li>
+            )}
           </ul>
           {!estCmjn && (
             <div className="flex flex-wrap items-center gap-2 text-xs text-foreground-muted">

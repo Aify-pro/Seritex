@@ -8,6 +8,7 @@ import type { OptionsSeparation } from "./separer";
 import type { Rendu } from "./trame";
 import { IMAGE_NEUTRE, type ReglagesImage } from "./image";
 import { nettoyerExpert, type ValeursExpert } from "./expert";
+import { SOUS_COUCHE_DEFAUT, type OptionsSousCouche } from "./sous-couche";
 
 export type Reglages = {
   /** Réglages manuels de l'image, appliqués avant la séparation (lot 7). */
@@ -25,6 +26,8 @@ export type Reglages = {
   recouvrementMm: number;
   /** Rentré de la sous-couche sous les couleurs, mm. */
   rentreMm: number;
+  /** Blancs des textiles foncés : sous-couche et rehaut. */
+  blancs: OptionsSousCouche;
 };
 
 /** Angles AM par défaut : 22,5° pour tous les écrans (le plus sûr contre le moiré avec la maille). */
@@ -48,6 +51,7 @@ export const REGLAGES_DEFAUT: Reglages = {
   pointMinMm: 0.5,
   recouvrementMm: 0,
   rentreMm: 0.2,
+  blancs: SOUS_COUCHE_DEFAUT,
 };
 
 /** Quadrichromie proposée : angles classiques C 15°, M 75°, J 0°, N 45°. */
@@ -111,6 +115,24 @@ const imageSchema = z.object({
   inverser: z.boolean(),
 });
 
+const trameBlancSchema = z.object({
+  lpi: z.number().min(10).max(150),
+  angle: z.number().min(-90).max(180),
+  forme: z.enum(["rond", "elliptique", "ligne"]),
+  pointMinPct: z.number().min(0).max(50),
+  pointMaxPct: z.number().min(50).max(100),
+});
+
+const blancsSchema = z.object({
+  active: z.boolean(),
+  mode: z.enum(["auto", "aplat", "tramee"]),
+  source: z.enum(["encres", "luminosite"]),
+  densitePct: z.number().min(0).max(100),
+  sansSousFoncesL: z.number().min(0).max(100),
+  trame: trameBlancSchema,
+  rehaut: z.object({ actif: z.boolean(), seuilL: z.number().min(30).max(99), densitePct: z.number().min(0).max(100) }),
+});
+
 export const reglagesSchema = z.object({
   image: imageSchema,
   moteur: z.object({
@@ -129,6 +151,7 @@ export const reglagesSchema = z.object({
   pointMinMm: z.number().min(0).max(5),
   recouvrementMm: z.number().min(0).max(2),
   rentreMm: z.number().min(0).max(2),
+  blancs: blancsSchema,
 });
 
 /** Lit des réglages enregistrés : complète avec les valeurs par défaut, null si invalides. */
@@ -140,6 +163,12 @@ export function lireReglages(v: unknown): Reglages | null {
     image: { ...IMAGE_NEUTRE, ...(o.image ?? {}) },
     moteur: { ...REGLAGES_DEFAUT.moteur, ...(o.moteur ?? {}), expert: nettoyerExpert(o.moteur?.expert) },
     rendu: o.rendu ?? REGLAGES_DEFAUT.rendu,
+    blancs: {
+      ...SOUS_COUCHE_DEFAUT,
+      ...(o.blancs ?? {}),
+      trame: { ...SOUS_COUCHE_DEFAUT.trame, ...(o.blancs?.trame ?? {}) },
+      rehaut: { ...SOUS_COUCHE_DEFAUT.rehaut, ...(o.blancs?.rehaut ?? {}) },
+    },
   });
   return r.success ? (r.data as Reglages) : null;
 }

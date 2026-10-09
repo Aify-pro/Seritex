@@ -20,6 +20,7 @@ import { dimensionsFilms, PPP_FILMS } from "./dimensions-films";
 import type { ResultatSeparation } from "./separer";
 import { ENCRES_CMJN, type Rendu } from "./trame";
 import type { ReglagesImage } from "./image";
+import { modeSousCouche, type OptionsSousCouche } from "./sous-couche";
 
 const MM = 72 / 25.4;
 /** Plus petit point qu'un écran imprime de façon fiable (côté, mm), par défaut. */
@@ -40,8 +41,8 @@ export type OptionsFilms = {
   reference?: string | null;
   /** Nom de l'encre retenue pour chaque écran, dans l'ordre des couleurs. */
   encres?: (string | null)[];
-  /** Sous-couche blanche (textile foncé) : écran imprimé en premier, rentré sous les couleurs. */
-  sousCouche?: { nom: string; rentreMm: number } | null;
+  /** Sous-couche blanche (textile foncé) : écran imprimé en premier, rentré sous les couleurs ; options et rehaut. */
+  sousCouche?: { nom: string; rentreMm: number; options?: OptionsSousCouche } | null;
   /** Rendu des écrans (défaut : aplats). */
   rendu?: Rendu;
   /** Résolution visée des films, points par pouce (défaut 360). */
@@ -58,6 +59,7 @@ export type OptionsFilms = {
 
 /** Résumé du rendu pour la légende d'un écran (k : index de couleur, -1 : sous-couche). */
 function legendeRendu(rendu: Rendu, k: number) {
+  if (k < 0) return null;
   if (rendu.type === "am" || rendu.type === "cmjn") {
     const angle = rendu.angles[k < 0 ? 0 : k] ?? rendu.angles[0] ?? 22.5;
     return `${rendu.type === "cmjn" ? "quadri" : "trame AM"} ${rendu.lpi} lpi · ${angle.toLocaleString("fr-FR")}° · point ${rendu.forme}`;
@@ -146,7 +148,9 @@ export async function preparerFilms(
     ppp: dims.ppp,
     pixelsMin: Math.max(4, Math.round((pxParMm * (options.pointMinMm ?? POINT_MIN_MM)) ** 2)),
     recouvrementPx: Math.round((options.recouvrementMm ?? 0) * pxParMm),
-    sousCouche: options.sousCouche ? { rentrePx: Math.max(1, Math.round(options.sousCouche.rentreMm * pxParMm)) } : null,
+    sousCouche: options.sousCouche
+      ? { rentrePx: Math.max(1, Math.round(options.sousCouche.rentreMm * pxParMm)), options: options.sousCouche.options }
+      : null,
     miroir: options.miroir,
   });
 
@@ -160,13 +164,21 @@ export async function preparerFilms(
   const [pl, ph] = formatPage(lmm, hmm);
   // Écrans dans l'ordre d'impression : la sous-couche d'abord (même ordre que films.ecrans).
   const titres: { titre: string; k: number }[] = [];
-  if (options.sousCouche) titres.push({ titre: `Sous-couche · ${options.sousCouche.nom}`, k: -1 });
+  const blancs = options.sousCouche?.options;
+  if (options.sousCouche) {
+    const tramee = blancs ? modeSousCouche(blancs, rendu.type) === "tramee" : rendu.type === "am" || rendu.type === "cmjn";
+    titres.push({
+      titre: `Sous-couche · ${options.sousCouche.nom}${tramee ? ` (tramée${blancs ? ` ${blancs.trame.lpi} lpi · ${blancs.trame.angle.toLocaleString("fr-FR")}°` : ""})` : " (aplat)"}`,
+      k: -1,
+    });
+  }
   if (cmjn) ENCRES_CMJN.forEach((c, k) => titres.push({ titre: `${c.nom} (quadrichromie)`, k }));
   else
     r.couleurs.forEach((c, k) => {
       const nomEncre = options.encres?.[k];
       titres.push({ titre: nomEncre ? `${nomEncre} · ${c.hex}` : c.hex, k });
     });
+  if (options.sousCouche && blancs?.rehaut.actif) titres.push({ titre: `Rehaut · ${options.sousCouche.nom} (hautes lumières, imprimé en dernier)`, k: -2 });
   const n = films.ecrans.length;
 
   for (let k = 0; k < n; k++) {
