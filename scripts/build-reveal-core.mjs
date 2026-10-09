@@ -6,13 +6,14 @@
  * Usage : node scripts/build-reveal-core.mjs <chemin du clone du fork>
  *
  * Le moteur est écrit en CommonJS pour Node : on le regroupe en un seul module
- * ES pour le navigateur (Web Worker), sans fs/path (les archétypes JSON ne
- * servent pas : on utilise le moteur adaptatif Mk2) et sans journaux console.
+ * ES pour le navigateur (Web Worker), sans fs/path et sans journaux console.
+ * Les archétypes (fichiers JSON lus sur disque par Node) sont intégrés au
+ * module et préchargés dans ArchetypeLoader.
  * Le même fichier est copié tel quel dans le dépôt du site (www.seritex.ci).
  */
 import { build } from "esbuild";
 import { execSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const fork = process.argv[2];
@@ -37,8 +38,19 @@ const sansNode = {
   },
 };
 
+// Entrée : le moteur + ses archétypes intégrés (lus sur disque sous Node).
+const archetypes = readdirSync(path.join(core, "archetypes")).filter((f) => f.endsWith(".json") && f !== "schema.json").sort();
+const entree = `
+const Reveal = require("./index.js");
+const L = Reveal.ArchetypeLoader;
+L.archetypes = [${archetypes.map((f) => `require("./archetypes/${f}")`).join(", ")}]
+  .map((a) => L._applyDefaults(a))
+  .sort((a, b) => a.id.localeCompare(b.id));
+module.exports = Reveal;
+`;
+
 const r = await build({
-  entryPoints: [path.join(core, "index.js")],
+  stdin: { contents: entree, resolveDir: core, loader: "js", sourcefile: "entree-reveal.js" },
   bundle: true,
   format: "esm",
   platform: "browser",
@@ -61,4 +73,16 @@ const entete = `/* eslint-disable */
  */
 `;
 writeFileSync(sortie, entete + r.outputFiles[0].text);
+
+// Liste des archétypes pour l'interface (sans charger le moteur).
+const liste = archetypes
+  .map((f) => JSON.parse(readFileSync(path.join(core, "archetypes", f), "utf8")))
+  .map((a) => ({ id: a.id, nom: a.name, groupe: a.group ?? null, description: a.description ?? "" }))
+  .sort((a, b) => a.nom.localeCompare(b.nom));
+writeFileSync(
+  path.resolve("src/lib/separation/archetypes.ts"),
+  `// Fichier GÉNÉRÉ par scripts/build-reveal-core.mjs (archétypes du moteur Reveal) : ne pas modifier à la main.\n` +
+    `export type Archetype = { id: string; nom: string; groupe: string | null; description: string };\n\n` +
+    `export const ARCHETYPES: Archetype[] = ${JSON.stringify(liste, null, 2)};\n`,
+);
 console.log(`${sortie} : ${(r.outputFiles[0].text.length / 1024).toFixed(0)} Ko (commit ${commit})`);
