@@ -6,10 +6,14 @@ import { Badge } from "@/components/ui/badge";
 import { chargerAbsences, chargerCommerciaux, type Commercial } from "@/lib/prospection/serveur";
 import {
   MOTIFS_ABSENCE,
+  NATURES_VISITE,
+  SOURCES_VISITE,
   STATUTS_ABSENCE,
   STATUTS_JOURNEE,
   aujourdhuiAbidjan,
   dateCourte,
+  type NatureVisite,
+  type SourceVisite,
   type StatutAbsence,
   type StatutJournee,
 } from "@/lib/prospection/constantes";
@@ -41,6 +45,32 @@ export default async function ProspectionPage() {
     })
   );
   const attendus = statuts.filter((s) => s.statut === "due").length;
+
+  // Journal des visites (0124) : les plus récentes, et celles à rattacher à
+  // une fiche (prospect non fiché, code client inconnu de la reprise Excel).
+  const [{ data: visitesBrutes }, { count: aRattacher }] = await Promise.all([
+    supabase
+      .from("visites")
+      .select("id, jour, nature, source, compte_rendu, tiers_libelle, companies!visites_company_id_fkey(name), app_users!visites_app_user_id_fkey(full_name)")
+      .order("jour", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(15),
+    supabase.from("visites").select("id", { count: "exact", head: true }).is("company_id", null),
+  ]);
+  const visites = (visitesBrutes ?? []).map((v) => {
+    const client = v.companies as unknown as { name: string } | null;
+    const auteur = v.app_users as unknown as { full_name: string } | null;
+    return {
+      id: v.id as string,
+      jour: v.jour as string,
+      nature: v.nature as NatureVisite,
+      source: v.source as SourceVisite,
+      compteRendu: v.compte_rendu as string,
+      tiers: client?.name ?? (v.tiers_libelle as string | null) ?? "—",
+      aRattacher: !client,
+      auteur: auteur?.full_name ?? "—",
+    };
+  });
 
   const debutMois = `${aujourdhui.slice(0, 7)}-01`;
   const absences = await chargerAbsences(debutMois);
@@ -80,6 +110,39 @@ export default async function ProspectionPage() {
                   <Badge tone={statut === "due" ? "brand" : "neutral"} dot={statut === "due"}>
                     {STATUTS_JOURNEE[statut]}
                   </Badge>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader
+          title="Dernières visites"
+          description={
+            (aRattacher ?? 0) > 0
+              ? `${aRattacher} visite${(aRattacher ?? 0) > 1 ? "s" : ""} à rattacher à une fiche client ou prospect.`
+              : "Le journal des visites, toutes sources confondues."
+          }
+        />
+        <CardBody className="p-0">
+          {visites.length === 0 ? (
+            <p className="px-5 py-6 text-sm text-foreground-muted">Aucune visite enregistrée.</p>
+          ) : (
+            <ul className="divide-y divide-border">
+              {visites.map((v) => (
+                <li key={v.id} className="px-5 py-2.5 text-sm">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="text-xs text-foreground-muted">{dateCourte(v.jour)}</span>
+                    <span className="font-medium text-foreground">{v.tiers}</span>
+                    {v.aRattacher && <Badge tone="warning">À rattacher</Badge>}
+                    <Badge tone="neutral">{NATURES_VISITE[v.nature]}</Badge>
+                    <span className="ml-auto text-xs text-foreground-muted">
+                      {v.auteur} · {SOURCES_VISITE[v.source]}
+                    </span>
+                  </div>
+                  <p className="mt-0.5 line-clamp-2 text-xs text-foreground-muted">{v.compteRendu}</p>
                 </li>
               ))}
             </ul>
