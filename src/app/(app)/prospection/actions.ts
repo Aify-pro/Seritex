@@ -18,7 +18,7 @@ type Result = { error?: string };
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date invalide");
 const absenceSchema = z
   .object({
-    app_user_id: z.string().uuid().nullable(),
+    app_user_id: z.guid().nullable(),
     debut: date,
     fin: date,
     motif: z.enum(Object.keys(MOTIFS_ABSENCE) as [keyof typeof MOTIFS_ABSENCE]),
@@ -54,7 +54,7 @@ export async function declarerAbsence(input: z.input<typeof absenceSchema>): Pro
 export async function traiterAbsence(id: string, decision: "validee" | "refusee", motifRefus: string): Promise<Result> {
   await requirePermission("prospection", "validate");
   const parsed = z
-    .object({ id: z.string().uuid(), decision: z.enum(["validee", "refusee"]), motifRefus: z.string().trim().max(300) })
+    .object({ id: z.guid(), decision: z.enum(["validee", "refusee"]), motifRefus: z.string().trim().max(300) })
     .safeParse({ id, decision, motifRefus });
   if (!parsed.success) return { error: "Saisie invalide" };
   if (decision === "refusee" && !parsed.data.motifRefus) return { error: "Indiquez le motif du refus." };
