@@ -35,7 +35,7 @@ export default async function UsersPage({
     await Promise.all([
       supabase
         .from("app_users")
-        .select("id,full_name,email,role,role_id,active,company_id,companies(name),sections(name),contacts(first_name,last_name)")
+        .select("id,full_name,email,role,role_id,active,company_id,companies!app_users_company_id_fkey(name),sections(name),contacts(first_name,last_name)")
         .order("full_name"),
       supabase.from("companies").select("id,name").order("name"),
       supabase.from("sections").select("id,name").order("display_order"),
