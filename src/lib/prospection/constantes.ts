@@ -39,6 +39,26 @@ export const STATUTS_ABSENCE = {
 } as const;
 export type StatutAbsence = keyof typeof STATUTS_ABSENCE;
 
+/** Nature d'une visite (migration 0124). */
+export const NATURES_VISITE = {
+  visite: "Visite",
+  prospection: "Prospection",
+  relance: "Relance",
+  appel: "Appel",
+  autre: "Autre",
+} as const;
+export type NatureVisite = keyof typeof NATURES_VISITE;
+
+/** Origine d'une visite (migration 0124). */
+export const SOURCES_VISITE = {
+  application: "Module",
+  whatsapp: "WhatsApp",
+  telegram: "Telegram",
+  email: "E-mail",
+  reprise_excel: "Reprise Excel",
+} as const;
+export type SourceVisite = keyof typeof SOURCES_VISITE;
+
 export const CANAUX = ["whatsapp", "telegram", "email", "application"] as const;
 export type Canal = (typeof CANAUX)[number];
 

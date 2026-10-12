@@ -39,3 +39,6 @@ npm-debug.log*
 
 # Aperçu local du PDF ODF (npm run preview:pdf-odf)
 odf-preview.pdf
+
+# Reprise Excel prospection : le SQL généré contient des données commerciales
+scripts/prospection-reprise/*.sql
