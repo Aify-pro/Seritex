@@ -16,6 +16,9 @@
 //   - sage_quotes_view / sage_quote_lines_view (devis Sage EN COURS : documents
 //                            de vente de type devis, pas encore transformes ;
 //                            migration 0071)
+//   - sage_client_ca / sage_client_creances (CA facture par client et par
+//                            annee, reste a encaisser ; planning de
+//                            prospection, migration 0123)
 //
 // Remplacement complet a chaque passage (upsert + suppression des lignes
 // disparues cote Sage) : volumes modestes (quelques milliers de lignes),
@@ -334,6 +337,81 @@ async function syncDevis(pool) {
   console.log(`Devis Sage en cours : ${headerRows.length} devis, ${lineRows.length} ligne(s) synchronises.`);
 }
 
+// Avoirs et retours (DO_Provenance 1 / 2) : deduits du CA et de la creance,
+// que Sage stocke leur montant en positif ou en negatif.
+const SIGNE_DOC = "CASE WHEN ISNULL(DO_Provenance, 0) IN (1, 2) THEN -1 ELSE 1 END";
+
+// CA facture par client et par annee civile, trois dernieres annees
+// (factures DO_Type 6 et factures comptabilisees DO_Type 7) — migration 0123.
+async function syncChiffreAffaires(pool) {
+  const cols = await colonnesDe(pool, "F_DOCENTETE");
+  exigerColonnes("F_DOCENTETE", cols, ["DO_Domaine", "DO_Type", "DO_Date", "DO_Tiers", "DO_TotalHT", "DO_TotalTTC", "DO_Provenance"]);
+  const r = await pool.request().query(`
+    SELECT DO_Tiers, YEAR(DO_Date) AS annee,
+           SUM(${SIGNE_DOC} * ABS(DO_TotalHT)) AS ca_ht,
+           SUM(${SIGNE_DOC} * ABS(DO_TotalTTC)) AS ca_ttc,
+           SUM(CASE WHEN ISNULL(DO_Provenance, 0) IN (1, 2) THEN 0 ELSE 1 END) AS nb_factures,
+           MAX(DO_Date) AS derniere_facture
+    FROM F_DOCENTETE
+    WHERE DO_Domaine = 0 AND DO_Type IN (6, 7)
+      AND DO_Date >= DATEFROMPARTS(YEAR(GETDATE()) - 2, 1, 1)
+    GROUP BY DO_Tiers, YEAR(DO_Date)
+  `);
+  const now = new Date().toISOString();
+  const rows = [];
+  for (const x of r.recordset) {
+    const tiers = trimOrNull(x.DO_Tiers);
+    if (!tiers || !x.annee) continue;
+    rows.push({
+      client_sage_code: tiers,
+      annee: Number(x.annee),
+      ca_ht: Math.round((Number(x.ca_ht) || 0) * 100) / 100,
+      ca_ttc: Math.round((Number(x.ca_ttc) || 0) * 100) / 100,
+      nb_factures: Number(x.nb_factures) || 0,
+      derniere_facture: dateJour(x.derniere_facture),
+      last_sync_at: now,
+    });
+  }
+  await upsertAndPrune("sage_client_ca", ["client_sage_code", "annee"], rows);
+  console.log(`CA Sage : ${rows.length} ligne(s) client x annee synchronisee(s).`);
+}
+
+// Reste a encaisser par client : net a payer - montant regle des factures
+// (DO_NetAPayer, a defaut DO_TotalTTC) — migration 0123. Seuls les clients
+// dont le solde n'est pas nul sont ecrits.
+async function syncCreances(pool) {
+  const cols = await colonnesDe(pool, "F_DOCENTETE");
+  exigerColonnes("F_DOCENTETE", cols, ["DO_Domaine", "DO_Type", "DO_Date", "DO_Tiers", "DO_TotalTTC", "DO_Provenance", "DO_MontantRegle"]);
+  const net = cols.has("DO_NetAPayer") ? "DO_NetAPayer" : "DO_TotalTTC";
+  const reste = `(ABS(${net}) - ABS(ISNULL(DO_MontantRegle, 0)))`;
+  const facture = "ISNULL(DO_Provenance, 0) NOT IN (1, 2)";
+  const r = await pool.request().query(`
+    SELECT DO_Tiers,
+           SUM(${SIGNE_DOC} * ${reste}) AS reste,
+           SUM(CASE WHEN ${reste} > 1 AND ${facture} THEN 1 ELSE 0 END) AS nb,
+           MIN(CASE WHEN ${reste} > 1 AND ${facture} THEN DO_Date END) AS plus_ancienne
+    FROM F_DOCENTETE
+    WHERE DO_Domaine = 0 AND DO_Type IN (6, 7)
+    GROUP BY DO_Tiers
+  `);
+  const now = new Date().toISOString();
+  const rows = [];
+  for (const x of r.recordset) {
+    const tiers = trimOrNull(x.DO_Tiers);
+    const montant = Math.round((Number(x.reste) || 0) * 100) / 100;
+    if (!tiers || Math.abs(montant) < 1) continue;
+    rows.push({
+      client_sage_code: tiers,
+      montant_ttc: montant,
+      nb_factures: Number(x.nb) || 0,
+      plus_ancienne: dateJour(x.plus_ancienne),
+      last_sync_at: now,
+    });
+  }
+  await upsertAndPrune("sage_client_creances", ["client_sage_code"], rows);
+  console.log(`Creances Sage : ${rows.length} client(s) avec un solde (base : ${net} - DO_MontantRegle).`);
+}
+
 // Upsert de toutes les lignes actuelles, puis suppression des lignes
 // existantes en base qui n'apparaissent plus dans le resultat Sage
 // (remplacement complet, pas de suivi incremental pour ce volume).
@@ -346,8 +424,16 @@ async function upsertAndPrune(table, keyColumns, rows) {
     if (error) throw new Error(`Upsert ${table} : ${error.message}`);
   }
 
-  const { data: existing, error: selError } = await supabase.from(table).select(keyColumns.join(","));
-  if (selError) throw new Error(`Lecture ${table} : ${selError.message}`);
+  // Lecture paginee : l'API renvoie au plus 1 000 lignes par requete.
+  const existing = [];
+  for (let from = 0; ; from += 1000) {
+    let query = supabase.from(table).select(keyColumns.join(","));
+    for (const c of keyColumns) query = query.order(c);
+    const { data, error: selError } = await query.range(from, from + 999);
+    if (selError) throw new Error(`Lecture ${table} : ${selError.message}`);
+    existing.push(...(data || []));
+    if (!data || data.length < 1000) break;
+  }
 
   const keyOf = (r) => keyColumns.map((c) => String(r[c])).join("|");
   const currentKeys = new Set(rows.map(keyOf));
@@ -381,6 +467,19 @@ async function main() {
     } catch (err) {
       console.error("ERREUR devis Sage :", err.message);
       process.exitCode = 1;
+    }
+    // Isoles de la meme facon : CA et creances alimentent le planning de
+    // prospection, pas le reste de Seritex.
+    for (const [libelle, etape] of [
+      ["CA Sage", syncChiffreAffaires],
+      ["creances Sage", syncCreances],
+    ]) {
+      try {
+        await etape(pool);
+      } catch (err) {
+        console.error(`ERREUR ${libelle} :`, err.message);
+        process.exitCode = 1;
+      }
     }
   } finally {
     await pool.close();
