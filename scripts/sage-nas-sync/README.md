@@ -29,6 +29,13 @@ Supabase **avant** de reconstruire l'image et de relancer la synchro
   ignorées. Cette partie est isolée : si elle échoue (colonne absente, tables de
   documents de vente non copiées sur le NAS), clients, articles et stock sont
   quand même synchronisés, mais le script se termine en erreur.
+- **CA et créances par client** (`F_DOCENTETE`, factures `DO_Type` 6 et 7,
+  avoirs et retours `DO_Provenance` 1 / 2 déduits) : CA HT / TTC par client et
+  par année civile sur les trois dernières années (`sage_client_ca`), et reste
+  à encaisser = net à payer − montant réglé (`sage_client_creances`, clients au
+  solde non nul seulement). Lus par le planning de prospection via la vue
+  `prospection_indicateurs_clients` (migration `0123_prospection_ca_creances_sage.sql`,
+  à appliquer avant de reconstruire l'image). Isolé comme les devis.
 - **Clients** (`F_COMPTET`) : uniquement les comptes dont `CG_NumPrinc`
   commence par `411` (convention comptable = clients, pas fournisseurs).
   Écrits dans `sage_customers_view` (miroir), puis rattachés à `companies`
