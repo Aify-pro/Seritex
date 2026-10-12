@@ -35,7 +35,7 @@ function versE164(saisie: string): string | null {
 }
 
 const commercialSchema = z.object({
-  app_user_id: z.string().uuid("Choisissez un compte"),
+  app_user_id: z.guid("Choisissez un compte"),
   sage_representant_no: z.number().int().positive().nullable(),
   whatsapp: z
     .string()
