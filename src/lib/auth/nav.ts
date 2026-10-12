@@ -36,6 +36,8 @@ import {
   MapPinned,
   Layers,
   Printer,
+  Target,
+  Briefcase,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { createElement, type ReactNode } from "react";
@@ -115,6 +117,7 @@ const PORTAL_NAV: Partial<Record<UserRole, NavItem[]>> = {
 const STAFF_NAV: NavItem[] = [
   { href: "/dashboard", label: "Tableau de bord", icon: navIcon(LayoutDashboard) },
   { href: "/commercial/clients", label: "Clients", icon: navIcon(Contact), module: "clients" },
+  { href: "/prospection", label: "Prospection", icon: navIcon(Target), module: "prospection" },
   { href: "/commercial/demandes", label: "Demandes", icon: navIcon(Inbox), module: "demandes", alsoModules: ["demandes_stock"] },
   { href: "/infographie/demandes", label: "Demandes graphiques", icon: navIcon(ImageIcon), module: "demandes_graphiques" },
   { href: "/infographie/separation", label: "Séparation des couleurs", icon: navIcon(Layers), module: "demandes_graphiques" },
@@ -139,6 +142,7 @@ const STAFF_NAV: NavItem[] = [
   { href: "/parametres/fabrication", label: "Fabrication", icon: navIcon(Gauge), section: PARAMETRES, module: "fabrication" },
   { href: "/parametres/dispatching", label: "Dispatching des tailles", icon: navIcon(ChartPie), section: PARAMETRES, module: "dispatching" },
   { href: "/parametres/livraison", label: "Livraison", icon: navIcon(MapPinned), section: PARAMETRES, module: "parametres_livraison" },
+  { href: "/parametres/prospection", label: "Prospection", icon: navIcon(Briefcase), section: PARAMETRES, module: "parametres_prospection" },
   { href: "/parametres/sage", label: "Intégration Sage", icon: navIcon(Plug), section: PARAMETRES, module: "parametres_sage" },
   { href: "/parametres/clients-sage", label: "Clients Sage (lecture)", icon: navIcon(Building2), section: PARAMETRES, module: "clients_sage" },
   { href: "/parametres/articles-sage", label: "Articles Sage (lecture)", icon: navIcon(Package), section: PARAMETRES, module: "articles_sage" },

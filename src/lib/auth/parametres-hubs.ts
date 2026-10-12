@@ -6,6 +6,7 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Truck,
+  Briefcase,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { createElement, type ReactNode } from "react";
@@ -76,6 +77,12 @@ const HUBS: HubDefinition[] = [
     label: "Livraison",
     icon: Truck,
     tabs: [{ href: "/parametres/livraison", label: "Zones, transporteurs et véhicules" }],
+  },
+  {
+    key: "commercial",
+    label: "Commercial",
+    icon: Briefcase,
+    tabs: [{ href: "/parametres/prospection", label: "Prospection" }],
   },
   {
     key: "acces",

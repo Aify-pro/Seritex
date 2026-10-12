@@ -38,6 +38,7 @@ const VIEW: PermissionAction[] = ["view"];
 export const MODULE_META: Record<string, ModuleMeta> = {
   // --- Modules -----------------------------------------------------------
   clients: { group: "modules", actions: ["view", "create", "modify", "delete"] },
+  prospection: { group: "modules", actions: ["view", "create", "modify", "validate"] },
   demandes: { group: "modules", actions: ["view", "create", "modify"] },
   demandes_stock: { group: "modules", actions: ["view", "create", "modify"] },
   demandes_graphiques: { group: "modules", actions: VIEW },
@@ -80,6 +81,7 @@ export const MODULE_META: Record<string, ModuleMeta> = {
   stockage_cibles: { group: "parametres", actions: VIEW, platformAdminOnly: true },
   notifications: { group: "parametres", actions: VIEW, platformAdminOnly: true },
   site_web: { group: "parametres", actions: ["view", "modify"] },
+  parametres_prospection: { group: "parametres", actions: ["view", "create", "modify", "delete"] },
 };
 
 const FALLBACK_META: ModuleMeta = { group: "modules", actions: VIEW };
