@@ -55,7 +55,7 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
   const from = (filters.page - 1) * filters.taille;
   const to = from + filters.taille - 1;
 
-  const [list, optionsRes, syncRes] = await Promise.all([
+  const [list, optionsRes, syncRes, aRattacherRes] = await Promise.all([
     applyClientFilters(
       supabase
         .from("companies_list")
@@ -67,7 +67,10 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
     ).range(from, to),
     supabase.rpc("company_filter_options"),
     supabase.from("sage_customers_view").select("last_sync_at").order("last_sync_at", { ascending: false }).limit(1).maybeSingle(),
+    // Comptes créés sur le site, en attente de rattachement (migration 0125).
+    supabase.rpc("site_accounts_a_rattacher"),
   ]);
+  const aRattacher = Array.isArray(aRattacherRes.data) ? aRattacherRes.data.length : 0;
 
   // Page demandée au-delà de la dernière (filtre resserré depuis) : retour à la première page.
   if (list.error?.code === "PGRST103" && filters.page > 1) {
@@ -98,12 +101,22 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
             : "Fiches clients — les contacts sont gérés dans Seritex."
         }
         action={
+          <div className="flex flex-wrap items-center gap-2">
+            {aRattacher > 0 && (
+              <Link
+                href="/commercial/clients/a-rattacher"
+                className="inline-flex h-8 items-center gap-1.5 rounded-md bg-brand px-3 text-xs font-medium text-brand-foreground transition-colors hover:bg-brand/90"
+              >
+                {aRattacher} compte{aRattacher > 1 ? "s" : ""} du site à rattacher
+              </Link>
+            )}
           <a
             href={`/api/clients/export${exportQs ? `?${exportQs}` : ""}`}
             className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-xs font-medium text-foreground transition-colors hover:bg-surface-muted"
           >
             <Download className="h-3.5 w-3.5" /> Exporter en CSV
           </a>
+          </div>
         }
       />
 
