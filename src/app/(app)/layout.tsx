@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { signOutAction } from "@/app/login/actions";
 import Image from "next/image";
 import { isPlatformAdmin, requireUser } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server";
@@ -14,6 +15,22 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // Compte créé avec un mot de passe provisoire (ou réinitialisation exigée) :
   // rien d'autre n'est accessible tant que l'utilisateur n'a pas choisi le sien.
   if (profile.must_change_password) redirect("/reinitialiser-mot-de-passe");
+  // Compte créé sur le site et pas encore rattaché à un client (migration 0125) : rien à montrer.
+  if (profile.role === "client" && !profile.company_id) {
+    return (
+      <main className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-4 px-6 text-center">
+        <Image src="/logo-seritex-wide.png" alt="Seritex" width={447} height={265} className="h-12 w-auto object-contain" priority />
+        <h1 className="text-lg font-semibold text-foreground">Votre compte est en cours de rattachement</h1>
+        <p className="text-sm text-foreground-muted">
+          Votre inscription est bien enregistrée. Notre équipe la rattache à votre fiche client ; l&apos;espace client s&apos;ouvrira ensuite.
+          Pour toute question : info@seritex.ci.
+        </p>
+        <form action={signOutAction}>
+          <button type="submit" className="text-sm text-brand underline">Se déconnecter</button>
+        </form>
+      </main>
+    );
+  }
   const [permissions, platformAdmin] = await Promise.all([getPermissionMap(), isPlatformAdmin()]);
   // Libellé du rôle métier (« Direction »…) plutôt que celui du rôle de base.
   const supabase = await createClient();

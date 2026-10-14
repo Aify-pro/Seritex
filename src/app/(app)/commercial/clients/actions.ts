@@ -149,3 +149,34 @@ export async function toggleContactStatus(contactId: string, companyId: string, 
   revalidatePath(`/commercial/clients/${companyId}`);
   return {};
 }
+
+const compteSchema = z.object({ user_id: z.string().uuid(), company_id: z.string().uuid().optional() });
+
+/**
+ * Comptes créés sur le site (migration 0125) : rattache le compte à une société
+ * venue de Sage — un contact est créé dans cette société, au nom du compte.
+ */
+export async function rattacherCompteB2B(userId: string, companyId: string) {
+  await requirePermission("clients", "modify");
+  const parsed = compteSchema.safeParse({ user_id: userId, company_id: companyId });
+  if (!parsed.success || !parsed.data.company_id) return { error: "Compte ou société invalide" };
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("attach_site_account_b2b", { p_user: parsed.data.user_id, p_company: parsed.data.company_id });
+  if (error) return { error: error.message };
+  revalidatePath("/commercial/clients/a-rattacher");
+  revalidatePath("/commercial/clients");
+  return {};
+}
+
+/** Comptes créés sur le site : crée la fiche particulier (hors Sage) et y rattache le compte. */
+export async function rattacherCompteB2C(userId: string) {
+  await requirePermission("clients", "create");
+  const parsed = compteSchema.safeParse({ user_id: userId });
+  if (!parsed.success) return { error: "Compte invalide" };
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("attach_site_account_b2c", { p_user: parsed.data.user_id });
+  if (error) return { error: error.message };
+  revalidatePath("/commercial/clients/a-rattacher");
+  revalidatePath("/commercial/clients");
+  return { companyId: data as string };
+}

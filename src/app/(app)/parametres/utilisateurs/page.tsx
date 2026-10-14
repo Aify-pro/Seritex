@@ -36,6 +36,8 @@ export default async function UsersPage({
       supabase
         .from("app_users")
         .select("id,full_name,email,role,role_id,active,company_id,companies!app_users_company_id_fkey(name),sections(name),contacts(first_name,last_name)")
+        // Les inscrits du site non rattachés ne sont pas des utilisateurs : ils sont dans Clients > Comptes à rattacher.
+        .or("origine.neq.site,company_id.not.is.null")
         .order("full_name"),
       supabase.from("companies").select("id,name").order("name"),
       supabase.from("sections").select("id,name").order("display_order"),
