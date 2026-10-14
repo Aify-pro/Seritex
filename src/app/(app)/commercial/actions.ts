@@ -764,21 +764,8 @@ export async function acceptQuote(quoteId: string) {
   const { data, error } = await supabase.rpc("accept_quote", { p_quote_id: quoteId });
   if (error) return { error: error.message };
 
-  const [{ data: quoteInfo }, { data: po }] = await Promise.all([
-    supabase.from("quotes").select("reference, companies(name)").eq("id", quoteId).maybeSingle(),
-    supabase.from("production_orders").select("reference").eq("id", data as string).maybeSingle(),
-  ]);
-  await sendNotification("devis_accepte", {
-    to: await resolveRoleEmails("responsable_production"),
-    variables: {
-      numero_devis: quoteInfo?.reference ?? "",
-      nom_client: (quoteInfo?.companies as unknown as { name: string } | null)?.name ?? "",
-      numero_odf: po?.reference ?? "",
-    },
-    relatedEntityType: "production_order",
-    relatedEntityId: data as string,
-  });
-
+  // L'e-mail « devis accepté » n'est plus envoyé d'ici : un déclencheur de la base l'inscrit dans la file
+  // des notifications (migration 0129), quelle que soit l'origine de l'acceptation (site, portail, plateforme).
   revalidatePath("/commercial/devis");
   revalidatePath("/client/devis");
   revalidatePath("/atelier/production");

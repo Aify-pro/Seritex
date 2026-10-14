@@ -1,5 +1,6 @@
 import { requirePlatformAdmin } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -7,6 +8,7 @@ import { Table, Thead, Tbody, Tr, Th, Td, EmptyRow } from "@/components/ui/table
 import { formatDateTime } from "@/lib/utils";
 import type { NotificationEvent, NotificationLogEntry, NotificationStyleSettings } from "@/lib/types/domain";
 import { EventList } from "./event-list";
+import type { RecipientView, RoleChoice, UserChoice } from "./event-recipients";
 import { StyleSettingsForm } from "./style-settings-form";
 import { AlertTriangle, CheckCircle2 } from "lucide-react";
 
@@ -38,10 +40,18 @@ export default async function NotificationsSettingsPage() {
   await requirePlatformAdmin();
   const supabase = await createClient();
 
-  const [{ data: events }, { data: style }, { data: log }] = await Promise.all([
+  const admin = createAdminClient();
+  const [{ data: events }, { data: style }, { data: log }, { data: recipients }, { data: users }, { data: roles }, enAttente, bloques] = await Promise.all([
     supabase.from("notification_events").select("*").order("category").order("label"),
     supabase.from("notification_style_settings").select("*").limit(1).single(),
     supabase.from("notification_log").select("*").order("created_at", { ascending: false }).limit(50),
+    supabase.from("notification_recipients").select("id, event_key, kind, user_id, role_key"),
+    // Le personnel seulement (jamais un compte client), actif.
+    supabase.from("app_users").select("id, full_name, email").eq("active", true).neq("role", "client").order("full_name"),
+    supabase.from("roles").select("key, label").eq("active", true).neq("key", "client").order("label"),
+    // File des événements déclenchés par la base (service_role seul : la table est fermée aux comptes connectés).
+    admin.from("notification_outbox").select("id", { count: "exact", head: true }).is("processed_at", null).lt("attempts", 6),
+    admin.from("notification_outbox").select("id", { count: "exact", head: true }).is("processed_at", null).gte("attempts", 6),
   ]);
 
   // Statut de connexion Resend — jamais la clé elle-même, seulement sa
@@ -51,6 +61,7 @@ export default async function NotificationsSettingsPage() {
   // technique se configure hors du web, pas dans un formulaire.
   const resendConfigured = !!process.env.RESEND_API_KEY;
   const senderConfigured = !!style?.sender_email;
+  const cronConfigured = !!process.env.CRON_SECRET;
 
   return (
     <div className="space-y-6">
@@ -101,16 +112,39 @@ export default async function NotificationsSettingsPage() {
                 : "Aucune adresse expéditeur — à renseigner ci-dessous (« Image de marque »), sur le domaine vérifié dans Resend."}
             </p>
           </div>
+          <div
+            className={`flex items-start gap-2 rounded-md px-3 py-2 text-sm ${
+              cronConfigured && !bloques.count ? "bg-success-soft text-success" : "bg-warning-soft text-warning"
+            }`}
+          >
+            {cronConfigured && !bloques.count ? (
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+            ) : (
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            )}
+            <p>
+              {!cronConfigured
+                ? "Envoi automatique des événements du site (devis accepté, message client) inactif : ajoutez CRON_SECRET dans les variables d'environnement Vercel (Production), puis redéployez."
+                : bloques.count
+                  ? `${bloques.count} événement(s) abandonné(s) après 6 tentatives — voir l'historique (échecs).`
+                  : `Envoi automatique actif (toutes les minutes). ${enAttente.count ?? 0} événement(s) en attente.`}
+            </p>
+          </div>
         </CardBody>
       </Card>
 
       <Card>
         <CardHeader
           title="Événements"
-          description="Activez/désactivez chaque événement et éditez son message — un événement correspond à un point déjà câblé dans le code."
+          description="Activez/désactivez chaque événement, éditez son message et choisissez qui le reçoit — un événement correspond à un point déjà câblé (code ou base)."
         />
         <CardBody>
-          <EventList events={(events ?? []) as NotificationEvent[]} />
+          <EventList
+            events={(events ?? []) as NotificationEvent[]}
+            recipients={(recipients ?? []) as (RecipientView & { event_key: string })[]}
+            users={(users ?? []) as UserChoice[]}
+            roles={(roles ?? []) as RoleChoice[]}
+          />
         </CardBody>
       </Card>
 

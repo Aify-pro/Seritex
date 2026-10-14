@@ -121,3 +121,38 @@ export async function sendTestNotification(eventKey: string) {
   revalidatePath("/parametres/notifications");
   return result.sent > 0 ? {} : { error: "Envoi non confirmé — voir l'historique ci-dessous pour le détail." };
 }
+
+const cibleSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("user"), ref: z.string().uuid() }),
+  z.object({ kind: z.literal("role"), ref: z.string().min(1).max(60) }),
+  z.object({ kind: z.literal("responsable_dossier") }),
+  z.object({ kind: z.literal("contact_client") }),
+]);
+
+/** Ajoute un destinataire à un événement (Paramètres > Notifications, migration 0129). */
+export async function addNotificationRecipient(eventKey: string, cible: unknown) {
+  const current = await requirePlatformAdmin();
+  const parsed = cibleSchema.safeParse(cible);
+  if (!parsed.success) return { error: "Destinataire invalide." };
+  const c = parsed.data;
+  const supabase = await createClient();
+  const { error } = await supabase.from("notification_recipients").insert({
+    event_key: eventKey,
+    kind: c.kind,
+    user_id: c.kind === "user" ? c.ref : null,
+    role_key: c.kind === "role" ? c.ref : null,
+    created_by: current.profile.id,
+  });
+  if (error) return { error: error.code === "23505" ? "Ce destinataire est déjà dans la liste." : error.message };
+  revalidatePath("/parametres/notifications");
+  return {};
+}
+
+export async function removeNotificationRecipient(id: string) {
+  await requirePlatformAdmin();
+  const supabase = await createClient();
+  const { error } = await supabase.from("notification_recipients").delete().eq("id", id);
+  if (error) return { error: error.message };
+  revalidatePath("/parametres/notifications");
+  return {};
+}
