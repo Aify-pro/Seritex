@@ -22,7 +22,7 @@ const asRole = async (uid, fn) => {
 const visiteur = await mkAuth("awa.kone@exemple.ci");
 await test("création du compte du site : client sans société, origine 'site'", async () => {
   await q(`select create_site_account($1,'  Awa.Kone@Exemple.ci ','Awa Koné','0707070707','Atelier Koné')`, [visiteur]);
-  const u = await one(`select role::text, company_id, origine, email, telephone, entreprise_declaree from app_users where id=$1`, [visiteur]);
+  const u = await one(`select role::text, company_id, origine, email, phone as telephone, entreprise_declaree from app_users where id=$1`, [visiteur]);
   assert.deepEqual(u, { role: "client", company_id: null, origine: "site", email: "awa.kone@exemple.ci", telephone: "0707070707", entreprise_declaree: "Atelier Koné" });
 });
 
