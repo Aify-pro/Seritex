@@ -6,7 +6,7 @@ import type { ShipmentStatus, ReglementMention } from "@/lib/delivery/status";
 /**
  * Lecture complète d'une expédition (LIV-1), pour sa fiche et son BL.
  * L'accès est contrôlé par la RLS de l'utilisateur sur `shipments`
- * (personnel, livreur affecté, client) ; une fois l'accès établi, le détail
+ * (personnel, livreur affecté) ou, pour un client, par la vue client_livraisons ; une fois l'accès établi, le détail
  * des articles est lu avec le client d'administration — production_order_lines
  * n'est lisible que par la production et le commercial, or le livreur et la
  * comptabilité doivent voir ce qu'ils livrent ou valident.
@@ -64,10 +64,16 @@ export interface ShipmentDetail {
 
 export async function loadShipment(id: string): Promise<ShipmentDetail | null> {
   const supabase = await createClient();
-  const { data: s } = await supabase.from("shipments").select("*").eq("id", id).maybeSingle();
+  const admin = createAdminClient();
+  let { data: s } = await supabase.from("shipments").select("*").eq("id", id).maybeSingle();
+  if (!s) {
+    // Un compte client n'a plus la lecture directe de `shipments` (migration 0132) : son accès se
+    // prouve par la vue client_livraisons (filtrée sur sa société), puis la fiche est lue côté serveur.
+    const { data: vue } = await supabase.from("client_livraisons").select("id").eq("id", id).maybeSingle();
+    if (vue) s = (await admin.from("shipments").select("*").eq("id", id).maybeSingle()).data;
+  }
   if (!s) return null;
 
-  const admin = createAdminClient();
   const [{ data: lines }, { data: packages }, { data: events }] = await Promise.all([
     admin
       .from("shipment_lines")
