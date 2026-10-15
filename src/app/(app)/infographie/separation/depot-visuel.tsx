@@ -9,7 +9,7 @@ import type { Recette } from "@/components/separation/reglages-avances";
 import type { EcranCadre, Machine } from "@/lib/atelier/parc";
 import { cn } from "@/lib/utils";
 
-const FORMATS = "image/png,image/jpeg,image/webp,image/svg+xml";
+const FORMATS = "image/png,image/jpeg,image/webp,image/svg+xml,application/pdf,.pdf";
 
 /** Dépôt d'un visuel (glisser-déposer ou choix du fichier), analysé dans le navigateur sans envoi. */
 export function DepotVisuel({
@@ -52,7 +52,7 @@ export function DepotVisuel({
       >
         <Upload className="h-6 w-6 text-foreground-muted" />
         <span className="font-medium text-foreground">{fichier ? `${fichier.name} — choisir un autre visuel` : "Glissez un visuel ici ou cliquez pour le choisir"}</span>
-        <span className="text-xs text-foreground-muted">PNG, JPEG, WebP ou SVG. Le fichier reste sur votre poste : rien n&apos;est envoyé.</span>
+        <span className="text-xs text-foreground-muted">PNG, JPEG, WebP, SVG ou PDF (un PDF vectoriel donne les films les plus nets). Le fichier reste sur votre poste : rien n&apos;est envoyé.</span>
         <input type="file" accept={FORMATS} className="sr-only" onChange={(e) => choisir(e.target.files?.[0])} />
       </label>
 

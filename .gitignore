@@ -42,3 +42,6 @@ odf-preview.pdf
 
 # Reprise Excel prospection : le SQL généré contient des données commerciales
 scripts/prospection-reprise/*.sql
+
+# ressources de pdf.js copiées avant dev/build (scripts/copier-pdfjs.mjs)
+/public/pdfjs/
