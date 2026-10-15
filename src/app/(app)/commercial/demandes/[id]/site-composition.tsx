@@ -101,7 +101,7 @@ export async function SiteComposition({ requestId, composition }: { requestId: s
         chargerEncres(supabase),
         chargerParametresSerigraphie(supabase),
         requireUser().then(({ profile }) => chargerRecettes(profile, supabase)),
-        chargerParc(supabase, { actifsSeulement: true }),
+        chargerParc(supabase, { actifsSeulement: true, famille: "serigraphie" }),
       ])
     : [[], null, [], { machines: [], ecrans: [] }];
   const textilesFonces = await Promise.all(

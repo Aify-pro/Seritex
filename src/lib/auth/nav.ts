@@ -130,7 +130,6 @@ const STAFF_NAV: NavItem[] = [
   { href: "/atelier/patronnage", label: "Patronnage", icon: navIcon(Ruler), module: "patronnage" },
   { href: "/atelier/section", label: "Terminaux de section", icon: navIcon(ClipboardList), module: "ordres_travail" },
   { href: "/atelier/stock", label: "Gestion de stock", icon: navIcon(ArrowLeftRight), module: "stock_atelier" },
-  { href: "/atelier/machines", label: "Machines et écrans", icon: navIcon(Printer), module: "machines_ecrans" },
   { href: "/livraisons", label: "Livraisons", icon: navIcon(Truck), module: "livraisons" },
 
   // --- Paramètres (regroupés en thèmes par parametres-hubs.ts) ------------
@@ -140,6 +139,7 @@ const STAFF_NAV: NavItem[] = [
   { href: "/parametres/tarification", label: "Tarification", icon: navIcon(Calculator), section: PARAMETRES, module: "tarification" },
   { href: "/parametres/sections", label: "Sections d'atelier", icon: navIcon(Boxes), section: PARAMETRES, module: "sections" },
   { href: "/parametres/fabrication", label: "Fabrication", icon: navIcon(Gauge), section: PARAMETRES, module: "fabrication" },
+  { href: "/parametres/impression", label: "Impression", icon: navIcon(Printer), section: PARAMETRES, module: "machines_ecrans" },
   { href: "/parametres/dispatching", label: "Dispatching des tailles", icon: navIcon(ChartPie), section: PARAMETRES, module: "dispatching" },
   { href: "/parametres/livraison", label: "Livraison", icon: navIcon(MapPinned), section: PARAMETRES, module: "parametres_livraison" },
   { href: "/parametres/prospection", label: "Prospection", icon: navIcon(Briefcase), section: PARAMETRES, module: "parametres_prospection" },
