@@ -12,6 +12,8 @@ import type { RecipientView, RoleChoice, UserChoice } from "./event-recipients";
 import { StyleSettingsForm } from "./style-settings-form";
 import { AlertTriangle, CheckCircle2 } from "lucide-react";
 
+const depuisPlusDeDixMinutes = (iso: string) => Date.now() - new Date(iso).getTime() > 10 * 60 * 1000;
+
 const STATUS_LABELS: Record<string, string> = {
   envoye: "Envoyé",
   simule: "Simulé",
@@ -41,7 +43,7 @@ export default async function NotificationsSettingsPage() {
   const supabase = await createClient();
 
   const admin = createAdminClient();
-  const [{ data: events }, { data: style }, { data: log }, { data: recipients }, { data: users }, { data: roles }, enAttente, bloques] = await Promise.all([
+  const [{ data: events }, { data: style }, { data: log }, { data: recipients }, { data: users }, { data: roles }, enAttente, bloques, { data: plusAncien }] = await Promise.all([
     supabase.from("notification_events").select("*").order("category").order("label"),
     supabase.from("notification_style_settings").select("*").limit(1).single(),
     supabase.from("notification_log").select("*").order("created_at", { ascending: false }).limit(50),
@@ -52,6 +54,7 @@ export default async function NotificationsSettingsPage() {
     // File des événements déclenchés par la base (service_role seul : la table est fermée aux comptes connectés).
     admin.from("notification_outbox").select("id", { count: "exact", head: true }).is("processed_at", null).lt("attempts", 6),
     admin.from("notification_outbox").select("id", { count: "exact", head: true }).is("processed_at", null).gte("attempts", 6),
+    admin.from("notification_outbox").select("created_at").is("processed_at", null).lt("attempts", 6).order("created_at").limit(1),
   ]);
 
   // Statut de connexion Resend — jamais la clé elle-même, seulement sa
@@ -62,6 +65,8 @@ export default async function NotificationsSettingsPage() {
   const resendConfigured = !!process.env.RESEND_API_KEY;
   const senderConfigured = !!style?.sender_email;
   const cronConfigured = !!process.env.CRON_SECRET;
+  // Un événement en attente depuis plus de 10 minutes : la base n'appelle pas l'application (planification absente ou en panne).
+  const fileBloquee = !!plusAncien?.[0] && depuisPlusDeDixMinutes(plusAncien[0].created_at);
 
   return (
     <div className="space-y-6">
@@ -114,10 +119,10 @@ export default async function NotificationsSettingsPage() {
           </div>
           <div
             className={`flex items-start gap-2 rounded-md px-3 py-2 text-sm ${
-              cronConfigured && !bloques.count ? "bg-success-soft text-success" : "bg-warning-soft text-warning"
+              cronConfigured && !bloques.count && !fileBloquee ? "bg-success-soft text-success" : "bg-warning-soft text-warning"
             }`}
           >
-            {cronConfigured && !bloques.count ? (
+            {cronConfigured && !bloques.count && !fileBloquee ? (
               <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
             ) : (
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -125,9 +130,11 @@ export default async function NotificationsSettingsPage() {
             <p>
               {!cronConfigured
                 ? "Envoi automatique des événements du site (devis accepté, message client) inactif : ajoutez CRON_SECRET dans les variables d'environnement Vercel (Production), puis redéployez."
-                : bloques.count
-                  ? `${bloques.count} événement(s) abandonné(s) après 6 tentatives — voir l'historique (échecs).`
-                  : `Envoi automatique actif (toutes les minutes). ${enAttente.count ?? 0} événement(s) en attente.`}
+                : fileBloquee
+                  ? `${enAttente.count ?? 0} événement(s) en attente depuis plus de 10 minutes : la planification (Supabase pg_cron) ne semble pas active — voir supabase/ops/planifier-notifications.sql.`
+                  : bloques.count
+                    ? `${bloques.count} événement(s) abandonné(s) après 6 tentatives — voir l'historique (échecs).`
+                    : `Envoi automatique actif (toutes les minutes). ${enAttente.count ?? 0} événement(s) en attente.`}
             </p>
           </div>
         </CardBody>

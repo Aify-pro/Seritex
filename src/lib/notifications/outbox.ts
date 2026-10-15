@@ -5,7 +5,7 @@ import { sendNotification } from "./send";
 
 /**
  * Vide la file des événements déclenchés par la base (migration 0129) : devis accepté, message d'un client…
- * Appelé chaque minute par /api/notifications/traiter. Chaque événement est réservé (claim_notification_outbox),
+ * Appelé chaque minute par /api/notifications/traiter (déclenché par la base : pg_cron). Chaque événement est réservé (claim_notification_outbox),
  * envoyé aux destinataires configurés dans Paramètres > Notifications, puis marqué traité. Un envoi qui échoue
  * est repris plus tard (délai croissant, 6 tentatives) ; un événement désactivé ou sans destinataire est
  * journalisé par sendNotification puis clos.

@@ -6,7 +6,8 @@ export const maxDuration = 60;
 
 /**
  * Vide la file des notifications déclenchées par la base (migration 0129).
- * Appelé chaque minute par le cron Vercel (vercel.json), qui présente `Authorization: Bearer <CRON_SECRET>`.
+ * Appelé chaque minute par la base (pg_cron + pg_net, voir supabase/ops/planifier-notifications.sql) avec
+ * `Authorization: Bearer <CRON_SECRET>` (le cron Vercel est payant, on ne l'utilise pas).
  * Route publique pour le proxy d'authentification (pas de session) : le secret fait foi.
  */
 export async function GET(req: Request) {
