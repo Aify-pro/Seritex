@@ -10,6 +10,8 @@ const PUBLIC_PATHS = [
   "/login",
   "/auth",
   "/api/health",
+  // Cron des notifications : pas de session, protégé par CRON_SECRET (voir la route).
+  "/api/notifications/traiter",
   "/mot-de-passe-oublie",
   "/reinitialiser-mot-de-passe",
   "/confirmation-livraison",

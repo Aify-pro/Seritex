@@ -2,6 +2,7 @@ import type { NotificationEvent } from "@/lib/types/domain";
 import { EventEnabledToggle } from "./event-enabled-toggle";
 import { EventTemplateForm } from "./event-template-form";
 import { SendTestButton } from "./send-test-button";
+import { EventRecipients, type RecipientView, type RoleChoice, type UserChoice } from "./event-recipients";
 
 const CATEGORY_LABELS: Record<string, string> = {
   commercial: "Commercial",
@@ -12,7 +13,17 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 
 /** Liste des événements déclenchables, groupés par catégorie. */
-export function EventList({ events }: { events: NotificationEvent[] }) {
+export function EventList({
+  events,
+  recipients,
+  users,
+  roles,
+}: {
+  events: NotificationEvent[];
+  recipients: (RecipientView & { event_key: string })[];
+  users: UserChoice[];
+  roles: RoleChoice[];
+}) {
   if (events.length === 0) {
     return <p className="text-sm text-foreground-muted">Aucun événement enregistré.</p>;
   }
@@ -41,6 +52,12 @@ export function EventList({ events }: { events: NotificationEvent[] }) {
                       <EventEnabledToggle eventId={event.id} enabled={event.enabled} />
                     </div>
                   </div>
+                  <EventRecipients
+                    eventKey={event.event_key}
+                    recipients={recipients.filter((r) => r.event_key === event.event_key)}
+                    users={users}
+                    roles={roles}
+                  />
                   <EventTemplateForm
                     eventId={event.id}
                     subjectTemplate={event.subject_template}
