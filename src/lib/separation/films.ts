@@ -16,6 +16,7 @@ import {
   type PDFPage,
 } from "pdf-lib";
 import { ecransFilmsPixels, lireZone } from "./client";
+import type { EcranVecteur } from "./vecteur";
 import { dimensionsFilms, PPP_FILMS } from "./dimensions-films";
 import type { ResultatSeparation } from "./separer";
 import { ENCRES_CMJN, type Rendu } from "./trame";
@@ -55,6 +56,8 @@ export type OptionsFilms = {
   image?: ReglagesImage;
   /** Largeur de l'image d'analyse en pixels (échelle de la netteté et du bruit). */
   largeurAnalyse?: number;
+  /** Films en tracés vectoriels (défaut : oui) plutôt qu'en image 1 bit pixélisée au zoom. */
+  vectoriel?: boolean;
 };
 
 /** Résumé du rendu pour la légende d'un écran (k : index de couleur, -1 : sous-couche). */
@@ -92,6 +95,35 @@ async function dessinerMasque(doc: PDFDocument, page: PDFPage, masque: Uint8Arra
     drawObject(nom),
     popGraphicsState(),
   );
+}
+
+const nb1 = (v: number) => {
+  const t = v.toFixed(1);
+  return t.endsWith(".0") ? t.slice(0, -2) : t;
+};
+
+/**
+ * Dessine un écran vectoriel en noir à (x, y) et à la taille (l, h) en points :
+ * zones pleines tracées directement, points de trame en gabarits (un objet
+ * graphique par niveau de ton) posés à leur position.
+ */
+export async function dessinerVecteur(doc: PDFDocument, page: PDFPage, v: EcranVecteur, f: { largeur: number; hauteur: number }, x: number, y: number, l: number, h: number, miroir: boolean) {
+  const noms = new Map<number, string>();
+  // Un gabarit tient dans une cellule : BBox large pour ne jamais rogner un point plein.
+  for (const g of v.gabarits) {
+    const rayon = Math.ceil(Math.max(...g.chemin.split(/[\s]+/).map((t) => Math.abs(Number(t)) || 0))) + 1;
+    const flux = doc.context.stream(`0 0 0 rg\n${g.chemin}\nf`, { Type: "XObject", Subtype: "Form", BBox: [-rayon, -rayon, rayon, rayon] });
+    noms.set(g.niveau, page.node.newXObject(`P${g.niveau}`, doc.context.register(flux)).toString());
+  }
+  const sx = (l / f.largeur) * (miroir ? -1 : 1);
+  const lignes = ["q", "0 0 0 rg", `${sx} 0 0 ${-(h / f.hauteur)} ${x + (miroir ? l : 0)} ${y + h} cm`];
+  if (v.chemin) lignes.push(v.chemin, "f");
+  for (let i = 0; i < v.points.length; i += 3) lignes.push(`q 1 0 0 1 ${nb1(v.points[i + 1])} ${nb1(v.points[i + 2])} cm ${noms.get(v.points[i])} Do Q`);
+  lignes.push("Q");
+  const contenu = new TextEncoder().encode(lignes.join("\n"));
+  const compresse = await compresser(contenu);
+  const flux = compresse ? doc.context.stream(compresse, { Filter: "FlateDecode" }) : doc.context.flateStream(contenu);
+  page.node.addContentStream(doc.context.register(flux));
 }
 
 /** Plus petit format (A4 puis A3, portrait ou paysage) qui contient le film ; sinon sur mesure. */
@@ -152,6 +184,7 @@ export async function preparerFilms(
       ? { rentrePx: Math.max(1, Math.round(options.sousCouche.rentreMm * pxParMm)), options: options.sousCouche.options }
       : null,
     miroir: options.miroir,
+    vectoriel: options.vectoriel ?? true,
   });
 
   const doc = await PDFDocument.create();
@@ -186,7 +219,9 @@ export async function preparerFilms(
     const page = doc.addPage([pl * MM, ph * MM]);
     const x = ((pl - lmm) / 2) * MM;
     const y = (MARGE_MM + LEGENDE_MM) * MM;
-    await dessinerMasque(doc, page, films.ecrans[k], films, x, y, lmm * MM, hmm * MM);
+    const vecteur = films.vecteurs[k];
+    if (vecteur) await dessinerVecteur(doc, page, vecteur, films, x, y, lmm * MM, hmm * MM, options.miroir);
+    else await dessinerMasque(doc, page, films.ecrans[k], films, x, y, lmm * MM, hmm * MM);
 
     // Cibles à 12 mm du dessin, au milieu de chaque côté.
     const e = 12 * MM;
