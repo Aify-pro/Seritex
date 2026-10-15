@@ -516,7 +516,7 @@ export function SeparationCouleurs({
               {resultat.fond ? `Fond ${resultat.fond} retiré : il n'est pas imprimé.` : "Fond transparent : seul le dessin est imprimé."}
             </li>
           )}
-          {image && image.largeurOrigine < LARGEUR_MIN_FILMS && (
+          {image && !image.vecteur && image.largeurOrigine < LARGEUR_MIN_FILMS && (
             <li className="flex gap-2 text-foreground-muted">
               <Info className="h-4 w-4 shrink-0" />
               Visuel de {image.largeurOrigine} px de large : suffisant pour choisir les couleurs, demandez le fichier source pour les films.

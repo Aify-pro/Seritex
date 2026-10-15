@@ -7,6 +7,7 @@ import { HORS_DESSIN, type Films, type OptionsSeparation, type ResultatSeparatio
 import type { EcransFilms, EntreeFilms } from "./ecrans";
 import type { ReglagesImage } from "./image";
 import type { Rendu } from "./trame";
+import { estPdf, ouvrirPdf } from "./pdf";
 
 export type { CouleurSeparee, Films, ResultatSeparation } from "./separer";
 export { HORS_DESSIN } from "./separer";
@@ -161,16 +162,33 @@ export async function ecransFilmsPixels(px: Uint8ClampedArray, w: number, h: num
   return ecransFilms(px, w, h, entree);
 }
 
-/** Charge une image (fichier ou URL accessible en CORS) réduite à `cote` pixels sur son plus grand côté. */
+async function blobDe(source: Blob | string) {
+  return typeof source === "string" ? await (await fetch(source)).blob() : source;
+}
+
+function pixelsCanvas(canvas: HTMLCanvasElement) {
+  return canvas.getContext("2d", { willReadFrequently: true })!.getImageData(0, 0, canvas.width, canvas.height).data;
+}
+
+/** Charge une image (fichier ou URL accessible en CORS) réduite à `cote` pixels sur son plus grand côté. Un PDF est dessiné directement à cette taille. */
 export async function lireImage(source: Blob | string, cote = COTE_SEPARATION) {
-  const img = await chargerImage(source);
+  const blob = await blobDe(source);
+  if (await estPdf(blob)) {
+    const page = await ouvrirPdf(blob);
+    const echelle = cote / Math.max(page.largeurPt, page.hauteurPt);
+    const w = Math.max(1, Math.round(page.largeurPt * echelle));
+    const h = Math.max(1, Math.round(page.hauteurPt * echelle));
+    const canvas = await page.dessiner(w, h);
+    return { px: pixelsCanvas(canvas), w, h, largeurOrigine: Math.round(page.largeurPt), hauteurOrigine: Math.round(page.hauteurPt), vecteur: true, nbPages: page.nbPages };
+  }
+  const img = await chargerImage(blob);
   const l0 = img.naturalWidth || cote;
   const h0 = img.naturalHeight || cote;
   const echelle = Math.min(1, cote / Math.max(l0, h0));
   // Un SVG sans taille propre est rendu à la taille d'analyse.
   const w = Math.max(1, Math.round(img.naturalWidth ? l0 * echelle : cote));
   const h = Math.max(1, Math.round(img.naturalHeight ? h0 * echelle : cote));
-  return { px: pixels(img, w, h), w, h, largeurOrigine: l0, hauteurOrigine: h0 };
+  return { px: pixels(img, w, h), w, h, largeurOrigine: l0, hauteurOrigine: h0, vecteur: false, nbPages: 1 };
 }
 
 /**
@@ -178,7 +196,13 @@ export async function lireImage(source: Blob | string, cote = COTE_SEPARATION) {
  * agrandie si besoin : sert aux films en pleine résolution.
  */
 export async function lireZone(source: Blob | string, zone: { x: number; y: number; l: number; h: number }, w: number, h: number) {
-  const img = await chargerImage(source);
+  const blob = await blobDe(source);
+  if (await estPdf(blob)) {
+    // Vectoriel : la zone est dessinée à la taille des films, sans agrandissement d'une image.
+    const canvas = await (await ouvrirPdf(blob)).dessiner(w, h, zone);
+    return { px: pixelsCanvas(canvas), w, h };
+  }
+  const img = await chargerImage(blob);
   return { px: pixels(img, w, h, zone), w, h };
 }
 
