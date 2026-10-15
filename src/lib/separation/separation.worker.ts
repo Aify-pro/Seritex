@@ -47,6 +47,7 @@ contexte.onmessage = async (e) => {
     } else if (d.type === "ecrans") {
       const f = ecransFilms(d.px, d.w, d.h, d.entree);
       f.ecrans.forEach((m) => transfert.push(m.buffer));
+      f.vecteurs.forEach((v) => v && transfert.push(v.points.buffer));
       resultat = f;
     } else {
       const r = await separer(reveal, d.px, d.w, d.h, d.options);

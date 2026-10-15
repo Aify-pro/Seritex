@@ -112,6 +112,7 @@ export function SeparationCouleurs({
   const [actif, setActif] = useState<number | null>(null);
   const [largeurCm, setLargeurCm] = useState(largeurInitiale && largeurInitiale > 0 ? largeurInitiale : 25);
   const [miroir, setMiroir] = useState(false);
+  const [vectoriel, setVectoriel] = useState(true);
   const [etapeFilms, setEtapeFilms] = useState<string | null>(null);
   const [erreurFilms, setErreurFilms] = useState<string | null>(null);
   // Encre choisie par écran (id), quand l'infographiste change la proposition.
@@ -389,6 +390,7 @@ export function SeparationCouleurs({
         {
           largeurCm,
           miroir,
+          vectoriel,
           nom,
           reference,
           encres: resultat.couleurs.map((_, i) => {
@@ -802,6 +804,10 @@ export function SeparationCouleurs({
             <label className="flex h-8 items-center gap-2 text-xs text-foreground-muted">
               <input type="checkbox" checked={miroir} onChange={(e) => setMiroir(e.target.checked)} />
               Miroir
+            </label>
+            <label className="flex h-8 items-center gap-2 text-xs text-foreground-muted" title="Tracés nets à toute échelle : aplats lissés, points de trame ronds. Décochez pour des films en image 1 bit.">
+              <input type="checkbox" checked={vectoriel} onChange={(e) => setVectoriel(e.target.checked)} />
+              Films vectoriels
             </label>
             <Button type="button" size="sm" onClick={telechargerFilms} loading={!!etapeFilms} disabled={calcul || !(largeurCm >= 2 && largeurCm <= 60)}>
               <Download className="h-3.5 w-3.5" />

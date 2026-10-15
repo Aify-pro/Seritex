@@ -8,6 +8,7 @@ import { HORS_DESSIN, sansIlots } from "./separer";
 import { ecransBlancs, luminosites, SOUS_COUCHE_DEFAUT, type OptionsSousCouche } from "./sous-couche";
 import { empaqueter, recouvrir, rvbDeHex, tableMelanges, ton, pur, tramerAM, versCmjn, type Rendu } from "./trame";
 import { ajusterImage, imageNeutre, type ReglagesImage } from "./image";
+import { ecranAMVecteur, ecranMasqueVecteur, type EcranVecteur } from "./vecteur";
 
 type Vec = [number, number, number];
 
@@ -215,13 +216,21 @@ export type EntreeFilms = Entree & {
   image?: ReglagesImage;
   /** Pixels de cette image par pixel de l'image d'analyse (netteté, bruit). */
   echelleImage?: number;
+  /**
+   * Films en tracés vectoriels (aplats, blancs, trame AM et quadrichromie) au
+   * lieu de masques 1 bit. La diffusion et Bayer restent en image : un point
+   * par pixel n'a pas de contour à lisser.
+   */
+  vectoriel?: boolean;
 };
 
 export type EcransFilms = {
   largeur: number;
   hauteur: number;
-  /** Masques 1 bit (/ImageMask) dans l'ordre d'impression : sous-couche, couleurs, rehaut. */
+  /** Masques 1 bit (/ImageMask) dans l'ordre d'impression : sous-couche, couleurs, rehaut. Vide si l'écran est vectoriel. */
   ecrans: Uint8Array[];
+  /** Même ordre : l'écran en tracés vectoriels, ou null s'il est en image (non demandé, trop volumineux, diffusion, Bayer). */
+  vecteurs: (EcranVecteur | null)[];
 };
 
 /**
@@ -269,7 +278,14 @@ export function ecransFilms(pxSource: Uint8ClampedArray | Uint8Array, w: number,
   let indices: Uint8Array = recadrer(plats);
   if (e.rendu.type === "aplat") indices = sansIlots(indices, lw, lh, e.pixelsMin);
   const ecrans: Uint8Array[] = [];
+  const vecteurs: (EcranVecteur | null)[] = [];
   const pack = (m: Uint8Array) => empaqueter(m, lw, lh, e.miroir);
+  /** Ajoute un écran : en vectoriel si demandé et possible, sinon en masque 1 bit. */
+  const ajouter = (vec: () => EcranVecteur | null, masque: () => Uint8Array) => {
+    const v = e.vectoriel ? vec() : null;
+    vecteurs.push(v);
+    ecrans.push(v ? new Uint8Array(0) : pack(masque()));
+  };
 
   // Blancs : sous-couche (en premier) et rehaut (en dernier), selon leurs options.
   const blancs = e.sousCouche
@@ -292,22 +308,25 @@ export function ecransFilms(pxSource: Uint8ClampedArray | Uint8Array, w: number,
         );
       })()
     : null;
-  if (blancs?.sousCouche) ecrans.push(pack(blancs.sousCouche));
+  if (blancs?.sousCouche) {
+    const m = blancs.sousCouche;
+    ajouter(() => ecranMasqueVecteur(m, lw, lh), () => m);
+  }
 
   if (am && tons) {
     tons.forEach((t, k) => {
       const tc = recadrer(t);
-      ecrans.push(
-        pack(
-          tramerAM((p) => tc[p], lw, lh, {
-            ppp: e.ppp,
-            lpi: am.lpi,
-            angle: am.angles[k] ?? am.angles[0] ?? 22.5,
-            forme: am.forme,
-            pointMinPct: am.pointMinPct,
-            pointMaxPct: am.pointMaxPct,
-          }),
-        ),
+      const reglage = {
+        ppp: e.ppp,
+        lpi: am.lpi,
+        angle: am.angles[k] ?? am.angles[0] ?? 22.5,
+        forme: am.forme,
+        pointMinPct: am.pointMinPct,
+        pointMaxPct: am.pointMaxPct,
+      };
+      ajouter(
+        () => ecranAMVecteur((p) => tc[p], lw, lh, reglage),
+        () => tramerAM((p) => tc[p], lw, lh, reglage),
       );
     });
   } else {
@@ -316,8 +335,13 @@ export function ecransFilms(pxSource: Uint8ClampedArray | Uint8Array, w: number,
       return 0.299 * r + 0.587 * g + 0.114 * b;
     });
     const masques = recouvrir(indices, lw, lh, luminances, e.rendu.type === "aplat" ? e.recouvrementPx : 0);
-    for (const m of masques) ecrans.push(pack(m));
+    // Seuls les aplats ont des contours à lisser ; diffusion et Bayer restent des points d'un pixel.
+    const lisse = e.rendu.type === "aplat";
+    for (const m of masques) ajouter(() => (lisse ? ecranMasqueVecteur(m, lw, lh) : null), () => m);
   }
-  if (blancs?.rehaut) ecrans.push(pack(blancs.rehaut));
-  return { largeur: lw, hauteur: lh, ecrans };
+  if (blancs?.rehaut) {
+    const m = blancs.rehaut;
+    ajouter(() => ecranMasqueVecteur(m, lw, lh), () => m);
+  }
+  return { largeur: lw, hauteur: lh, ecrans, vecteurs };
 }

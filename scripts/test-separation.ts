@@ -41,6 +41,7 @@ import { ajusterImage, IMAGE_NEUTRE } from "../src/lib/separation/image";
 import { versCmjn } from "../src/lib/separation/trame";
 import { CMJN_DEFAUT } from "../src/lib/separation/reglages";
 import { SOUS_COUCHE_DEFAUT, tonsBlancs } from "../src/lib/separation/sous-couche";
+import { contoursMasque, contourPoint, ecranAMVecteur, NIVEAUX } from "../src/lib/separation/vecteur";
 
 const logo = (fond: string, texte: boolean) => `<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1600">${fond}
 <circle cx="800" cy="650" r="420" fill="#d62828"/><circle cx="800" cy="650" r="300" fill="#f77f00"/>
@@ -537,6 +538,72 @@ await test("films : sous-couche tramée et rehaut dans l'ordre d'impression", as
   });
   assert.equal(f.ecrans.length, r.couleurs.length + 2, "sous-couche + couleurs + rehaut");
   return `${f.ecrans.length} écrans`;
+});
+
+const aireSignee = (b: number[]) => {
+  let a = 0;
+  const k = b.length / 2;
+  for (let i = 0; i < k; i++) {
+    const j = (i + 1) % k;
+    a += b[i * 2] * b[j * 2 + 1] - b[j * 2] * b[i * 2 + 1];
+  }
+  return a / 2;
+};
+
+await test("vectoriel : contours exacts (trou, pixels en diagonale séparés)", async () => {
+  const w = 30;
+  const h = 20;
+  const m = new Uint8Array(w * h);
+  for (let y = 2; y < 8; y++) for (let x = 3; x < 13; x++) m[y * w + x] = 1;
+  for (let y = 4; y < 6; y++) for (let x = 6; x < 8; x++) m[y * w + x] = 0;
+  m[12 * w + 20] = 1;
+  m[13 * w + 21] = 1;
+  const b = contoursMasque(m, w, h);
+  assert.equal(b.length, 4, "extérieur, trou, deux pixels");
+  assert.equal(b.reduce((s, c) => s + aireSignee(c), 0), 58, "aire = pixels pleins (le trou compte en négatif)");
+  return "4 contours, aire 58";
+});
+
+await test("vectoriel : point de trame d'aire exacte pour chaque forme et chaque ton", async () => {
+  const echantillon = (segs: ReturnType<typeof contourPoint>) => {
+    const pts: number[] = [];
+    let cur = [0, 0];
+    for (const s of segs) {
+      if (s.op === "c") {
+        const [x1, y1, x2, y2, x3, y3] = s.p;
+        for (let t = 1; t <= 24; t++) {
+          const u = t / 24;
+          const v = 1 - u;
+          pts.push(v ** 3 * cur[0] + 3 * v * v * u * x1 + 3 * v * u * u * x2 + u ** 3 * x3, v ** 3 * cur[1] + 3 * v * v * u * y1 + 3 * v * u * u * y2 + u ** 3 * y3);
+        }
+        cur = [x3, y3];
+      } else {
+        cur = [s.p[0], s.p[1]];
+        pts.push(cur[0], cur[1]);
+      }
+    }
+    return pts;
+  };
+  for (const forme of ["rond", "elliptique", "ligne"] as const) {
+    for (let k = 1; k <= NIVEAUX; k++) {
+      const a = Math.abs(aireSignee(echantillon(contourPoint(forme, k))));
+      assert.ok(Math.abs(a - k / NIVEAUX) < 0.02, `${forme} ${k} % : aire ${a.toFixed(3)}`);
+    }
+  }
+  return "rond, elliptique, ligne : écart < 2 % d'aire (débord de 0,4 % voulu)";
+});
+
+await test("vectoriel : le ton moyen des points suit le ton demandé, zones pleines à part", async () => {
+  const w = 600;
+  const h = 300;
+  // Dégradé de 0 à 100 % sur la largeur : seuls les tons intermédiaires donnent des points.
+  const v = ecranAMVecteur((p) => Math.round(255 * ((p % w) / w)), w, h, { ppp: 360, lpi: 45, angle: 45, forme: "rond", pointMinPct: 2, pointMaxPct: 98 });
+  assert.ok(v, "écran vectoriel produit");
+  assert.ok(v.points.length / 3 > 1000, "des points de trame");
+  assert.ok(v.chemin.length > 0, "zone pleine à droite (ton ≥ 98 %)");
+  const niveaux = new Set(v.gabarits.map((g) => g.niveau));
+  for (let i = 0; i < v.points.length; i += 3) assert.ok(niveaux.has(v.points[i]), "chaque point a son gabarit");
+  return `${v.points.length / 3} points, ${v.gabarits.length} gabarits`;
 });
 
 console.log(`${n} tests réussis`);
