@@ -2,6 +2,7 @@ import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveConfiguredRecipients, type RecipientContext } from "./recipients";
 import { sendNotification } from "./send";
+import { PRODUCTION_ORDER_STATUS_LABELS, type ProductionOrderStatus } from "@/lib/types/domain";
 
 /**
  * Vide la file des événements déclenchés par la base (migration 0129) : devis accepté, message d'un client…
@@ -12,7 +13,7 @@ import { sendNotification } from "./send";
  */
 
 type Ligne = { id: string; event_key: string; entity_type: string | null; entity_id: string | null; payload: Record<string, unknown>; attempts: number };
-type Construit = { variables: Record<string, string>; ctx: RecipientContext; related?: { type: string; id: string } };
+type Construit = { variables: Record<string, string | number>; ctx: RecipientContext; related?: { type: string; id: string } };
 
 const nomSociete = (c: unknown) => (c as { name: string } | null)?.name ?? "";
 
@@ -50,6 +51,30 @@ async function construire(l: Ligne): Promise<Construit | null> {
       },
       ctx: { requestId: m.request_id, companyId: r.company_id },
       related: { type: "request", id: m.request_id },
+    };
+  }
+  if (l.event_key.startsWith("odf_")) {
+    const poId = String(l.payload.production_order_id ?? l.entity_id ?? "");
+    const { data: po } = await db
+      .from("production_orders")
+      .select("id, reference, company_id, request_id, total_quantity, quotes(reference), companies(name)")
+      .eq("id", poId)
+      .maybeSingle();
+    if (!po) return null;
+    const libelle = (v: unknown) => PRODUCTION_ORDER_STATUS_LABELS[v as ProductionOrderStatus] ?? String(v ?? "");
+    return {
+      variables: {
+        numero_odf: po.reference,
+        // ODF de stock : pas de client.
+        nom_client: nomSociete(po.companies) || "Stock",
+        numero_devis: (po.quotes as unknown as { reference: string } | null)?.reference ?? "",
+        quantite: po.total_quantity,
+        statut_precedent: libelle(l.payload.ancien_statut),
+        statut: libelle(l.payload.nouveau_statut),
+        chemin_lien: `/atelier/production/${po.id}`,
+      },
+      ctx: { requestId: po.request_id, companyId: po.company_id },
+      related: { type: "production_order", id: po.id },
     };
   }
   return null;
