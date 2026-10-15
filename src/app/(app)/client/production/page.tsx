@@ -2,8 +2,8 @@ import { requireRole } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardBody } from "@/components/ui/card";
-import { StatusBadge } from "@/components/ui/badge";
-import { PRODUCTION_ORDER_STATUS_LABELS } from "@/lib/types/domain";
+import { Badge } from "@/components/ui/badge";
+import { ETAT_COMMANDE_LABELS, type EtatCommande } from "@/lib/client-suivi";
 import { formatDate } from "@/lib/utils";
 
 export default async function ClientProductionPage() {
@@ -11,10 +11,10 @@ export default async function ClientProductionPage() {
   const supabase = await createClient();
 
   const { data: orders } = await supabase
-    .from("client_production_status")
-    .select("*")
+    .from("client_commandes")
+    .select("id,reference,etat,total_quantity,planned_end_date,section_en_cours")
     .eq("company_id", profile.company_id!)
-    .order("planned_start_date", { ascending: false });
+    .order("created_at", { ascending: false });
 
   return (
     <div className="space-y-6">
@@ -28,7 +28,7 @@ export default async function ClientProductionPage() {
             <div key={o.id} className="rounded-md border border-border p-4">
               <div className="flex items-center justify-between">
                 <p className="text-sm font-medium text-foreground">{o.reference}</p>
-                <StatusBadge status={o.status} labels={PRODUCTION_ORDER_STATUS_LABELS} kind="production" />
+                <Badge tone={o.etat === "terminee" ? "success" : "brand"}>{ETAT_COMMANDE_LABELS[o.etat as EtatCommande]}</Badge>
               </div>
               <p className="mt-1 text-xs text-foreground-muted">
                 {o.total_quantity} pièces
