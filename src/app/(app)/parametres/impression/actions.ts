@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requirePermission } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
-import { ETATS_ECRAN, SECHAGES, TYPES_MACHINE } from "@/lib/atelier/parc";
+import { ETATS_ECRAN, FAMILLES_MACHINE, SECHAGES, SECHAGES_PAR_FAMILLE, TYPES_MACHINE, familleDuType, type TypeMachine } from "@/lib/atelier/parc";
 
 /**
  * Machines et écrans de sérigraphie (migration 0119). Droits du module
@@ -32,12 +32,21 @@ const machineSchema = z.object({
   cadence_pieces_h: z.number().int().positive("Cadence invalide").max(5000).nullable(),
   notes: texte(500),
   active: z.boolean(),
+  marque_modele: texte(80),
+  technologie_encre: texte(60),
+  nb_canaux_encre: z.number().int().min(1, "Canaux d'encre invalides").max(16, "Canaux d'encre invalides").nullable(),
+  encre_blanche: z.boolean(),
+  modele_tetes: texte(80),
+  resolution_dpi: z.number().int().min(72, "Résolution invalide").max(5760, "Résolution invalide").nullable(),
+  vitesse_m2_h: z.number().positive("Vitesse invalide").max(10_000).nullable(),
+  conso_encre_ml_m2: z.number().positive("Consommation d'encre invalide").max(10_000).nullable(),
+  rip_logiciel: texte(80),
   /** Coût horaire (Direction) : absent = inchangé. */
   cout_horaire: z.number().min(0).max(10_000_000).nullable().optional(),
 });
 
 const fin = () => {
-  revalidatePath("/atelier/machines");
+  revalidatePath("/parametres/impression");
   revalidatePath("/infographie/separation");
 };
 
@@ -56,8 +65,26 @@ export async function enregistrerMachine(id: string | null, input: z.input<typeo
   await requirePermission("machines_ecrans", id ? "modify" : "create");
   const parsed = machineSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Saisie invalide" };
-  const { cout_horaire, ...donnees } = parsed.data;
-  if (donnees.nb_tetes > donnees.nb_stations) return { error: "Une machine ne peut pas avoir plus de têtes que de stations." };
+  const { cout_horaire, ...saisie } = parsed.data;
+  const famille: keyof typeof FAMILLES_MACHINE = familleDuType(saisie.type as TypeMachine);
+  if (!(SECHAGES_PAR_FAMILLE[famille] as readonly string[]).includes(saisie.sechage)) return { error: `Séchage « ${SECHAGES[saisie.sechage]} » incompatible avec ${FAMILLES_MACHINE[famille].toLowerCase()}.` };
+  // Sérigraphie : têtes ≤ stations. Numérique : une seule « station », pas de bras.
+  if (famille === "serigraphie" && saisie.nb_tetes > saisie.nb_stations) return { error: "Une machine ne peut pas avoir plus de têtes que de stations." };
+  const numerique = famille === "numerique";
+  const donnees = {
+    ...saisie,
+    famille,
+    nb_stations: numerique ? 1 : saisie.nb_stations,
+    // La fiche numérique n'a pas de sens en sérigraphie : on la vide plutôt que de garder un reste d'un changement de type.
+    technologie_encre: numerique ? saisie.technologie_encre : null,
+    nb_canaux_encre: numerique ? saisie.nb_canaux_encre : null,
+    encre_blanche: numerique && saisie.encre_blanche,
+    modele_tetes: numerique ? saisie.modele_tetes : null,
+    resolution_dpi: numerique ? saisie.resolution_dpi : null,
+    vitesse_m2_h: numerique ? saisie.vitesse_m2_h : null,
+    conso_encre_ml_m2: numerique ? saisie.conso_encre_ml_m2 : null,
+    rip_logiciel: numerique ? saisie.rip_logiciel : null,
+  };
   const supabase = await createClient();
   const { data, error } = id
     ? await supabase.from("machines").update(donnees).eq("id", id).select("id").single()

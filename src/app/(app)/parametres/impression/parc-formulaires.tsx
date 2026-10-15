@@ -7,7 +7,20 @@ import { Pencil, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { ConfirmDelete } from "@/app/(app)/parametres/couleurs/confirm-delete";
-import { ETATS_ECRAN, SECHAGES, TYPES_MACHINE, type EcranCadre, type EtatEcran, type Machine } from "@/lib/atelier/parc";
+import {
+  DEFAUTS_NUMERIQUE,
+  ETATS_ECRAN,
+  SECHAGES,
+  SECHAGES_PAR_FAMILLE,
+  TYPES_NUMERIQUE,
+  TYPES_SERIGRAPHIE,
+  familleDuType,
+  type EcranCadre,
+  type EtatEcran,
+  type FamilleMachine,
+  type Machine,
+  type TypeMachine,
+} from "@/lib/atelier/parc";
 import { changerEtatEcran, enregistrerEcran, enregistrerMachine, supprimerEcran, supprimerMachine } from "./actions";
 
 const champ = "h-9 w-full rounded-md border border-border bg-surface px-2 text-sm";
@@ -27,30 +40,47 @@ function Champ({ label, children, aide }: { label: string; children: React.React
 /* Machines                                                                 */
 /* ------------------------------------------------------------------------ */
 
-function FormulaireMachine({ machine, voitCouts, onFini }: { machine: Machine | null; voitCouts: boolean; onFini: () => void }) {
+function FormulaireMachine({ machine, famille, voitCouts, onFini }: { machine: Machine | null; famille: FamilleMachine; voitCouts: boolean; onFini: () => void }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [v, setV] = useState({
     nom: machine?.nom ?? "",
-    type: machine?.type ?? "carrousel_manuel",
+    type: machine?.type ?? (famille === "numerique" ? "dtf" : "carrousel_manuel"),
     nb_stations: String(machine?.nbStations ?? 6),
     nb_tetes: String(machine?.nbTetes ?? 6),
     format_max_l_cm: machine?.formatMaxLCm != null ? String(machine.formatMaxLCm) : "",
     format_max_h_cm: machine?.formatMaxHCm != null ? String(machine.formatMaxHCm) : "",
-    sechage: machine?.sechage ?? "flash",
+    sechage: machine?.sechage ?? (famille === "numerique" ? "four" : "flash"),
     cadence_pieces_h: machine?.cadencePiecesH != null ? String(machine.cadencePiecesH) : "",
     notes: machine?.notes ?? "",
     active: machine?.active ?? true,
     cout_horaire: machine?.coutHoraire != null ? String(machine.coutHoraire) : "",
+    marque_modele: machine?.marqueModele ?? "",
+    technologie_encre: machine?.technologieEncre ?? (famille === "numerique" ? DEFAUTS_NUMERIQUE.dtf.technologie : ""),
+    nb_canaux_encre: machine?.nbCanauxEncre != null ? String(machine.nbCanauxEncre) : "",
+    encre_blanche: machine?.encreBlanche ?? famille === "numerique",
+    modele_tetes: machine?.modeleTetes ?? "",
+    resolution_dpi: machine?.resolutionDpi != null ? String(machine.resolutionDpi) : "",
+    vitesse_m2_h: machine?.vitesseM2H != null ? String(machine.vitesseM2H) : "",
+    conso_encre_ml_m2: machine?.consoEncreMlM2 != null ? String(machine.consoEncreMlM2) : "",
+    rip_logiciel: machine?.ripLogiciel ?? "",
   });
   const maj = (x: Partial<typeof v>) => setV({ ...v, ...x });
+  const numerique = familleDuType(v.type) === "numerique";
+
+  /** Changer de type d'une machine neuve propose la technologie, l'encre blanche et le séchage usuels. */
+  function changerType(type: TypeMachine) {
+    if (machine || !(type in TYPES_NUMERIQUE)) return maj({ type });
+    const d = DEFAUTS_NUMERIQUE[type as keyof typeof TYPES_NUMERIQUE];
+    maj({ type, technologie_encre: d.technologie, encre_blanche: d.blanc, sechage: d.sechage });
+  }
 
   function enregistrer() {
     startTransition(async () => {
       const res = await enregistrerMachine(machine?.id ?? null, {
         nom: v.nom,
         type: v.type,
-        nb_stations: Number(v.nb_stations),
+        nb_stations: numerique ? 1 : Number(v.nb_stations),
         nb_tetes: Number(v.nb_tetes),
         format_max_l_cm: num(v.format_max_l_cm),
         format_max_h_cm: num(v.format_max_h_cm),
@@ -58,6 +88,15 @@ function FormulaireMachine({ machine, voitCouts, onFini }: { machine: Machine | 
         cadence_pieces_h: num(v.cadence_pieces_h),
         notes: v.notes,
         active: v.active,
+        marque_modele: v.marque_modele,
+        technologie_encre: v.technologie_encre,
+        nb_canaux_encre: num(v.nb_canaux_encre),
+        encre_blanche: v.encre_blanche,
+        modele_tetes: v.modele_tetes,
+        resolution_dpi: num(v.resolution_dpi),
+        vitesse_m2_h: num(v.vitesse_m2_h),
+        conso_encre_ml_m2: num(v.conso_encre_ml_m2),
+        rip_logiciel: v.rip_logiciel,
         ...(voitCouts ? { cout_horaire: num(v.cout_horaire) } : {}),
       });
       if (res.error) toast.error("Machine non enregistrée", { description: res.error });
@@ -76,21 +115,62 @@ function FormulaireMachine({ machine, voitCouts, onFini }: { machine: Machine | 
           <input value={v.nom} maxLength={80} onChange={(e) => maj({ nom: e.target.value })} placeholder="Carrousel 6 couleurs" className={champ} />
         </Champ>
         <Champ label="Type">
-          <select value={v.type} onChange={(e) => maj({ type: e.target.value as Machine["type"] })} className={champ}>
-            {Object.entries(TYPES_MACHINE).map(([k, l]) => (
+          <select value={v.type} onChange={(e) => changerType(e.target.value as TypeMachine)} className={champ}>
+            {Object.entries(familleDuType(v.type) === "numerique" ? TYPES_NUMERIQUE : TYPES_SERIGRAPHIE).map(([k, l]) => (
               <option key={k} value={k}>
                 {l}
               </option>
             ))}
           </select>
         </Champ>
-        <Champ label="Stations (bras)">
-          <input inputMode="numeric" value={v.nb_stations} onChange={(e) => maj({ nb_stations: e.target.value })} className={champ} />
-        </Champ>
-        <Champ label="Têtes (couleurs par passage)">
-          <input inputMode="numeric" value={v.nb_tetes} onChange={(e) => maj({ nb_tetes: e.target.value })} className={champ} />
-        </Champ>
-        <Champ label="Format d'impression max (cm)" aide="Largeur × hauteur de la zone imprimable.">
+        {numerique ? (
+          <>
+            <Champ label="Marque et modèle">
+              <input value={v.marque_modele} maxLength={80} onChange={(e) => maj({ marque_modele: e.target.value })} placeholder="Epson L1800 modifiée, Mimaki…" className={champ} />
+            </Champ>
+            <Champ label="Technologie d'encre">
+              <input value={v.technologie_encre} maxLength={60} onChange={(e) => maj({ technologie_encre: e.target.value })} className={champ} />
+            </Champ>
+            <Champ label="Canaux d'encre" aide="CMJN = 4 · CMJN + blanc = 5 · avec clairs et vernis : plus.">
+              <input inputMode="numeric" value={v.nb_canaux_encre} placeholder="5" onChange={(e) => maj({ nb_canaux_encre: e.target.value })} className={champ} />
+            </Champ>
+            <Champ label="Têtes d'impression">
+              <span className="flex items-center gap-1.5">
+                <input inputMode="numeric" value={v.nb_tetes} onChange={(e) => maj({ nb_tetes: e.target.value })} className={`${champ} w-20 shrink-0`} />
+                <input value={v.modele_tetes} maxLength={80} placeholder="Modèle (i3200, XP600…)" onChange={(e) => maj({ modele_tetes: e.target.value })} className={champ} />
+              </span>
+            </Champ>
+            <Champ label="Résolution maximale (dpi)">
+              <input inputMode="numeric" value={v.resolution_dpi} placeholder="1440" onChange={(e) => maj({ resolution_dpi: e.target.value })} className={champ} />
+            </Champ>
+            <Champ label="Vitesse (m²/h)" aide="Mode de production courant.">
+              <input inputMode="decimal" value={v.vitesse_m2_h} placeholder="8" onChange={(e) => maj({ vitesse_m2_h: e.target.value })} className={champ} />
+            </Champ>
+            <Champ label="Consommation d'encre (ml/m²)" aide="Tous canaux, couverture moyenne.">
+              <input inputMode="decimal" value={v.conso_encre_ml_m2} placeholder="12" onChange={(e) => maj({ conso_encre_ml_m2: e.target.value })} className={champ} />
+            </Champ>
+            <Champ label="RIP / logiciel">
+              <input value={v.rip_logiciel} maxLength={80} onChange={(e) => maj({ rip_logiciel: e.target.value })} placeholder="Maintop, Onyx, Caldera…" className={champ} />
+            </Champ>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={v.encre_blanche} onChange={(e) => maj({ encre_blanche: e.target.checked })} />
+              Encre blanche
+            </label>
+          </>
+        ) : (
+          <>
+            <Champ label="Stations (bras)">
+              <input inputMode="numeric" value={v.nb_stations} onChange={(e) => maj({ nb_stations: e.target.value })} className={champ} />
+            </Champ>
+            <Champ label="Têtes (couleurs par passage)">
+              <input inputMode="numeric" value={v.nb_tetes} onChange={(e) => maj({ nb_tetes: e.target.value })} className={champ} />
+            </Champ>
+          </>
+        )}
+        <Champ
+          label={numerique ? "Largeur × longueur imprimable max (cm)" : "Format d'impression max (cm)"}
+          aide={numerique ? "Roll to roll : la largeur du rouleau suffit, laissez la longueur vide." : "Largeur × hauteur de la zone imprimable."}
+        >
           <span className="flex items-center gap-1.5">
             <input inputMode="decimal" value={v.format_max_l_cm} placeholder="40" onChange={(e) => maj({ format_max_l_cm: e.target.value })} className={champ} />
             ×
@@ -99,14 +179,14 @@ function FormulaireMachine({ machine, voitCouts, onFini }: { machine: Machine | 
         </Champ>
         <Champ label="Séchage">
           <select value={v.sechage} onChange={(e) => maj({ sechage: e.target.value as Machine["sechage"] })} className={champ}>
-            {Object.entries(SECHAGES).map(([k, l]) => (
+            {SECHAGES_PAR_FAMILLE[familleDuType(v.type)].map((k) => (
               <option key={k} value={k}>
-                {l}
+                {SECHAGES[k]}
               </option>
             ))}
           </select>
         </Champ>
-        <Champ label="Cadence (pièces/heure)" aide="Toutes couleurs comprises : un tour de carrousel.">
+        <Champ label="Cadence (pièces/heure)" aide={numerique ? "Pièces de format courant ; la vitesse en m²/h sert au métrage." : "Toutes couleurs comprises : un tour de carrousel."}>
           <input inputMode="numeric" value={v.cadence_pieces_h} placeholder="120" onChange={(e) => maj({ cadence_pieces_h: e.target.value })} className={champ} />
         </Champ>
         {voitCouts && (
@@ -134,7 +214,7 @@ function FormulaireMachine({ machine, voitCouts, onFini }: { machine: Machine | 
   );
 }
 
-export function BoutonMachine({ machine, voitCouts }: { machine?: Machine; voitCouts: boolean }) {
+export function BoutonMachine({ machine, famille, voitCouts }: { machine?: Machine; famille?: FamilleMachine; voitCouts: boolean }) {
   const [ouvert, setOuvert] = useState(false);
   return (
     <>
@@ -148,7 +228,7 @@ export function BoutonMachine({ machine, voitCouts }: { machine?: Machine; voitC
         </Button>
       )}
       <Dialog open={ouvert} onOpenChange={setOuvert} title={machine ? `Modifier ${machine.nom}` : "Nouvelle machine"} size="lg">
-        <FormulaireMachine machine={machine ?? null} voitCouts={voitCouts} onFini={() => setOuvert(false)} />
+        <FormulaireMachine machine={machine ?? null} famille={machine?.famille ?? famille ?? "serigraphie"} voitCouts={voitCouts} onFini={() => setOuvert(false)} />
       </Dialog>
     </>
   );

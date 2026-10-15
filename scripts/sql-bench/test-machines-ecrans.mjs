@@ -66,3 +66,32 @@ await test("contraintes : état, maillage, code unique, têtes", async () => {
   await assert.rejects(q(`insert into ecrans_cadres(code, largeur_cm, hauteur_cm, maillage) values (' a-01 ', 50, 60, 43)`), /unique|duplicate/);
   await assert.rejects(q(`insert into machines(nom, nb_tetes) values ('Trop', 0)`), /check/);
 });
+
+await test("0130 : machines numériques (DTF, DTG, roll to roll…) et cohérence famille / type / séchage", async () => {
+  await as(u.administrateur);
+  // Les machines existantes restent de la sérigraphie.
+  assert.equal((await one(`select count(*)::int n from machines where famille = 'serigraphie'`)).n, (await one(`select count(*)::int n from machines`)).n);
+  for (const type of ["dtf", "dtf_uv", "dtg", "roll_to_roll", "sublimation", "uv_plat", "ecosolvant"]) {
+    await q(
+      `insert into machines(nom, famille, type, nb_stations, nb_tetes, sechage, nb_canaux_encre, encre_blanche, resolution_dpi, vitesse_m2_h, conso_encre_ml_m2, format_max_l_cm)
+       values ($1, 'numerique', $1, 1, 2, 'integre', 5, true, 1440, 8, 12, 60)`,
+      [type],
+    );
+  }
+  // Roll to roll : la longueur peut rester libre (format_max_h_cm vide).
+  assert.equal((await one(`select format_max_h_cm from machines where nom = 'roll_to_roll'`)).format_max_h_cm, null);
+  // Un type numérique ne peut pas être déclaré en sérigraphie, et inversement.
+  await assert.rejects(q(`insert into machines(nom, famille, type) values ('Faux 1', 'serigraphie', 'dtf')`), /check/);
+  await assert.rejects(q(`insert into machines(nom, famille, type) values ('Faux 2', 'numerique', 'ovale')`), /check/);
+  // Fiche technique : bornes.
+  await assert.rejects(q(`insert into machines(nom, famille, type, resolution_dpi) values ('Faux 3', 'numerique', 'dtf', 10)`), /check/);
+  await assert.rejects(q(`insert into machines(nom, famille, type, nb_canaux_encre) values ('Faux 4', 'numerique', 'dtf', 40)`), /check/);
+  await assert.rejects(q(`insert into machines(nom, famille, type, sechage) values ('Faux 5', 'numerique', 'dtf', 'vapeur')`), /check/);
+});
+
+await test("0130 : mêmes droits pour les machines numériques (lecture personnel, écriture Direction/production)", async () => {
+  const num = `insert into machines(nom, famille, type, nb_stations, nb_tetes, sechage) values ($1, 'numerique', 'dtf', 1, 2, 'four') returning id`;
+  assert.equal((await run(u.responsable_production, num, ["DTF prod"])).ok, true);
+  assert.equal((await run(u.infographiste, num, ["DTF info"])).ok, false);
+  assert.equal((await run(u.commercial, `select id from machines where famille = 'numerique'`)).rows.length > 0, true);
+});

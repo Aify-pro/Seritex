@@ -12,7 +12,7 @@ export default async function SeparationCouleursPage() {
     chargerEncres(),
     chargerParametresSerigraphie(),
     chargerRecettes(profile),
-    chargerParc(undefined, { actifsSeulement: true }),
+    chargerParc(undefined, { actifsSeulement: true, famille: "serigraphie" }),
   ]);
 
   return (
