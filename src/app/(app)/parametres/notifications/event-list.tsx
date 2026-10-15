@@ -8,6 +8,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   commercial: "Commercial",
   infographie: "Infographie",
   production: "Production",
+  commande: "Statut des commandes (ordres de fabrication)",
   livraison: "Livraison",
   general: "Général",
 };
