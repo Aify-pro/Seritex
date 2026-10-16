@@ -4,7 +4,8 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireUser, requirePlatformAdmin } from "@/lib/auth/current-user";
 import { can } from "@/lib/auth/permissions";
-import { checkTargetConnection, replicateToTargets, selectWriteTargets } from "@/lib/storage";
+import { checkTargetConnection, replicateWithBuffer } from "@/lib/storage";
+import { viderTampon, type ViderTamponResult } from "@/lib/storage/tampon";
 import type { ConnectionStatus, StorageTargetRow } from "@/lib/storage/types";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -92,7 +93,7 @@ export async function uploadMediaFile(formData: FormData) {
   }
 
   const buffer = Buffer.from(await file.arrayBuffer());
-  const replicationError = await replicateVersion({
+  const replication = await replicateVersion({
     versionId,
     companyId: parsed.data.company_id,
     companyName: company?.name ?? "Client",
@@ -100,10 +101,10 @@ export async function uploadMediaFile(formData: FormData) {
     mimeType: file.type || null,
     buffer,
   });
-  if (replicationError) return { error: replicationError };
+  if (replication.error) return { error: replication.error };
 
   revalidatePath(`/mediatheque/${parsed.data.company_id}`);
-  return { mediaFileId: mediaFile.id };
+  return { mediaFileId: mediaFile.id, buffered: replication.buffered };
 }
 
 const versionSchema = z.object({
@@ -154,7 +155,7 @@ export async function addMediaFileVersion(formData: FormData) {
 
   const buffer = Buffer.from(await file.arrayBuffer());
   const companyName = (mediaFile.companies as unknown as { name: string } | null)?.name ?? "Client";
-  const replicationError = await replicateVersion({
+  const replication = await replicateVersion({
     versionId,
     companyId: mediaFile.company_id,
     companyName,
@@ -162,10 +163,10 @@ export async function addMediaFileVersion(formData: FormData) {
     mimeType: file.type || null,
     buffer,
   });
-  if (replicationError) return { error: replicationError };
+  if (replication.error) return { error: replication.error };
 
   revalidatePath(`/mediatheque/${mediaFile.company_id}`);
-  return { mediaFileId: mediaFile.id };
+  return { mediaFileId: mediaFile.id, buffered: replication.buffered };
 }
 
 /**
@@ -177,9 +178,11 @@ export async function addMediaFileVersion(formData: FormData) {
  * involontaire) — l'écriture des copies repasse par le client authentifié de
  * l'utilisateur, soumis aux policies RLS habituelles.
  *
- * Dès qu'un NAS est actif il est le stockage exclusif (`selectWriteTargets`) :
- * si l'écriture y échoue, il n'existe aucune copie ailleurs, donc l'erreur
- * est renvoyée à l'utilisateur plutôt que passée sous silence.
+ * Dès qu'un NAS est actif il est le stockage exclusif (`selectWriteTargets`).
+ * S'il est injoignable et qu'une cible « tampon » est active, le fichier y
+ * attend (`buffered`) jusqu'au prochain vidage (`viderTampon`). Sans tampon,
+ * il n'existe aucune copie ailleurs : l'erreur est renvoyée à l'utilisateur
+ * plutôt que passée sous silence.
  */
 async function replicateVersion(params: {
   versionId: string;
@@ -188,16 +191,16 @@ async function replicateVersion(params: {
   fileName: string;
   mimeType: string | null;
   buffer: Buffer;
-}): Promise<string | null> {
+}): Promise<{ error?: string; buffered?: boolean }> {
   const admin = createAdminClient();
   const { data: targets } = await admin
     .from("storage_targets")
     .select("*")
     .eq("active", true);
 
-  if (!targets || targets.length === 0) return null;
+  if (!targets || targets.length === 0) return {};
 
-  const outcomes = await replicateToTargets(selectWriteTargets(targets as StorageTargetRow[]), {
+  const { outcomes, buffered } = await replicateWithBuffer(targets as StorageTargetRow[], {
     companyId: params.companyId,
     companyName: params.companyName,
     fileName: params.fileName,
@@ -218,9 +221,11 @@ async function replicateVersion(params: {
   );
 
   if (outcomes.length > 0 && outcomes.every((o) => o.status === "erreur")) {
-    return `Le fichier n'a pas pu être enregistré sur le stockage (${outcomes[0].errorMessage ?? "erreur inconnue"}). Vérifiez que le NAS est joignable, puis redéposez-le.`;
+    return {
+      error: `Le fichier n'a pas pu être enregistré sur le stockage (${outcomes[0].errorMessage ?? "erreur inconnue"}). Vérifiez que le NAS est joignable, puis redéposez-le.`,
+    };
   }
-  return null;
+  return { buffered };
 }
 
 /** Liste des cibles de stockage actives, sans exposer leur configuration — utilisable par n'importe quel rôle staff pour afficher où un fichier est répliqué. */
@@ -233,6 +238,7 @@ export async function listActiveStorageTargetsSummary() {
 
 const targetSchema = z.object({
   type: z.enum(["supabase_storage", "google_drive", "nas", "local_server"]),
+  role: z.enum(["stockage", "tampon"]).default("stockage"),
   name: z.string().trim().min(2),
   bucket: z.string().trim().optional(),
   service_account_json: z.string().trim().optional(),
@@ -249,6 +255,7 @@ export async function createStorageTarget(formData: FormData) {
 
   const parsed = targetSchema.safeParse({
     type: formData.get("type"),
+    role: formData.get("role") || undefined,
     name: formData.get("name"),
     bucket: formData.get("bucket") || undefined,
     service_account_json: formData.get("service_account_json") || undefined,
@@ -291,6 +298,7 @@ export async function createStorageTarget(formData: FormData) {
     .from("storage_targets")
     .insert({
       type: parsed.data.type,
+      role: parsed.data.role,
       name: parsed.data.name,
       config,
       created_by: authId,
@@ -333,9 +341,12 @@ export async function toggleStorageTargetActive(targetId: string, active: boolea
       .from("storage_targets")
       .select("id")
       .eq("active", true)
+      .eq("role", "stockage")
       .neq("id", targetId);
-    if (!others?.length) {
-      return { error: "Impossible de désactiver la dernière cible active : plus aucun fichier ne serait enregistré." };
+    const { data: self } = await supabase.from("storage_targets").select("role").eq("id", targetId).maybeSingle();
+    // Un tampon peut toujours être désactivé ; le dernier stockage actif, non : le tampon ne pourrait plus se vider.
+    if (self?.role !== "tampon" && !others?.length) {
+      return { error: "Impossible de désactiver le dernier stockage actif : plus aucun fichier ne serait enregistré durablement." };
     }
   }
 
@@ -348,6 +359,7 @@ export async function toggleStorageTargetActive(targetId: string, active: boolea
 
 const updateTargetSchema = z.object({
   id: z.string().uuid(),
+  role: z.enum(["stockage", "tampon"]).default("stockage"),
   name: z.string().trim().min(2, "Le nom doit contenir au moins 2 caractères"),
   bucket: z.string().trim().optional(),
   service_account_json: z.string().trim().optional(),
@@ -368,6 +380,7 @@ export async function updateStorageTarget(formData: FormData) {
 
   const parsed = updateTargetSchema.safeParse({
     id: formData.get("id"),
+    role: formData.get("role") || undefined,
     name: formData.get("name"),
     bucket: formData.get("bucket") || undefined,
     service_account_json: formData.get("service_account_json") || undefined,
@@ -381,8 +394,17 @@ export async function updateStorageTarget(formData: FormData) {
   const d = parsed.data;
 
   const supabase = await createClient();
-  const { data: existing } = await supabase.from("storage_targets").select("type, config").eq("id", d.id).single();
+  const { data: existing } = await supabase.from("storage_targets").select("type, role, active, config").eq("id", d.id).single();
   if (!existing) return { error: "Cible introuvable" };
+  if (existing.role === "stockage" && d.role === "tampon" && existing.active) {
+    const { data: others } = await supabase
+      .from("storage_targets")
+      .select("id")
+      .eq("active", true)
+      .eq("role", "stockage")
+      .neq("id", d.id);
+    if (!others?.length) return { error: "Impossible de passer en tampon le dernier stockage actif : activez d'abord un autre stockage." };
+  }
   const current = (existing.config ?? {}) as Record<string, unknown>;
 
   let config: Record<string, unknown>;
@@ -412,7 +434,7 @@ export async function updateStorageTarget(formData: FormData) {
 
   const { data, error } = await supabase
     .from("storage_targets")
-    .update({ name: d.name, config })
+    .update({ name: d.name, role: d.role, config })
     .eq("id", d.id)
     .select("id");
   if (error) return { error: error.message };
@@ -486,4 +508,12 @@ export async function deleteMediaFile(formData: FormData) {
   revalidatePath(`/mediatheque/${parsed.data.company_id}`);
   revalidatePath("/client/mediatheque");
   return {};
+}
+
+/** Déplace maintenant les fichiers du tampon vers le stockage (même traitement que la tâche planifiée) — administrateur de plateforme. */
+export async function viderTamponMaintenant(): Promise<ViderTamponResult> {
+  await requirePlatformAdmin();
+  const result = await viderTampon();
+  revalidatePath("/parametres/stockage");
+  return result;
 }

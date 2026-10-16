@@ -30,7 +30,7 @@ export async function uploadToTarget(target: StorageTargetRow, input: UploadInpu
 
 export interface ReplicationOutcome {
   targetId: string;
-  status: "synchronise" | "erreur";
+  status: "synchronise" | "erreur" | "en_attente";
   remotePath?: string;
   errorMessage?: string;
 }
@@ -43,12 +43,13 @@ export interface ReplicationOutcome {
  */
 export async function replicateToTargets(
   targets: StorageTargetRow[],
-  input: UploadInput
+  input: UploadInput,
+  timeoutMs = UPLOAD_TIMEOUT_MS
 ): Promise<ReplicationOutcome[]> {
   return Promise.all(
     targets.map(async (target): Promise<ReplicationOutcome> => {
       try {
-        const result = await uploadToTarget(target, input);
+        const result = await withTimeout(uploadToTarget(target, input), timeoutMs, `${target.name} : aucune réponse en ${Math.round(timeoutMs / 1000)} s`);
         return { targetId: target.id, status: "synchronise", remotePath: result.remotePath };
       } catch (error) {
         const message = error instanceof Error ? error.message : "Erreur inconnue";
@@ -56,6 +57,23 @@ export async function replicateToTargets(
       }
     })
   );
+}
+
+// Un NAS éteint ne répond pas : sans borne, le dépôt resterait suspendu jusqu'à l'expiration de la fonction.
+const UPLOAD_TIMEOUT_MS = 40_000;
+
+async function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 export function isWebdavTarget(target: Pick<StorageTargetRow, "type">) {
@@ -68,9 +86,49 @@ export function isWebdavTarget(target: Pick<StorageTargetRow, "type">) {
  * alimenté. Sans NAS actif, on garde le comportement historique.
  */
 export function selectWriteTargets(activeTargets: StorageTargetRow[]): StorageTargetRow[] {
-  return activeTargets.some(isWebdavTarget)
-    ? activeTargets.filter((t) => t.type !== "supabase_storage")
-    : activeTargets;
+  const principal = activeTargets.filter((t) => t.role !== "tampon");
+  return principal.some(isWebdavTarget) ? principal.filter((t) => t.type !== "supabase_storage") : principal;
+}
+
+/** Cibles « tampon » actives, dans l'ordre de création : relais quand aucun stockage n'est joignable. */
+export function selectBufferTargets(activeTargets: StorageTargetRow[]): StorageTargetRow[] {
+  return activeTargets
+    .filter((t) => t.role === "tampon")
+    .sort((a, b) => a.created_at.localeCompare(b.created_at));
+}
+
+/**
+ * Enregistre un fichier : sur les cibles de stockage actives ; si AUCUNE n'a
+ * pu l'enregistrer (NAS injoignable), sur la première cible tampon qui répond.
+ * Le fichier est alors « en_attente » : `viderTampon` (lib/storage/tampon.ts)
+ * le déplacera vers le stockage dès qu'il sera de nouveau joignable.
+ */
+export async function replicateWithBuffer(
+  activeTargets: StorageTargetRow[],
+  input: UploadInput
+): Promise<{ outcomes: ReplicationOutcome[]; buffered: boolean }> {
+  const principal = selectWriteTargets(activeTargets);
+  const outcomes = await replicateToTargets(principal, input);
+  const stored = outcomes.some((o) => o.status === "synchronise");
+  const buffers = selectBufferTargets(activeTargets);
+  if (stored || buffers.length === 0) return { outcomes, buffered: false };
+
+  for (const buffer of buffers) {
+    const [outcome] = await replicateToTargets([buffer], input);
+    if (outcome.status !== "synchronise") {
+      outcomes.push(outcome);
+      continue;
+    }
+    // Le stockage n'a pas reçu le fichier : ses lignes passent « en attente » (erreur conservée), le tampon porte le fichier.
+    return {
+      outcomes: [
+        ...outcomes.map((o): ReplicationOutcome => ({ ...o, status: "en_attente" })),
+        { ...outcome, status: "en_attente" },
+      ],
+      buffered: true,
+    };
+  }
+  return { outcomes, buffered: false };
 }
 
 const CHECK_TIMEOUT_MS = 12_000;

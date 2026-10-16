@@ -4,7 +4,7 @@ import { useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { checkStorageTarget, createStorageTarget } from "@/lib/actions/media";
-import type { StorageBackendType } from "@/lib/types/domain";
+import type { StorageBackendType, StorageTargetRole } from "@/lib/types/domain";
 import { Plus } from "lucide-react";
 
 const TYPES: { value: StorageBackendType; label: string }[] = [
@@ -16,6 +16,7 @@ const TYPES: { value: StorageBackendType; label: string }[] = [
 
 export function NewStorageTargetForm() {
   const [type, setType] = useState<StorageBackendType>("google_drive");
+  const [role, setRole] = useState<StorageTargetRole>("stockage");
   const [pending, startTransition] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -57,6 +58,18 @@ export function NewStorageTargetForm() {
             ))}
           </select>
         </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-foreground">Rôle</label>
+          <select
+            name="role"
+            value={role}
+            onChange={(e) => setRole(e.target.value as StorageTargetRole)}
+            className="h-9 rounded-md border border-border bg-surface px-2 text-sm"
+          >
+            <option value="stockage">Stockage</option>
+            <option value="tampon">Tampon</option>
+          </select>
+        </div>
         <div className="flex-1 min-w-[200px]">
           <label className="mb-1 block text-xs font-medium text-foreground">Nom (interne)</label>
           <input
@@ -67,6 +80,12 @@ export function NewStorageTargetForm() {
           />
         </div>
       </div>
+
+      {role === "tampon" && (
+        <p className="text-xs text-foreground-muted">
+          Un tampon n&apos;est utilisé que si aucun stockage n&apos;est joignable au dépôt : le fichier y attend, puis est déplacé vers le stockage dès qu&apos;il répond.
+        </p>
+      )}
 
       {type === "supabase_storage" && (
         <div>

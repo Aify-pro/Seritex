@@ -6,13 +6,14 @@ import { Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { deleteStorageTarget, updateStorageTarget } from "@/lib/actions/media";
-import type { StorageBackendType } from "@/lib/types/domain";
+import type { StorageBackendType, StorageTargetRole } from "@/lib/types/domain";
 
 /** Partie non secrète de la configuration (les mots de passe / clés ne quittent jamais le serveur). */
 export interface EditableTarget {
   id: string;
   name: string;
   type: StorageBackendType;
+  role: StorageTargetRole;
   bucket?: string;
   rootFolderId?: string;
   url?: string;
@@ -79,6 +80,12 @@ export function TargetActions({ target, onUpdated }: { target: EditableTarget; o
           <input type="hidden" name="id" value={target.id} />
           <Field label="Nom (interne)">
             <input name="name" required defaultValue={target.name} className={inputClass} />
+          </Field>
+          <Field label="Rôle">
+            <select name="role" defaultValue={target.role} className={inputClass}>
+              <option value="stockage">Stockage</option>
+              <option value="tampon">Tampon (relais si aucun stockage n&apos;est joignable)</option>
+            </select>
           </Field>
 
           {target.type === "supabase_storage" && (
