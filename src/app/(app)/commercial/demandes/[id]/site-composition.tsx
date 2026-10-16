@@ -68,6 +68,9 @@ type FichierSite = {
   marquage: number | null;
   /** Rang de l'article (à partir de 1) quand la demande en porte plusieurs ; absent = 1. */
   article?: number | null;
+  /** Copie dans la médiathèque du client (0136) : renseigné quand le fichier est enregistré sur le stockage. */
+  imported_at?: string | null;
+  import_error?: string | null;
 };
 
 /**
@@ -88,6 +91,9 @@ export async function SiteComposition({ requestId, composition }: { requestId: s
     .order("role", { ascending: false })
     .order("marquage");
   const files = (data ?? []) as unknown as FichierSite[];
+  // La copie dans la médiathèque ne part qu'une fois la demande rattachée à une société.
+  const { data: demande } = await supabase.from("requests").select("company_id").eq("id", requestId).maybeSingle();
+  const clientConnu = !!demande?.company_id;
   const signed = files.length
     ? ((await createAdminClient().storage.from("site-personnalisation").createSignedUrls(files.map((f) => f.path), 3600)).data ?? [])
     : [];
@@ -119,6 +125,13 @@ export async function SiteComposition({ requestId, composition }: { requestId: s
   function Fichier({ f, article, textileFonce }: { f: FichierSite; article: SiteArticle; textileFonce: boolean }) {
     const lien = url(f.path);
     const image = f.mime_type?.startsWith("image/");
+    const copie = f.imported_at
+      ? "Dans la médiathèque du client"
+      : f.import_error
+        ? "Copie vers la médiathèque en échec, nouvelle tentative automatique"
+        : clientConnu
+          ? "Copie vers la médiathèque en cours"
+          : "Sera copié dans la médiathèque dès le rattachement du client";
     return (
       <li className="flex items-center gap-2">
         <a
@@ -136,12 +149,13 @@ export async function SiteComposition({ requestId, composition }: { requestId: s
             <ImageIcon className="h-5 w-5 text-foreground-muted" />
           )}
           <span>
-            <span className="block font-medium">{f.role === "maquette" ? "Maquette (PDF)" : "Visuel"}</span>
+            <span className="block font-medium">{f.role === "maquette" ? "Maquette (PDF)" : f.role === "apercu" ? "Maquette (image)" : "Visuel"}</span>
             <span className="block text-xs text-foreground-muted">{f.file_name}</span>
+            <span className={`block text-xs ${f.imported_at ? "text-success" : "text-foreground-muted"}`}>{copie}</span>
           </span>
           <Download className="h-4 w-4 text-foreground-muted" />
         </a>
-        {image && lien && (
+        {image && lien && f.role === "logo" && (
           <BoutonSeparation
             url={lien}
             nom={f.file_name}
@@ -173,8 +187,8 @@ export async function SiteComposition({ requestId, composition }: { requestId: s
         {articles.map((a, n) => {
           const rang = n + 1;
           const siens = files.filter((f) => (f.article ?? 1) === rang);
-          const maquettes = siens.filter((f) => f.role === "maquette");
-          const logos = siens.filter((f) => f.role !== "maquette");
+          const maquettes = siens.filter((f) => f.role === "maquette" || f.role === "apercu");
+          const logos = siens.filter((f) => f.role !== "maquette" && f.role !== "apercu");
           const dansUnCadre = (i: number) => logos.filter((f) => f.marquage === i + 1);
           const orphelins = logos.filter((f) => !f.marquage || f.marquage > a.marquages.length);
           const repartition = Object.entries(a.repartition ?? {});
