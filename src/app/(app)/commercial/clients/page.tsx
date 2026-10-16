@@ -18,6 +18,7 @@ import {
   type ClientQuery,
 } from "@/lib/clients/filters";
 import { ClientsFilters } from "./clients-filters";
+import { Presets } from "@/components/filters/presets";
 import { ChevronLeft, ChevronRight, Download } from "lucide-react";
 
 interface ClientRow {
@@ -120,6 +121,7 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
         }
       />
 
+      <Presets module="clients" />
       <ClientsFilters values={filters} options={options} activeCount={activeCount} />
 
       {list.error && list.error.code !== "PGRST103" && (

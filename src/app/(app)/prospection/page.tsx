@@ -18,6 +18,11 @@ import {
   type StatutJournee,
 } from "@/lib/prospection/constantes";
 import { BoutonAbsence, RetirerAbsence, TraiterAbsence } from "./absences";
+import { FilterBar, type FilterField } from "@/components/filters/filter-bar";
+import { Presets } from "@/components/filters/presets";
+import { ListPagination } from "@/components/filters/pagination";
+import { PAGE_SIZES, type ListQuery, type RawParams } from "@/lib/filters/params";
+import { VISITE_NATURES, VISITE_SORTS, VISITE_SOURCES, applyVisiteFilters, parseVisiteFilters, type VisiteSortKey } from "@/lib/prospection/filtres";
 
 const TON_ABSENCE: Record<StatutAbsence, "warning" | "success" | "danger"> = {
   demandee: "warning",
@@ -30,10 +35,12 @@ const TON_ABSENCE: Record<StatutAbsence, "warning" | "success" | "danger"> = {
  * et les absences. Le planning des visites et les rapports arrivent avec
  * les lots suivants.
  */
-export default async function ProspectionPage() {
+export default async function ProspectionPage({ searchParams }: { searchParams: Promise<RawParams> }) {
   const { profile } = await requireModule("prospection");
   const [direction, peutDeclarer] = await Promise.all([can("prospection", "validate"), can("prospection", "create")]);
   const aujourdhui = aujourdhuiAbidjan();
+  const raw = await searchParams;
+  const filtres = parseVisiteFilters(raw);
   const supabase = await createClient();
 
   const commerciaux = await chargerCommerciaux();
@@ -46,31 +53,65 @@ export default async function ProspectionPage() {
   );
   const attendus = statuts.filter((s) => s.statut === "due").length;
 
-  // Journal des visites (0124) : les plus récentes, et celles à rattacher à
-  // une fiche (prospect non fiché, code client inconnu de la reprise Excel).
-  const [{ data: visitesBrutes }, { count: aRattacher }] = await Promise.all([
-    supabase
-      .from("visites")
-      .select("id, jour, nature, source, compte_rendu, tiers_libelle, companies!visites_company_id_fkey(name), app_users!visites_app_user_id_fkey(full_name)")
-      .order("jour", { ascending: false })
-      .order("created_at", { ascending: false })
-      .limit(15),
+  // Journal des visites (0124, vue visites_list 0134) : recherche, filtres, tri et pagination en base.
+  // `aRattacher` : visites sans fiche client (prospect non fiché, code inconnu de la reprise Excel).
+  const depart = (filtres.page - 1) * filtres.taille;
+  const [visitesRes, { count: aRattacher }] = await Promise.all([
+    applyVisiteFilters(
+      supabase
+        .from("visites_list")
+        .select("id,jour,nature,source,compte_rendu,tiers,a_rattacher,auteur", { count: "exact" }) as unknown as ListQuery,
+      filtres
+    ).range(depart, depart + filtres.taille - 1),
     supabase.from("visites").select("id", { count: "exact", head: true }).is("company_id", null),
   ]);
-  const visites = (visitesBrutes ?? []).map((v) => {
-    const client = v.companies as unknown as { name: string } | null;
-    const auteur = v.app_users as unknown as { full_name: string } | null;
-    return {
-      id: v.id as string,
-      jour: v.jour as string,
-      nature: v.nature as NatureVisite,
-      source: v.source as SourceVisite,
-      compteRendu: v.compte_rendu as string,
-      tiers: client?.name ?? (v.tiers_libelle as string | null) ?? "—",
-      aRattacher: !client,
-      auteur: auteur?.full_name ?? "—",
-    };
-  });
+  const visites = ((visitesRes.data ?? []) as {
+    id: string;
+    jour: string;
+    nature: NatureVisite;
+    source: SourceVisite;
+    compte_rendu: string;
+    tiers: string | null;
+    a_rattacher: boolean;
+    auteur: string | null;
+  }[]).map((v) => ({
+    id: v.id,
+    jour: v.jour,
+    nature: v.nature,
+    source: v.source,
+    compteRendu: v.compte_rendu,
+    tiers: v.tiers ?? "—",
+    aRattacher: v.a_rattacher,
+    auteur: v.auteur ?? "—",
+  }));
+  const champsVisites: FilterField[] = [
+    { kind: "multi", key: "nature", label: "Nature", primary: true, options: VISITE_NATURES.map((n) => ({ value: n, label: NATURES_VISITE[n] })) },
+    ...(direction
+      ? [
+          {
+            kind: "select" as const,
+            key: "commercial",
+            label: "Commercial",
+            placeholder: "Tous",
+            options: commerciaux.map((c) => ({ value: c.appUserId, label: c.nom })),
+          },
+        ]
+      : []),
+    { kind: "select", key: "source", label: "Provenance", placeholder: "Toutes", options: VISITE_SOURCES.map((v) => ({ value: v, label: SOURCES_VISITE[v] })) },
+    {
+      kind: "select",
+      key: "rattachement",
+      label: "Rattachement",
+      placeholder: "Peu importe",
+      options: [
+        { value: "a_rattacher", label: "À rattacher à une fiche" },
+        { value: "rattachee", label: "Déjà rattachées" },
+      ],
+    },
+    { kind: "date", key: "du", label: "Visites à partir du" },
+    { kind: "date", key: "au", label: "Visites jusqu'au" },
+  ];
+  const paramsVisites = new URLSearchParams(Object.entries(raw).flatMap(([k, v]) => (typeof v === "string" ? [[k, v] as [string, string]] : [])));
 
   const debutMois = `${aujourdhui.slice(0, 7)}-01`;
   const absences = await chargerAbsences(debutMois);
@@ -117,9 +158,21 @@ export default async function ProspectionPage() {
         </CardBody>
       </Card>
 
+      <div className="space-y-3">
+        <Presets module="prospection" />
+        <FilterBar
+          fields={champsVisites}
+          sorts={(Object.keys(VISITE_SORTS) as VisiteSortKey[]).map((k) => ({ value: k, label: VISITE_SORTS[k].label }))}
+          defaultSort={{ tri: "date", ordre: "desc" }}
+          placeholder="Rechercher une visite : client, prospect, compte rendu, commercial…"
+          searchLabel="Rechercher une visite"
+          pageSizes={PAGE_SIZES}
+        />
+      </div>
+
       <Card>
         <CardHeader
-          title="Dernières visites"
+          title="Journal des visites"
           description={
             (aRattacher ?? 0) > 0
               ? `${aRattacher} visite${(aRattacher ?? 0) > 1 ? "s" : ""} à rattacher à une fiche client ou prospect.`
@@ -128,7 +181,9 @@ export default async function ProspectionPage() {
         />
         <CardBody className="p-0">
           {visites.length === 0 ? (
-            <p className="px-5 py-6 text-sm text-foreground-muted">Aucune visite enregistrée.</p>
+            <p className="px-5 py-6 text-sm text-foreground-muted">
+              {visitesRes.error ? `Impossible de charger le journal (${visitesRes.error.message}). Si la migration 0134 n'est pas appliquée, appliquez-la puis rechargez.` : "Aucune visite ne correspond."}
+            </p>
           ) : (
             <ul className="divide-y divide-border">
               {visites.map((v) => (
@@ -149,6 +204,15 @@ export default async function ProspectionPage() {
           )}
         </CardBody>
       </Card>
+
+      <ListPagination
+        basePath="/prospection"
+        params={paramsVisites}
+        page={filtres.page}
+        taille={filtres.taille}
+        total={visitesRes.count ?? 0}
+        noun="visite"
+      />
 
       <Card>
         <CardHeader
