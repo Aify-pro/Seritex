@@ -151,7 +151,7 @@ export function SeparationCouleurs({
       .then((img) => !annule && setImage(img))
       .catch(() => {
         if (annule) return;
-        setErreur("Ce fichier ne peut pas être lu comme une image (PNG, JPEG, WebP ou SVG).");
+        setErreur("Ce fichier ne peut pas être lu comme une image (PNG, JPEG, WebP, SVG ou PDF).");
         setCalcul(false);
       });
     return () => {
@@ -212,6 +212,16 @@ export function SeparationCouleurs({
   useEffect(() => () => {
     if (typeof source !== "string") URL.revokeObjectURL(original);
   }, [source, original]);
+
+  // Un PDF ne s'affiche pas dans une balise image : on montre son rendu (fond transparent, damier visible).
+  const apercuPdf = useMemo(() => {
+    if (!image?.vecteur) return null;
+    const c = document.createElement("canvas");
+    c.width = image.w;
+    c.height = image.h;
+    c.getContext("2d")!.putImageData(new ImageData(new Uint8ClampedArray(image.px), image.w, image.h), 0, 0);
+    return c.toDataURL("image/png");
+  }, [image]);
 
   const vueRendu = reglages.rendu.type !== "aplat" && rendu?.cle === cleVue ? rendu : undefined;
   const loupeVisible = loupe?.cle === `${cleVue}|${reglages.ppp}` ? loupe : null;
@@ -534,7 +544,7 @@ export function SeparationCouleurs({
           </figcaption>
           <div className={cn("flex aspect-square items-center justify-center rounded-md border border-border p-3", DAMIER)}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={imageRetouchee ?? original} alt={nom} className="max-h-full max-w-full object-contain" />
+            <img src={imageRetouchee ?? apercuPdf ?? original} alt={nom} className="max-h-full max-w-full object-contain" />
           </div>
         </figure>
         <figure className="space-y-1">
