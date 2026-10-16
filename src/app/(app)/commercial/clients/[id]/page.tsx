@@ -11,6 +11,7 @@ import { ContactActions } from "./contact-actions";
 import type { Company, Contact } from "@/lib/types/domain";
 import { formatDate } from "@/lib/utils";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { RattacherB2C } from "./rattacher-b2c";
 import { DeliveryPlaces, type PlaceWithPhoto } from "./delivery-places";
 import { FolderOpen, Globe, Lock, Mail, MapPin, Phone, Star, User } from "lucide-react";
 
@@ -38,6 +39,13 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
   ]);
 
   if (!company) notFound();
+
+  const isB2C = company.client_type === "b2c";
+  // Fiche B2C dont le contact a été rattaché à une entreprise (migration 0133).
+  const { data: rattacheeA } = company.rattachee_a
+    ? await supabase.from("companies").select("id,name").eq("id", company.rattachee_a).maybeSingle()
+    : { data: null };
+  const canModify = await can("clients", "modify");
 
   // Lieux de livraison (LIV-0) : gérés dans Seritex, indépendants de Sage.
   const [{ data: placeRows }, { data: zones }] = await Promise.all([
@@ -78,7 +86,8 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
         title={company.name}
         description="Fiche client CRM — entreprise, contacts, comptes portail liés."
         action={
-          <div className="flex gap-3 text-xs">
+          <div className="flex flex-wrap items-center gap-3 text-xs">
+            {isB2C && !rattacheeA && canModify && (contacts ?? []).length > 0 && <RattacherB2C b2cId={id} />}
             <Link href={`/mediatheque/${id}`} className="flex items-center gap-1 font-medium text-brand hover:underline">
               <FolderOpen className="h-3.5 w-3.5" /> Médiathèque
             </Link>
@@ -93,6 +102,21 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
           action={<CompanyForm company={company as Company} />}
         />
         <CardBody className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+          {isB2C && (
+            <div className="flex flex-wrap gap-1.5 sm:col-span-2">
+              <Badge tone="accent">Client particulier (B2C)</Badge>
+              {rattacheeA && <Badge tone="warning">Rattaché à {rattacheeA.name}</Badge>}
+            </div>
+          )}
+          {rattacheeA && (
+            <p className="rounded-md bg-info-soft px-3 py-2 text-xs text-info sm:col-span-2">
+              Le contact de cette fiche est désormais celui de{" "}
+              <Link href={`/commercial/clients/${rattacheeA.id}`} className="font-medium underline">
+                {rattacheeA.name}
+              </Link>
+              . La fiche et son historique sont conservés ; pour la réactiver, détachez le contact depuis l&apos;entreprise.
+            </p>
+          )}
           {fromSage && (
             <p className="flex items-start gap-2 rounded-md bg-info-soft px-3 py-2 text-xs text-info sm:col-span-2">
               <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -192,6 +216,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
                       companyId={id}
                       isPrimary={contact.is_primary_contact}
                       status={contact.status}
+                      canDetach={!isB2C && canModify}
                     />
                   </div>
                 </li>

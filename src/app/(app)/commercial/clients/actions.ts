@@ -180,3 +180,34 @@ export async function rattacherCompteB2C(userId: string) {
   revalidatePath("/commercial/clients");
   return { companyId: data as string };
 }
+
+const idSchema = z.string().uuid();
+
+/**
+ * Migration 0133 : le client particulier (B2C) devient contact d'une entreprise.
+ * Sa fiche et son historique sont conservés, seuls le contact et son compte portail déménagent.
+ */
+export async function rattacherB2CAEntreprise(b2cId: string, companyId: string) {
+  await requirePermission("clients", "modify");
+  if (!idSchema.safeParse(b2cId).success || !idSchema.safeParse(companyId).success) return { error: "Fiche invalide" };
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("attach_b2c_to_company", { p_b2c: b2cId, p_company: companyId });
+  if (error) return { error: error.message };
+  revalidatePath(`/commercial/clients/${b2cId}`);
+  revalidatePath(`/commercial/clients/${companyId}`);
+  revalidatePath("/commercial/clients");
+  return {};
+}
+
+/** Migration 0133 : le contact quitte son entreprise et devient un client particulier (B2C). */
+export async function detacherContactEnB2C(contactId: string, companyId: string) {
+  await requirePermission("clients", "modify");
+  await requirePermission("clients", "create");
+  if (!idSchema.safeParse(contactId).success) return { error: "Contact invalide" };
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("detach_contact_to_b2c", { p_contact: contactId });
+  if (error) return { error: error.message };
+  revalidatePath(`/commercial/clients/${companyId}`);
+  revalidatePath("/commercial/clients");
+  return { b2cId: data as string };
+}
