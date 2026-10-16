@@ -133,6 +133,10 @@ export interface Company {
   /** Identifiants légaux ivoiriens (migration 0061), éditables même pour une fiche Sage. */
   ncc?: string | null;
   rccm?: string | null;
+  /** Migration 0125 : 'b2c' = particulier créé dans la plateforme ; nul = non précisé / société. */
+  client_type?: "b2b" | "b2c" | null;
+  /** Migration 0133 : entreprise à laquelle le contact de cette fiche B2C a été rattaché. */
+  rattachee_a?: string | null;
 }
 
 export type ContactStatus = "actif" | "inactif";
