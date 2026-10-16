@@ -638,6 +638,8 @@ export interface StorageTarget {
   name: string;
   active: boolean;
   is_default: boolean;
+  /** « tampon » : relais temporaire quand aucun stockage n'est joignable (migration 0135). */
+  role: StorageTargetRole;
   config: Record<string, unknown>;
   created_at: string;
 }
@@ -854,6 +856,13 @@ export const MEDIA_CATEGORY_LABELS: Record<MediaFileCategory, string> = {
   nuancier: "Nuancier",
   maquette: "Maquette",
   autre: "Autre",
+};
+
+export type StorageTargetRole = "stockage" | "tampon";
+
+export const STORAGE_ROLE_LABELS: Record<StorageTargetRole, string> = {
+  stockage: "Stockage",
+  tampon: "Tampon",
 };
 
 export const STORAGE_BACKEND_LABELS: Record<StorageBackendType, string> = {

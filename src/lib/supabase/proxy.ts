@@ -12,6 +12,8 @@ const PUBLIC_PATHS = [
   "/api/health",
   // Cron des notifications : pas de session, protégé par CRON_SECRET (voir la route).
   "/api/notifications/traiter",
+  // Vidage du tampon de la médiathèque vers le NAS : même principe (CRON_SECRET).
+  "/api/media/tampon/vider",
   // Téléchargement d'un fichier de la médiathèque par un compte client DU SITE (www.seritex.ci) :
   // pas de cookie de la plateforme, la route exige le jeton du client (Authorization: Bearer).
   "/api/site/media",

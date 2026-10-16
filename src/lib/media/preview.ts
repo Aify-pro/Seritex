@@ -13,7 +13,7 @@ type ResolvedCopy =
 /**
  * Résolution "media_file_id → copie exploitable" pour la prévisualisation
  * (maquette, écran ODF), l'intégration au PDF et le téléchargement. On prend
- * la copie synchronisée de la version courante, en préférant le NAS (stockage
+ * la copie synchronisée (ou en attente dans un tampon) de la version courante, en préférant le NAS (stockage
  * principal) à Supabase Storage (anciens fichiers). Un fichier dont la seule
  * copie est sur Google Drive n'a aucun aperçu (lecture non implémentée).
  *
@@ -41,7 +41,8 @@ async function resolveCopies(mediaFileIds: string[], db?: SupabaseClient) {
     .from("media_file_copies")
     .select("media_file_version_id, remote_path, storage_target_id, storage_targets(type)")
     .in("media_file_version_id", versionIds)
-    .eq("sync_status", "synchronise");
+    // « en_attente » avec un chemin = fichier qui attend dans une cible tampon (NAS injoignable au dépôt) : déjà lisible.
+    .in("sync_status", ["synchronise", "en_attente"]);
 
   // La configuration (identifiants WebDAV) n'est lisible que par un
   // administrateur : on la lit côté serveur, jamais renvoyée au navigateur.

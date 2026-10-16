@@ -46,7 +46,12 @@ export function UploadMediaForm({
             toast.error(res.error);
             return;
           }
-          toast.success("Fichier ajouté à la médiathèque");
+          if (res.buffered) {
+            toast.warning("Fichier mis en attente", {
+              description: "Le NAS est injoignable : le fichier est conservé dans le tampon et sera déplacé dès qu'il répondra.",
+              duration: 10000,
+            });
+          } else toast.success("Fichier ajouté à la médiathèque");
           formRef.current?.reset();
           if (res.mediaFileId) onUploaded?.(res.mediaFileId);
         })

@@ -31,7 +31,12 @@ export function AddVersionForm({ mediaFileId }: { mediaFileId: string }) {
           const res = await addMediaFileVersion(formData);
           if (res?.error) toast.error(res.error);
           else {
-            toast.success("Nouvelle version enregistrée");
+            if (res.buffered) {
+              toast.warning("Version mise en attente", {
+                description: "Le NAS est injoignable : elle est conservée dans le tampon et sera déplacée dès qu'il répondra.",
+                duration: 10000,
+              });
+            } else toast.success("Nouvelle version enregistrée");
             formRef.current?.reset();
             setOpen(false);
           }
