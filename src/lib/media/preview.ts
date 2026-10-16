@@ -1,4 +1,5 @@
 import "server-only";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getSupabaseStorageSignedUrl } from "@/lib/storage/providers/supabase-storage";
@@ -20,11 +21,11 @@ type ResolvedCopy =
  * supabaseStorageProvider.upload) — le premier segment est retiré ici pour
  * obtenir le chemin réel dans le bucket.
  */
-async function resolveCopies(mediaFileIds: string[]) {
+async function resolveCopies(mediaFileIds: string[], db?: SupabaseClient) {
   const result = new Map<string, ResolvedCopy>();
   if (mediaFileIds.length === 0) return result;
 
-  const supabase = await createClient();
+  const supabase = db ?? (await createClient());
 
   const { data: files } = await supabase
     .from("media_files")
@@ -117,9 +118,10 @@ export async function getMediaFilePreviewUrls(mediaFileIds: string[]): Promise<M
  * lib/storage/patronnage-files.ts).
  */
 export async function getMediaFileBuffers(
-  mediaFileIds: string[]
+  mediaFileIds: string[],
+  db?: SupabaseClient
 ): Promise<Map<string, { buffer: Buffer; mimeType: string | null }>> {
-  const resolved = await resolveCopies(mediaFileIds);
+  const resolved = await resolveCopies(mediaFileIds, db);
   const result = new Map<string, { buffer: Buffer; mimeType: string | null }>();
   if (resolved.size === 0) return result;
 
@@ -143,7 +145,13 @@ export async function getMediaFileBuffers(
   return result;
 }
 
-/** Contenu d'un fichier pour la route de téléchargement (null si introuvable ou illisible). */
-export async function getMediaFileContent(mediaFileId: string): Promise<{ buffer: Buffer; mimeType: string | null } | null> {
-  return (await getMediaFileBuffers([mediaFileId])).get(mediaFileId) ?? null;
+/**
+ * Contenu d'un fichier pour la route de téléchargement (null si introuvable ou illisible).
+ * `db` : client à utiliser pour résoudre les copies. Par défaut celui de l'utilisateur connecté
+ * (cookies). Un compte client ne lit pas `storage_targets` (réservé au personnel) : pour lui, la
+ * route appelante PROUVE d'abord l'accès au fichier avec sa session, puis passe ici le client
+ * d'administration.
+ */
+export async function getMediaFileContent(mediaFileId: string, db?: SupabaseClient): Promise<{ buffer: Buffer; mimeType: string | null } | null> {
+  return (await getMediaFileBuffers([mediaFileId], db)).get(mediaFileId) ?? null;
 }
