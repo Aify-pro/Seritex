@@ -12,6 +12,9 @@ const PUBLIC_PATHS = [
   "/api/health",
   // Cron des notifications : pas de session, protégé par CRON_SECRET (voir la route).
   "/api/notifications/traiter",
+  // Téléchargement d'un fichier de la médiathèque par un compte client DU SITE (www.seritex.ci) :
+  // pas de cookie de la plateforme, la route exige le jeton du client (Authorization: Bearer).
+  "/api/site/media",
   "/mot-de-passe-oublie",
   "/reinitialiser-mot-de-passe",
   "/confirmation-livraison",
