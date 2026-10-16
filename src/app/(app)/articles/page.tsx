@@ -11,6 +11,7 @@ import { applyArticleFilters, articleFiltersToSearchParams, paginate, parseArtic
 import { loadArticleCatalog } from "@/lib/articles/catalog";
 import { NATURE_LABELS, TYPE_APPRO_LABELS, UNITE_LABELS, type Unite } from "@/lib/articles/natures";
 import { ArticlesFilters } from "./articles-filters";
+import { Presets } from "@/components/filters/presets";
 
 const nf = new Intl.NumberFormat("fr-FR");
 
@@ -56,6 +57,7 @@ export default async function ArticlesPage({
         }
       />
 
+      <Presets module="articles" />
       <ArticlesFilters values={filters} options={catalog.options} showGrille={canSeeCosts} />
 
       <Card>
