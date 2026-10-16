@@ -14,6 +14,8 @@ const PUBLIC_PATHS = [
   "/api/notifications/traiter",
   // Vidage du tampon de la médiathèque vers le NAS : même principe (CRON_SECRET).
   "/api/media/tampon/vider",
+  // Copie des fichiers envoyés par le site vers la médiathèque (0136) : même principe (CRON_SECRET).
+  "/api/media/importer-site",
   // Téléchargement d'un fichier de la médiathèque par un compte client DU SITE (www.seritex.ci) :
   // pas de cookie de la plateforme, la route exige le jeton du client (Authorization: Bearer).
   "/api/site/media",
