@@ -3,18 +3,24 @@
 import { useId, useRef, useState, useTransition, type MouseEvent } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Crosshair, Trash2, Upload } from "lucide-react";
+import { Crosshair, Link2, Trash2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { scoperSvg } from "@/lib/articles/mockup-scope";
 import { analyserMockup, enregistrerMockup, supprimerMockup } from "../technique/mockup-actions";
 
 type Point = { x: number; y: number };
+/**
+ * Repère d'une zone d'impression. `zones` = zones de couleur sur lesquelles le
+ * visuel peut passer (le « groupe » : les coutures entre ces zones ne le
+ * coupent pas) ; hors de ces zones, il est découpé. Absent = tout le vêtement.
+ */
+type Repere = Point & { zones?: string[] };
 export type MockupData = {
   svg: string;
   zones: Record<string, string>;
   largeur_cm: number | null;
   cadre: { x: number; y: number; w: number; h: number } | null;
-  reperes: Record<string, Point>;
+  reperes: Record<string, Repere>;
 };
 
 const CONTOUR = "__contour";
@@ -63,12 +69,15 @@ export function MockupEditor({
   const [svg, setSvg] = useState<string | null>(initial?.svg ?? null);
   const [zones, setZones] = useState<Record<string, string>>(initial?.zones ?? {});
   const [largeur, setLargeur] = useState(initial?.largeur_cm ? String(initial.largeur_cm) : "52");
-  const [reperes, setReperes] = useState<Record<string, Point>>(initial?.reperes ?? {});
+  const [reperes, setReperes] = useState<Record<string, Repere>>(initial?.reperes ?? {});
   const [repereActif, setRepereActif] = useState<string | null>(null);
   const [survol, setSurvol] = useState<string | null>(null);
   const [modifie, setModifie] = useState(false);
 
   const elements = svg ? elementsDe(svg) : [];
+  const zonesUtiles = zonesCouleur.filter((z) => Object.values(zones).includes(z.zone_key));
+  const zonesSansCalque = zonesCouleur.filter((z) => !Object.values(zones).includes(z.zone_key));
+  const aDesign = elements.some((id) => zones[id] === CONTOUR && norm(id).startsWith("design"));
   const vb = svg?.slice(0, svg.indexOf(">")).match(/viewBox="([^"]+)"/)?.[1] ?? "0 0 400 440";
 
   function autoCorrespondance(ids: string[]): Record<string, string> {
@@ -77,9 +86,62 @@ export function MockupEditor({
       const n = norm(id);
       const z = zonesCouleur.find((zc) => norm(zc.zone_key) === n || norm(zc.zone_label) === n);
       if (z) out[id] = z.zone_key;
-      else if (/contour|silhouette|vetement|tshirt|outline/.test(n)) out[id] = CONTOUR;
+      else if (/^design|contour|silhouette|vetement|tshirt|outline/.test(n)) out[id] = CONTOUR;
     }
     return out;
+  }
+
+  /** Relie les calques encore libres à leur zone (utile après l'ajout d'une zone) ; les choix manuels sont gardés. */
+  function relier() {
+    const auto = autoCorrespondance(elements.filter((id) => !zones[id]));
+    const n = Object.keys(auto).length;
+    if (n === 0) {
+      toast.message("Aucun nouveau calque à relier : nommez le calque comme la zone (clé ou libellé) dans le SVG.");
+      return;
+    }
+    setZones({ ...zones, ...auto });
+    setModifie(true);
+    toast.success(`${n} calque(s) relié(s)`);
+  }
+
+  /** Zone de couleur (la plus haute dans l'ordre du dessin) sous un point du SVG, ou null. */
+  function zoneSous(p: Point, liens: Record<string, string>): string | null {
+    const racine = conteneur.current?.querySelector("svg");
+    if (!racine) return null;
+    let retenue: { zk: string; el: Element } | null = null;
+    for (const [id, zk] of Object.entries(liens)) {
+      if (!zk || zk === CONTOUR) continue;
+      const el = racine.querySelector(`[id="${pfx}-${id.replace(/["\\]/g, "\\$&")}"]`);
+      if (!el) continue;
+      const formes = (el instanceof SVGGeometryElement ? [el] : [...el.querySelectorAll("path,rect,circle,ellipse,polygon,polyline")]) as SVGGeometryElement[];
+      const dedans = formes.some((f) => {
+        const m = f.getCTM();
+        return m ? f.isPointInFill(new DOMPoint(p.x, p.y).matrixTransform(m.inverse())) : false;
+      });
+      if (dedans && (!retenue || retenue.el.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING)) retenue = { zk, el };
+    }
+    return retenue?.zk ?? null;
+  }
+
+  /** Anciens repères sans zone de pose : propose la zone de couleur sous chaque repère. */
+  function detecterZonesDePose() {
+    const suite: Record<string, Repere> = { ...reperes };
+    let n = 0;
+    for (const [id, r] of Object.entries(reperes)) {
+      if (r.zones) continue;
+      const sous = zoneSous(r, zones);
+      if (sous) {
+        suite[id] = { ...r, zones: [sous] };
+        n++;
+      }
+    }
+    if (n === 0) {
+      toast.message("Aucun repère ne tombe dans une zone reliée : reliez d'abord les calques.");
+      return;
+    }
+    setReperes(suite);
+    setModifie(true);
+    toast.success(`${n} zone(s) de pose détectée(s) : enregistrez pour les appliquer.`);
   }
 
   async function deposer(f: File | undefined) {
@@ -104,7 +166,10 @@ export function MockupEditor({
     pt.x = e.clientX;
     pt.y = e.clientY;
     const p = pt.matrixTransform(calque.current.getScreenCTM()!.inverse());
-    setReperes({ ...reperes, [repereActif]: { x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10 } });
+    const pos = { x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10 };
+    // Par défaut le visuel reste dans la zone où le repère est posé ; on peut ensuite l'étendre aux zones voisines.
+    const sous = zoneSous(pos, zones);
+    setReperes({ ...reperes, [repereActif]: { ...pos, zones: sous ? [sous] : reperes[repereActif]?.zones } });
     setRepereActif(null);
     setModifie(true);
   }
@@ -242,7 +307,14 @@ export function MockupEditor({
 
           <div className="space-y-4 text-sm">
             <div>
-              <p className="text-xs font-medium text-foreground-muted">Calques du SVG → zones de couleur</p>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-medium text-foreground-muted">Calques du SVG → zones de couleur</p>
+                {canModify && elements.length > 0 && (
+                  <Button size="sm" variant="ghost" onClick={relier} disabled={pending} title="Relie les calques libres dont le nom correspond à une zone (clé ou libellé)">
+                    <Link2 className="h-3.5 w-3.5" /> Relier
+                  </Button>
+                )}
+              </div>
               {elements.length === 0 ? (
                 <p className="mt-1 text-warning">Aucun élément nommé : nommez les calques comme les zones (corps_avant, col…) avant l&apos;export.</p>
               ) : (
@@ -277,6 +349,16 @@ export function MockupEditor({
                     </li>
                   ))}
                 </ul>
+              )}
+              {elements.length > 0 && !aDesign && (
+                <p className="mt-1 text-xs text-warning">
+                  Aucun calque « Design » : ajoutez-le dans le SVG (tracé du vêtement : contours et coutures) ; il est relié au contour du vêtement automatiquement.
+                </p>
+              )}
+              {zonesSansCalque.length > 0 && (
+                <p className="mt-1 text-xs text-warning">
+                  Zone(s) sans calque : {zonesSansCalque.map((z) => z.zone_label).join(", ")}. Nommez un calque comme la zone puis cliquez sur « Relier », ou choisissez-le dans la liste.
+                </p>
               )}
             </div>
 
@@ -315,6 +397,53 @@ export function MockupEditor({
                 {zonesImpression.length === 0 && <span className="text-xs text-foreground-muted">Aucune zone d&apos;impression déclarée.</span>}
               </div>
               <p className="mt-1 text-xs text-foreground-muted">Ne placez que les zones visibles sur cette vue (poitrine sur l&apos;avant, dos sur le dos…).</p>
+              {zonesImpression.some((z) => reperes[z.id]) && (
+                <div className="mt-3 space-y-2">
+                  {canModify && zonesImpression.some((z) => reperes[z.id] && !reperes[z.id].zones) && (
+                    <Button size="sm" variant="secondary" onClick={detecterZonesDePose} disabled={pending}>
+                      Détecter la zone de pose des repères existants
+                    </Button>
+                  )}
+                  <p className="text-xs font-medium text-foreground-muted">
+                    Où le visuel peut passer : hors des zones cochées il est coupé. Cochez plusieurs zones pour qu&apos;il traverse leurs coutures.
+                  </p>
+                  {zonesImpression
+                    .filter((z) => reperes[z.id])
+                    .map((z) => {
+                      const choisies = reperes[z.id].zones;
+                      return (
+                        <div key={z.id} className="rounded-md border border-border p-2">
+                          <p className="text-xs font-medium">
+                            {z.zone_label}
+                            {!choisies && <span className="ml-2 font-normal text-foreground-muted">(tout le vêtement)</span>}
+                          </p>
+                          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+                            {zonesUtiles.map((zc) => {
+                              const coche = choisies ? choisies.includes(zc.zone_key) : true;
+                              return (
+                                <label key={zc.zone_key} className="inline-flex items-center gap-1 text-xs">
+                                  <input
+                                    type="checkbox"
+                                    checked={coche}
+                                    disabled={!canModify || pending}
+                                    onChange={() => {
+                                      const base = choisies ?? zonesUtiles.map((u) => u.zone_key);
+                                      const suite = coche ? base.filter((k) => k !== zc.zone_key) : [...base, zc.zone_key];
+                                      if (suite.length === 0) return; // au moins une zone
+                                      setReperes({ ...reperes, [z.id]: { ...reperes[z.id], zones: suite } });
+                                      setModifie(true);
+                                    }}
+                                  />
+                                  {zc.zone_label}
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
             </div>
 
             {canModify && (

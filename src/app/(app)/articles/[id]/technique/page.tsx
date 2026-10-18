@@ -64,7 +64,7 @@ export default async function ArticleTechniquePage({ params }: { params: Promise
       <Card>
         <CardHeader
           title="Mockups SVG (e-shop)"
-          description="Un dessin par vue, dont les calques portent le nom des zones de couleur : sur l'e-shop, le client voit son vêtement aux bonnes couleurs, zone par zone, et place ses visuels à l'échelle. Les repères positionnent les zones d'impression."
+          description="Un dessin par vue, dont les calques portent le nom des zones de couleur : sur l'e-shop, le client voit son vêtement aux bonnes couleurs, zone par zone, et place ses visuels à l'échelle. Les repères positionnent les zones d'impression ; pour chacune, cochez les zones de couleur où le visuel peut passer (hors de ces zones il est coupé). Le calque « Design » porte le tracé du vêtement."
         />
         <CardBody className="space-y-4">
           {(["avant", "dos"] as const).map((vue) => (

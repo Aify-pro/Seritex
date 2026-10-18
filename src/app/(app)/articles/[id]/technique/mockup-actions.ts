@@ -20,7 +20,12 @@ export async function analyserMockup(texte: string) {
   return { svg: r.resultat.svg, viewBox: r.resultat.viewBox, elements: r.resultat.elements };
 }
 
-const point = z.object({ x: z.number().finite(), y: z.number().finite() });
+/** Repère d'une zone d'impression ; `zones` = zones de couleur où le visuel peut passer (absent = tout le vêtement). */
+const point = z.object({
+  x: z.number().finite(),
+  y: z.number().finite(),
+  zones: z.array(z.string().min(1).max(100)).min(1).max(50).optional(),
+});
 const schema = z.object({
   modelId: z.guid(),
   vue: z.enum(["avant", "dos"]),
