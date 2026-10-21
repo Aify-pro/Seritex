@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { requirePermission } from "@/lib/auth/permissions";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { DROITS_CLIENT_CLES } from "@/lib/clients/droits";
 
 const companySchema = z.object({
   company_id: z.string().uuid(),
@@ -210,4 +211,31 @@ export async function detacherContactEnB2C(contactId: string, companyId: string)
   revalidatePath(`/commercial/clients/${companyId}`);
   revalidatePath("/commercial/clients");
   return { b2cId: data as string };
+}
+
+const droitSchema = z.object({
+  company_id: z.string().uuid(),
+  droit: z.string().refine((d) => DROITS_CLIENT_CLES.includes(d), "Droit inconnu"),
+  autorise: z.boolean(),
+  user_id: z.string().uuid().nullable(),
+});
+
+/**
+ * Migration 0140 : droits de l'espace client. Sans `userId`, règle la société (false = retiré à tous ses comptes).
+ * Avec `userId`, règle ce compte : false = restreint, true = hérite de sa société (jamais plus que sa société).
+ */
+export async function definirDroitClient(companyId: string, droit: string, autorise: boolean, userId: string | null = null) {
+  await requirePermission("clients", "modify");
+  const parsed = droitSchema.safeParse({ company_id: companyId, droit, autorise, user_id: userId });
+  if (!parsed.success) return { error: "Droit invalide" };
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("definir_droit_client", {
+    p_company: parsed.data.company_id,
+    p_droit: parsed.data.droit,
+    p_autorise: parsed.data.autorise,
+    p_user: parsed.data.user_id,
+  });
+  if (error) return { error: error.message };
+  revalidatePath(`/commercial/clients/${companyId}`);
+  return {};
 }
