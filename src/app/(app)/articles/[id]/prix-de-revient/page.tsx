@@ -4,7 +4,7 @@ import { requireArticles } from "@/lib/articles/access";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
 import { formatDateTime } from "@/lib/utils";
 import { getSizeOptionsByModel } from "@/lib/quote-dispatch";
-import { getModelPricings, getPricingSettings } from "@/lib/tarification";
+import { getModelPricings, getPricingSettings, getTextilePricesKg } from "@/lib/tarification";
 import { ModelPricingEditor, type FabricOption } from "../_components/model-pricing-editor";
 import { PurchasedPricingEditor } from "../_components/purchased-pricing-editor";
 import { UNITE_LABELS, type Unite } from "@/lib/articles/natures";
@@ -36,7 +36,14 @@ export default async function ArticleCostPage({ params }: { params: Promise<{ id
     const n = (v: unknown) => (v == null ? null : Number(v));
     return (
       <Card>
-        <CardHeader title="Prix de revient et prix de vente" description="Direction seulement. Le commercial ne voit que les prix de vente (onglet Ventes)." />
+        <CardHeader
+          title="Prix de revient et prix de vente"
+          description={
+            article.nature === "mp"
+              ? "Direction seulement. Le commercial ne voit que les prix de vente (onglet Ventes). Pour un tissu, le prix d'achat de l'article plus les frais d'approche donnent le prix rendu au kg, le même pour tous les grammages : il valorise le tissu dans le prix de revient des produits finis et des ODF."
+              : "Direction seulement. Le commercial ne voit que les prix de vente (onglet Ventes)."
+          }
+        />
         <CardBody>
           <PurchasedPricingEditor
             productModelId={id}
@@ -83,9 +90,7 @@ export default async function ArticleCostPage({ params }: { params: Promise<{ id
   ]);
   const pricing = pricings[id];
   const textileIds = (allowed ?? []).map((a) => a.textile_id as string);
-  const { data: prices } = textileIds.length
-    ? await supabase.from("textile_prices").select("textile_id,prix_kg").in("textile_id", textileIds)
-    : { data: [] };
+  const prices = await getTextilePricesKg(textileIds, supabase);
   const fabrics: FabricOption[] = (allowed ?? [])
     .map((a) => a.textiles as unknown as { id: string; nom: string; grammage: number | null } | null)
     .filter((t): t is { id: string; nom: string; grammage: number | null } => !!t)
@@ -94,10 +99,7 @@ export default async function ArticleCostPage({ params }: { params: Promise<{ id
       id: t.id,
       nom: t.nom,
       grammage: t.grammage != null ? Number(t.grammage) : null,
-      prixKg: (() => {
-        const p = (prices ?? []).find((x) => x.textile_id === t.id);
-        return p ? Number(p.prix_kg) : null;
-      })(),
+      prixKg: prices[t.id] ?? null,
     }));
 
   return (

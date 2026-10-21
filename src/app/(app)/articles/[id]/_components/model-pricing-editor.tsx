@@ -21,7 +21,7 @@ type ComponentDraft = {
   perte: string;
 };
 
-/** Textile proposé pour l'aperçu : grammage et prix au kg (Tarification). */
+/** Textile proposé pour l'aperçu : grammage et prix au kg (fiche de l'article tissu). */
 export type FabricOption = { id: string; nom: string; grammage: number | null; prixKg: number | null };
 
 const PRESETS = ["Tissu", "Col", "Confection", "Fournitures", "Charges fixes"];
@@ -458,7 +458,7 @@ function FabricSection({
             <option key={f.id} value={f.id}>
               {f.nom}
               {f.grammage ? ` · ${f.grammage} g/m²` : ""}
-              {f.prixKg ? ` · ${formatMoney(f.prixKg)}/kg` : " · prix au kg à saisir (Tarification)"}
+              {f.prixKg ? ` · ${formatMoney(f.prixKg)}/kg` : " · prix d'achat à saisir sur la fiche de l'article tissu"}
             </option>
           ))}
         </select>

@@ -4,57 +4,31 @@ import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
 import { getPricingSettings, getPrintGrid } from "@/lib/tarification";
 import { PricingSettingsForm, PrintCostsForm } from "./settings-forms";
-import { TextilePricesForm } from "./textile-prices-form";
 import { SerigraphieForm } from "./serigraphie-form";
 import { chargerParametresSerigraphie } from "@/lib/separation/encres-serveur";
 
 /**
  * Paramétrage de la tarification (migration 0067) — Direction et
  * administrateur. La grille de chaque modèle vit dans sa fiche article
- * (onglet Prix de revient) ; le prix de revient réel, dans la fiche de l'ODF.
+ * (onglet Prix de revient), comme le prix d'achat au kg d'un tissu (migration
+ * 0140) ; le prix de revient réel, dans la fiche de l'ODF.
  */
 export default async function TarificationSettingsPage() {
   await requireModule("tarification");
   const supabase = await createClient();
-  const [settings, printGrid, { data: textiles }, { data: textilePrices }, serigraphie] = await Promise.all([
-    getPricingSettings(),
-    getPrintGrid(),
-    supabase.from("textiles").select("id,nom,grammage").eq("active", true).order("nom"),
-    supabase.from("textile_prices").select("textile_id,prix_kg"),
-    chargerParametresSerigraphie(supabase),
-  ]);
+  const [settings, printGrid, serigraphie] = await Promise.all([getPricingSettings(), getPrintGrid(), chargerParametresSerigraphie(supabase)]);
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Tarification"
-        description="Valeurs communes à tous les modèles : charges, marge et coefficient, prix du tissu au kg, grille impression. La grille de chaque modèle se saisit dans sa fiche article."
+        description="Valeurs communes à tous les modèles : charges, marge et coefficient, grille impression. La grille de chaque modèle se saisit dans sa fiche article, le prix d'achat au kg d'un tissu dans la fiche de l'article tissu."
       />
 
       <Card>
         <CardHeader title="Paramètres généraux" description="Valeurs par défaut de tous les modèles ; un modèle peut avoir ses propres charges et marge." />
         <CardBody>
           <PricingSettingsForm initial={settings} />
-        </CardBody>
-      </Card>
-
-      <Card>
-        <CardHeader
-          title="Prix du tissu au kg"
-          description="Prix rendu (douane comprise), par textile. Il valorise le tissu pesé dans le prix de revient réel des ODF ; un ODF peut avoir son propre prix (famille de couleur, nouveau prix fournisseur)."
-        />
-        <CardBody>
-          <TextilePricesForm
-            textiles={(textiles ?? []).map((t) => ({
-              id: t.id as string,
-              nom: t.nom as string,
-              grammage: (t.grammage as number | null) ?? null,
-              prixKg: (() => {
-                const p = (textilePrices ?? []).find((x) => x.textile_id === t.id);
-                return p ? Number(p.prix_kg) : null;
-              })(),
-            }))}
-          />
         </CardBody>
       </Card>
 

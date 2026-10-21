@@ -74,7 +74,7 @@ export function resolveComponents(
     if (c.mode !== "tissu_calcule") return c;
     if (!fabric || !fabric.grammage || !fabric.prixKg) {
       warnings.push(
-        `« ${c.libelle} » calculé : ${!fabric ? "aucun textile pour ce modèle" : !fabric.grammage ? `grammage du textile ${fabric.textileNom ?? ""} inconnu` : `prix au kg du textile ${fabric.textileNom ?? ""} non saisi`}`
+        `« ${c.libelle} » calculé : ${!fabric ? "aucun textile pour ce modèle" : !fabric.grammage ? `grammage du textile ${fabric.textileNom ?? ""} inconnu` : `prix d'achat du tissu ${fabric.textileNom ?? ""} non saisi (fiche de l'article tissu)`}`
       );
       return { ...c, base: 0, supplements: {} };
     }
