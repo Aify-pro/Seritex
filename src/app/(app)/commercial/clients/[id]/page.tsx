@@ -12,6 +12,7 @@ import type { Company, Contact } from "@/lib/types/domain";
 import { formatDate } from "@/lib/utils";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { RattacherB2C } from "./rattacher-b2c";
+import { DroitsClient } from "./droits-client";
 import { DeliveryPlaces, type PlaceWithPhoto } from "./delivery-places";
 import { FolderOpen, Globe, Lock, Mail, MapPin, Phone, Star, User } from "lucide-react";
 
@@ -26,7 +27,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
   const { id } = await params;
   const supabase = await createClient();
 
-  const [{ data: company }, { data: sage }, { data: contacts }, { data: linkedAccounts }] = await Promise.all([
+  const [{ data: company }, { data: sage }, { data: contacts }, { data: linkedAccounts }, { data: retraitsDroits }] = await Promise.all([
     supabase.from("companies").select("*").eq("id", id).single(),
     // Vue de liste : libellés Sage normalisés, commercial, statut (migration 0060).
     supabase
@@ -36,6 +37,8 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
       .maybeSingle(),
     supabase.from("contacts").select("*").eq("company_id", id).order("is_primary_contact", { ascending: false }),
     supabase.from("app_users").select("id,full_name,email,active,contact_id").eq("company_id", id).eq("role", "client"),
+    // Droits de l'espace client retirés (migration 0140) : tout est permis par défaut.
+    supabase.from("client_droits_retires").select("droit,user_id").eq("company_id", id),
   ]);
 
   if (!company) notFound();
@@ -226,6 +229,21 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
               <li className="px-5 py-8 text-center text-sm text-foreground-muted">Aucun contact pour ce client.</li>
             )}
           </ul>
+        </CardBody>
+      </Card>
+
+      <Card id="droits-espace-client">
+        <CardHeader
+          title="Accès à l'espace client"
+          description="Ce que les comptes de cette société peuvent faire sur www.seritex.ci/espace-client. Réglage par société, avec restriction possible compte par compte."
+        />
+        <CardBody>
+          <DroitsClient
+            companyId={id}
+            comptes={(linkedAccounts ?? []).map((a) => ({ id: a.id, label: a.full_name || a.email, actif: a.active }))}
+            retraits={(retraitsDroits ?? []) as { droit: string; user_id: string | null }[]}
+            editable={canModify}
+          />
         </CardBody>
       </Card>
 
