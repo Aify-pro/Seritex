@@ -15,11 +15,11 @@
 --        - toutes les couleurs actives, les tailles du groupe (Homme / Femme /
 --          Enfant), les grammages Jersey 125/145/160/180 (T-shirts) ou le
 --          Piqué 260 (polos) ;
---        - zones de personnalisation et zones imprimables de TS002 ;
---        - déclinaisons générées pour le tissu par défaut seulement
---          (Jersey 180 g / Piqué 260 g) : les autres grammages se génèrent
---          depuis l'onglet Déclinaisons de l'article.
---   4. « Vert turquoise » passe de VER à VTQ (codes de déclinaison ambigus).
+--        - zones de personnalisation et zones imprimables de TS002.
+--   4. Aucune déclinaison générée : elles se créent article par article depuis
+--      l'onglet Déclinaisons (bouton Générer). Attention : « Vert turquoise »
+--      (VER) en 3XL/4XL/5XL et VER3/VER4/VER5 en XL donnent le même code ;
+--      différenciez-les dans Paramètres > Codification avant de générer.
 --   5. Aucun prix : la composition du coût et la tarification se renseignent
 --      dans Tarification. Aucun article n'est publié sur l'e-shop.
 --
@@ -65,21 +65,7 @@ where m.code = 'TS001' and m.name = 'T-shirt col V'
   and s.nom = 'Tshirt' and s.parent_id = f.id;
 
 -- ----------------------------------------------------------------------------
--- 3. CODES COURTS AMBIGUS
--- ----------------------------------------------------------------------------
--- Le code d'une déclinaison concatène couleur et taille sans séparateur :
--- « Vert turquoise » (VER) en 3XL et « Vert émeraude » (VER3) en XL donnaient
--- tous deux ...VER3XL. « Vert turquoise » devient VTQ, à condition qu'aucune
--- déclinaison existante ne porte déjà cette couleur (son code changerait).
-
-update colors
-set code_court = 'VTQ'
-where code_court = 'VER' and name = 'Vert turquoise'
-  and not exists (select 1 from product_variants pv where pv.color_id = colors.id)
-  and not exists (select 1 from colors c2 where c2.code_court = 'VTQ');
-
--- ----------------------------------------------------------------------------
--- 4. NOUVEAUX ARTICLES
+-- 3. NOUVEAUX ARTICLES
 -- ----------------------------------------------------------------------------
 
 do $$
@@ -105,18 +91,6 @@ begin
   if v_famille is null or v_cat_ts is null or v_cat_po is null
      or v_jersey is null or v_pique is null or v_tissu_jersey is null or v_tissu_pique is null then
     raise exception 'référentiels manquants (famille Produit Fini, catégories TS/PO, matières JE/PI, Jersey 180 g, Piqué 260 g)';
-  end if;
-
-  -- Aucune couleur × taille d'un même groupe ne doit donner le même code.
-  if exists (
-    select 1
-    from colors c
-    join sizes s on s.active
-    where c.active
-    group by s.groupe, c.code_court || s.code_court
-    having count(*) > 1
-  ) then
-    raise exception 'codes courts couleur/taille ambigus : différenciez-les dans Paramètres > Codification avant de relancer';
   end if;
 
   -- Liste issue des dossiers de Patron > Nos produits (ordre = ordre des codes).
@@ -220,32 +194,10 @@ begin
     where product_model_id = (select id from product_models where code = 'TS002')
   ) z;
 
-  -- Déclinaisons : tissu par défaut × couleurs × tailles (codes et articles de
-  -- stock vierge / personnalisé / 2ᵉ choix comme ensure_variants).
-  insert into product_variants (model_id, textile_id, color_id, size_id, code)
-  select pm.id, m.textile_id, pmc.color_id, pms.size_id,
-         generate_variant_code(pm.id, m.textile_id, pmc.color_id, pms.size_id)
-  from product_models pm
-  join product_models m on m.id = pm.id
-  join product_model_colors pmc on pmc.product_model_id = pm.id
-  join product_model_sizes pms on pms.product_model_id = pm.id
-  where pm.id = any (v_ids);
-
-  perform ensure_variant_stock_articles(pv.id)
-  from product_variants pv
-  where pv.model_id = any (v_ids);
-
-  -- Garde-fou : autant d'articles que prévu, tous avec un code et des déclinaisons.
+  -- Garde-fou : autant d'articles que prévu, tous avec un code.
   select count(*) into v_attendu from product_models where id = any (v_ids) and code is not null;
   if v_attendu <> array_length(v_ids, 1) then
     raise exception 'codes manquants sur les nouveaux articles (% sur %)', v_attendu, array_length(v_ids, 1);
-  end if;
-  if exists (
-    select 1 from product_models m
-    where m.id = any (v_ids)
-      and not exists (select 1 from product_variants pv where pv.model_id = m.id)
-  ) then
-    raise exception 'un nouvel article n''a aucune déclinaison';
   end if;
 end;
 $$;
