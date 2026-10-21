@@ -19,7 +19,8 @@
 --        - déclinaisons générées pour le tissu par défaut seulement
 --          (Jersey 180 g / Piqué 260 g) : les autres grammages se génèrent
 --          depuis l'onglet Déclinaisons de l'article.
---   4. Aucun prix : la composition du coût et la tarification se renseignent
+--   4. « Vert turquoise » passe de VER à VTQ (codes de déclinaison ambigus).
+--   5. Aucun prix : la composition du coût et la tarification se renseignent
 --      dans Tarification. Aucun article n'est publié sur l'e-shop.
 --
 -- Idempotente : un article déjà présent (même nom) n'est pas recréé.
@@ -64,7 +65,21 @@ where m.code = 'TS001' and m.name = 'T-shirt col V'
   and s.nom = 'Tshirt' and s.parent_id = f.id;
 
 -- ----------------------------------------------------------------------------
--- 3. NOUVEAUX ARTICLES
+-- 3. CODES COURTS AMBIGUS
+-- ----------------------------------------------------------------------------
+-- Le code d'une déclinaison concatène couleur et taille sans séparateur :
+-- « Vert turquoise » (VER) en 3XL et « Vert émeraude » (VER3) en XL donnaient
+-- tous deux ...VER3XL. « Vert turquoise » devient VTQ, à condition qu'aucune
+-- déclinaison existante ne porte déjà cette couleur (son code changerait).
+
+update colors
+set code_court = 'VTQ'
+where code_court = 'VER' and name = 'Vert turquoise'
+  and not exists (select 1 from product_variants pv where pv.color_id = colors.id)
+  and not exists (select 1 from colors c2 where c2.code_court = 'VTQ');
+
+-- ----------------------------------------------------------------------------
+-- 4. NOUVEAUX ARTICLES
 -- ----------------------------------------------------------------------------
 
 do $$
@@ -90,6 +105,18 @@ begin
   if v_famille is null or v_cat_ts is null or v_cat_po is null
      or v_jersey is null or v_pique is null or v_tissu_jersey is null or v_tissu_pique is null then
     raise exception 'référentiels manquants (famille Produit Fini, catégories TS/PO, matières JE/PI, Jersey 180 g, Piqué 260 g)';
+  end if;
+
+  -- Aucune couleur × taille d'un même groupe ne doit donner le même code.
+  if exists (
+    select 1
+    from colors c
+    join sizes s on s.active
+    where c.active
+    group by s.groupe, c.code_court || s.code_court
+    having count(*) > 1
+  ) then
+    raise exception 'codes courts couleur/taille ambigus : différenciez-les dans Paramètres > Codification avant de relancer';
   end if;
 
   -- Liste issue des dossiers de Patron > Nos produits (ordre = ordre des codes).
