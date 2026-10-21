@@ -113,6 +113,28 @@ export function effectiveParams(settings: PricingSettings, model: Pick<ModelPric
 }
 
 /**
+ * Prix rendu au kg de chaque textile (migration 0140) : prix d'achat ×
+ * (1 + frais d'approche) de son article tissu, le même pour tous ses
+ * grammages — comme textile_prix_kg() côté SQL. Null si non renseigné.
+ */
+export async function getTextilePricesKg(textileIds: string[], db?: Db): Promise<Record<string, number | null>> {
+  if (textileIds.length === 0) return {};
+  const supabase = db ?? (await createClient());
+  const { data: textiles } = await supabase.from("textiles").select("id,product_model_id").in("id", textileIds);
+  const modelIds = [...new Set((textiles ?? []).map((t) => t.product_model_id as string | null).filter((v): v is string => !!v))];
+  const { data: pricings } = modelIds.length
+    ? await supabase.from("model_pricing").select("product_model_id,prix_achat,frais_pct").in("product_model_id", modelIds)
+    : { data: [] };
+  return Object.fromEntries(
+    textileIds.map((id) => {
+      const modelId = (textiles ?? []).find((t) => t.id === id)?.product_model_id;
+      const mp = (pricings ?? []).find((p) => p.product_model_id === modelId);
+      return [id, mp?.prix_achat != null ? Number(mp.prix_achat) * (1 + Number(mp.frais_pct ?? 0) / 100) : null];
+    })
+  );
+}
+
+/**
  * Contexte tissu de chaque modèle (ART-C, A9) : surfaces par taille et le
  * textile de la déclinaison — celui demandé (`textileByModel`, ex. grammage
  * choisi sur le devis), sinon le tissu principal du modèle, sinon son premier
@@ -137,23 +159,19 @@ export async function getFabricContexts(
     ((allowed ?? []).find((a) => a.product_model_id === id)?.textile_id as string | undefined) ??
     null;
   const textileIds = [...new Set(modelIds.map(textileIdOf).filter((v): v is string => !!v))];
-  const [{ data: textiles }, { data: prices }] = textileIds.length
-    ? await Promise.all([
-        supabase.from("textiles").select("id,nom,grammage").in("id", textileIds),
-        supabase.from("textile_prices").select("textile_id,prix_kg").in("textile_id", textileIds),
-      ])
-    : [{ data: [] }, { data: [] }];
+  const [{ data: textiles }, prices] = textileIds.length
+    ? await Promise.all([supabase.from("textiles").select("id,nom,grammage").in("id", textileIds), getTextilePricesKg(textileIds, supabase)])
+    : [{ data: [] }, {} as Record<string, number | null>];
 
   const out: Record<string, FabricContext & { textileId: string | null }> = {};
   for (const id of modelIds) {
     const tid = textileIdOf(id);
     const t = (textiles ?? []).find((x) => x.id === tid);
-    const p = (prices ?? []).find((x) => x.textile_id === tid);
     out[id] = {
       textileId: tid,
       textileNom: (t?.nom as string | undefined) ?? null,
       grammage: t?.grammage != null ? Number(t.grammage) : null,
-      prixKg: p ? Number(p.prix_kg) : null,
+      prixKg: tid ? prices[tid] ?? null : null,
       surfaces: Object.fromEntries(
         (areas ?? []).filter((a) => a.product_model_id === id).map((a) => [a.taille as string, Number(a.surface_m2)])
       ),

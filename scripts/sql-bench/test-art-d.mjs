@@ -12,13 +12,15 @@ const clientUser = await mkUser("client", { company_id: client.id });
 const cat = await one(`insert into product_categories(nom, code_court) values ('T-shirt','TS') returning id`);
 const jersey = await one(`insert into matieres(nom, code_court) values ('Jersey','JE') returning id`);
 const model = await one(`insert into product_models(name, categorie_id, matiere_id) values ('T-shirt D',$1,$2) returning id`, [cat.id, jersey.id]);
-const t165 = await one(`insert into textiles(nom, grammage, matiere_id, code_court) values ('Jersey 165 D',165,$1,'165') returning id`, [jersey.id]);
-const t200 = await one(`insert into textiles(nom, grammage, matiere_id, code_court) values ('Jersey 200 D',200,$1,'200') returning id`, [jersey.id]);
+// Prix au kg lu sur l'article tissu (0140) : 2 500 achat + 20 % d'approche = 3 000 rendu, pour tous ses grammages.
+const tissuArticle = await one(`insert into product_models(name, nature, unite, matiere_id) values ('Jersey D','mp','kg',$1) returning id`, [jersey.id]);
+await q(`insert into model_pricing(product_model_id, prix_achat, frais_pct) values ($1,2500,20)`, [tissuArticle.id]);
+const t165 = await one(`insert into textiles(nom, grammage, matiere_id, code_court, product_model_id) values ('Jersey 165 D',165,$1,'165',$2) returning id`, [jersey.id, tissuArticle.id]);
+const t200 = await one(`insert into textiles(nom, grammage, matiere_id, code_court, product_model_id) values ('Jersey 200 D',200,$1,'200',$2) returning id`, [jersey.id, tissuArticle.id]);
 const M = await one(`select id, cle from sizes where cle='Homme/M'`);
 const L = await one(`select id, cle from sizes where cle='Homme/L'`);
 await q(`insert into product_model_textiles(product_model_id, textile_id) values ($1,$2),($1,$3)`, [model.id, t165.id, t200.id]);
 await q(`insert into product_model_sizes(product_model_id, size_id) values ($1,$2),($1,$3)`, [model.id, M.id, L.id]);
-await q(`insert into textile_prices(textile_id, prix_kg) values ($1,3000),($2,3000)`, [t165.id, t200.id]);
 await q(`insert into model_size_fabric_area(product_model_id, taille, surface_m2) values ($1,'Homme/M',0.5),($1,'Homme/L',0.6)`, [model.id]);
 const tissu = await one(`insert into model_cost_components(product_model_id, libelle, base, mode_calcul, est_tissu) values ($1,'Tissu',0,'tissu_calcule',true) returning id`, [model.id]);
 const conf = await one(`insert into model_cost_components(product_model_id, libelle, base) values ($1,'Confection',150) returning id`, [model.id]);
@@ -60,11 +62,13 @@ await test("prix forcé et coefficient imposé", async () => {
 });
 
 await test("donnée manquante : prix nul et motif, jamais 0", async () => {
-  await q(`delete from textile_prices where textile_id=$1`, [t165.id]);
+  await q(`update model_pricing set prix_achat = null where product_model_id=$1`, [tissuArticle.id]);
   const rows = await prices(commercial);
-  assert.equal(pv(rows, 165, "Homme/L").prix_vente, null);
-  assert.match(pv(rows, 165, "Homme/L").manquant, /tissu incomplet/);
-  await q(`insert into textile_prices(textile_id, prix_kg) values ($1,3000)`, [t165.id]);
+  for (const g of [165, 200]) {
+    assert.equal(pv(rows, g, "Homme/L").prix_vente, null);
+    assert.match(pv(rows, g, "Homme/L").manquant, /tissu incomplet/);
+  }
+  await q(`update model_pricing set prix_achat = 2500 where product_model_id=$1`, [tissuArticle.id]);
 });
 
 await test("réservé au personnel : un client ne lit pas les prix de la grille", async () => {

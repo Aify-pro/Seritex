@@ -69,25 +69,6 @@ export async function savePrintCosts(input: Record<string, number | null>) {
   return {};
 }
 
-/** Prix du tissu au kg, rendu, d'un textile (migration 0070) ; null retire le prix. */
-export async function saveTextilePrice(textileId: string, prixKg: number | null) {
-  const { profile } = await requirePermission("tarification", "modify");
-  const parsed = z.object({ id: z.guid(), prix: z.number().positive("Prix au kg invalide").nullable() }).safeParse({ id: textileId, prix: prixKg });
-  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Prix invalide" };
-
-  const supabase = await createClient();
-  const { error } =
-    parsed.data.prix === null
-      ? await supabase.from("textile_prices").delete().eq("textile_id", textileId)
-      : await supabase
-          .from("textile_prices")
-          .upsert({ textile_id: textileId, prix_kg: parsed.data.prix, updated_at: new Date().toISOString(), updated_by: profile.id });
-  if (error) return { error: error.message };
-  revalidatePath("/parametres/tarification");
-  revalidatePath("/articles", "layout");
-  return {};
-}
-
 // ============================================================================
 // Sérigraphie : prix de revient (migration 0117)
 // ============================================================================

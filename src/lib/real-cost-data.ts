@@ -1,5 +1,6 @@
 import "server-only";
 import { createClient } from "@/lib/supabase/server";
+import { getTextilePricesKg } from "@/lib/tarification";
 import { computeRealCost, type RealCostResult, type TheoreticalRow } from "@/lib/real-cost";
 
 /**
@@ -69,9 +70,7 @@ export async function getOdfRealCosts(odfIds?: string[]): Promise<OdfRealCost[]>
         .filter((id): id is string => !!id)
     ),
   ];
-  const { data: textilePrices } = textileIds.length
-    ? await supabase.from("textile_prices").select("textile_id,prix_kg").in("textile_id", textileIds)
-    : { data: [] as { textile_id: string; prix_kg: number }[] };
+  const textilePrices = await getTextilePricesKg(textileIds, supabase);
 
   return list.map((o) => {
     const quote = o.quotes as unknown as { taux_change: number | null } | null;
@@ -97,8 +96,7 @@ export async function getOdfRealCosts(odfIds?: string[]): Promise<OdfRealCost[]>
     for (const l of (lines ?? []).filter((x) => x.quote_id === o.quote_id)) {
       const t = (l.product_models as unknown as { textiles: { id: string; nom: string } | null } | null)?.textiles;
       if (!t) continue;
-      const price = (textilePrices ?? []).find((p) => p.textile_id === t.id);
-      textiles.set(t.id, { nom: t.nom, prixKg: price ? Number(price.prix_kg) : null });
+      textiles.set(t.id, { nom: t.nom, prixKg: textilePrices[t.id] ?? null });
     }
     const param = (params ?? []).find((p) => p.production_order_id === o.id);
     const prixKgOdf = param?.prix_tissu_kg != null ? Number(param.prix_tissu_kg) : null;

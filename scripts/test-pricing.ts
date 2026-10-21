@@ -172,7 +172,7 @@ test("le coût tissu change avec le grammage, sans saisir de grille", () => {
 test("tissu calculé : donnée manquante signalée, jamais comptée 0 en silence", () => {
   const comps: CostComponent[] = [{ id: "t", libelle: "Tissu", base: 0, supplements: {}, mode: "tissu_calcule" }];
   assert.ok(resolveComponents(comps, [M], null).warnings[0].includes("aucun textile"));
-  assert.ok(resolveComponents(comps, [M], { textileNom: "J", grammage: 165, prixKg: null, surfaces: { [M]: 0.5 } }).warnings[0].includes("prix au kg"));
+  assert.ok(resolveComponents(comps, [M], { textileNom: "J", grammage: 165, prixKg: null, surfaces: { [M]: 0.5 } }).warnings[0].includes("prix d'achat du tissu"));
   const r = resolveComponents(comps, [M, XXL], { textileNom: "J", grammage: 165, prixKg: 3000, surfaces: { [M]: 0.5 } });
   assert.ok(r.warnings[0].includes("XXL"));
   // Un composant « saisi » n'est pas touché.

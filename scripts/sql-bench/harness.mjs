@@ -47,6 +47,8 @@ export async function boot({ upTo = Infinity, quiet = false } = {}) {
     if (n === 36) {
       await db.exec("insert into sections(name, display_order) values ('Coupe',1),('Sérigraphie',2),('Couture',3) on conflict do nothing;");
     }
+    // 0138 ne fait que charger le catalogue de production (référentiels absents ici).
+    if (n === 138) continue;
     try {
       await db.exec(fs.readFileSync(path.join(DIR, f), "utf8"));
       if (!quiet) console.log("ok", f);

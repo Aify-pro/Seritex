@@ -96,7 +96,7 @@ export async function RealCostTab({ productionOrderId }: { productionOrderId: st
                 <Stat label="Pièces obtenues (coupe)" value={odf.piecesObtenues === null ? "—" : String(odf.piecesObtenues)} />
               </dl>
               <p className="mt-3 text-xs text-foreground-muted">
-                Prix au kg retenu : {odf.prixKg === null ? "non renseigné" : `${formatMoney(odf.prixKg)} (${odf.prixKgSource === "odf" ? "propre à cet ODF" : "prix du textile"})`}.
+                Prix au kg retenu : {odf.prixKg === null ? "non renseigné" : `${formatMoney(odf.prixKg)} (${odf.prixKgSource === "odf" ? "propre à cet ODF" : "prix d'achat de l'article tissu"})`}.
               </p>
             </CardBody>
           </Card>
