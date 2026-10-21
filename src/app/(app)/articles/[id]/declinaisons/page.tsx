@@ -7,6 +7,7 @@ import { ArticleVariantGrid } from "../_components/article-variant-grid";
 import { ColorAxis, DimensionAxis, GrammageAxis, SizeAxis } from "../_components/article-variant-axes";
 import { ModelClassification } from "../_components/model-classification";
 import { TextileArticles } from "../../matieres/textile-articles";
+import { fetchAll } from "@/lib/supabase/fetch-all";
 
 /**
  * Onglet Déclinaisons, même disposition pour toutes les natures : Axes de
@@ -36,10 +37,14 @@ export default async function ArticleVariantsPage({ params }: { params: Promise<
     supabase.from("product_model_textiles").select("textile_id,textiles(id,nom,grammage)").eq("product_model_id", id),
     supabase.from("product_model_colors").select("color_id,colors(id,name,code,hex)").eq("product_model_id", id),
     supabase.from("product_model_sizes").select("size_id,sizes(id,libelle,groupe,display_order)").eq("product_model_id", id),
-    supabase
-      .from("product_variants")
-      .select("id,textile_id,color_id,size_id,code,sage_reference,actif,variant_stock_articles(id,etat,code,sage_reference)")
-      .eq("model_id", id),
+    fetchAll((from, to) =>
+      supabase
+        .from("product_variants")
+        .select("id,textile_id,color_id,size_id,code,sage_reference,actif,variant_stock_articles(id,etat,code,sage_reference)")
+        .eq("model_id", id)
+        .order("id")
+        .range(from, to),
+    ),
     supabase.from("textiles").select("id,nom,grammage,matiere_id").eq("active", true).order("nom"),
     supabase.from("sizes").select("id,groupe,libelle").eq("active", true).order("groupe").order("display_order"),
     supabase.from("colors").select("id,name,hex,code").eq("active", true).order("name"),
@@ -189,7 +194,14 @@ async function ArticleAxesVariants({ id, nature, canModify }: { id: string; natu
     supabase.from("product_model_colors").select("color_id").eq("product_model_id", id),
     supabase.from("textiles").select("id,grammage,code_court,active").eq("product_model_id", id).order("grammage"),
     supabase.from("article_dimensions").select("id,libelle,code_court,actif,ordre").eq("product_model_id", id).order("ordre"),
-    supabase.from("product_variants").select("id,textile_id,color_id,dimension_id,code,sage_reference,actif").eq("model_id", id),
+    fetchAll((from, to) =>
+      supabase
+        .from("product_variants")
+        .select("id,textile_id,color_id,dimension_id,code,sage_reference,actif")
+        .eq("model_id", id)
+        .order("id")
+        .range(from, to),
+    ),
   ]);
   const selectedColors = (modelColors ?? []).map((c) => c.color_id as string);
   const colorName = new Map((colors ?? []).map((c) => [c.id as string, c.name as string]));

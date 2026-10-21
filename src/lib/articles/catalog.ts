@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { articleSearchText, type ArticleRow } from "@/lib/articles/filters";
 import type { FilterOption } from "@/lib/clients/filters";
+import { fetchAll } from "@/lib/supabase/fetch-all";
 
 /**
  * Lignes de la liste Articles (produits finis) et options des filtres
@@ -41,10 +42,18 @@ export async function loadArticleCatalog({ canSeeCosts }: { canSeeCosts: boolean
         "id,code,name,category,active,sage_reference,textile_id,nature,type_appro,famille_id,sous_famille_id,unite,textiles!product_models_textile_id_fkey(nom,grammage),matieres(nom,code_court)"
       )
       .order("name"),
-    supabase.from("product_model_colors").select("product_model_id,color_id"),
+    fetchAll((from, to) =>
+      supabase.from("product_model_colors").select("product_model_id,color_id").order("product_model_id").order("color_id").range(from, to),
+    ),
     supabase.from("colors").select("id,name").order("name"),
     canSeeCosts ? supabase.from("model_cost_components").select("product_model_id") : Promise.resolve({ data: [] }),
-    supabase.from("product_variants").select("model_id,actif,sage_reference,variant_stock_articles(sage_reference)"),
+    fetchAll((from, to) =>
+      supabase
+        .from("product_variants")
+        .select("model_id,actif,sage_reference,variant_stock_articles(sage_reference)")
+        .order("id")
+        .range(from, to),
+    ),
     supabase.from("product_model_textiles").select("product_model_id,textiles(grammage)"),
     // ART-E (migration 0084) : stock disponible vierge et plus petit prix de vente, sans aucun coût.
     supabase.rpc("article_catalog_figures"),

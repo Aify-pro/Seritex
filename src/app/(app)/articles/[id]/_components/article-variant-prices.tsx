@@ -4,6 +4,7 @@ import { Table, Thead, Tbody, Tr, Th, Td, EmptyRow } from "@/components/ui/table
 import { Badge } from "@/components/ui/badge";
 import { formatAmount } from "@/lib/utils";
 import { UNITE_LABELS, type Unite } from "@/lib/articles/natures";
+import { fetchAll } from "@/lib/supabase/fetch-all";
 
 /**
  * Prix de vente des déclinaisons d'un tissu ou d'un consommable (migration
@@ -14,7 +15,14 @@ export async function ArticleVariantPrices({ productModelId }: { productModelId:
   const supabase = await createClient();
   const [{ data: prices, error }, { data: variants }, { data: model }] = await Promise.all([
     supabase.rpc("article_variant_prices", { p_model_id: productModelId }),
-    supabase.from("product_variants").select("id,textiles(grammage),colors(name),article_dimensions(libelle)").eq("model_id", productModelId),
+    fetchAll((from, to) =>
+      supabase
+        .from("product_variants")
+        .select("id,textiles(grammage),colors(name),article_dimensions(libelle)")
+        .eq("model_id", productModelId)
+        .order("id")
+        .range(from, to),
+    ),
     supabase.from("product_models").select("unite").eq("id", productModelId).maybeSingle(),
   ]);
   const unite = UNITE_LABELS[(model?.unite as Unite) ?? "piece"] ?? "unité";
