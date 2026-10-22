@@ -6,7 +6,7 @@ import { formatDateTime } from "@/lib/utils";
 import { getSizeOptionsByModel } from "@/lib/quote-dispatch";
 import { getModelPricings, getPricingSettings, getTextilePricesKg } from "@/lib/tarification";
 import { ModelPricingEditor, type FabricOption } from "../_components/model-pricing-editor";
-import { PurchasedPricingEditor } from "../_components/purchased-pricing-editor";
+import { PurchasedPricingEditor, type Famille } from "../_components/purchased-pricing-editor";
 import { UNITE_LABELS, type Unite } from "@/lib/articles/natures";
 
 /**
@@ -23,12 +23,13 @@ export default async function ArticleCostPage({ params }: { params: Promise<{ id
   // Tissu ou consommable : prix d'achat + frais × coefficient, ou prix saisi (migration 0104).
   const { data: article } = await supabase.from("product_models").select("nature,unite").eq("id", id).maybeSingle();
   if (article && article.nature !== "pf") {
-    const [settingsP, { data: mp }, { data: variants }] = await Promise.all([
+    const [settingsP, { data: mp }, { data: fams }, { data: variants }] = await Promise.all([
       getPricingSettings(),
       supabase.from("model_pricing").select("mode_prix,prix_achat,frais_pct,prix_vente,charges_pct,marge_pct").eq("product_model_id", id).maybeSingle(),
+      supabase.from("model_family_pricing").select("famille,mode_prix,prix_achat,frais_pct,prix_vente").eq("product_model_id", id),
       supabase
         .from("product_variants")
-        .select("id,code,textiles(grammage),colors(name),article_dimensions(libelle),variant_pricing(mode_prix,prix_achat,frais_pct,prix_vente)")
+        .select("id,code,textiles(grammage),colors(name,famille),article_dimensions(libelle),variant_pricing(mode_prix,prix_achat,frais_pct,prix_vente)")
         .eq("model_id", id)
         .eq("actif", true)
         .order("code"),
@@ -57,6 +58,17 @@ export default async function ArticleCostPage({ params }: { params: Promise<{ id
               chargesPct: n(mp?.charges_pct),
               margePct: n(mp?.marge_pct),
             }}
+            families={Object.fromEntries(
+              (fams ?? []).map((f) => [
+                f.famille as Famille,
+                {
+                  mode: (f.mode_prix as "calcule" | "saisi" | null) ?? null,
+                  prixAchat: n(f.prix_achat),
+                  fraisPct: n(f.frais_pct),
+                  prixVente: n(f.prix_vente),
+                },
+              ])
+            )}
             variants={(variants ?? []).map((v) => {
               const vp = (Array.isArray(v.variant_pricing) ? v.variant_pricing[0] : v.variant_pricing) as
                 | { mode_prix: string | null; prix_achat: number | null; frais_pct: number | null; prix_vente: number | null }
@@ -69,6 +81,7 @@ export default async function ArticleCostPage({ params }: { params: Promise<{ id
                 label: [g ? `${g} g/m²` : null, (v.article_dimensions as unknown as { libelle: string } | null)?.libelle, (v.colors as unknown as { name: string } | null)?.name]
                   .filter(Boolean)
                   .join(" · "),
+                famille: ((v.colors as unknown as { famille: string | null } | null)?.famille as Famille | null | undefined) ?? null,
                 mode: (vp?.mode_prix as "calcule" | "saisi" | null | undefined) ?? null,
                 prixAchat: n(vp?.prix_achat),
                 fraisPct: n(vp?.frais_pct),
