@@ -12,7 +12,7 @@ const clientUser = await mkUser("client", { company_id: client.id });
 const cat = await one(`insert into product_categories(nom, code_court) values ('T-shirt','TS') returning id`);
 const jersey = await one(`insert into matieres(nom, code_court) values ('Jersey','JE') returning id`);
 const model = await one(`insert into product_models(name, categorie_id, matiere_id) values ('T-shirt D',$1,$2) returning id`, [cat.id, jersey.id]);
-// Prix au kg lu sur l'article tissu (0140) : 2 500 achat + 20 % d'approche = 3 000 rendu, pour tous ses grammages.
+// Prix au kg lu sur l'article tissu (0141) : 2 500 achat + 20 % d'approche = 3 000 rendu, pour tous ses grammages.
 const tissuArticle = await one(`insert into product_models(name, nature, unite, matiere_id) values ('Jersey D','mp','kg',$1) returning id`, [jersey.id]);
 await q(`insert into model_pricing(product_model_id, prix_achat, frais_pct) values ($1,2500,20)`, [tissuArticle.id]);
 const t165 = await one(`insert into textiles(nom, grammage, matiere_id, code_court, product_model_id) values ('Jersey 165 D',165,$1,'165',$2) returning id`, [jersey.id, tissuArticle.id]);
