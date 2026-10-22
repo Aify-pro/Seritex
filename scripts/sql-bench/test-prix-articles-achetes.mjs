@@ -54,4 +54,26 @@ await test("le commercial lit les prix de vente, jamais les coûts", async () =>
   await expectFail(() => asAuth(commercial, `insert into variant_pricing(variant_id, prix_vente) select id, 1 from product_variants limit 1`), /row-level security/);
 });
 
+await test("prix par famille de couleur (0141) : déclinaison → famille → article", async () => {
+  await q(`update colors set famille='fonce' where id=$1`, [noir.id]);
+  await q(`update colors set famille='blanc' where id=$1`, [blanc.id]);
+  const noirV = await one(`select id from product_variants where model_id=$1 and color_id=$2`, [tissu.id, noir.id]);
+  await q(`delete from variant_pricing where variant_id=$1`, [noirV.id]);
+  // Foncé : 3 500 F/kg, frais repris de l'article (10 %) → 3 850 × 1,96… → 7 600.
+  await q(`insert into model_family_pricing(product_model_id, famille, prix_achat) values ($1,'fonce',3500)`, [tissu.id]);
+  const coef = 1 / (0.6 * 0.85);
+  assert.deepEqual((await prix()).map((x) => [x.code, Number(x.p)]), [["JE180BLP", 6500], ["JE180NOP", Math.ceil((3500 * 1.1 * coef) / 100) * 100]]);
+  // La déclinaison prime encore sur sa famille.
+  await q(`insert into variant_pricing(variant_id, mode_prix, prix_vente) values ($1,'saisi',9000)`, [noirV.id]);
+  assert.equal(Number((await prix())[1].p), 9000);
+  await q(`delete from variant_pricing where variant_id=$1`, [noirV.id]);
+  // Couleur sans famille : valeur de l'article.
+  await q(`update colors set famille=null where id=$1`, [noir.id]);
+  assert.equal(Number((await prix())[1].p), 6500);
+  await q(`update colors set famille='fonce' where id=$1`, [noir.id]);
+  // Le commercial ne lit pas les prix d'achat par famille et ne peut pas les écrire.
+  assert.equal((await asAuth(commercial, `select count(*)::int n from model_family_pricing`))[0].n, 0);
+  await expectFail(() => asAuth(commercial, `insert into model_family_pricing(product_model_id, famille, prix_achat) values ('${tissu.id}','clair',1)`), /row-level security/);
+});
+
 console.log("Prix des articles achetés : tous les tests passent");

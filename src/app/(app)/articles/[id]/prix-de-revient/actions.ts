@@ -180,3 +180,32 @@ export async function saveVariantPricing(variantId: string, input: z.input<typeo
   revalidatePath("/articles", "layout");
   return {};
 }
+
+const familySchema = z.object({
+  famille: z.enum(["blanc", "clair", "moyen", "fonce"]),
+  mode_prix: z.enum(["calcule", "saisi"]).nullable(),
+  prix_achat: money.nullable(),
+  frais_pct: z.number().min(0).max(499).nullable(),
+  prix_vente: z.number().positive("Prix de vente invalide").nullable(),
+});
+
+/**
+ * Prix d'une famille de couleur (migration 0141) quand il diffère de celui de
+ * l'article ; tout vide = valeur de l'article.
+ */
+export async function saveFamilyPricing(productModelId: string, input: z.input<typeof familySchema>) {
+  const { profile } = await requirePermission("tarification", "modify");
+  const parsed = familySchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Saisie invalide" };
+  const { famille, ...values } = parsed.data;
+  const supabase = await createClient();
+  const vide = Object.values(values).every((v) => v === null);
+  const { error } = vide
+    ? await supabase.from("model_family_pricing").delete().eq("product_model_id", productModelId).eq("famille", famille)
+    : await supabase
+        .from("model_family_pricing")
+        .upsert({ product_model_id: productModelId, famille, ...values, updated_at: new Date().toISOString(), updated_by: profile.id });
+  if (error) return { error: error.message };
+  revalidatePath("/articles", "layout");
+  return {};
+}
