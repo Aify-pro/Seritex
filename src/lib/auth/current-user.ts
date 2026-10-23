@@ -9,8 +9,12 @@ import { redirect } from "next/navigation";
  * le rôle pour décider quoi afficher DOIT passer par cette fonction plutôt
  * que de faire confiance à un état côté client — l'UI n'est qu'un confort,
  * l'autorisation réelle vit dans la RLS et dans ces contrôles serveur.
+ *
+ * Mise en cache par requête serveur (comme `isPlatformAdmin`) : le layout, la
+ * matrice de permissions et la page l'appellent tous, et chaque appel coûtait
+ * un aller-retour Supabase Auth plus une requête `app_users`.
  */
-export async function getCurrentUser(): Promise<{ authId: string; profile: AppUser } | null> {
+export const getCurrentUser = cache(async (): Promise<{ authId: string; profile: AppUser } | null> => {
   const supabase = await createClient();
   const {
     data: { user },
@@ -27,7 +31,7 @@ export async function getCurrentUser(): Promise<{ authId: string; profile: AppUs
   if (error || !profile) return null;
 
   return { authId: user.id, profile: profile as AppUser };
-}
+});
 
 /** Exige une session valide ; redirige vers /login sinon. */
 export async function requireUser() {
