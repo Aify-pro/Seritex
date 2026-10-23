@@ -2,13 +2,17 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, Wand2 } from "lucide-react";
+import { AlertTriangle, Pencil, Trash2, Wand2 } from "lucide-react";
+import { toast } from "sonner";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { PieceOverlay } from "@/components/atelier/patronnage/piece-overlay";
-import type { LibraryArticle } from "@/lib/patronnage/types";
+import type { LibraryArticle, LibraryPattern } from "@/lib/patronnage/types";
 import {
+  deleteReferenceArticle,
+  deleteReferencePattern,
   previewDxfPieces,
+  replaceReferencePattern,
   saveReferencePattern,
   type PreviewedPiece,
 } from "@/app/(app)/atelier/patronnage/actions";
@@ -36,13 +40,25 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 export function PatronBibliothequeManager({
   initialLibrary,
   productModels,
+  canModify,
+  canDelete,
 }: {
   initialLibrary: LibraryArticle[];
   /** Modèles actifs : un nouvel article de patronnage est forcément rattaché à l'un d'eux (A5). */
   productModels: { id: string; name: string }[];
+  canModify: boolean;
+  canDelete: boolean;
 }) {
   const router = useRouter();
-  return <BibliothequeTab library={initialLibrary} productModels={productModels} onChanged={() => router.refresh()} />;
+  return (
+    <BibliothequeTab
+      library={initialLibrary}
+      productModels={productModels}
+      canModify={canModify}
+      canDelete={canDelete}
+      onChanged={() => router.refresh()}
+    />
+  );
 }
 
 /* ============================================================
@@ -55,16 +71,46 @@ interface DraftPiece extends PreviewedPiece {
   expectedCount: number;
 }
 
+/** Reprend nom et quantité des pièces d'un patron à mettre à jour : la pièce de même taille la plus proche en surface. */
+function prefillFromExisting(pieces: PreviewedPiece[], existing: LibraryPattern["pieces"]): DraftPiece[] {
+  const libres = [...existing];
+  return pieces.map((p) => {
+    let best = -1;
+    let bestGap = Infinity;
+    libres.forEach((e, i) => {
+      const gap = Math.abs(e.area - p.area) / Math.max(e.area, 1);
+      if (gap < bestGap) {
+        best = i;
+        bestGap = gap;
+      }
+    });
+    if (best >= 0 && bestGap < 0.35) {
+      const [match] = libres.splice(best, 1);
+      return { ...p, include: true, name: match.name, expectedCount: match.expectedCount };
+    }
+    return { ...p, include: true, name: p.layer && p.layer !== "0" ? p.layer : `Pièce ${p.index + 1}`, expectedCount: 1 };
+  });
+}
+
 function BibliothequeTab({
   library,
   productModels,
+  canModify,
+  canDelete,
   onChanged,
 }: {
   library: LibraryArticle[];
   productModels: { id: string; name: string }[];
+  canModify: boolean;
+  canDelete: boolean;
   onChanged: () => void;
 }) {
   const [showAdd, setShowAdd] = useState(false);
+  // Patron (une taille) dont on remplace les pièces par un nouveau DXF.
+  const [editing, setEditing] = useState<{ article: LibraryArticle; pattern: LibraryPattern } | null>(null);
+  // Suppression en deux temps : « pa:<id> » (taille) ou « ar:<id> » (article entier).
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [existingArticleId, setExistingArticleId] = useState("");
   const [productModelId, setProductModelId] = useState("");
   const [articleCode, setArticleCode] = useState("");
@@ -78,6 +124,7 @@ function BibliothequeTab({
 
   function resetForm() {
     setShowAdd(false);
+    setEditing(null);
     setExistingArticleId("");
     setProductModelId("");
     setArticleCode("");
@@ -105,13 +152,28 @@ function BibliothequeTab({
       return;
     }
     setDraft(
-      result.pieces.map((p) => ({
-        ...p,
-        include: true,
-        name: p.layer && p.layer !== "0" ? p.layer : `Pièce ${p.index + 1}`,
-        expectedCount: 1,
-      }))
+      editing
+        ? prefillFromExisting(result.pieces, editing.pattern.pieces)
+        : result.pieces.map((p) => ({
+            ...p,
+            include: true,
+            name: p.layer && p.layer !== "0" ? p.layer : `Pièce ${p.index + 1}`,
+            expectedCount: 1,
+          }))
     );
+  }
+
+  async function handleDelete(kind: "pa" | "ar", id: string) {
+    setDeleting(true);
+    const result = kind === "pa" ? await deleteReferencePattern(id) : await deleteReferenceArticle(id);
+    setDeleting(false);
+    setConfirmDelete(null);
+    if (result.error) {
+      toast.error(result.error);
+      return;
+    }
+    toast.success(kind === "pa" ? "Patron supprimé" : "Article supprimé");
+    onChanged();
   }
 
   async function handleSave() {
@@ -121,7 +183,8 @@ function BibliothequeTab({
     const fd = new FormData();
     fd.set("file", file);
     fd.set("size", size);
-    if (existingArticleId) fd.set("existing_article_id", existingArticleId);
+    if (editing) fd.set("pattern_id", editing.pattern.id);
+    else if (existingArticleId) fd.set("existing_article_id", existingArticleId);
     else {
       fd.set("article_code", articleCode);
       fd.set("designation", designation);
@@ -131,7 +194,7 @@ function BibliothequeTab({
       "pieces_meta",
       JSON.stringify(draft.map((d) => ({ index: d.index, include: d.include, name: d.name, expectedCount: d.expectedCount })))
     );
-    const result = await saveReferencePattern(fd);
+    const result = editing ? await replaceReferencePattern(fd) : await saveReferencePattern(fd);
     setBusy(false);
     if ("error" in result) {
       setError(result.error);
@@ -149,14 +212,34 @@ function BibliothequeTab({
           extraites de vrais fichiers DXF. Cette bibliothèque sert de référence à toute reconnaissance
           automatique d&apos;un tracé importé.
         </p>
-        <Button size="sm" onClick={() => setShowAdd((v) => !v)} className="shrink-0">
-          Ajouter un patron de référence
-        </Button>
+        {canModify && (
+          <Button
+            size="sm"
+            onClick={() => {
+              setEditing(null);
+              setDraft(null);
+              setError(null);
+              setShowAdd((v) => !v);
+            }}
+            className="shrink-0"
+          >
+            Ajouter un patron de référence
+          </Button>
+        )}
       </div>
 
-      {showAdd && (
+      {(showAdd || editing) && (
         <Card>
-          <CardHeader title="Fiche de référencement du patron" />
+          <CardHeader
+            title={editing ? `Mettre à jour le patron ${editing.article.articleCode} — taille ${editing.pattern.size}` : "Fiche de référencement du patron"}
+            description={
+              editing
+                ? editing.pattern.utilise
+                  ? "Ce patron a déjà servi à reconnaître des tracés : les verdicts déjà rendus ne sont pas recalculés, seuls les prochains tracés utiliseront la nouvelle version."
+                  : "Les pièces actuelles de cette taille seront remplacées par celles du nouveau fichier."
+                : undefined
+            }
+          />
           <CardBody className="space-y-4">
             {error && (
               <div className="flex items-center gap-2 rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger">
@@ -164,7 +247,29 @@ function BibliothequeTab({
               </div>
             )}
 
-            {!draft && (
+            {!draft && editing && (
+              <>
+                <Field label="Nouveau fichier DXF du patron">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".dxf"
+                    onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                    className="w-full rounded-md border border-dashed border-border bg-surface-muted px-2.5 py-2 text-sm text-foreground-muted"
+                  />
+                </Field>
+                <div className="flex justify-end gap-2 pt-1">
+                  <Button type="button" variant="ghost" size="sm" onClick={resetForm}>
+                    Annuler
+                  </Button>
+                  <Button type="button" size="sm" loading={busy} onClick={handleAnalyze}>
+                    <Wand2 className="h-3.5 w-3.5" /> Analyser le tracé
+                  </Button>
+                </div>
+              </>
+            )}
+
+            {!draft && !editing && (
               <>
                 <div className="grid grid-cols-2 gap-4">
                   <Field label="Rattacher à un article existant">
@@ -299,7 +404,7 @@ function BibliothequeTab({
                     Revenir
                   </Button>
                   <Button type="button" size="sm" loading={busy} onClick={handleSave}>
-                    Enregistrer le patron
+                    {editing ? "Remplacer le patron" : "Enregistrer le patron"}
                   </Button>
                 </div>
               </>
@@ -321,13 +426,28 @@ function BibliothequeTab({
             <CardHeader
               title={art.articleCode}
               description={art.designation}
-              action={<span className="text-xs text-foreground-muted">seuil de reconnaissance : {art.tolerancePct}%</span>}
+              action={
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-foreground-muted">seuil de reconnaissance : {art.tolerancePct}%</span>
+                  {canDelete && (
+                    <DeleteControl
+                      label="Supprimer l'article"
+                      blocked={art.patterns.some((p) => p.utilise)}
+                      confirming={confirmDelete === `ar:${art.id}`}
+                      busy={deleting}
+                      onAsk={() => setConfirmDelete(`ar:${art.id}`)}
+                      onCancel={() => setConfirmDelete(null)}
+                      onConfirm={() => handleDelete("ar", art.id)}
+                    />
+                  )}
+                </div>
+              }
             />
             <div className="divide-y divide-border">
               {art.patterns.map((pat) => (
                 <div key={pat.id} className="flex items-center gap-4 px-5 py-3">
                   <span className="w-10 shrink-0 text-xs font-medium text-foreground">{pat.size}</span>
-                  <div className="flex gap-4 overflow-x-auto">
+                  <div className="flex flex-1 gap-4 overflow-x-auto">
                     {pat.pieces.map((piece) => (
                       <div key={piece.id} className="flex shrink-0 items-center gap-2">
                         <PieceOverlay candidatePoints={piece.points} />
@@ -340,6 +460,36 @@ function BibliothequeTab({
                       </div>
                     ))}
                   </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    {canModify && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowAdd(false);
+                          setDraft(null);
+                          setFile(null);
+                          setError(null);
+                          setSize(pat.size);
+                          setEditing({ article: art, pattern: pat });
+                          window.scrollTo({ top: 0, behavior: "smooth" });
+                        }}
+                        className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-foreground hover:bg-surface-muted"
+                      >
+                        <Pencil className="h-3 w-3" /> Modifier
+                      </button>
+                    )}
+                    {canDelete && (
+                      <DeleteControl
+                        label="Supprimer"
+                        blocked={pat.utilise}
+                        confirming={confirmDelete === `pa:${pat.id}`}
+                        busy={deleting}
+                        onAsk={() => setConfirmDelete(`pa:${pat.id}`)}
+                        onCancel={() => setConfirmDelete(null)}
+                        onConfirm={() => handleDelete("pa", pat.id)}
+                      />
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -350,3 +500,50 @@ function BibliothequeTab({
   );
 }
 
+
+/**
+ * Suppression en deux temps. Un patron déjà reconnu dans des tracés ne se
+ * supprime pas (le bouton l'explique) ; le serveur refait le même contrôle.
+ */
+function DeleteControl({
+  label,
+  blocked,
+  confirming,
+  busy,
+  onAsk,
+  onCancel,
+  onConfirm,
+}: {
+  label: string;
+  blocked: boolean;
+  confirming: boolean;
+  busy: boolean;
+  onAsk: () => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  if (confirming) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs">
+        <span className="text-danger">Supprimer définitivement ?</span>
+        <Button type="button" size="sm" variant="ghost" onClick={onCancel} disabled={busy}>
+          Non
+        </Button>
+        <Button type="button" size="sm" loading={busy} onClick={onConfirm}>
+          Oui, supprimer
+        </Button>
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={onAsk}
+      disabled={blocked}
+      title={blocked ? "Utilisé : ce patron a déjà été reconnu dans des tracés" : undefined}
+      className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-danger hover:bg-danger-soft disabled:cursor-not-allowed disabled:text-foreground-muted disabled:opacity-60 disabled:hover:bg-transparent"
+    >
+      <Trash2 className="h-3 w-3" /> {label}
+    </button>
+  );
+}

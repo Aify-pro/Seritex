@@ -12,6 +12,8 @@ export interface LibraryPiece {
 export interface LibraryPattern {
   id: string;
   size: string;
+  /** Une de ses pièces a été reconnue dans un tracé déjà analysé : suppression impossible. */
+  utilise: boolean;
   pieces: LibraryPiece[];
 }
 

@@ -2,6 +2,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Point } from "@/lib/patronnage/geometry";
 import type { ReferencePiece } from "@/lib/patronnage/reconnaissance";
+import { fetchAll } from "@/lib/supabase/fetch-all";
 
 /**
  * Chargement de la bibliothèque de patrons de référence, sous la forme
@@ -67,4 +68,24 @@ export async function loadReferenceLibrary(
   }
 
   return { references };
+}
+
+/**
+ * Pièces de la bibliothèque déjà reconnues par au moins une analyse de tracé
+ * enregistrée (`analyses_trace.patrons_reconnus[].patron_id`). Un patron
+ * dont une pièce y figure est « utilisé » : le supprimer ferait disparaître de
+ * la bibliothèque un patron que des verdicts déjà rendus citent encore.
+ *
+ * À appeler avec un client qui voit TOUTES les analyses (client admin, en
+ * lecture seule) : avec un client filtré par la RLS, une analyse invisible
+ * ferait passer un patron utilisé pour libre.
+ */
+export async function loadPiecesUtilisees(supabase: SupabaseClient): Promise<Set<string> | { error: string }> {
+  const { data, error } = await fetchAll<{ patrons_reconnus: { patron_id?: string }[] | null }>((from, to) =>
+    supabase.from("analyses_trace").select("patrons_reconnus").order("trace_id").range(from, to)
+  );
+  if (error) return { error: `Lecture des analyses impossible : ${error.message}` };
+  const used = new Set<string>();
+  for (const row of data) for (const p of row.patrons_reconnus ?? []) if (p.patron_id) used.add(p.patron_id);
+  return used;
 }
