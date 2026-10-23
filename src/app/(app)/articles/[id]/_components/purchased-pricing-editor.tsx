@@ -228,7 +228,7 @@ export function PurchasedPricingEditor({
                   <th className="py-1 pr-3">Achat / {unite}</th>
                   <th className="py-1 pr-3">Frais %</th>
                   <th className="py-1 pr-3">PV saisi</th>
-                  <th className="py-1 pr-3 text-right">Prix de vente</th>
+                  <th className="py-1 pr-3 text-right">Prix de revient</th>
                   <th />
                 </tr>
               </thead>
@@ -291,7 +291,7 @@ function VariantRow({
       <td className="py-1 pr-3">
         <input value={r.prixVente} inputMode="decimal" onChange={(e) => setR({ ...r, prixVente: e.target.value })} placeholder={base.prixVente} className={`${input} w-24`} />
       </td>
-      <td className="py-1 pr-3 text-right tabular-nums">{effectif.prixVente != null ? `${formatMoney(effectif.prixVente)} / ${unite}` : "—"}</td>
+      <td className="py-1 pr-3 text-right tabular-nums">{effectif.prixRevient != null ? `${formatMoney(Math.round(effectif.prixRevient))} / ${unite}` : "—"}</td>
       <td className="py-1">
         <Button
           size="sm"
