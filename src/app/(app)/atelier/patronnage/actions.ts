@@ -5,7 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { requirePermission } from "@/lib/auth/permissions";
 import { parseDxfContours } from "@/lib/patronnage/dxf";
 import { normalizeShape, type Point } from "@/lib/patronnage/geometry";
-import { loadReferenceLibrary } from "@/lib/patronnage/bibliotheque";
+import { loadPiecesUtilisees, loadReferenceLibrary } from "@/lib/patronnage/bibliotheque";
 import { SEUIL_RECONNAISSANCE_DEFAUT } from "@/lib/patronnage/reconnaissance";
 import { construireAnalyseDetaillee, type TraceAnalysisDetail } from "@/lib/patronnage/detail";
 import { readDxfFile } from "@/lib/patronnage/upload";
@@ -171,22 +171,7 @@ export async function saveReferencePattern(
   }
   const patternId = pattern.id as string;
 
-  const pieceRows = included
-    .map((meta) => {
-      const contour = contours[meta.index];
-      if (!contour) return null;
-      const geom = normalizeShape(contour.points);
-      return {
-        pattern_id: patternId,
-        name: meta.name,
-        expected_count: meta.expectedCount,
-        area: geom.area,
-        perimeter: geom.perimeter,
-        radial_signature: geom.radial,
-        points: geom.points,
-      };
-    })
-    .filter((row): row is NonNullable<typeof row> => row !== null);
+  const pieceRows = rowsFromContours(patternId, contours, included);
 
   const { error: piecesError } = await supabase.from("pattern_pieces").insert(pieceRows);
   if (piecesError) return { error: `Enregistrement des pièces impossible : ${piecesError.message}` };
@@ -223,6 +208,199 @@ export async function saveReferencePattern(
 
   revalidatePath("/atelier/patronnage");
   return { patternId };
+}
+
+/** Lignes `pattern_pieces` d'un DXF, à partir des pièces nommées par l'utilisateur. */
+function rowsFromContours(patternId: string, contours: ReturnType<typeof parseDxfContours>, included: z.infer<typeof pieceMetaSchema>) {
+  return included
+    .map((meta) => {
+      const contour = contours[meta.index];
+      if (!contour) return null;
+      const geom = normalizeShape(contour.points);
+      return {
+        pattern_id: patternId,
+        name: meta.name,
+        expected_count: meta.expectedCount,
+        area: geom.area,
+        perimeter: geom.perimeter,
+        radial_signature: geom.radial,
+        points: geom.points,
+      };
+    })
+    .filter((row): row is NonNullable<typeof row> => row !== null);
+}
+
+function revalidateBibliotheque() {
+  revalidatePath("/atelier/patronnage");
+  revalidatePath("/atelier/patronnage/bibliotheque");
+}
+
+/**
+ * Mise à jour d'un patron existant (nouvelle version du modèle) : remplace les
+ * pièces d'UNE taille par celles d'un nouveau DXF, même assistant que l'ajout.
+ * Les nouvelles pièces sont insérées AVANT de retirer les anciennes : si
+ * l'insertion échoue, le patron reste intact. Les verdicts déjà rendus sur des
+ * tracés ne sont pas recalculés (ils gardent le nom du patron reconnu à
+ * l'époque) ; seuls les prochains tracés analysés utilisent la nouvelle version.
+ */
+export async function replaceReferencePattern(formData: FormData): Promise<{ patternId: string } | { error: string }> {
+  const { authId } = await requirePermission("patronnage", "modify");
+
+  const patternId = String(formData.get("pattern_id") ?? "").trim();
+  if (!patternId) return { error: "Patron manquant" };
+
+  const read = readDxfFile(formData);
+  if ("error" in read) return { error: read.error };
+
+  let piecesMeta: z.infer<typeof pieceMetaSchema>;
+  try {
+    piecesMeta = pieceMetaSchema.parse(JSON.parse(String(formData.get("pieces_meta") ?? "[]")));
+  } catch {
+    return { error: "Description des pièces invalide" };
+  }
+  const included = piecesMeta.filter((p) => p.include && p.name.length > 0);
+  if (included.length === 0) return { error: "Sélectionnez au moins une pièce à enregistrer, avec un nom" };
+
+  let text: string;
+  try {
+    text = await read.file.text();
+  } catch {
+    return { error: "Impossible de relire le fichier" };
+  }
+  const contours = parseDxfContours(text);
+
+  const supabase = await createClient();
+  const { data: pattern } = await supabase
+    .from("patterns")
+    .select("id,article_id,size,reference_dxf_path")
+    .eq("id", patternId)
+    .maybeSingle();
+  if (!pattern) return { error: "Patron introuvable" };
+
+  const pieceRows = rowsFromContours(patternId, contours, included);
+  if (pieceRows.length === 0) return { error: "Aucune pièce exploitable dans ce fichier" };
+
+  const { data: anciennes, error: anciennesError } = await supabase.from("pattern_pieces").select("id").eq("pattern_id", patternId);
+  if (anciennesError) return { error: `Lecture du patron impossible : ${anciennesError.message}` };
+
+  const { error: insertError } = await supabase.from("pattern_pieces").insert(pieceRows);
+  if (insertError) return { error: `Enregistrement des pièces impossible : ${insertError.message}` };
+
+  const anciennesIds = (anciennes ?? []).map((a) => a.id as string);
+  if (anciennesIds.length > 0) {
+    const { error: deleteError } = await supabase.from("pattern_pieces").delete().in("id", anciennesIds);
+    if (deleteError) {
+      return { error: `Nouvelles pièces enregistrées, mais les anciennes n'ont pas pu être retirées : ${deleteError.message}. Rouvrez le patron et recommencez.` };
+    }
+  }
+
+  // DXF de référence : même principe que l'ajout, best effort.
+  try {
+    const admin = createAdminClient();
+    const remotePath = `${pattern.article_id}/${pattern.size}-${Date.now()}-${sanitizeFileName(read.file.name)}`;
+    const buffer = Buffer.from(await read.file.arrayBuffer());
+    const { error: uploadError } = await admin.storage
+      .from("patronnage")
+      .upload(remotePath, buffer, { contentType: "application/dxf", upsert: false });
+    if (!uploadError) {
+      await supabase.from("patterns").update({ reference_dxf_path: remotePath, reference_dxf_filename: read.file.name }).eq("id", patternId);
+      if (pattern.reference_dxf_path) await admin.storage.from("patronnage").remove([pattern.reference_dxf_path as string]);
+    } else {
+      console.error("Échec upload DXF de référence :", uploadError.message);
+    }
+  } catch (e) {
+    console.error("Échec upload DXF de référence :", e);
+  }
+
+  await supabase.from("audit_log").insert({
+    user_id: authId,
+    action: "update_pattern",
+    entity_type: "pattern",
+    entity_id: patternId,
+    metadata: { article_id: pattern.article_id, size: pattern.size, piece_count: pieceRows.length, pieces_remplacees: anciennesIds.length },
+  });
+
+  revalidateBibliotheque();
+  return { patternId };
+}
+
+/** Pièces de la bibliothèque (parmi `patternIds`) citées par un tracé déjà analysé. */
+async function patronsUtilises(patternIds: string[]): Promise<Set<string> | { error: string }> {
+  const admin = createAdminClient();
+  const used = await loadPiecesUtilisees(admin);
+  if (!(used instanceof Set)) return used;
+  const { data, error } = await admin.from("pattern_pieces").select("id,pattern_id").in("pattern_id", patternIds);
+  if (error) return { error: `Lecture des pièces impossible : ${error.message}` };
+  return new Set((data ?? []).filter((p) => used.has(p.id as string)).map((p) => p.pattern_id as string));
+}
+
+/**
+ * Supprime une taille d'un patron. Refusé si un tracé déjà analysé a reconnu
+ * l'une de ses pièces (contrôle refait ici, côté serveur, quel que soit l'état
+ * de l'écran) ; droit « Supprimer » du module requis.
+ */
+export async function deleteReferencePattern(patternId: string): Promise<{ error?: string }> {
+  const { authId } = await requirePermission("patronnage", "delete");
+
+  const supabase = await createClient();
+  const { data: pattern } = await supabase
+    .from("patterns")
+    .select("id,article_id,size,reference_dxf_path")
+    .eq("id", patternId)
+    .maybeSingle();
+  if (!pattern) return { error: "Patron introuvable" };
+
+  const used = await patronsUtilises([patternId]);
+  if (!(used instanceof Set)) return used;
+  if (used.has(patternId)) return { error: "Suppression impossible : ce patron a déjà été reconnu dans des tracés." };
+
+  const { error } = await supabase.from("patterns").delete().eq("id", patternId);
+  if (error) return { error: error.message };
+
+  if (pattern.reference_dxf_path) {
+    await createAdminClient().storage.from("patronnage").remove([pattern.reference_dxf_path as string]).catch(() => undefined);
+  }
+  await supabase.from("audit_log").insert({
+    user_id: authId,
+    action: "delete_pattern",
+    entity_type: "pattern",
+    entity_id: patternId,
+    metadata: { article_id: pattern.article_id, size: pattern.size },
+  });
+  revalidateBibliotheque();
+  return {};
+}
+
+/** Supprime un article de patronnage et toutes ses tailles, aux mêmes conditions que `deleteReferencePattern`. */
+export async function deleteReferenceArticle(articleId: string): Promise<{ error?: string }> {
+  const { authId } = await requirePermission("patronnage", "delete");
+
+  const supabase = await createClient();
+  const { data: article } = await supabase.from("pattern_articles").select("id,article_code").eq("id", articleId).maybeSingle();
+  if (!article) return { error: "Article introuvable" };
+
+  const { data: patterns } = await supabase.from("patterns").select("id,reference_dxf_path").eq("article_id", articleId);
+  const ids = (patterns ?? []).map((p) => p.id as string);
+  if (ids.length > 0) {
+    const used = await patronsUtilises(ids);
+    if (!(used instanceof Set)) return used;
+    if (used.size > 0) return { error: "Suppression impossible : une taille de cet article a déjà été reconnue dans des tracés." };
+  }
+
+  const { error } = await supabase.from("pattern_articles").delete().eq("id", articleId);
+  if (error) return { error: error.message };
+
+  const paths = (patterns ?? []).map((p) => p.reference_dxf_path as string | null).filter((x): x is string => !!x);
+  if (paths.length > 0) await createAdminClient().storage.from("patronnage").remove(paths).catch(() => undefined);
+  await supabase.from("audit_log").insert({
+    user_id: authId,
+    action: "delete_pattern_article",
+    entity_type: "pattern_article",
+    entity_id: articleId,
+    metadata: { article_code: article.article_code, tailles: ids.length },
+  });
+  revalidateBibliotheque();
+  return {};
 }
 
 function sanitizeFileName(name: string) {
