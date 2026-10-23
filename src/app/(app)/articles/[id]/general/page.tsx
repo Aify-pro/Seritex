@@ -32,6 +32,7 @@ export default async function ArticleGeneralPage({ params }: { params: Promise<{
     { data: categories },
     { data: matieres },
     { data: allowedTextiles },
+    { data: familles },
   ] = await Promise.all([
       supabase
         .from("product_models")
@@ -42,10 +43,10 @@ export default async function ArticleGeneralPage({ params }: { params: Promise<{
       supabase.from("product_categories").select("id,nom,code_court").order("nom"),
       supabase.from("matieres").select("id,nom,code_court").eq("actif", true).order("nom"),
       supabase.from("product_model_textiles").select("textile_id").eq("product_model_id", id),
+      supabase.from("article_families").select("id,nom,parent_id").eq("actif", true).order("ordre").order("nom"),
     ]);
   if (!model) return null;
   const nature = model.nature as ArticleNature;
-  const { data: familles } = await supabase.from("article_families").select("id,nom,parent_id").eq("actif", true).order("ordre").order("nom");
 
   const identite = (
     <Card>
