@@ -92,6 +92,7 @@ const row = (r: Partial<ArticleRow> & { id: string; name: string }): ArticleRow 
   declinaisons: 0,
   stockDisponible: null,
   prixAPartirDe: null,
+  vignettePath: null,
   vignetteUrl: null,
   searchText: articleSearchText([r.name, r.category, r.matiere, r.code]),
   ...r,

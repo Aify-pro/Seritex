@@ -126,6 +126,8 @@ export interface ArticleRow {
   declinaisons: number;
   stockDisponible: number | null;
   prixAPartirDe: number | null;
+  /** Chemin de l'image principale dans le bucket `articles` ; signé seulement pour les lignes affichées. */
+  vignettePath: string | null;
   vignetteUrl: string | null;
   /** Texte de recherche normalisé (nom, code, catégorie, matière, références). */
   searchText: string;

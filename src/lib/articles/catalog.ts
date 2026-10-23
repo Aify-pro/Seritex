@@ -35,7 +35,21 @@ function countOptions(values: (string | null | undefined)[], label?: (v: string)
 
 export async function loadArticleCatalog({ canSeeCosts }: { canSeeCosts: boolean }): Promise<ArticleCatalog> {
   const supabase = await createClient();
-  const [{ data: models }, { data: modelColors }, { data: colors }, { data: costs }, { data: variants }, { data: allowed }, { data: figures }] = await Promise.all([
+  // Toutes les lectures sont indépendantes : une seule vague, pas quatre allers-retours à la suite.
+  const [
+    { data: models },
+    { data: modelColors },
+    { data: colors },
+    { data: costs },
+    { data: variants },
+    { data: allowed },
+    { data: figures },
+    // Fiche unique (migration 0093) : données techniques des matières premières et consommables.
+    { data: familles },
+    { data: ownTextiles },
+    { data: ownConsumables },
+    { data: principals },
+  ] = await Promise.all([
     supabase
       .from("product_models")
       .select(
@@ -57,12 +71,10 @@ export async function loadArticleCatalog({ canSeeCosts }: { canSeeCosts: boolean
     supabase.from("product_model_textiles").select("product_model_id,textiles(grammage)"),
     // ART-E (migration 0084) : stock disponible vierge et plus petit prix de vente, sans aucun coût.
     supabase.rpc("article_catalog_figures"),
-  ]);
-  // Fiche unique (migration 0093) : données techniques des matières premières et consommables.
-  const [{ data: familles }, { data: ownTextiles }, { data: ownConsumables }] = await Promise.all([
     supabase.from("article_families").select("id,nom,parent_id,ordre").eq("actif", true).order("ordre").order("nom"),
     supabase.from("textiles").select("product_model_id,composition,grammage,matieres(nom,code_court)").not("product_model_id", "is", null),
     supabase.from("consumables").select("product_model_id,code,sage_reference").not("product_model_id", "is", null),
+    supabase.from("product_model_media").select("product_model_id,path,color_id").eq("principale", true).order("ordre"),
   ]);
   const familleNom = new Map((familles ?? []).map((f) => [f.id as string, f.nom as string]));
   const textileOf = new Map((ownTextiles ?? []).map((t) => [t.product_model_id as string, t]));
@@ -73,23 +85,27 @@ export async function loadArticleCatalog({ canSeeCosts }: { canSeeCosts: boolean
   }
   const consumableOf = new Map((ownConsumables ?? []).map((c) => [c.product_model_id as string, c]));
   // Vignette (ART-F) : image principale « toutes couleurs », sinon la première principale.
-  const { data: principals } = await supabase
-    .from("product_model_media")
-    .select("product_model_id,path,color_id")
-    .eq("principale", true)
-    .order("ordre");
   const vignettePath = new Map<string, string>();
   for (const p of principals ?? []) {
     const cur = vignettePath.get(p.product_model_id as string);
     if (!cur || p.color_id === null) vignettePath.set(p.product_model_id as string, p.path as string);
   }
-  const signedVignettes = vignettePath.size
-    ? ((await createAdminClient().storage.from("articles").createSignedUrls([...vignettePath.values()], 3600)).data ?? [])
-    : [];
-  const vignetteUrl = (modelId: string) => {
-    const path = vignettePath.get(modelId);
-    return path ? signedVignettes.find((s) => s.path === path)?.signedUrl ?? null : null;
-  };
+  // Index par article, pour ne pas re-parcourir ces tables entières pour chaque ligne.
+  const grammagesAutorises = new Map<string, Set<number>>();
+  for (const a of allowed ?? []) {
+    const g = Number((a.textiles as unknown as { grammage: number | null } | null)?.grammage ?? 0);
+    if (g <= 0) continue;
+    const id = a.product_model_id as string;
+    if (!grammagesAutorises.has(id)) grammagesAutorises.set(id, new Set());
+    grammagesAutorises.get(id)!.add(g);
+  }
+  const couleursParModele = new Map<string, string[]>();
+  for (const c of modelColors ?? []) {
+    const id = c.product_model_id as string;
+    const list = couleursParModele.get(id);
+    if (list) list.push(c.color_id as string);
+    else couleursParModele.set(id, [c.color_id as string]);
+  }
   const figuresByModel = new Map(
     ((figures ?? []) as { product_model_id: string; stock_disponible: number | null; prix_a_partir_de: number | null }[]).map((f) => [f.product_model_id, f])
   );
@@ -106,15 +122,8 @@ export async function loadArticleCatalog({ canSeeCosts }: { canSeeCosts: boolean
     const textile = m.textiles as unknown as { nom: string; grammage: number | null } | null;
     const matiere = (m.matieres as unknown as { nom: string } | null)?.nom ?? null;
     const modelVariants = variantsByModel.get(m.id as string) ?? [];
-    const grammages = [
-      ...new Set(
-        (allowed ?? [])
-          .filter((a) => a.product_model_id === m.id)
-          .map((a) => Number((a.textiles as unknown as { grammage: number | null } | null)?.grammage ?? 0))
-          .filter((g) => g > 0)
-      ),
-    ];
-    const couleurIds = (modelColors ?? []).filter((c) => c.product_model_id === m.id).map((c) => c.color_id as string);
+    const grammages = [...(grammagesAutorises.get(m.id as string) ?? [])];
+    const couleurIds = couleursParModele.get(m.id as string) ?? [];
     const ownTextile = textileOf.get(m.id as string);
     const ownConsumable = consumableOf.get(m.id as string);
     const ownMatiere = (ownTextile?.matieres as unknown as { nom: string } | null)?.nom ?? null;
@@ -153,7 +162,8 @@ export async function loadArticleCatalog({ canSeeCosts }: { canSeeCosts: boolean
       declinaisons: modelVariants.filter((v) => v.actif).length,
       stockDisponible: figuresByModel.get(m.id as string)?.stock_disponible != null ? Number(figuresByModel.get(m.id as string)!.stock_disponible) : null,
       prixAPartirDe: figuresByModel.get(m.id as string)?.prix_a_partir_de != null ? Number(figuresByModel.get(m.id as string)!.prix_a_partir_de) : null,
-      vignetteUrl: vignetteUrl(m.id as string),
+      vignettePath: vignettePath.get(m.id as string) ?? null,
+      vignetteUrl: null,
       searchText: articleSearchText([
         m.name as string,
         code,
@@ -190,6 +200,18 @@ export async function loadArticleCatalog({ canSeeCosts }: { canSeeCosts: boolean
       couleurs: countOptions(rows.flatMap((r) => r.couleurIds), (id) => colorName.get(id) ?? id),
     },
   };
+}
+
+/**
+ * Signe les vignettes des seules lignes données (la page affichée) : signer
+ * celles de tout le catalogue à chaque clic coûtait un appel Storage inutile.
+ */
+export async function avecVignettes(rows: ArticleRow[]): Promise<ArticleRow[]> {
+  const paths = [...new Set(rows.map((r) => r.vignettePath).filter((p): p is string => !!p))];
+  if (!paths.length) return rows;
+  const signed = (await createAdminClient().storage.from("articles").createSignedUrls(paths, 3600)).data ?? [];
+  const urlOf = new Map(signed.map((s) => [s.path, s.signedUrl]));
+  return rows.map((r) => (r.vignettePath ? { ...r, vignetteUrl: urlOf.get(r.vignettePath) ?? null } : r));
 }
 
 /**

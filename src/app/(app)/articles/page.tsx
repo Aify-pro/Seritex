@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { formatAmount } from "@/lib/utils";
 import { ChevronLeft, ChevronRight, Package, Plus, Shirt, Spool } from "lucide-react";
 import { applyArticleFilters, articleFiltersToSearchParams, paginate, parseArticleFilters, type ArticleFilters } from "@/lib/articles/filters";
-import { loadArticleCatalog } from "@/lib/articles/catalog";
+import { avecVignettes, loadArticleCatalog } from "@/lib/articles/catalog";
 import { NATURE_LABELS, TYPE_APPRO_LABELS, UNITE_LABELS, type Unite } from "@/lib/articles/natures";
 import { ArticlesFilters } from "./articles-filters";
 import { Presets } from "@/components/filters/presets";
@@ -33,7 +33,8 @@ export default async function ArticlesPage({
   const filters = parseArticleFilters(await searchParams);
   const catalog = await loadArticleCatalog({ canSeeCosts });
   const filtered = applyArticleFilters(catalog.rows, filters);
-  const { rows, page, totalPages } = paginate(filtered, filters.page, filters.taille);
+  const { rows: pageRows, page, totalPages } = paginate(filtered, filters.page, filters.taille);
+  const rows = await avecVignettes(pageRows);
 
   return (
     <div className="space-y-6">
