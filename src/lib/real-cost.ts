@@ -29,6 +29,18 @@ export interface TheoreticalRow {
   chargesPct: number;
 }
 
+/** Détail d'un chiffrage figé (quote_cost_snapshots.detail). */
+export type SnapshotDetail = { charges_pct?: number; composants?: { libelle: string; cout: number; est_tissu?: boolean }[]; taux_change?: number };
+
+/** Part tissu d'un chiffrage figé : composants cochés « tissu » (à défaut, nommés « Tissu… »). */
+export function tissuOf(detail: SnapshotDetail): number {
+  const comps = detail.composants ?? [];
+  const flagged = comps.some((c) => c.est_tissu !== undefined);
+  return comps
+    .filter((c) => (flagged ? c.est_tissu : c.libelle.trim().toLowerCase().startsWith("tissu")))
+    .reduce((s, c) => s + Number(c.cout || 0), 0);
+}
+
 export interface RealCostInput {
   rows: TheoreticalRow[];
   /** Tissu consommé mesuré (kg) — null tant qu'aucune pesée de réception. */

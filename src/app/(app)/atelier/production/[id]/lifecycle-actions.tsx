@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody } from "@/components/ui/card";
@@ -157,7 +158,12 @@ export function LifecycleActions({
         {canValidate && !showRenvoi && (
           <Card className="border-warning/30 bg-warning-soft/40">
             <CardBody className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
-              <p className="text-sm font-medium text-foreground">Demande de clôture — contrôle de la direction requis</p>
+              <div>
+                <p className="text-sm font-medium text-foreground">Demande de clôture — contrôle de la direction requis</p>
+                <Link href={`/atelier/production/${productionOrderId}?onglet=rapport`} className="text-xs font-medium text-brand hover:underline">
+                  Lire le rapport de production →
+                </Link>
+              </div>
               <div className="flex gap-2">
                 <Button
                   loading={pending}

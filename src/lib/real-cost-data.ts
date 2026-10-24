@@ -1,7 +1,7 @@
 import "server-only";
 import { createClient } from "@/lib/supabase/server";
 import { getTextilePricesKg } from "@/lib/tarification";
-import { computeRealCost, type RealCostResult, type TheoreticalRow } from "@/lib/real-cost";
+import { computeRealCost, tissuOf, type RealCostResult, type SnapshotDetail, type TheoreticalRow } from "@/lib/real-cost";
 
 /**
  * Données du prix de revient réel d'un ODF (lot F, migration 0070), lues avec
@@ -30,16 +30,6 @@ export interface OdfRealCost {
   result: RealCostResult | null;
 }
 
-type SnapshotDetail = { charges_pct?: number; composants?: { libelle: string; cout: number; est_tissu?: boolean }[]; taux_change?: number };
-
-/** Part tissu d'un chiffrage figé : composants cochés « tissu » (à défaut, nommés « Tissu… »). */
-function tissuOf(detail: SnapshotDetail): number {
-  const comps = detail.composants ?? [];
-  const flagged = comps.some((c) => c.est_tissu !== undefined);
-  return comps
-    .filter((c) => (flagged ? c.est_tissu : c.libelle.trim().toLowerCase().startsWith("tissu")))
-    .reduce((s, c) => s + Number(c.cout || 0), 0);
-}
 
 export async function getOdfRealCosts(odfIds?: string[]): Promise<OdfRealCost[]> {
   const supabase = await createClient();

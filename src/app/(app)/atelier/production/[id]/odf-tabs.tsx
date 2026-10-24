@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 
-export type OdfTab = "general" | "production" | "livraison" | "stock" | "couts";
+export type OdfTab = "general" | "production" | "rapport" | "livraison" | "stock" | "couts";
 
 export const ODF_TAB_LABELS: Record<OdfTab, string> = {
   general: "Général",
   production: "Production",
+  rapport: "Rapport",
   livraison: "Livraison",
   stock: "Stock",
   couts: "Coûts",
