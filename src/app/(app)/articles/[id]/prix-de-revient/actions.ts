@@ -190,7 +190,7 @@ const familySchema = z.object({
 });
 
 /**
- * Prix d'une famille de couleur (migration 0141) quand il diffère de celui de
+ * Prix d'une famille de couleur (migration 0142) quand il diffère de celui de
  * l'article ; tout vide = valeur de l'article.
  */
 export async function saveFamilyPricing(productModelId: string, input: z.input<typeof familySchema>) {

@@ -1,5 +1,5 @@
 -- ============================================================================
--- 0141 — Prix d'un tissu ou d'un consommable par famille de couleur
+-- 0142 — Prix d'un tissu ou d'un consommable par famille de couleur
 -- ============================================================================
 --
 -- Décision du 2026-10-22 : le fournisseur facture le tissu selon la famille
@@ -17,7 +17,7 @@
 --   2. article_variant_prices() : même calcul qu'en 0104, avec la famille.
 --
 -- Le prix au kg qui valorise le tissu des produits finis (textile_prix_kg,
--- 0140) reste celui de l'article (« Tout ») : la grille d'un produit fini ne
+-- 0141) reste celui de l'article (« Tout ») : la grille d'un produit fini ne
 -- connaît pas encore la couleur.
 -- Droits : module Tarification de la matrice, comme model_pricing.
 -- ============================================================================
@@ -84,7 +84,7 @@ begin
   end;
 
   for r in
-    -- Déclinaison, puis famille de sa couleur (0141), puis article.
+    -- Déclinaison, puis famille de sa couleur (0142), puis article.
     select v.id, v.code,
            coalesce(vp.mode_prix, fp.mode_prix) as mode_prix,
            coalesce(vp.prix_achat, fp.prix_achat) as prix_achat,

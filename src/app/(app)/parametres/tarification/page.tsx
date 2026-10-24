@@ -11,7 +11,7 @@ import { chargerParametresSerigraphie } from "@/lib/separation/encres-serveur";
  * Paramétrage de la tarification (migration 0067) — Direction et
  * administrateur. La grille de chaque modèle vit dans sa fiche article
  * (onglet Prix de revient), comme le prix d'achat au kg d'un tissu (migration
- * 0140) ; le prix de revient réel, dans la fiche de l'ODF.
+ * 0141) ; le prix de revient réel, dans la fiche de l'ODF.
  */
 export default async function TarificationSettingsPage() {
   await requireModule("tarification");

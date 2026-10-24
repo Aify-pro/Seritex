@@ -54,7 +54,7 @@ await test("le commercial lit les prix de vente, jamais les coûts", async () =>
   await expectFail(() => asAuth(commercial, `insert into variant_pricing(variant_id, prix_vente) select id, 1 from product_variants limit 1`), /row-level security/);
 });
 
-await test("prix par famille de couleur (0141) : déclinaison → famille → article", async () => {
+await test("prix par famille de couleur (0142) : déclinaison → famille → article", async () => {
   await q(`update colors set famille='fonce' where id=$1`, [noir.id]);
   await q(`update colors set famille='blanc' where id=$1`, [blanc.id]);
   const noirV = await one(`select id from product_variants where model_id=$1 and color_id=$2`, [tissu.id, noir.id]);
