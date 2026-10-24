@@ -76,11 +76,22 @@ export default async function ArticleGeneralPage({ params }: { params: Promise<{
     // Un tissu peut avoir plusieurs grammages (migration 0102) : une ligne textile par grammage.
     const { data: grammages } = await supabase.from("textiles").select("id,composition,matiere_id").eq("product_model_id", id).order("grammage");
     if (!grammages || grammages.length === 0) return identite;
-    const { data: porteurs } = await supabase
-      .from("product_models")
-      .select("id,name")
-      .in("textile_id", grammages.map((g) => g.id as string))
-      .order("name");
+    const [{ data: porteurs }, { data: usages }] = await Promise.all([
+      supabase
+        .from("product_models")
+        .select("id,name")
+        .in("textile_id", grammages.map((g) => g.id as string))
+        .order("name"),
+      // Matière employée par la nomenclature d'un produit fini (bord-côte du col, 0144).
+      supabase.from("nomenclature_lines").select("product_models!nomenclature_lines_product_model_id_fkey(id,name)").eq("mp_id", id),
+    ]);
+    const utilisateurs = [
+      ...new Map(
+        [...(porteurs ?? []), ...(usages ?? []).map((u) => u.product_models as unknown as { id: string; name: string } | null)]
+          .filter((m): m is { id: string; name: string } => !!m)
+          .map((m) => [m.id, m])
+      ).values(),
+    ].sort((a, b) => a.name.localeCompare(b.name, "fr"));
     return (
       <div className="space-y-4">
         {identite}
@@ -100,9 +111,9 @@ export default async function ArticleGeneralPage({ params }: { params: Promise<{
         </Card>
         <UsageCard
           title="Utilisation"
-          description="Produits finis taillés dans ce tissu (tissu principal)."
-          empty="Aucun produit fini n'a ce tissu comme tissu principal."
-          models={porteurs ?? []}
+          description="Produits finis taillés dans ce tissu (tissu principal) ou qui l'emploient par leur nomenclature (bord-côte…)."
+          empty="Aucun produit fini n'emploie ce tissu."
+          models={utilisateurs}
         />
       </div>
     );

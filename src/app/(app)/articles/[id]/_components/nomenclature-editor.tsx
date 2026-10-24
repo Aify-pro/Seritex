@@ -14,6 +14,7 @@ interface NomenclatureRow {
   unite: string;
   consumable_id?: string | null;
   semi_fini_id?: string | null;
+  mp_id?: string | null;
   zone_key?: string | null;
   couleur_imposee_id?: string | null;
 }
@@ -29,6 +30,12 @@ export interface SemiFiniOption {
   id: string;
   code: string | null;
   name: string;
+}
+
+export interface MatiereOption {
+  id: string;
+  name: string;
+  unite: string;
 }
 
 export interface ZoneOption {
@@ -86,10 +93,11 @@ function CouleurOptions({ zones, couleurs }: { zones: ZoneOption[]; couleurs: Co
 }
 
 /**
- * Nomenclature d'un produit fini (lot 12, COM-G, 0143) : les semi-finis qui
- * le composent (manches, col, corps…, en pièces entières) et les consommables
- * hors tissu (boutons, fil, étiquettes, emballage…) avec leur quantité par
- * pièce. Chaque ligne prend la couleur du produit fini — sa couleur unique ou
+ * Nomenclature d'un produit fini (lot 12, COM-G, 0143, 0144) : les semi-finis
+ * qui le composent (manches, col, corps…, en pièces entières), les matières
+ * premières autres que le tissu principal (bord-côte du col, en kg théoriques)
+ * et les consommables (boutons, fil, étiquettes, emballage…) avec leur
+ * quantité par pièce. Chaque ligne prend la couleur du produit fini — sa couleur unique ou
  * celle d'une zone — sauf couleur imposée ; une demande spéciale du client se
  * traitera sur la ligne d'ODF. Le tissu reste celui du produit fini. Seules
  * les lignes consommables comptent dans la consommation à la clôture des ODF.
@@ -99,6 +107,7 @@ export function NomenclatureEditor({
   lines,
   consumables,
   semiFinis,
+  matieres,
   zones,
   couleurs,
 }: {
@@ -106,12 +115,13 @@ export function NomenclatureEditor({
   lines: NomenclatureRow[];
   consumables: ConsumableOption[];
   semiFinis: SemiFiniOption[];
+  matieres: MatiereOption[];
   zones: ZoneOption[];
   couleurs: CouleurOption[];
 }) {
   const [pending, startTransition] = useTransition();
   const [open, setOpen] = useState(false);
-  const [genre, setGenre] = useState<"semi_fini" | "consommable">(semiFinis.length > 0 ? "semi_fini" : "consommable");
+  const [genre, setGenre] = useState<"semi_fini" | "mp" | "consommable">(semiFinis.length > 0 ? "semi_fini" : "consommable");
   const formRef = useRef<HTMLFormElement>(null);
   const router = useRouter();
 
@@ -131,8 +141,8 @@ export function NomenclatureEditor({
     });
   }
 
-  // Semi-finis d'abord : ils composent le vêtement ; puis les consommables.
-  const ordered = [...lines.filter((l) => l.semi_fini_id), ...lines.filter((l) => !l.semi_fini_id)];
+  // Semi-finis d'abord : ils composent le vêtement ; puis les matières, puis les consommables.
+  const ordered = [...lines.filter((l) => l.semi_fini_id), ...lines.filter((l) => l.mp_id), ...lines.filter((l) => !l.semi_fini_id && !l.mp_id)];
 
   return (
     <div className="space-y-3">
@@ -150,6 +160,14 @@ export function NomenclatureEditor({
                       <>
                         <span className="mr-1.5 font-mono text-xs text-foreground-muted">{s?.code ?? "SF"}</span>
                         {s?.name ?? l.designation}
+                      </>
+                    );
+                  }
+                  if (l.mp_id) {
+                    return (
+                      <>
+                        <span className="mr-1.5 text-xs text-foreground-muted">MP</span>
+                        {matieres.find((x) => x.id === l.mp_id)?.name ?? l.designation}
                       </>
                     );
                   }
@@ -248,6 +266,9 @@ export function NomenclatureEditor({
               <input type="radio" checked={genre === "semi_fini"} onChange={() => setGenre("semi_fini")} /> Semi-fini
             </label>
             <label className="flex items-center gap-1.5">
+              <input type="radio" checked={genre === "mp"} onChange={() => setGenre("mp")} /> Matière première
+            </label>
+            <label className="flex items-center gap-1.5">
               <input type="radio" checked={genre === "consommable"} onChange={() => setGenre("consommable")} /> Consommable
             </label>
           </div>
@@ -261,6 +282,18 @@ export function NomenclatureEditor({
                     <option key={s.id} value={s.id}>
                       {s.code ? `${s.code} · ` : ""}
                       {s.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : genre === "mp" ? (
+              <div>
+                <label className="mb-1 block text-xs font-medium text-foreground">Matière première</label>
+                <select key="mp" name="mp_id" required className={`${champ} w-60`}>
+                  <option value="">— Choisir —</option>
+                  {matieres.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name} ({m.unite})
                     </option>
                   ))}
                 </select>
@@ -287,7 +320,7 @@ export function NomenclatureEditor({
                 step={genre === "semi_fini" ? "1" : "0.001"}
                 min={genre === "semi_fini" ? "1" : "0"}
                 required
-                placeholder={genre === "semi_fini" ? "1" : "4"}
+                placeholder={genre === "semi_fini" ? "1" : genre === "mp" ? "0,012" : "4"}
                 className={`${champ} w-24`}
               />
             </div>
