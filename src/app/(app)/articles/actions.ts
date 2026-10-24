@@ -191,7 +191,7 @@ export async function removeProductPrintableZone(zoneId: string) {
 }
 
 // Lot 12 — nomenclature (fournitures constantes) ; 0143 — semi-finis et
-// couleur de chaque ligne.
+// couleur de chaque ligne ; 0144 — matières premières (bord-côte).
 
 const optionalGuid = z
   .string()
@@ -215,21 +215,26 @@ const newNomenclatureLineSchema = couleurLigneSchema
     product_model_id: z.string().uuid(),
     // COM-G : une ligne consommable pointe vers le référentiel des consommables ;
     // désignation et unité en sont reprises (le texte libre ne compte pas à la
-    // clôture). 0143 : une ligne semi-fini pointe vers un article semi-fini.
+    // clôture). 0143 : une ligne semi-fini pointe vers un article semi-fini ;
+    // 0144 : une ligne MP vers une matière première (bord-côte, en kg).
     consumable_id: optionalGuid,
     semi_fini_id: optionalGuid,
+    mp_id: optionalGuid,
     quantite_par_piece: z.coerce.number().positive("Quantité invalide"),
   })
-  .refine((d) => !!d.consumable_id !== !!d.semi_fini_id, { message: "Choisissez un semi-fini ou un consommable" })
+  .refine((d) => [d.consumable_id, d.semi_fini_id, d.mp_id].filter(Boolean).length === 1, {
+    message: "Choisissez un semi-fini, une matière première ou un consommable",
+  })
   .refine((d) => !d.semi_fini_id || Number.isInteger(d.quantite_par_piece), { message: "Un semi-fini se compte en pièces entières" });
 
-/** Ajoute une ligne de nomenclature (semi-fini, ou consommable hors tissu) à un produit fini. */
+/** Ajoute une ligne de nomenclature (semi-fini, matière première ou consommable) à un produit fini. */
 export async function addNomenclatureLine(formData: FormData) {
   await requirePermission("articles", "modify");
   const parsed = newNomenclatureLineSchema.safeParse({
     product_model_id: formData.get("product_model_id"),
     consumable_id: formData.get("consumable_id") ?? "",
     semi_fini_id: formData.get("semi_fini_id") ?? "",
+    mp_id: formData.get("mp_id") ?? "",
     quantite_par_piece: formData.get("quantite_par_piece"),
     zone_key: formData.get("zone_key") ?? "",
     couleur_imposee_id: formData.get("couleur_imposee_id") ?? "",
@@ -243,10 +248,10 @@ export async function addNomenclatureLine(formData: FormData) {
     if (!consumable) return { error: "Consommable introuvable" };
     libelle = { designation: consumable.designation as string, unite: consumable.unite as string };
   }
-  // Ligne semi-fini : désignation et unité recopiées par la base (nomenclature_lines_natures).
+  // Ligne semi-fini ou MP : désignation et unité recopiées par la base (nomenclature_lines_natures).
   const { error } = await supabase.from("nomenclature_lines").insert({ ...parsed.data, ...libelle });
   if (error) {
-    return { error: error.code === "23505" ? "Ce semi-fini est déjà dans la nomenclature pour cette zone." : error.message };
+    return { error: error.code === "23505" ? "Cet article est déjà dans la nomenclature pour cette zone." : error.message };
   }
   revalidateArticles();
   return {};
@@ -260,7 +265,7 @@ export async function setNomenclatureLineCouleur(lineId: string, input: z.input<
   const supabase = await createClient();
   const { error } = await supabase.from("nomenclature_lines").update(parsed.data).eq("id", lineId);
   if (error) {
-    return { error: error.code === "23505" ? "Ce semi-fini est déjà dans la nomenclature pour cette zone." : error.message };
+    return { error: error.code === "23505" ? "Cet article est déjà dans la nomenclature pour cette zone." : error.message };
   }
   revalidateArticles();
   return {};

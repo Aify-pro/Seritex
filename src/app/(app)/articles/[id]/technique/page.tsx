@@ -76,7 +76,7 @@ export default async function ArticleTechniquePage({ params }: { params: Promise
     );
   }
 
-  const [{ data: zones }, { data: printableZones }, { data: nomenclature }, { data: fiches }, { data: consumables }, { data: mockups }, { data: semiFinis }, { data: couleurs }] =
+  const [{ data: zones }, { data: printableZones }, { data: nomenclature }, { data: fiches }, { data: consumables }, { data: mockups }, { data: semiFinis }, { data: couleurs }, { data: matieres }] =
     await Promise.all([
       supabase.from("product_zone_templates").select("*").eq("product_model_id", id).order("display_order"),
       supabase.from("product_printable_zones").select("*").eq("product_model_id", id).order("display_order"),
@@ -91,6 +91,7 @@ export default async function ArticleTechniquePage({ params }: { params: Promise
       supabase.from("product_model_mockups").select("vue,svg,zones,largeur_cm,cadre,reperes").eq("product_model_id", id),
       supabase.from("product_models").select("id,code,name").eq("nature", "semi_fini").eq("active", true).order("name"),
       supabase.from("colors").select("id,name").eq("active", true).order("name"),
+      supabase.from("product_models").select("id,name,unite").eq("nature", "mp").eq("active", true).order("name"),
     ]);
   // Patrons : ceux des semi-finis de la nomenclature (0143), plus l'ancien
   // patron rattaché directement au produit fini s'il en a un (ART-A).
@@ -145,7 +146,7 @@ export default async function ArticleTechniquePage({ params }: { params: Promise
       <Card>
         <CardHeader
           title="Nomenclature"
-          description="Semi-finis qui composent le vêtement (manches, col, corps…) et consommables par pièce (boutons, fil, étiquettes, emballage…). Chaque ligne prend la couleur du produit fini — couleur unique ou celle d'une zone — sauf couleur imposée. Le tissu est celui du produit fini, mesuré par les pesées ; la consommation théorique des consommables est calculée à la clôture des ODF."
+          description="Semi-finis qui composent le vêtement (manches, col, corps…), matières premières autres que le tissu principal (bord-côte du col, en kg théoriques par pièce) et consommables par pièce (boutons, fil, étiquettes, emballage…). Chaque ligne prend la couleur du produit fini — couleur unique ou celle d'une zone — sauf couleur imposée. Le tissu est celui du produit fini, mesuré par les pesées ; la consommation théorique des consommables est calculée à la clôture des ODF."
         />
         <CardBody>
           {canModify ? (
@@ -154,6 +155,7 @@ export default async function ArticleTechniquePage({ params }: { params: Promise
               lines={nomenclature ?? []}
               consumables={(consumables ?? []).map((c) => ({ id: c.id as string, code: c.code as string, designation: c.designation as string, unite: c.unite as string }))}
               semiFinis={(semiFinis ?? []).map((s) => ({ id: s.id as string, code: (s.code as string | null) ?? null, name: s.name as string }))}
+              matieres={(matieres ?? []).map((m) => ({ id: m.id as string, name: m.name as string, unite: m.unite as string }))}
               zones={(zones ?? []).map((z) => ({ zone_key: z.zone_key as string, zone_label: z.zone_label as string }))}
               couleurs={(couleurs ?? []).map((c) => ({ id: c.id as string, name: c.name as string }))}
             />
