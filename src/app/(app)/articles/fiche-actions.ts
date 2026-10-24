@@ -8,7 +8,7 @@ import { ARTICLE_NATURES, TYPES_APPRO, UNITES } from "@/lib/articles/natures";
 
 /**
  * Fiche article unique (migration 0093) : création de tout article — produit
- * fini, matière première, consommable — depuis la même fiche, et son
+ * fini, semi-fini (0143), matière première, consommable — depuis la même fiche, et son
  * classement. Les données techniques des matières premières (textiles) et
  * des consommables restent dans leurs tables, reliées à l'article.
  */
@@ -67,6 +67,8 @@ export async function createArticle(input: z.input<typeof createSchema>): Promis
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Saisie invalide" };
   const d = parsed.data;
   if (d.nature === "consommable" && !d.consumable_family_id) return { error: "Choisissez le préfixe du code (famille de consommable)." };
+  // Un semi-fini est toujours fabriqué, à la pièce (contrainte product_models_semi_fini_interne, 0143).
+  if (d.nature === "semi_fini") Object.assign(d, { type_appro: "fabrique", unite: "piece" });
 
   const supabase = await createClient();
   const { data: model, error } = await supabase

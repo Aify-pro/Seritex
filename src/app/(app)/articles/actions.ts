@@ -190,33 +190,78 @@ export async function removeProductPrintableZone(zoneId: string) {
   return {};
 }
 
-// Lot 12 — nomenclature (fournitures constantes).
+// Lot 12 — nomenclature (fournitures constantes) ; 0143 — semi-finis et
+// couleur de chaque ligne.
 
-const newNomenclatureLineSchema = z.object({
-  product_model_id: z.string().uuid(),
-  // COM-G : la ligne pointe vers le référentiel des consommables ; désignation
-  // et unité en sont reprises (le texte libre ne compte pas à la clôture).
-  consumable_id: z.guid("Choisissez un consommable"),
-  quantite_par_piece: z.coerce.number().positive(),
+const optionalGuid = z
+  .string()
+  .trim()
+  .transform((v) => v || null)
+  .pipe(z.guid().nullable());
+
+// Couleur d'une ligne (0143) : celle du produit fini, lue sur la ligne de
+// devis / d'ODF — la zone choisie, sinon la couleur unique — ou une couleur
+// imposée (col toujours noir).
+const couleurLigneSchema = z.object({
+  zone_key: z
+    .string()
+    .trim()
+    .transform((v) => v || null),
+  couleur_imposee_id: optionalGuid,
 });
 
-/** Ajoute une ligne de nomenclature (composant constant hors tissu) à un modèle de produit. */
+const newNomenclatureLineSchema = couleurLigneSchema
+  .extend({
+    product_model_id: z.string().uuid(),
+    // COM-G : une ligne consommable pointe vers le référentiel des consommables ;
+    // désignation et unité en sont reprises (le texte libre ne compte pas à la
+    // clôture). 0143 : une ligne semi-fini pointe vers un article semi-fini.
+    consumable_id: optionalGuid,
+    semi_fini_id: optionalGuid,
+    quantite_par_piece: z.coerce.number().positive("Quantité invalide"),
+  })
+  .refine((d) => !!d.consumable_id !== !!d.semi_fini_id, { message: "Choisissez un semi-fini ou un consommable" })
+  .refine((d) => !d.semi_fini_id || Number.isInteger(d.quantite_par_piece), { message: "Un semi-fini se compte en pièces entières" });
+
+/** Ajoute une ligne de nomenclature (semi-fini, ou consommable hors tissu) à un produit fini. */
 export async function addNomenclatureLine(formData: FormData) {
   await requirePermission("articles", "modify");
   const parsed = newNomenclatureLineSchema.safeParse({
     product_model_id: formData.get("product_model_id"),
-    consumable_id: formData.get("consumable_id"),
+    consumable_id: formData.get("consumable_id") ?? "",
+    semi_fini_id: formData.get("semi_fini_id") ?? "",
     quantite_par_piece: formData.get("quantite_par_piece"),
+    zone_key: formData.get("zone_key") ?? "",
+    couleur_imposee_id: formData.get("couleur_imposee_id") ?? "",
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message };
 
   const supabase = await createClient();
-  const { data: consumable } = await supabase.from("consumables").select("designation,unite").eq("id", parsed.data.consumable_id).maybeSingle();
-  if (!consumable) return { error: "Consommable introuvable" };
-  const { error } = await supabase
-    .from("nomenclature_lines")
-    .insert({ ...parsed.data, designation: consumable.designation, unite: consumable.unite });
-  if (error) return { error: error.message };
+  let libelle = { designation: "", unite: "piece" };
+  if (parsed.data.consumable_id) {
+    const { data: consumable } = await supabase.from("consumables").select("designation,unite").eq("id", parsed.data.consumable_id).maybeSingle();
+    if (!consumable) return { error: "Consommable introuvable" };
+    libelle = { designation: consumable.designation as string, unite: consumable.unite as string };
+  }
+  // Ligne semi-fini : désignation et unité recopiées par la base (nomenclature_lines_natures).
+  const { error } = await supabase.from("nomenclature_lines").insert({ ...parsed.data, ...libelle });
+  if (error) {
+    return { error: error.code === "23505" ? "Ce semi-fini est déjà dans la nomenclature pour cette zone." : error.message };
+  }
+  revalidateArticles();
+  return {};
+}
+
+/** Change la couleur d'une ligne de nomenclature : zone du produit fini, ou couleur imposée. */
+export async function setNomenclatureLineCouleur(lineId: string, input: z.input<typeof couleurLigneSchema>) {
+  await requirePermission("articles", "modify");
+  const parsed = couleurLigneSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message };
+  const supabase = await createClient();
+  const { error } = await supabase.from("nomenclature_lines").update(parsed.data).eq("id", lineId);
+  if (error) {
+    return { error: error.code === "23505" ? "Ce semi-fini est déjà dans la nomenclature pour cette zone." : error.message };
+  }
   revalidateArticles();
   return {};
 }
@@ -263,8 +308,9 @@ export async function updateProductModelIdentity(productModelId: string, formDat
 }
 
 /**
- * Rattache à ce modèle un article de patronnage resté orphelin (A5 : le
- * patronnage est forcément lié à un modèle). Les orphelins sont listés dans
+ * Rattache à ce semi-fini un article de patronnage resté orphelin (A5 : le
+ * patronnage est forcément lié à un modèle ; 0143 : à un semi-fini, un seul
+ * patron par semi-fini, contrôlé par la base). Les orphelins sont listés dans
  * l'inventaire de la migration 0073.
  */
 export async function attachPatternArticle(patternArticleId: string, productModelId: string) {

@@ -6,7 +6,7 @@ import { Table, Thead, Tbody, Th, Td, EmptyRow } from "@/components/ui/table";
 import { ClickableTr } from "@/components/ui/clickable-row";
 import { Badge } from "@/components/ui/badge";
 import { formatAmount } from "@/lib/utils";
-import { ChevronLeft, ChevronRight, Package, Plus, Shirt, Spool } from "lucide-react";
+import { ChevronLeft, ChevronRight, Package, Plus, Scissors, Shirt, Spool } from "lucide-react";
 import { applyArticleFilters, articleFiltersToSearchParams, paginate, parseArticleFilters, type ArticleFilters } from "@/lib/articles/filters";
 import { avecVignettes, loadArticleCatalog } from "@/lib/articles/catalog";
 import { NATURE_LABELS, TYPE_APPRO_LABELS, UNITE_LABELS, type Unite } from "@/lib/articles/natures";
@@ -15,7 +15,7 @@ import { Presets } from "@/components/filters/presets";
 
 const nf = new Intl.NumberFormat("fr-FR");
 
-const NATURE_ICON = { pf: Shirt, mp: Spool, consommable: Package } as const;
+const NATURE_ICON = { pf: Shirt, semi_fini: Scissors, mp: Spool, consommable: Package } as const;
 
 /**
  * Module Articles : une seule liste pour tous les articles — produits finis,

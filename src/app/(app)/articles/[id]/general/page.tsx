@@ -17,8 +17,8 @@ import type { ArticleNature, TypeAppro, Unite } from "@/lib/articles/natures";
  * Onglet Général : ce qu'est l'article, avec la même disposition pour toutes
  * les natures — Identité et classement, Caractéristiques (codification et
  * tissu d'un produit fini, composition d'un tissu, famille et étape d'un
- * consommable), puis Utilisation (les produits finis qui emploient ce tissu
- * ou ce consommable). Ce qui décline l'article (axes, grille, références
+ * consommable), puis Utilisation (les produits finis qui emploient ce tissu,
+ * ce consommable ou ce semi-fini). Ce qui décline l'article (axes, grille, références
  * Sage) est dans l'onglet Déclinaisons.
  */
 export default async function ArticleGeneralPage({ params }: { params: Promise<{ id: string }> }) {
@@ -108,6 +108,44 @@ export default async function ArticleGeneralPage({ params }: { params: Promise<{
     );
   }
 
+  if (nature === "semi_fini") {
+    const { data: usages } = await supabase
+      .from("nomenclature_lines")
+      .select("product_models!nomenclature_lines_product_model_id_fkey(id,name)")
+      .eq("semi_fini_id", id);
+    const utilisateurs = [
+      ...new Map(
+        (usages ?? [])
+          .map((u) => u.product_models as unknown as { id: string; name: string } | null)
+          .filter((m): m is { id: string; name: string } => !!m)
+          .map((m) => [m.id, m])
+      ).values(),
+    ].sort((a, b) => a.name.localeCompare(b.name, "fr"));
+    return (
+      <div className="space-y-4">
+        {identite}
+        <Card>
+          <CardHeader
+            title="Caractéristiques"
+            description="Pièce de production : fabriquée à la pièce, jamais vendue ni envoyée à Sage, sans déclinaison. Son tissu et sa couleur sont ceux du produit fini qui l'emploie ; son patron (un par taille) est dans l'onglet Technique."
+          />
+          <CardBody>
+            <p className="text-sm">
+              <span className="text-foreground-muted">Code : </span>
+              <span className="font-mono">{model.code ?? "—"}</span>
+            </p>
+          </CardBody>
+        </Card>
+        <UsageCard
+          title="Utilisation"
+          description="Produits finis dont la nomenclature contient ce semi-fini."
+          empty="Aucune nomenclature ne contient ce semi-fini."
+          models={utilisateurs}
+        />
+      </div>
+    );
+  }
+
   if (nature === "consommable") {
     const { data: consumable } = await supabase
       .from("consumables")
@@ -115,7 +153,7 @@ export default async function ArticleGeneralPage({ params }: { params: Promise<{
       .eq("product_model_id", id)
       .maybeSingle();
     const { data: usages } = consumable
-      ? await supabase.from("nomenclature_lines").select("product_models(id,name)").eq("consumable_id", consumable.id as string)
+      ? await supabase.from("nomenclature_lines").select("product_models!nomenclature_lines_product_model_id_fkey(id,name)").eq("consumable_id", consumable.id as string)
       : { data: [] };
     // Article de la sous-famille « Encres » (0117) : options sérigraphie.
     const { data: sousFamille } = model.sous_famille_id

@@ -1,13 +1,16 @@
 /**
  * Nature, type d'approvisionnement et unité d'un article (migration 0093) :
- * tous les articles — produits finis, matières premières, consommables —
- * partagent la même liste et la même fiche.
+ * tous les articles — produits finis, semi-finis, matières premières,
+ * consommables — partagent la même liste et la même fiche. Un semi-fini
+ * (manche, col… migration 0143) est une pièce de production : fabriqué,
+ * jamais vendu ni envoyé à Sage, sans déclinaison.
  */
-export const ARTICLE_NATURES = ["pf", "mp", "consommable"] as const;
+export const ARTICLE_NATURES = ["pf", "semi_fini", "mp", "consommable"] as const;
 export type ArticleNature = (typeof ARTICLE_NATURES)[number];
 
 export const NATURE_LABELS: Record<ArticleNature, string> = {
   pf: "Produit fini",
+  semi_fini: "Semi-fini",
   mp: "Matière première",
   consommable: "Consommable",
 };

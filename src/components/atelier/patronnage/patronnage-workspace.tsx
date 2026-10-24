@@ -44,7 +44,7 @@ export function PatronBibliothequeManager({
   canDelete,
 }: {
   initialLibrary: LibraryArticle[];
-  /** Modèles actifs : un nouvel article de patronnage est forcément rattaché à l'un d'eux (A5). */
+  /** Semi-finis actifs sans patron : un nouvel article de patronnage est forcément rattaché à l'un d'eux (A5, 0143). */
   productModels: { id: string; name: string }[];
   canModify: boolean;
   canDelete: boolean;
@@ -298,13 +298,13 @@ function BibliothequeTab({
 
                 {!existingArticleId && (
                   <div className="grid grid-cols-2 gap-4">
-                    <Field label="Modèle de produit (obligatoire)">
+                    <Field label="Semi-fini (obligatoire)">
                       <select
                         value={productModelId}
                         onChange={(e) => setProductModelId(e.target.value)}
                         className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground"
                       >
-                        <option value="">— Choisir le modèle —</option>
+                        <option value="">— Choisir le semi-fini —</option>
                         {productModels.map((m) => (
                           <option key={m.id} value={m.id}>
                             {m.name}
@@ -312,12 +312,16 @@ function BibliothequeTab({
                         ))}
                       </select>
                     </Field>
-                    <div />
+                    <p className="self-end text-[11px] text-foreground-muted">
+                      {productModels.length === 0
+                        ? "Aucun semi-fini sans patron : créez-le dans Articles (nature « Semi-fini »)."
+                        : "Un patron par semi-fini (manche, col, corps…), partagé par tous les produits finis qui l'emploient."}
+                    </p>
                     <Field label="Code article">
                       <input
                         value={articleCode}
                         onChange={(e) => setArticleCode(e.target.value)}
-                        placeholder="ex. TS-COL-V-002"
+                        placeholder="ex. MANCHE-COURTE"
                         className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground"
                       />
                     </Field>
@@ -325,7 +329,7 @@ function BibliothequeTab({
                       <input
                         value={designation}
                         onChange={(e) => setDesignation(e.target.value)}
-                        placeholder="ex. T-shirt col V, manches courtes"
+                        placeholder="ex. Manche courte, t-shirts adulte"
                         className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground"
                       />
                     </Field>

@@ -27,7 +27,7 @@ export default async function NewArticlePage() {
       <Link href="/articles" className="inline-flex items-center gap-1.5 text-xs font-medium text-foreground-muted hover:text-foreground">
         <ArrowLeft className="h-3.5 w-3.5" /> Articles
       </Link>
-      <PageHeader title="Nouvel article" description="Produit fini, matière première ou consommable : tous les articles ont la même fiche et peuvent être vendus." />
+      <PageHeader title="Nouvel article" description="Produit fini, semi-fini, matière première ou consommable : tous les articles ont la même fiche ; tous peuvent être vendus, sauf les semi-finis." />
       <NewArticleForm
         familles={(familles ?? []).map((f) => ({ id: f.id as string, nom: f.nom as string, parentId: (f.parent_id as string | null) ?? null }))}
         categories={(categories ?? []).map((c) => ({ id: c.id as string, nom: c.nom as string }))}

@@ -38,7 +38,7 @@ export function ArticleClassementForm({
         </div>
         <label className="block">
           <span className="mb-1 block text-xs font-medium text-foreground-muted">Type</span>
-          <select value={v.type_appro} disabled={!editable} onChange={(e) => setV({ ...v, type_appro: e.target.value as TypeAppro })} className={input} title={TYPE_APPRO_HINTS[v.type_appro]}>
+          <select value={v.type_appro} disabled={!editable || nature === "semi_fini"} onChange={(e) => setV({ ...v, type_appro: e.target.value as TypeAppro })} className={input} title={TYPE_APPRO_HINTS[v.type_appro]}>
             {(Object.keys(TYPE_APPRO_LABELS) as TypeAppro[]).map((t) => (
               <option key={t} value={t}>
                 {TYPE_APPRO_LABELS[t]}
@@ -70,7 +70,7 @@ export function ArticleClassementForm({
         </label>
         <label className="block">
           <span className="mb-1 block text-xs font-medium text-foreground-muted">Unité</span>
-          <select value={v.unite} disabled={!editable} onChange={(e) => setV({ ...v, unite: e.target.value as Unite })} className={input}>
+          <select value={v.unite} disabled={!editable || nature === "semi_fini"} onChange={(e) => setV({ ...v, unite: e.target.value as Unite })} className={input}>
             {(Object.keys(UNITE_LABELS) as Unite[]).map((u) => (
               <option key={u} value={u}>
                 {UNITE_LABELS[u]}
