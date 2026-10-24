@@ -49,6 +49,11 @@ const contenu: ReportContenu = {
     duree_ecoulee_min: 508 + i * 900,
   })),
   tissu: { kg_reception: "182.4", kg_retour_stock: "11.2", kg_sortie_lots: "160.1", kg_dechets: "9.7", matelas_clotures: 4 },
+  semi_finis: [
+    { semi_fini_id: "a", code: "SF001", piece: "Manche courte", statut: "semi_fini", coupe: 2880, attendu: 2880 },
+    { semi_fini_id: "b", code: "SF002", piece: "Col rond", statut: "semi_fini", coupe: 1420, attendu: 1440 },
+    { semi_fini_id: null, code: null, piece: "Poche", statut: "non_rattachee", coupe: 960, attendu: null },
+  ],
   consommables: [
     { code: "COBO0001", designation: "Bouton nacre 12 mm", unite: "piece", theorique: "1440", reel: "1452", motif: "boutons cassés à la pose" },
     { code: "COEM0001", designation: "Sachet individuel", unite: "piece", theorique: "1440", reel: null, motif: null },

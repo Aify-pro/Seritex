@@ -1,6 +1,7 @@
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import { getLogoPngBytes } from "./logo";
 import { formatDuree, type ReportValeur, type ReportView } from "@/lib/production-report";
+import { PIECE_STATUT_LABELS } from "@/lib/pieces-coupees";
 
 /**
  * Mise en page du rapport de production (migration 0145), imprimable.
@@ -300,7 +301,29 @@ export async function buildProductionReportPdf(d: ProductionReportPdfData): Prom
     );
   }
 
-  // 7. Valeurs (droit Tarification)
+  // 7. Semi-finis (0146) : coupé au tracé face à l'attendu par la nomenclature.
+  if (d.view.semiFinis.length > 0) {
+    heading("Semi-finis", "Coupé = pièces reconnues sur le tracé × couches réelles ; attendu = t-shirts obtenus × nomenclature.");
+    table(
+      [
+        { label: "Pièce", width: 260 },
+        { label: "Coupé", width: 70, align: R },
+        { label: "Attendu", width: 70, align: R },
+        { label: "Écart", width: 70, align: R },
+      ],
+      d.view.semiFinis.map((s) => ({
+        cells: [
+          `${s.code ? `${s.code} ` : ""}${s.piece}${s.statut !== "semi_fini" ? ` (${PIECE_STATUT_LABELS[s.statut].toLowerCase()})` : ""}`,
+          String(s.coupe),
+          s.attendu === null ? "-" : String(s.attendu),
+          s.ecart === null ? "-" : signe(s.ecart),
+        ],
+        danger: s.ecart !== null && s.ecart < 0 ? [3] : [],
+      }))
+    );
+  }
+
+  // 8. Valeurs (droit Tarification)
   const v = d.valeur;
   if (v) {
     heading(

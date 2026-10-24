@@ -6,12 +6,15 @@
  *  2. le tissu net = réception − retour au stock, et le kg par pièce sortie ;
  *  3. sans devis : valeur du tissu et des déchets seulement, signalé ;
  *  4. avec devis : prix de revient réel calculé comme l'onglet Coûts ;
- *  5. la durée écoulée se lit en minutes, heures, jours.
+ *  5. la durée écoulée se lit en minutes, heures, jours ;
+ *  6. les pièces coupées (src/lib/pieces-coupees.ts) se regroupent par
+ *     semi-fini, avec l'attendu et l'écart ; le hors semi-fini à part.
  *
  * Lancer : npm run test:rapport
  */
 import assert from "node:assert/strict";
 import { buildReportValeur, buildReportView, formatDuree, type ReportContenu } from "../src/lib/production-report";
+import { groupPiecesCoupees, type PieceCoupeeRow } from "../src/lib/pieces-coupees";
 
 let n = 0;
 function test(name: string, fn: () => void) {
@@ -84,6 +87,26 @@ test("sans prix au kg : aucune valeur inventée", () => {
 
 test("durée écoulée lisible", () => {
   assert.deepEqual([formatDuree(null), formatDuree(45), formatDuree(190), formatDuree(120), formatDuree(60 * 52)], ["—", "45 min", "3 h 10", "2 h", "2 j 4 h"]);
+});
+
+test("pièces coupées : par semi-fini et par taille, attendu et écart ; hors semi-fini sans attendu", () => {
+  const rows: PieceCoupeeRow[] = [
+    { source: "trace", statut: "semi_fini", semi_fini_id: "col", piece: "Col", taille: "M", quantite: 10 },
+    { source: "trace", statut: "semi_fini", semi_fini_id: "man", piece: "Manche", taille: "M", quantite: 24 },
+    { source: "trace", statut: "semi_fini", semi_fini_id: "man", piece: "Manche", taille: "L", quantite: 16 },
+    { source: "nomenclature", statut: "semi_fini", semi_fini_id: "man", piece: "Manche courte", taille: null, quantite: 40 },
+    { source: "nomenclature", statut: "semi_fini", semi_fini_id: "col", piece: "Col rond", taille: null, quantite: 20 },
+    { source: "trace", statut: "non_reconnue", semi_fini_id: null, piece: "Pièces non reconnues", taille: null, quantite: 10 },
+    { source: "trace", statut: "non_rattachee", semi_fini_id: null, piece: "Poche", taille: "M", quantite: 20 },
+  ];
+  const noms: Record<string, string> = { man: "Manche courte", col: "Col rond" };
+  const { groupes, tailles } = groupPiecesCoupees(rows, (id) => noms[id] ?? null);
+  assert.deepEqual(tailles, ["M", "L", "—"]);
+  assert.deepEqual(
+    groupes.map((g) => [g.libelle, g.coupe, g.attendu, g.ecart]),
+    [["Col rond", 10, 20, -10], ["Manche courte", 40, 40, 0], ["Poche", 20, null, null], ["Pièces non reconnues", 10, null, null]]
+  );
+  assert.deepEqual(groupes[1].parTaille, { M: 24, L: 16 });
 });
 
 console.log(`\n${n} tests OK`);

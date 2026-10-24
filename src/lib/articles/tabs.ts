@@ -19,6 +19,7 @@ const ARTICLES_VENDUS: ArticleNature[] = ["pf", "mp", "consommable"];
 export const ARTICLE_DETAIL_TABS: ArticleTabDef[] = [
   { slug: "general", label: "Général" },
   { slug: "technique", label: "Technique", natures: ["pf", "semi_fini"] },
+  { slug: "stock-tampon", label: "Stock tampon", natures: ["semi_fini"] },
   { slug: "declinaisons", label: "Déclinaisons", natures: ARTICLES_VENDUS },
   { slug: "fabrication", label: "Fabrication", natures: ["pf"] },
   { slug: "ventes", label: "Ventes", natures: ARTICLES_VENDUS },

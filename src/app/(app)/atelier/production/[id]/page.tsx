@@ -28,6 +28,8 @@ import { RemaindersPanel, type RemainderRow } from "./remainders-panel";
 import { OdfTabs, type OdfTab } from "./odf-tabs";
 import { RealCostTab } from "./real-cost-tab";
 import { ProductionReportTab } from "./production-report-tab";
+import { PiecesCoupeesTable } from "@/components/atelier/pieces-coupees-table";
+import { groupPiecesCoupees, type PieceCoupeeRow } from "@/lib/pieces-coupees";
 import { OdfRolls } from "./odf-rolls";
 import { ConsumptionPanel, type ConsumptionRow } from "./consumption-panel";
 import { odfClientLabel } from "@/lib/production/client-label";
@@ -729,10 +731,21 @@ export default async function ProductionOrderDetailPage({
 
   // Rapport de production (0145) : visible de qui voit l'ODF dès qu'il en existe un ;
   // ses valeurs, seulement avec le droit Tarification.
-  const [{ count: nbRapports }, canSeeCosts] = await Promise.all([
+  const [{ count: nbRapports }, canSeeCosts, { data: piecesCoupeesRows }] = await Promise.all([
     supabase.from("production_reports").select("id", { count: "exact", head: true }).eq("production_order_id", order.id),
     can("tarification", "view"),
+    // Pièces coupées par semi-fini, figées à la clôture des matelas (0146).
+    supabase
+      .from("pieces_coupees")
+      .select("source,statut,semi_fini_id,piece,taille,quantite,semi_fini:product_models(name)")
+      .eq("production_order_id", order.id),
   ]);
+  const semiFiniNames = new Map(
+    (piecesCoupeesRows ?? [])
+      .filter((r) => r.semi_fini_id)
+      .map((r) => [r.semi_fini_id as string, (r.semi_fini as unknown as { name: string } | null)?.name ?? null])
+  );
+  const piecesCoupees = groupPiecesCoupees((piecesCoupeesRows ?? []) as PieceCoupeeRow[], (sfId) => semiFiniNames.get(sfId) ?? null);
 
   // Onglets visibles selon le rôle : la lecture s'ouvre catégorie par catégorie.
   const tabs: OdfTab[] = ["general"];
@@ -978,6 +991,18 @@ export default async function ProductionOrderDetailPage({
         )}
 
         <WhereArePieces lines={whereArePiecesLines} sizes={allSizes} />
+
+        {piecesCoupees.groupes.length > 0 && (
+          <Card>
+            <CardHeader
+              title="Pièces coupées par semi-fini"
+              description="Figées à chaque clôture de matelas : pièces reconnues sur le tracé × couches réelles, comparées aux t-shirts obtenus × nomenclature. Consultation seule."
+            />
+            <CardBody>
+              <PiecesCoupeesTable groupes={piecesCoupees.groupes} tailles={piecesCoupees.tailles} />
+            </CardBody>
+          </Card>
+        )}
 
         <Card>
           <CardHeader
