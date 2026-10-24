@@ -27,6 +27,7 @@ import type { WorkOrderFlowRow } from "@/lib/types/domain";
 import { RemaindersPanel, type RemainderRow } from "./remainders-panel";
 import { OdfTabs, type OdfTab } from "./odf-tabs";
 import { RealCostTab } from "./real-cost-tab";
+import { ProductionReportTab } from "./production-report-tab";
 import { OdfRolls } from "./odf-rolls";
 import { ConsumptionPanel, type ConsumptionRow } from "./consumption-panel";
 import { odfClientLabel } from "@/lib/production/client-label";
@@ -42,11 +43,11 @@ export default async function ProductionOrderDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ onglet?: string }>;
+  searchParams: Promise<{ onglet?: string; rapport?: string }>;
 }) {
   const { profile } = await requireModule("ordres_fabrication");
   const { id } = await params;
-  const { onglet } = await searchParams;
+  const { onglet, rapport } = await searchParams;
   const supabase = await createClient();
   const baseUrl = await getBaseUrl();
 
@@ -726,9 +727,17 @@ export default async function ProductionOrderDetailPage({
     }
   }
 
+  // Rapport de production (0145) : visible de qui voit l'ODF dès qu'il en existe un ;
+  // ses valeurs, seulement avec le droit Tarification.
+  const [{ count: nbRapports }, canSeeCosts] = await Promise.all([
+    supabase.from("production_reports").select("id", { count: "exact", head: true }).eq("production_order_id", order.id),
+    can("tarification", "view"),
+  ]);
+
   // Onglets visibles selon le rôle : la lecture s'ouvre catégorie par catégorie.
   const tabs: OdfTab[] = ["general"];
   if (["administrateur", "responsable_production", "gestionnaire_stock"].includes(profile.role)) tabs.push("production");
+  if ((nbRapports ?? 0) > 0) tabs.push("rapport");
   if (order.company_id && ["administrateur", "responsable_production", "comptabilite"].includes(profile.role)) tabs.push("livraison");
   if (canManageStock) tabs.push("stock");
   if (profile.role === "administrateur" && order.quote_id) tabs.push("couts");
@@ -1198,6 +1207,10 @@ export default async function ProductionOrderDetailPage({
           canGenerate={canManageStock}
         />
         </>
+      )}
+
+      {tab === "rapport" && (
+        <ProductionReportTab productionOrderId={order.id} numero={rapport ? Number(rapport) : undefined} canSeeCosts={canSeeCosts} />
       )}
 
       {tab === "couts" && <RealCostTab productionOrderId={order.id} />}
