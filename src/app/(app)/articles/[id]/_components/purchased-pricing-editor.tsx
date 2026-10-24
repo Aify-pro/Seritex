@@ -25,7 +25,7 @@ export type Famille = keyof typeof FAMILLE_LABELS;
 /** Ordre du sélecteur : du plus cher au moins cher chez le fournisseur. */
 const FAMILLES: Famille[] = ["fonce", "moyen", "clair", "blanc"];
 
-/** Valeurs d'une famille de couleur (migration 0141) ; null = valeur de l'article. */
+/** Valeurs d'une famille de couleur (migration 0142) ; null = valeur de l'article. */
 export interface FamilyPurchase {
   mode: "calcule" | "saisi" | null;
   prixAchat: number | null;
@@ -49,7 +49,7 @@ export interface VariantPurchase {
  * calculé — achat + frais d'approche × coefficient, arrondi — ou saisi. Les
  * valeurs de l'article valent pour toutes ses déclinaisons, qui peuvent les
  * remplacer. Une famille de couleur (Foncé, Moyen, Clair, Blanc — migration
- * 0141) peut aussi remplacer l'article pour toutes ses déclinaisons : chaque
+ * 0142) peut aussi remplacer l'article pour toutes ses déclinaisons : chaque
  * valeur se lit déclinaison → famille → article. Direction et administrateur
  * seulement.
  */

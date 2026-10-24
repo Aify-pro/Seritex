@@ -1,5 +1,5 @@
 -- ============================================================================
--- 0140 — Prix du tissu au kg lu sur la fiche article du tissu
+-- 0141 — Prix du tissu au kg lu sur la fiche article du tissu
 -- ============================================================================
 --
 -- Décision du 2026-10-21 : le tissu s'achète au kg, au même prix quel que soit
