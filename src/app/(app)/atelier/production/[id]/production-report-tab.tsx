@@ -7,6 +7,7 @@ import { formatDateTime } from "@/lib/utils";
 import { getSizes } from "@/lib/sizes";
 import { getProductionReports } from "@/lib/production-report-data";
 import { buildReportValeur, buildReportView, DECISION_LABELS, formatDuree, type ReportDecision } from "@/lib/production-report";
+import { PIECE_STATUT_LABELS } from "@/lib/pieces-coupees";
 
 const th = "px-2 py-1.5 text-right";
 const td = "px-2 py-1.5 text-right";
@@ -253,6 +254,43 @@ export async function ProductionReportTab({
           )}
         </CardBody>
       </Card>
+
+      {v.semiFinis.length > 0 && (
+        <Card>
+          <CardHeader
+            title="Semi-finis"
+            description="Pièces coupées (reconnues sur le tracé × couches réelles) face à l'attendu (t-shirts obtenus × nomenclature), cumulées sur les matelas de l'ODF."
+          />
+          <CardBody className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border text-left text-[11px] uppercase tracking-wide text-foreground-muted">
+                  <th className="py-1.5 pr-3">Pièce</th>
+                  <th className={th}>Coupé</th>
+                  <th className={th}>Attendu</th>
+                  <th className={th}>Écart</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border tabular-nums">
+                {v.semiFinis.map((s) => (
+                  <tr key={`${s.statut}-${s.piece}`}>
+                    <td className="py-1.5 pr-3">
+                      {s.code && <span className="mr-1.5 font-mono text-[11px] text-foreground-muted">{s.code}</span>}
+                      <span className="font-medium">{s.piece}</span>
+                      {s.statut !== "semi_fini" && <span className="block text-[11px] text-warning">{PIECE_STATUT_LABELS[s.statut]}</span>}
+                    </td>
+                    <td className={td}>{s.coupe}</td>
+                    <td className={td}>{s.attendu ?? "—"}</td>
+                    <td className={`${td} font-semibold ${s.ecart !== null && s.ecart < 0 ? "text-danger" : s.ecart ? "text-warning" : ""}`}>
+                      {s.ecart === null ? "—" : s.ecart === 0 ? "0" : signe(s.ecart)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </CardBody>
+        </Card>
+      )}
 
       {valeur && (
         <Card>

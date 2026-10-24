@@ -1,4 +1,5 @@
 import { computeRealCost, tissuOf, type RealCostResult, type SnapshotDetail, type TheoreticalRow } from "@/lib/real-cost";
+import type { PieceCoupeeStatut } from "@/lib/pieces-coupees";
 
 /**
  * Rapport de production (migration 0145) : lecture du rapport figé à la
@@ -60,6 +61,8 @@ export interface ReportContenu {
     matelas_clotures: number;
   };
   consommables: { code: string; designation: string; unite: string; theorique: number | string; reel: number | string | null; motif: string | null }[];
+  /** Pièces coupées par semi-fini (0146) ; absent des rapports antérieurs. */
+  semi_finis?: { semi_fini_id: string | null; code: string | null; piece: string; statut: PieceCoupeeStatut; coupe: number; attendu: number | null }[];
 }
 
 export interface ReportCouts {
@@ -90,6 +93,8 @@ export interface ReportView {
   sections: ReportSection[];
   tissu: { kgReception: number; kgRetour: number; kgNet: number; kgSortieLots: number; kgDechets: number; matelasClotures: number; kgParPiece: number | null };
   consommables: { code: string; designation: string; unite: string; theorique: number; reel: number | null; ecart: number | null; motif: string | null }[];
+  /** Coupé au tracé, attendu par la nomenclature, écart (coupé − attendu) ; vide sans semi-fini. */
+  semiFinis: { code: string | null; piece: string; statut: PieceCoupeeStatut; coupe: number; attendu: number | null; ecart: number | null }[];
 }
 
 export interface ReportValeur {
@@ -167,6 +172,14 @@ export function buildReportView(c: ReportContenu): ReportView {
       const reel = numOrNull(k.reel);
       return { code: k.code, designation: k.designation, unite: k.unite, theorique, reel, ecart: reel === null ? null : reel - theorique, motif: k.motif };
     }),
+    semiFinis: (c.semi_finis ?? []).map((s) => ({
+      code: s.code,
+      piece: s.piece,
+      statut: s.statut,
+      coupe: s.coupe,
+      attendu: s.attendu,
+      ecart: s.attendu === null ? null : s.coupe - s.attendu,
+    })),
   };
 }
 
