@@ -1056,17 +1056,20 @@ export async function reanalyserTrace(
 
 export interface OptionsAffectation {
   articles: { id: string; code: string; designation: string; patrons: { id: string; taille: string }[] }[];
+  /** Semi-finis actifs sans patron : un nouvel article de patronnage se rattache à l'un d'eux (0143). */
+  semiFinis: { id: string; libelle: string }[];
 }
 
 /** Articles et patrons de la bibliothèque, pour les listes de l'écran d'affectation. */
 export async function listerOptionsAffectation(): Promise<OptionsAffectation | { error: string }> {
   await requirePermission("view");
   const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("pattern_articles")
-    .select("id,article_code,designation,patterns(id,size)")
-    .order("article_code");
+  const [{ data, error }, { data: semiFinis }] = await Promise.all([
+    supabase.from("pattern_articles").select("id,article_code,designation,product_model_id,patterns(id,size)").order("article_code"),
+    supabase.from("product_models").select("id,code,name").eq("active", true).eq("nature", "semi_fini").order("name"),
+  ]);
   if (error) return { error: error.message };
+  const avecPatron = new Set((data ?? []).map((a) => a.product_model_id as string | null).filter(Boolean));
   return {
     articles: (data ?? []).map((a) => ({
       id: a.id as string,
@@ -1074,6 +1077,9 @@ export async function listerOptionsAffectation(): Promise<OptionsAffectation | {
       designation: a.designation as string,
       patrons: ((a.patterns ?? []) as { id: string; size: string }[]).map((p) => ({ id: p.id, taille: p.size })),
     })),
+    semiFinis: (semiFinis ?? [])
+      .filter((s) => !avecPatron.has(s.id as string))
+      .map((s) => ({ id: s.id as string, libelle: s.code ? `${s.code} · ${s.name}` : (s.name as string) })),
   };
 }
 
@@ -1088,6 +1094,7 @@ const affectationSchema = z.object({
       articleId: z.string().uuid().optional(),
       articleCode: z.string().trim().max(60).optional(),
       designation: z.string().trim().max(120).optional(),
+      semiFiniId: z.string().uuid().optional(),
       taille: z.string().trim().min(1, "Taille manquante").max(30),
     }),
   ]),
@@ -1145,17 +1152,15 @@ export async function affecterFamille(
     let articleId = cible.articleId ?? "";
     if (!articleId) {
       if (!cible.articleCode) return { error: "Choisissez un article ou saisissez un code article." };
-      // A5 : le nouvel article de patronnage hérite du modèle de la fiche du tracé.
-      const { data: fiche } = await supabase.from("fiches_placement").select("product_model_id").eq("id", ficheId).maybeSingle();
-      if (!fiche?.product_model_id) {
-        return { error: "Cette fiche n'est rattachée à aucun modèle : impossible de créer un article de patronnage sans modèle." };
-      }
+      // A5, 0143 : le nouvel article de patronnage se rattache au semi-fini
+      // choisi (manche, col…), plus au produit fini de la fiche du tracé.
+      if (!cible.semiFiniId) return { error: "Choisissez le semi-fini de ce nouveau patron." };
       const { data: article, error: articleError } = await supabase
         .from("pattern_articles")
         .insert({
           article_code: cible.articleCode,
           designation: cible.designation || "Sans désignation",
-          product_model_id: fiche.product_model_id,
+          product_model_id: cible.semiFiniId,
           created_by: authId,
         })
         .select("id")

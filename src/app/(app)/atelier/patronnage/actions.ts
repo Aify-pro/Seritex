@@ -117,9 +117,10 @@ export async function saveReferencePattern(
     return { error: "Code article manquant" };
   }
   // A5 : un nouvel article de patronnage est forcément rattaché à un modèle
-  // (contrainte pattern_articles_modele_obligatoire, migration 0073).
+  // (contrainte pattern_articles_modele_obligatoire, migration 0073) ; 0143 :
+  // à un semi-fini, un seul patron par semi-fini (contrôlé par la base).
   if (!existingArticleId && !productModelId) {
-    return { error: "Choisissez le modèle de produit de ce patron" };
+    return { error: "Choisissez le semi-fini de ce patron" };
   }
 
   let piecesMeta: z.infer<typeof pieceMetaSchema>;

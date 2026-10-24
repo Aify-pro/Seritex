@@ -304,6 +304,7 @@ function FormulaireAffectation({
   const [articleId, setArticleId] = useState(""); // "" = nouvel article
   const [articleCode, setArticleCode] = useState("");
   const [designation, setDesignation] = useState("");
+  const [semiFiniId, setSemiFiniId] = useState("");
   const [patternId, setPatternId] = useState("");
   const [taille, setTaille] = useState("");
   const [nomPiece, setNomPiece] = useState(famille.nature === "taille_differente" ? (g?.pieceName ?? "") : "");
@@ -346,6 +347,7 @@ function FormulaireAffectation({
                 articleId: articleId || undefined,
                 articleCode: articleId ? undefined : articleCode,
                 designation: articleId ? undefined : designation,
+                semiFiniId: articleId || !semiFiniId ? undefined : semiFiniId,
                 taille,
               },
       });
@@ -356,7 +358,7 @@ function FormulaireAffectation({
 
   const pret =
     nomPiece.trim().length > 0 &&
-    (mode === "existant" ? patternId !== "" : taille.trim().length > 0 && (articleId !== "" || articleCode.trim().length > 0));
+    (mode === "existant" ? patternId !== "" : taille.trim().length > 0 && (articleId !== "" || (articleCode.trim().length > 0 && semiFiniId !== "")));
 
   return (
     <div className="mt-3 space-y-3 rounded-md border border-border bg-surface p-3">
@@ -427,6 +429,17 @@ function FormulaireAffectation({
 
         {mode === "nouveau" && articleId === "" && (
           <>
+            <label className="space-y-1 text-xs text-foreground-muted sm:col-span-2">
+              Semi-fini du nouvel article
+              <select className={champ} value={semiFiniId} onChange={(e) => setSemiFiniId(e.target.value)}>
+                <option value="">{options && options.semiFinis.length === 0 ? "Aucun semi-fini sans patron (à créer dans Articles)" : "Choisir…"}</option>
+                {options?.semiFinis.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.libelle}
+                  </option>
+                ))}
+              </select>
+            </label>
             <label className="space-y-1 text-xs text-foreground-muted">
               Code du nouvel article
               <input className={champ} value={articleCode} onChange={(e) => setArticleCode(e.target.value)} />

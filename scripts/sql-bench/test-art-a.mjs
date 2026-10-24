@@ -17,8 +17,9 @@ await test("module articles : droits par défaut", async () => {
 
 await test("un nouveau patron sans modèle est refusé", async () => {
   await expectFail(() => q(`insert into pattern_articles(article_code, designation) values ('X1','Sans modèle')`), /pattern_articles_modele_obligatoire/);
-  const m = await one(`insert into product_models(name) values ('Polo') returning id`);
-  await q(`insert into pattern_articles(article_code, designation, product_model_id) values ('P1','Polo',$1)`, [m.id]);
+  // Depuis 0143, un patron se rattache à un semi-fini (test-semi-finis.mjs).
+  const m = await one(`insert into product_models(name, nature) values ('Manche polo','semi_fini') returning id`);
+  await q(`insert into pattern_articles(article_code, designation, product_model_id) values ('P1','Manche polo',$1)`, [m.id]);
 });
 
 await test("contrainte validée quand aucune ligne n'est orpheline", async () => {

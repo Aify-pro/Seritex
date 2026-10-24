@@ -32,6 +32,7 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 /** Valeurs par défaut selon la nature : un tissu se gère au kg et s'achète, un vêtement se fabrique. */
 const DEFAUTS: Record<ArticleNature, { type: TypeAppro; unite: Unite }> = {
   pf: { type: "fabrique", unite: "piece" },
+  semi_fini: { type: "fabrique", unite: "piece" },
   mp: { type: "negoce", unite: "kg" },
   consommable: { type: "negoce", unite: "piece" },
 };
@@ -106,10 +107,10 @@ export function NewArticleForm({
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Nom">
-              <input value={v.name} onChange={(e) => set({ name: e.target.value })} className={input} placeholder={v.nature === "mp" ? "Jersey 180 g" : v.nature === "consommable" ? "Bouton nacre 12 mm" : "T-shirt col rond"} />
+              <input value={v.name} onChange={(e) => set({ name: e.target.value })} className={input} placeholder={v.nature === "mp" ? "Jersey 180 g" : v.nature === "consommable" ? "Bouton nacre 12 mm" : v.nature === "semi_fini" ? "Manche courte" : "T-shirt col rond"} />
             </Field>
             <Field label="Type" hint={TYPE_APPRO_HINTS[v.type_appro]}>
-              <select value={v.type_appro} onChange={(e) => set({ type_appro: e.target.value as TypeAppro })} className={input}>
+              <select value={v.type_appro} disabled={v.nature === "semi_fini"} onChange={(e) => set({ type_appro: e.target.value as TypeAppro })} className={input}>
                 {(Object.keys(TYPE_APPRO_LABELS) as TypeAppro[]).map((t) => (
                   <option key={t} value={t}>
                     {TYPE_APPRO_LABELS[t]}
@@ -138,7 +139,7 @@ export function NewArticleForm({
               </select>
             </Field>
             <Field label="Unité de gestion et de vente">
-              <select value={v.unite} onChange={(e) => set({ unite: e.target.value as Unite })} className={input}>
+              <select value={v.unite} disabled={v.nature === "semi_fini"} onChange={(e) => set({ unite: e.target.value as Unite })} className={input}>
                 {(Object.keys(UNITE_LABELS) as Unite[]).map((u) => (
                   <option key={u} value={u}>
                     {UNITE_LABELS[u]}
@@ -175,6 +176,15 @@ export function NewArticleForm({
               </select>
             </Field>
           </CardBody>
+        </Card>
+      )}
+
+      {v.nature === "semi_fini" && (
+        <Card>
+          <CardHeader
+            title="Semi-fini"
+            description="Pièce de production (manche, col, corps…) : fabriquée à la pièce, jamais vendue ni envoyée à Sage, sans déclinaison. Le code (ex. SF001) est attribué à la création, puis figé. Son patron se dépose dans la bibliothèque de patronnage ; les produits finis l'emploient par leur nomenclature, avec leur tissu et leur couleur."
+          />
         </Card>
       )}
 

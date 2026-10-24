@@ -34,7 +34,9 @@ export async function ArticlesTab({ params }: { params: { q?: string; nature?: s
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("stock_articles_overview");
   const q = (params.q ?? "").trim();
-  const nature = (["pf", "mp", "consommable"] as const).includes(params.nature as ArticleNature) ? (params.nature as ArticleNature) : "";
+  // Les semi-finis (0143) n'ont pas de stock Sage : leur stock tampon se suit ailleurs.
+  const natures: ArticleNature[] = ["pf", "mp", "consommable"];
+  const nature = natures.includes(params.nature as ArticleNature) ? (params.nature as ArticleNature) : "";
   const enStockSeulement = params.dispo !== "tous";
   const terms = normalizeSearch(q).split(/\s+/).filter(Boolean);
   const rows = ((data ?? []) as OverviewRow[]).filter((r) => {
@@ -58,7 +60,7 @@ export async function ArticlesTab({ params }: { params: { q?: string; nature?: s
           <span className="mb-1 block text-foreground-muted">Nature</span>
           <select name="nature" defaultValue={nature} className="h-9 rounded-md border border-border bg-surface px-2 text-sm">
             <option value="">Toutes</option>
-            {(Object.keys(NATURE_LABELS) as ArticleNature[]).map((n) => (
+            {natures.map((n) => (
               <option key={n} value={n}>
                 {NATURE_LABELS[n]}
               </option>

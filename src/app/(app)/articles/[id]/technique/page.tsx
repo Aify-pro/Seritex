@@ -11,9 +11,31 @@ import { NomenclatureEditor } from "../_components/nomenclature-editor";
 import { AttachPattern } from "../_components/attach-pattern";
 import { MockupEditor, type MockupData } from "../_components/mockup-editor";
 
+type PatronRow = { id: string; article_code: string; designation: string; product_model_id: string | null; patterns: { size: string }[] | null };
+
+/** Liste des patrons de la bibliothèque, avec leurs tailles. */
+function PatronList({ patterns, empty, semiFiniName }: { patterns: PatronRow[]; empty: string; semiFiniName?: (id: string | null) => string | null }) {
+  if (patterns.length === 0) return <p className="text-sm text-foreground-muted">{empty}</p>;
+  return (
+    <ul className="divide-y divide-border rounded-md border border-border">
+      {patterns.map((p) => (
+        <li key={p.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+          <span>
+            {semiFiniName && <span className="mr-1.5 font-medium">{semiFiniName(p.product_model_id) ?? "Ancien patron du modèle"} :</span>}
+            <span className="font-mono text-xs">{p.article_code}</span> — {p.designation}
+          </span>
+          <span className="text-xs text-foreground-muted">Tailles : {(p.patterns ?? []).map((x) => x.size).join(", ") || "—"}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /**
- * Onglet Technique : zones de couleur, zones imprimables, nomenclature,
- * patrons de la bibliothèque et fiches de placement du modèle (A5 : le
+ * Onglet Technique. Produit fini : zones de couleur, zones imprimables,
+ * nomenclature (semi-finis et consommables), patrons de ses semi-finis et
+ * fiches de placement. Semi-fini (0143) : son patron de la bibliothèque, un
+ * par taille, partagé par tous les produits finis qui l'emploient (A5 : le
  * patronnage est forcément lié à un modèle).
  */
 export default async function ArticleTechniquePage({ params }: { params: Promise<{ id: string }> }) {
@@ -21,16 +43,44 @@ export default async function ArticleTechniquePage({ params }: { params: Promise
   const { id } = await params;
   const supabase = await createClient();
   const canPatronnage = await can("patronnage", "view");
+  const { data: model } = await supabase.from("product_models").select("nature").eq("id", id).maybeSingle();
 
-  const [{ data: zones }, { data: printableZones }, { data: nomenclature }, { data: patterns }, { data: orphans }, { data: fiches }, { data: consumables }, { data: mockups }] =
+  const orphansQuery = canModify
+    ? supabase.from("pattern_articles").select("id,article_code,designation").is("product_model_id", null).order("article_code")
+    : Promise.resolve({ data: [] as { id: string; article_code: string; designation: string }[] });
+  const bibliothequeLink = canPatronnage && (
+    <Link href="/atelier/patronnage/bibliotheque" className="text-xs font-medium text-brand hover:underline">
+      Ouvrir la bibliothèque de patrons →
+    </Link>
+  );
+
+  if (model?.nature === "semi_fini") {
+    const [{ data: patterns }, { data: orphans }] = await Promise.all([
+      supabase.from("pattern_articles").select("id,article_code,designation,product_model_id,patterns(size)").eq("product_model_id", id).order("article_code"),
+      orphansQuery,
+    ]);
+    return (
+      <Card>
+        <CardHeader
+          title="Patron"
+          description="Patron de référence de la bibliothèque, un par taille : le même pour tous les produits finis dont la nomenclature emploie ce semi-fini. Il se dépose dans la bibliothèque de patronnage."
+        />
+        <CardBody className="space-y-3">
+          <PatronList patterns={(patterns ?? []) as PatronRow[]} empty="Aucun patron pour ce semi-fini." />
+          {canModify && (patterns ?? []).length === 0 && (
+            <AttachPattern productModelId={id} orphans={(orphans ?? []).map((o) => ({ id: o.id, label: `${o.article_code} — ${o.designation}` }))} />
+          )}
+          {bibliothequeLink}
+        </CardBody>
+      </Card>
+    );
+  }
+
+  const [{ data: zones }, { data: printableZones }, { data: nomenclature }, { data: fiches }, { data: consumables }, { data: mockups }, { data: semiFinis }, { data: couleurs }] =
     await Promise.all([
       supabase.from("product_zone_templates").select("*").eq("product_model_id", id).order("display_order"),
       supabase.from("product_printable_zones").select("*").eq("product_model_id", id).order("display_order"),
       supabase.from("nomenclature_lines").select("*").eq("product_model_id", id).order("created_at"),
-      supabase.from("pattern_articles").select("id,article_code,designation,patterns(id,size)").eq("product_model_id", id).order("article_code"),
-      canModify
-        ? supabase.from("pattern_articles").select("id,article_code,designation").is("product_model_id", null).order("article_code")
-        : Promise.resolve({ data: [] }),
       supabase
         .from("fiches_placement")
         .select("id,numero_ot,statut,date_emission,quantite_totale")
@@ -39,7 +89,18 @@ export default async function ArticleTechniquePage({ params }: { params: Promise
         .limit(20),
       supabase.from("consumables").select("id,code,designation,unite").eq("actif", true).order("code"),
       supabase.from("product_model_mockups").select("vue,svg,zones,largeur_cm,cadre,reperes").eq("product_model_id", id),
+      supabase.from("product_models").select("id,code,name").eq("nature", "semi_fini").eq("active", true).order("name"),
+      supabase.from("colors").select("id,name").eq("active", true).order("name"),
     ]);
+  // Patrons : ceux des semi-finis de la nomenclature (0143), plus l'ancien
+  // patron rattaché directement au produit fini s'il en a un (ART-A).
+  const semiFiniIds = [...new Set((nomenclature ?? []).map((l) => l.semi_fini_id as string | null).filter((x): x is string => !!x))];
+  const { data: patterns } = await supabase
+    .from("pattern_articles")
+    .select("id,article_code,designation,product_model_id,patterns(size)")
+    .in("product_model_id", [id, ...semiFiniIds])
+    .order("article_code");
+  const semiFiniName = (modelId: string | null) => (semiFinis ?? []).find((s) => s.id === modelId)?.name ?? null;
   const mockup = (vue: string) => ((mockups ?? []).find((m) => m.vue === vue) as MockupData | undefined) ?? null;
 
   return (
@@ -84,7 +145,7 @@ export default async function ArticleTechniquePage({ params }: { params: Promise
       <Card>
         <CardHeader
           title="Nomenclature"
-          description="Consommables par pièce (boutons, fil, étiquettes, emballage…) : consommation théorique calculée à la clôture des ODF. Le tissu reste mesuré par les pesées."
+          description="Semi-finis qui composent le vêtement (manches, col, corps…) et consommables par pièce (boutons, fil, étiquettes, emballage…). Chaque ligne prend la couleur du produit fini — couleur unique ou celle d'une zone — sauf couleur imposée. Le tissu est celui du produit fini, mesuré par les pesées ; la consommation théorique des consommables est calculée à la clôture des ODF."
         />
         <CardBody>
           {canModify ? (
@@ -92,6 +153,9 @@ export default async function ArticleTechniquePage({ params }: { params: Promise
               productModelId={id}
               lines={nomenclature ?? []}
               consumables={(consumables ?? []).map((c) => ({ id: c.id as string, code: c.code as string, designation: c.designation as string, unite: c.unite as string }))}
+              semiFinis={(semiFinis ?? []).map((s) => ({ id: s.id as string, code: (s.code as string | null) ?? null, name: s.name as string }))}
+              zones={(zones ?? []).map((z) => ({ zone_key: z.zone_key as string, zone_label: z.zone_label as string }))}
+              couleurs={(couleurs ?? []).map((c) => ({ id: c.id as string, name: c.name as string }))}
             />
           ) : (
             <ul className="space-y-1 text-sm">
@@ -107,35 +171,13 @@ export default async function ArticleTechniquePage({ params }: { params: Promise
       </Card>
 
       <Card>
-        <CardHeader title="Patrons" description="Patrons de référence de la bibliothèque rattachés à ce modèle, un par taille." />
+        <CardHeader
+          title="Patrons"
+          description="Patrons de référence des semi-finis de la nomenclature, un par taille : c'est la nomenclature qui dit quelle manche, quel col… ce produit fini emploie."
+        />
         <CardBody className="space-y-3">
-          {(patterns ?? []).length === 0 ? (
-            <p className="text-sm text-foreground-muted">Aucun patron rattaché à ce modèle.</p>
-          ) : (
-            <ul className="divide-y divide-border rounded-md border border-border">
-              {(patterns ?? []).map((p) => (
-                <li key={p.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-                  <span>
-                    <span className="font-mono text-xs">{p.article_code}</span> — {p.designation}
-                  </span>
-                  <span className="text-xs text-foreground-muted">
-                    Tailles : {((p.patterns ?? []) as { size: string }[]).map((x) => x.size).join(", ") || "—"}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-          {canModify && (
-            <AttachPattern
-              productModelId={id}
-              orphans={(orphans ?? []).map((o) => ({ id: o.id, label: `${o.article_code} — ${o.designation}` }))}
-            />
-          )}
-          {canPatronnage && (
-            <Link href="/atelier/patronnage/bibliotheque" className="text-xs font-medium text-brand hover:underline">
-              Ouvrir la bibliothèque de patrons →
-            </Link>
-          )}
+          <PatronList patterns={(patterns ?? []) as PatronRow[]} empty="Aucun patron : ajoutez les semi-finis à la nomenclature, puis déposez leur patron dans la bibliothèque." semiFiniName={semiFiniName} />
+          {bibliothequeLink}
         </CardBody>
       </Card>
 

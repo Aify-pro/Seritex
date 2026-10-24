@@ -18,7 +18,7 @@ export default async function PatronnageBibliothequePage() {
   const { data: articles } = await supabase
     .from("pattern_articles")
     .select(
-      "id,article_code,designation,tolerance_pct,patterns(id,size,pattern_pieces(id,name,expected_count,area,perimeter,points))"
+      "id,article_code,designation,tolerance_pct,product_model_id,patterns(id,size,pattern_pieces(id,name,expected_count,area,perimeter,points))"
     )
     .order("article_code");
   const [canModify, canDelete, used] = await Promise.all([
@@ -28,7 +28,12 @@ export default async function PatronnageBibliothequePage() {
   ]);
   // Si les analyses ne peuvent pas être lues, rien n'est présenté comme supprimable.
   const utilisees = used instanceof Set ? used : null;
-  const { data: productModels } = await supabase.from("product_models").select("id,name").eq("active", true).eq("nature", "pf").order("name");
+  // Un nouveau patron se rattache à un semi-fini qui n'en a pas encore (0143).
+  const avecPatron = new Set((articles ?? []).map((a) => a.product_model_id as string | null).filter(Boolean));
+  const { data: semiFinis } = await supabase.from("product_models").select("id,code,name").eq("active", true).eq("nature", "semi_fini").order("name");
+  const productModels = (semiFinis ?? [])
+    .filter((s) => !avecPatron.has(s.id as string))
+    .map((s) => ({ id: s.id as string, name: s.code ? `${s.code} · ${s.name}` : (s.name as string) }));
 
   const library: LibraryArticle[] = (articles ?? []).map((a) => ({
     id: a.id,
@@ -66,7 +71,7 @@ export default async function PatronnageBibliothequePage() {
       />
       <PatronBibliothequeManager
         initialLibrary={library}
-        productModels={productModels ?? []}
+        productModels={productModels}
         canModify={canModify}
         canDelete={canDelete}
       />
