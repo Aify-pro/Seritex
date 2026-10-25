@@ -17,12 +17,11 @@ import type { Size } from "@/lib/sizes";
 import { LineSectionsPicker } from "./line-sections-picker";
 import { RouteApplier } from "./route-applier";
 import { SplitLineButton, StockAvailability, type StockAvailabilityRow } from "./line-stock-tools";
-import { FichePatronnageLink } from "./fiche-patronnage-link";
+import { FichePatronnageLink, type FicheLiee } from "./fiche-patronnage-link";
 import { LineVisuelPicker } from "./line-visuel-picker";
 import { LineMaquettePicker } from "./line-maquette-picker";
 import { LinePrintableZonesPicker, type PrintableZoneOption, type SelectedPrintableZone } from "./line-printable-zones-picker";
 import type { AttachableMediaFile, DownloadableMediaFile, MaquetteFile } from "@/lib/types/domain";
-import type { StatutFiche } from "@/lib/patronnage/types";
 
 interface ZoneTemplate {
   zone_key: string;
@@ -77,7 +76,7 @@ export interface LineData {
   stockAvailability?: StockAvailabilityRow[];
   /** Une section de catégorie Coupe est-elle retenue ? Conditionne l'affichage de la fiche Patronnage. */
   coupeSelected: boolean;
-  fiche: { id: string; numeroOt: string; statut: StatutFiche } | null;
+  fiche: FicheLiee | null;
   /**
    * Une section exigeant un visuel (ex. Impression) est-elle retenue ?
    * Conditionne aussi l'affichage de la maquette et des zones imprimables

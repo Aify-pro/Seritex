@@ -85,6 +85,27 @@ export interface RendementTrace {
   rendementEstimePiecesParKg: number | null;
 }
 
+/** Statut d'un tracé (TR-1a, migration 0147) ; celui de la fiche en est le résumé. */
+export type StatutTrace = "previsionnel" | "en_preparation" | "bon_pour_coupe" | "en_coupe" | "termine" | "annule";
+
+export const STATUT_TRACE_LABELS: Record<StatutTrace, string> = {
+  previsionnel: "Prévisionnel",
+  en_preparation: "En préparation",
+  bon_pour_coupe: "Bon pour coupe",
+  en_coupe: "En coupe",
+  termine: "Terminé",
+  annule: "Annulé",
+};
+
+export const STATUT_TRACE_TONES: Record<StatutTrace, "neutral" | "info" | "success" | "warning" | "brand" | "danger"> = {
+  previsionnel: "neutral",
+  en_preparation: "info",
+  bon_pour_coupe: "success",
+  en_coupe: "warning",
+  termine: "brand",
+  annule: "danger",
+};
+
 export interface TracePlacement {
   id: string;
   ordre: number;
@@ -99,13 +120,21 @@ export interface TracePlacement {
   fichierNom: string | null;
   chargeLe: string | null;
   analyse: AnalyseTrace | null;
-  // Lot 3 : tracé de rattrapage — voir supabase/migrations/0012_lot3_trace_rattrapage.sql.
-  // estCorrectif=false → tracé normal. true + approuveLe=null → demande en
-  // attente d'approbation. true + approuveLe renseigné → rattrapage approuvé
-  // (de nouveau éditable malgré le verrou de la fiche).
+  // TR-1a (0147) : statut et décisions du tracé.
+  statut: StatutTrace;
+  valideLe: string | null;
+  motifValidation: string | null;
+  /** Surplus par taille accepté avec motif à la validation (aucune tolérance). */
+  surplusValide: Record<string, number> | null;
+  modifieValideLe: string | null;
+  annuleLe: string | null;
+  motifAnnulation: string | null;
+  demarreLe: string | null;
+  termineLe: string | null;
+  // Tracé de rattrapage (créé par un manque à la clôture du matelas) : depuis
+  // TR-1a, un tracé ordinaire en préparation, sans approbation.
   estCorrectif: boolean;
   justification: string | null;
-  approuveLe: string | null;
   // Lot 8 — voir RendementTrace ci-dessus. null tant que le matelas
   // correspondant (section Coupe) n'a pas été clôturé.
   rendement: RendementTrace | null;

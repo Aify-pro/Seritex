@@ -17,7 +17,8 @@ import { ProductionOrderLines, type LineData } from "./production-order-lines";
 import { ProductionOrderMediaFiles, type AttachableMediaFile } from "./production-order-media-files";
 import { getMediaFilePreviewUrls } from "@/lib/media/preview";
 import { StockMovementsPanel } from "./stock-movements-panel";
-import type { StatutFiche } from "@/lib/patronnage/types";
+import type { StatutFiche, StatutTrace } from "@/lib/patronnage/types";
+import type { FicheLiee } from "./fiche-patronnage-link";
 import type { DownloadableMediaFile, MaquetteFile, StockMovement, StockExportFiche, SampleRequestStatus } from "@/lib/types/domain";
 import { ValidationCircuitPanel } from "./validation-circuit-panel";
 import { WhereArePieces, type WhereArePiecesLine } from "./where-are-pieces";
@@ -131,7 +132,7 @@ export default async function ProductionOrderDetailPage({
     // par ODF entier) — même jointure que ci-dessus pour filtrer par ODF.
     supabase
       .from("fiches_placement")
-      .select("id,numero_ot,statut,production_order_line_id,production_order_lines!inner(production_order_id)")
+      .select("id,numero_ot,statut,production_order_line_id,production_order_lines!inner(production_order_id),traces_placement(ordre,reference,statut,nb_plis,repartition_par_couche)")
       .eq("production_order_lines.production_order_id", id),
     supabase
       .from("production_order_anomalies")
@@ -513,9 +514,22 @@ export default async function ProductionOrderDetailPage({
     visuelWithUrlByLine[lineId] = files.map((f) => ({ ...f, downloadUrl: visuelDownloadUrls.get(f.id) ?? null }));
   }
 
-  const fichesByLine: Record<string, { id: string; numeroOt: string; statut: StatutFiche }> = {};
-  for (const f of (fiches ?? []) as unknown as { id: string; numero_ot: string; statut: StatutFiche; production_order_line_id: string }[]) {
-    fichesByLine[f.production_order_line_id] = { id: f.id, numeroOt: f.numero_ot, statut: f.statut };
+  // Statut de chaque tracé (TR-1a, 0147) : résumé Patronnage sur la carte de l'article.
+  type FicheTraceRow = { ordre: number; reference: string; statut: StatutTrace; nb_plis: number | null; repartition_par_couche: Record<string, number> | null };
+  const fichesByLine: Record<string, FicheLiee> = {};
+  for (const f of (fiches ?? []) as unknown as { id: string; numero_ot: string; statut: StatutFiche; production_order_line_id: string; traces_placement: FicheTraceRow[] | null }[]) {
+    fichesByLine[f.production_order_line_id] = {
+      id: f.id,
+      numeroOt: f.numero_ot,
+      statut: f.statut,
+      traces: (f.traces_placement ?? [])
+        .sort((a, b) => a.ordre - b.ordre)
+        .map((t) => ({
+          reference: t.reference,
+          statut: t.statut,
+          pieces: (t.nb_plis ?? 0) * Object.values(t.repartition_par_couche ?? {}).reduce((s, n) => s + Number(n || 0), 0),
+        })),
+    };
   }
 
   // Sections retenues, fiche Patronnage, visuel, maquette et zones

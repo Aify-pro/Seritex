@@ -13,11 +13,9 @@ import {
   CheckCircle2,
   XCircle,
   Lock,
-  Unlock,
   Archive,
   ArchiveRestore,
   Search,
-  Wrench,
 } from "lucide-react";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Table, Thead, Tbody, Tr, Th, Td, EmptyRow } from "@/components/ui/table";
@@ -27,7 +25,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { cn, formatDate, formatDateTime } from "@/lib/utils";
 import { QrScannerButton } from "@/components/atelier/patronnage/qr-scanner-button";
 import { SelecteurEchelle, TraceDownloadMenu, TracePiecesPanel } from "@/components/atelier/patronnage/trace-pieces-panel";
-import type { FichePlacement, RepartitionTailles, StatutFiche, TracePlacement } from "@/lib/patronnage/types";
+import { STATUT_TRACE_LABELS, STATUT_TRACE_TONES, type FichePlacement, type RepartitionTailles, type StatutFiche, type TracePlacement } from "@/lib/patronnage/types";
 import { createContext, useContext } from "react";
 import type { Size } from "@/lib/sizes";
 import { repartitionDepuisTraces, repartitionTotal } from "@/lib/patronnage/dispatching";
@@ -36,8 +34,6 @@ import {
   updateFiche,
   linkLine,
   sizesForProductModel,
-  validateFiche,
-  unlockFiche,
   archiveFiche,
   unarchiveFiche,
   deleteFicheDefinitively,
@@ -46,9 +42,9 @@ import {
   deleteTrace,
   uploadTraceDxf,
   removeTraceDxf,
-  requestCorrectiveTrace,
-  approveCorrectiveTrace,
-  rejectCorrectiveTrace,
+  validerTrace,
+  modifierTraceValide,
+  annulerTrace,
   searchOdfLines,
   searchClient,
 } from "@/app/(app)/atelier/patronnage/fiches-actions";
@@ -707,21 +703,9 @@ export function FicheDetailContent({
               {STATUT_LABELS[fiche.statut]}
             </Badge>
             <span className="text-xs text-foreground-muted">Émise le {formatDate(fiche.dateEmission)}</span>
-            {fiche.valideLe && (
-              <span className="text-xs text-foreground-muted">· Validée le {formatDateTime(fiche.valideLe)}</span>
-            )}
+            <span className="text-xs text-foreground-muted">· Statut calculé d&apos;après les tracés : chacun se valide un par un.</span>
           </div>
           <div className="flex flex-wrap gap-2">
-            {fiche.statut !== "bon_pour_coupe" && fiche.statut !== "archive" && permissions.canValidate && (
-              <Button size="sm" variant="secondary" loading={pending} onClick={() => runAction(() => validateFiche(fiche.id))}>
-                <Lock className="h-3.5 w-3.5" /> Valider — bon pour coupe
-              </Button>
-            )}
-            {fiche.statut === "bon_pour_coupe" && permissions.canUnlock && (
-              <Button size="sm" variant="secondary" loading={pending} onClick={() => runAction(() => unlockFiche(fiche.id))}>
-                <Unlock className="h-3.5 w-3.5" /> Repasser en révision
-              </Button>
-            )}
             {fiche.statut !== "archive" && permissions.canArchive && (
               <Button size="sm" variant="ghost" loading={pending} onClick={() => runAction(() => archiveFiche(fiche.id))}>
                 <Archive className="h-3.5 w-3.5" /> Archiver
@@ -747,8 +731,10 @@ export function FicheDetailContent({
 
         {locked && (
           <div className="flex items-center gap-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-xs text-foreground">
-            <Lock className="h-3.5 w-3.5 shrink-0" /> Fiche verrouillée — aucune modification des cadres ni des tracés
-            tant qu&apos;elle n&apos;est pas repassée en révision.
+            <Lock className="h-3.5 w-3.5 shrink-0" />
+            {fiche.statut === "archive"
+              ? "Fiche archivée — aucune modification des cadres ni des tracés tant qu'elle n'est pas désarchivée."
+              : "Un tracé est validé : les cadres de la fiche sont figés. Les tracés restent gérés un par un (ajout, validation, modification motivée, annulation)."}
           </div>
         )}
 
@@ -892,7 +878,7 @@ export function FicheDetailContent({
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-medium text-foreground">Tracés ({fiche.traces.length})</h3>
             <div className="flex gap-2">
-              {!locked && permissions.canAddTrace && (
+              {fiche.statut !== "archive" && permissions.canAddTrace && (
                 <Button
                   size="sm"
                   variant="secondary"
@@ -901,9 +887,6 @@ export function FicheDetailContent({
                 >
                   <Plus className="h-3.5 w-3.5" /> Ajouter un tracé
                 </Button>
-              )}
-              {locked && fiche.statut === "bon_pour_coupe" && permissions.canModify && (
-                <RequestCorrectiveTraceButton ficheId={fiche.id} onRequested={refresh} />
               )}
             </div>
           </div>
@@ -948,9 +931,10 @@ export function FicheDetailContent({
           <TraceDetailBody
             fiche={fiche}
             trace={openTrace}
-            locked={locked}
+            archived={fiche.statut === "archive"}
             canModify={permissions.canModifyTrace}
             canValidate={permissions.canValidate}
+            canUnlock={permissions.canUnlock}
             canLearn={permissions.canLearn}
             referenceOptions={referenceOptions}
             onChanged={refresh}
@@ -958,68 +942,6 @@ export function FicheDetailContent({
         )}
       </Dialog>
     </SizesContext.Provider>
-  );
-}
-
-/* ============================================================
-   Demande de tracé de rattrapage (lot 3) — chef de section, fiche verrouillée
-============================================================ */
-
-function RequestCorrectiveTraceButton({ ficheId, onRequested }: { ficheId: string; onRequested: () => void }) {
-  const [open, setOpen] = useState(false);
-  const [justification, setJustification] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
-
-  function submit() {
-    if (!justification.trim()) {
-      setError("Justification obligatoire.");
-      return;
-    }
-    setError(null);
-    startTransition(async () => {
-      const res = await requestCorrectiveTrace(ficheId, justification.trim());
-      if ("error" in res && res.error) {
-        setError(res.error);
-        return;
-      }
-      setOpen(false);
-      setJustification("");
-      onRequested();
-    });
-  }
-
-  if (!open) {
-    return (
-      <Button size="sm" variant="secondary" onClick={() => setOpen(true)}>
-        <Wrench className="h-3.5 w-3.5" /> Demander un tracé de rattrapage
-      </Button>
-    );
-  }
-
-  return (
-    <div className="w-full space-y-2 rounded-md border border-warning/30 bg-warning-soft/40 p-3">
-      <p className="text-xs font-medium text-foreground">
-        Fiche verrouillée : ce tracé sera ajouté après approbation du chef de production.
-      </p>
-      {error && <p className="text-xs text-danger">{error}</p>}
-      <textarea
-        autoFocus
-        value={justification}
-        onChange={(e) => setJustification(e.target.value)}
-        placeholder="Justification du rattrapage (obligatoire)"
-        rows={2}
-        className="w-full rounded-md border border-border bg-surface p-2 text-xs text-foreground outline-none focus:ring-2 focus:ring-brand/30"
-      />
-      <div className="flex gap-1.5">
-        <Button size="sm" loading={pending} onClick={submit}>
-          Envoyer la demande
-        </Button>
-        <Button size="sm" variant="ghost" onClick={() => { setOpen(false); setError(null); }}>
-          Annuler
-        </Button>
-      </div>
-    </div>
   );
 }
 
@@ -1039,7 +961,6 @@ function TraceRow({
 }) {
   const totalCouche = repartitionTotal(trace.repartitionParCouche);
   const totalTrace = trace.nbPlis ? totalCouche * trace.nbPlis : null;
-  const pendingApproval = trace.estCorrectif && !trace.approuveLe;
   const a = trace.analyse;
 
   return (
@@ -1053,21 +974,21 @@ function TraceRow({
         {trace.estCorrectif && <span className="ml-1.5 text-xs text-warning">(rattrapage)</span>}
       </Td>
       <Td>
-        {pendingApproval ? (
-          <Badge tone="warning">En attente d&apos;approbation</Badge>
-        ) : trace.rendement ? (
-          <Badge tone="success">Clôturé</Badge>
-        ) : a ? (
-          a.reconnaissanceComplete ? (
-            <Badge tone="success">Reconnu</Badge>
-          ) : (
-            <Badge tone="danger">À vérifier</Badge>
-          )
-        ) : trace.fichierNom ? (
-          <Badge tone="info">Déposé</Badge>
-        ) : (
-          <Badge tone="neutral">En attente de dépôt</Badge>
-        )}
+        <span className="flex flex-wrap items-center gap-1.5">
+          <Badge tone={STATUT_TRACE_TONES[trace.statut]} dot>
+            {STATUT_TRACE_LABELS[trace.statut]}
+          </Badge>
+          {trace.statut === "en_preparation" &&
+            (a ? (
+              a.reconnaissanceComplete ? (
+                <span className="text-xs text-success">reconnu</span>
+              ) : (
+                <span className="text-xs text-danger">à vérifier</span>
+              )
+            ) : (
+              <span className="text-xs text-foreground-muted">{trace.fichierNom ? "déposé" : "en attente de dépôt"}</span>
+            ))}
+        </span>
       </Td>
       <Td align="center">{trace.nbPlis ?? "—"}</Td>
       <Td align="center">{totalTrace ?? "—"}</Td>
@@ -1083,25 +1004,32 @@ function TraceRow({
 function TraceDetailBody({
   fiche,
   trace,
-  locked,
+  archived,
   canModify,
   canValidate,
+  canUnlock,
   canLearn,
   onChanged,
 }: {
   fiche: FichePlacement;
   trace: TracePlacement;
-  locked: boolean;
+  archived: boolean;
   canModify: boolean;
   canValidate: boolean;
+  canUnlock: boolean;
   canLearn: boolean;
   referenceOptions: ReferenceOption[];
   onChanged: () => void;
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [rejectMotif, setRejectMotif] = useState("");
-  const [showReject, setShowReject] = useState(false);
+  // Validation : le motif n'est demandé que si la base signale un surplus (aucune tolérance).
+  const [motifRequis, setMotifRequis] = useState(false);
+  const [motifValidation, setMotifValidation] = useState("");
+  // Modification d'un tracé validé (droit « déverrouiller ») et annulation : motif obligatoire.
+  const [modeModif, setModeModif] = useState(false);
+  const [showAnnul, setShowAnnul] = useState(false);
+  const [motifAnnul, setMotifAnnul] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const matelasFormRef = useRef<HTMLFormElement>(null);
 
@@ -1114,64 +1042,24 @@ function TraceDetailBody({
     });
   }
 
-  // Lot 3 : un rattrapage approuvé redéverrouille CE tracé précis, même si le
-  // reste de la fiche reste figé. Une demande encore en attente (pas encore
-  // approuvée) n'affiche pas le formulaire matelas/DXF normal — seulement la
-  // justification + les actions d'approbation.
-  const pendingApproval = trace.estCorrectif && !trace.approuveLe;
-  const effectiveLocked = pendingApproval ? true : locked && !(trace.estCorrectif && trace.approuveLe);
-
-  if (pendingApproval) {
-    return (
-      <div className="space-y-3">
-        <Badge tone="warning">Rattrapage — en attente d&apos;approbation</Badge>
-        {error && (
-          <div className="flex items-center gap-2 rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger">
-            <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> {error}
-          </div>
-        )}
-        <p className="text-sm text-foreground">{trace.justification}</p>
-        {canValidate && (
-          <div className="space-y-2">
-            {!showReject ? (
-              <div className="flex gap-1.5">
-                <Button size="sm" loading={pending} onClick={() => run(() => approveCorrectiveTrace(trace.id))}>
-                  <CheckCircle2 className="h-3.5 w-3.5" /> Approuver
-                </Button>
-                <Button size="sm" variant="danger" onClick={() => setShowReject(true)} disabled={pending}>
-                  <XCircle className="h-3.5 w-3.5" /> Refuser
-                </Button>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <textarea
-                  autoFocus
-                  value={rejectMotif}
-                  onChange={(e) => setRejectMotif(e.target.value)}
-                  placeholder="Motif du refus"
-                  rows={2}
-                  className="w-full rounded-md border border-border bg-surface p-2 text-xs text-foreground outline-none focus:ring-2 focus:ring-brand/30"
-                />
-                <div className="flex gap-1.5">
-                  <Button
-                    size="sm"
-                    variant="danger"
-                    loading={pending}
-                    onClick={() => run(() => rejectCorrectiveTrace(trace.id, rejectMotif))}
-                  >
-                    Confirmer le refus
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={() => setShowReject(false)}>
-                    Annuler
-                  </Button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    );
+  function valider() {
+    setError(null);
+    startTransition(async () => {
+      const res = await validerTrace(trace.id, fiche.id, motifRequis ? motifValidation : undefined);
+      if ("error" in res && res.error) {
+        setError(res.error);
+        if (res.motifRequis) setMotifRequis(true);
+      } else onChanged();
+    });
   }
+
+  // TR-1a : seul un tracé en préparation (ou prévisionnel) se modifie
+  // directement ; un tracé validé se modifie avec un motif (droit
+  // « déverrouiller »), un tracé en coupe, terminé ou annulé est figé.
+  const enPreparation = trace.statut === "en_preparation" || trace.statut === "previsionnel";
+  const effectiveLocked = archived || !enPreparation;
+  const champsModifiables = (!effectiveLocked && canModify) || modeModif;
+  const peutAnnuler = !archived && (trace.statut === "bon_pour_coupe" ? canUnlock : enPreparation && canModify);
 
   function handleUpload() {
     const input = fileInputRef.current;
@@ -1189,7 +1077,13 @@ function TraceDetailBody({
     e.preventDefault();
     if (!matelasFormRef.current) return;
     const fd = new FormData(matelasFormRef.current);
-    run(() => updateTrace(trace.id, fiche.id, fd));
+    if (modeModif) {
+      run(async () => {
+        const res = await modifierTraceValide(trace.id, fiche.id, fd);
+        if (!res.error) setModeModif(false);
+        return res;
+      });
+    } else run(() => updateTrace(trace.id, fiche.id, fd));
   }
 
   const totalCouche = repartitionTotal(trace.repartitionParCouche);
@@ -1199,14 +1093,33 @@ function TraceDetailBody({
   return (
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3">
-        {trace.estCorrectif ? (
-          <span className="inline-flex flex-wrap items-center gap-1.5 text-sm">
-            <Badge tone="warning">Rattrapage approuvé le {formatDateTime(trace.approuveLe)}</Badge>
-            <span className="text-foreground-muted">{trace.justification}</span>
+        <div className="space-y-1 text-sm">
+          <span className="flex flex-wrap items-center gap-1.5">
+            <Badge tone={STATUT_TRACE_TONES[trace.statut]} dot>
+              {STATUT_TRACE_LABELS[trace.statut]}
+            </Badge>
+            {trace.estCorrectif && <Badge tone="warning">Rattrapage</Badge>}
+            {trace.valideLe && <span className="text-xs text-foreground-muted">validé le {formatDateTime(trace.valideLe)}</span>}
+            {trace.modifieValideLe && <span className="text-xs text-foreground-muted">· modifié le {formatDateTime(trace.modifieValideLe)}</span>}
+            {trace.demarreLe && <span className="text-xs text-foreground-muted">· coupe démarrée le {formatDateTime(trace.demarreLe)}</span>}
+            {trace.termineLe && <span className="text-xs text-foreground-muted">· matelas clôturé le {formatDateTime(trace.termineLe)}</span>}
           </span>
-        ) : (
-          <span />
-        )}
+          {trace.estCorrectif && trace.justification && <p className="text-xs text-foreground-muted">Rattrapage : {trace.justification}</p>}
+          {trace.surplusValide && (
+            <p className="text-xs text-warning">
+              Surplus accepté :{" "}
+              {Object.entries(trace.surplusValide)
+                .map(([t, n]) => `+${n} ${t.split("/").pop()}`)
+                .join(", ")}
+              {trace.motifValidation ? ` — ${trace.motifValidation}` : ""}
+            </p>
+          )}
+          {trace.statut === "annule" && (
+            <p className="text-xs text-danger">
+              Annulé le {formatDateTime(trace.annuleLe)} : {trace.motifAnnulation}
+            </p>
+          )}
+        </div>
         <div className="flex shrink-0 items-center gap-2">
           {!effectiveLocked && canModify && (
             <button
@@ -1214,12 +1127,83 @@ function TraceDetailBody({
                 if (confirm("Retirer ce tracé de la fiche ?")) run(() => deleteTrace(trace.id, fiche.id));
               }}
               className="text-foreground-muted hover:text-danger"
+              aria-label="Retirer ce tracé"
             >
               <Trash2 className="h-3.5 w-3.5" />
             </button>
           )}
         </div>
       </div>
+
+      {/* Actions de statut */}
+      {!archived && (enPreparation ? canValidate || peutAnnuler : trace.statut === "bon_pour_coupe" && canUnlock) && (
+        <div className="space-y-2 rounded-md border border-border bg-surface-muted p-3">
+          <div className="flex flex-wrap gap-2">
+            {enPreparation && canValidate && !motifRequis && (
+              <Button size="sm" loading={pending} onClick={valider}>
+                <CheckCircle2 className="h-3.5 w-3.5" /> Valider — Bon pour coupe
+              </Button>
+            )}
+            {trace.statut === "bon_pour_coupe" && canUnlock && !modeModif && (
+              <Button size="sm" variant="secondary" onClick={() => setModeModif(true)} disabled={pending}>
+                Modifier (motif)
+              </Button>
+            )}
+            {peutAnnuler && !showAnnul && (
+              <Button size="sm" variant="ghost" onClick={() => setShowAnnul(true)} disabled={pending}>
+                <XCircle className="h-3.5 w-3.5" /> Annuler le tracé
+              </Button>
+            )}
+          </div>
+          {motifRequis && (
+            <div className="space-y-2">
+              <p className="text-xs text-warning">Ce tracé crée un surplus par rapport à la demande : indiquez pourquoi (aucune tolérance).</p>
+              <textarea
+                autoFocus
+                value={motifValidation}
+                onChange={(e) => setMotifValidation(e.target.value)}
+                placeholder="Motif du surplus (obligatoire)"
+                rows={2}
+                className="w-full rounded-md border border-border bg-surface p-2 text-xs text-foreground outline-none focus:ring-2 focus:ring-brand/30"
+              />
+              <div className="flex gap-1.5">
+                <Button size="sm" loading={pending} disabled={!motifValidation.trim()} onClick={valider}>
+                  Valider avec ce motif
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setMotifRequis(false)}>
+                  Annuler
+                </Button>
+              </div>
+            </div>
+          )}
+          {modeModif && (
+            <p className="text-xs text-foreground-muted">
+              Modifiez les plis, la répartition ou le matelas ci-dessous, indiquez le motif, puis enregistrez : le tracé reste « Bon pour coupe ».
+            </p>
+          )}
+          {showAnnul && (
+            <div className="space-y-2">
+              <textarea
+                autoFocus
+                value={motifAnnul}
+                onChange={(e) => setMotifAnnul(e.target.value)}
+                placeholder="Motif de l'annulation (obligatoire)"
+                rows={2}
+                className="w-full rounded-md border border-border bg-surface p-2 text-xs text-foreground outline-none focus:ring-2 focus:ring-brand/30"
+              />
+              <div className="flex gap-1.5">
+                <Button size="sm" variant="danger" loading={pending} disabled={!motifAnnul.trim()} onClick={() => run(() => annulerTrace(trace.id, fiche.id, motifAnnul))}>
+                  Confirmer l&apos;annulation
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setShowAnnul(false)}>
+                  Retour
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
         {error && (
           <div className="flex items-center gap-2 rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger">
             <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> {error}
@@ -1232,24 +1216,39 @@ function TraceDetailBody({
               <input name="reference_patron" defaultValue={trace.referencePatron ?? ""} disabled={effectiveLocked || !canModify} className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground disabled:opacity-60" />
             </Field>
             <Field label="Longueur matelas (cm)">
-              <input type="number" step="0.1" name="longueur_matelas_cm" defaultValue={trace.longueurMatelasCm ?? ""} disabled={effectiveLocked || !canModify} className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground disabled:opacity-60" />
+              <input type="number" step="0.1" name="longueur_matelas_cm" defaultValue={trace.longueurMatelasCm ?? ""} disabled={!champsModifiables} className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground disabled:opacity-60" />
             </Field>
             <Field label="Largeur matelas (cm)">
-              <input type="number" name="largeur_matelas_cm" defaultValue={trace.largeurMatelasCm ?? ""} disabled={effectiveLocked || !canModify} className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground disabled:opacity-60" />
+              <input type="number" name="largeur_matelas_cm" defaultValue={trace.largeurMatelasCm ?? ""} disabled={!champsModifiables} className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground disabled:opacity-60" />
             </Field>
             <Field label="Nombre de plis">
-              <input type="number" name="nb_plis" defaultValue={trace.nbPlis ?? ""} disabled={effectiveLocked || !canModify} className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground disabled:opacity-60" />
+              <input type="number" name="nb_plis" defaultValue={trace.nbPlis ?? ""} disabled={!champsModifiables} className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground disabled:opacity-60" />
             </Field>
           </div>
           <Field label={`Répartition par couche (total/couche ${totalCouche}${totalTrace !== null ? ` · théorique tracé ${totalTrace}` : ""})`}>
-            <fieldset disabled={effectiveLocked || !canModify}>
+            <fieldset disabled={!champsModifiables}>
               <RepartitionFields prefix="couche" initial={trace.repartitionParCouche} />
             </fieldset>
           </Field>
-          {!effectiveLocked && canModify && (
-            <div className="flex justify-end">
+          {modeModif && (
+            <Field label="Motif de la modification (obligatoire)">
+              <textarea
+                name="motif"
+                required
+                rows={2}
+                className="w-full rounded-md border border-border bg-surface p-2 text-xs text-foreground outline-none focus:ring-2 focus:ring-brand/30"
+              />
+            </Field>
+          )}
+          {champsModifiables && (
+            <div className="flex justify-end gap-2">
+              {modeModif && (
+                <Button type="button" size="sm" variant="ghost" onClick={() => setModeModif(false)}>
+                  Abandonner
+                </Button>
+              )}
               <Button type="submit" size="sm" variant="secondary" loading={pending}>
-                Enregistrer
+                {modeModif ? "Enregistrer la modification" : "Enregistrer"}
               </Button>
             </div>
           )}

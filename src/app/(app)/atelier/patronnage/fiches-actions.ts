@@ -302,27 +302,31 @@ async function assertFicheModifiable(ficheId: string): Promise<{ error: string }
 }
 
 /**
- * Même rôle qu'assertFicheModifiable, mais laisse passer un tracé de
- * rattrapage déjà approuvé (lot 3) même si la fiche elle-même est verrouillée
- * — c'est tout le principe du rattrapage : ce tracé précis redevient
- * éditable par le circuit normal (updateTrace, uploadTraceDxf...), le reste
- * de la fiche reste figé. Une demande encore en attente d'approbation
- * (est_correctif=true, approuve_par=null) n'est PAS éditable ici : elle
- * suit son propre circuit (approveCorrectiveTrace/rejectCorrectiveTrace).
+ * Ajout d'un tracé (TR-1a, 0147) : possible tant que la fiche n'est pas
+ * archivée — y compris après un premier tracé validé ou le lancement de
+ * l'ODF (la base refuse seulement un ODF clôturé ou annulé).
+ */
+async function assertFicheOuverteAuxTraces(ficheId: string): Promise<{ error: string } | { ok: true; numeroOt: string; statut: StatutFiche }> {
+  const supabase = await createClient();
+  const { data: fiche } = await supabase.from("fiches_placement").select("numero_ot,statut").eq("id", ficheId).single();
+  if (!fiche) return { error: "Fiche introuvable" };
+  if (fiche.statut === "archive") return { error: "Cette fiche est archivée — désarchivez-la pour ajouter un tracé." };
+  return { ok: true, numeroOt: fiche.numero_ot, statut: fiche.statut as StatutFiche };
+}
+
+/**
+ * Modification directe d'un tracé (cadres, DXF, échelle, suppression) :
+ * seulement en préparation (ou prévisionnel). Un tracé validé se modifie par
+ * modifierTraceValide (motif), un tracé coupé ou annulé ne se modifie plus.
  */
 async function assertTraceEditable(traceId: string, ficheId: string): Promise<{ error: string } | { ok: true; numeroOt: string; statut: StatutFiche }> {
   const supabase = await createClient();
-  const { data: trace } = await supabase
-    .from("traces_placement")
-    .select("est_correctif,approuve_par")
-    .eq("id", traceId)
-    .single();
-  if (trace?.est_correctif && trace.approuve_par) {
-    const { data: fiche } = await supabase.from("fiches_placement").select("numero_ot,statut").eq("id", ficheId).single();
-    if (!fiche) return { error: "Fiche introuvable" };
-    return { ok: true, numeroOt: fiche.numero_ot, statut: fiche.statut as StatutFiche };
+  const { data: trace } = await supabase.from("traces_placement").select("statut").eq("id", traceId).single();
+  if (!trace) return { error: "Tracé introuvable" };
+  if (!["previsionnel", "en_preparation"].includes(trace.statut as string)) {
+    return { error: "Ce tracé n'est plus en préparation : un tracé validé se modifie avec un motif, un tracé coupé ou annulé ne se modifie plus." };
   }
-  return assertFicheModifiable(ficheId);
+  return assertFicheOuverteAuxTraces(ficheId);
 }
 
 export async function updateFiche(ficheId: string, formData: FormData) {
@@ -561,70 +565,6 @@ export async function generateFicheFromLine(lineId: string, force = false) {
   return { id: created.id as string, numeroOt: created.numero_ot as string };
 }
 
-export async function validateFiche(ficheId: string) {
-  const { authId } = await requirePermission("validate");
-  const supabase = await createClient();
-
-  const { data: fiche } = await supabase.from("fiches_placement").select("statut").eq("id", ficheId).single();
-  if (!fiche) return { error: "Fiche introuvable" };
-
-  const { error } = await supabase
-    .from("fiches_placement")
-    .update({
-      statut: "bon_pour_coupe",
-      statut_precedent: fiche.statut,
-      valide_par: authId,
-      valide_le: new Date().toISOString(),
-    })
-    .eq("id", ficheId);
-  if (error) return { error: error.message };
-
-  await supabase.from("audit_log").insert({
-    user_id: authId,
-    action: "valider_fiche_placement",
-    entity_type: "fiche_placement",
-    entity_id: ficheId,
-  });
-
-  revalidatePath("/atelier/patronnage");
-  revalidatePath(`/atelier/patronnage/${ficheId}`);
-  return {};
-}
-
-export async function unlockFiche(ficheId: string) {
-  const { authId } = await requirePermission("unlock");
-  const supabase = await createClient();
-
-  const { data: fiche } = await supabase
-    .from("fiches_placement")
-    .select("statut,statut_precedent")
-    .eq("id", ficheId)
-    .single();
-  if (!fiche) return { error: "Fiche introuvable" };
-  if (fiche.statut !== "bon_pour_coupe") return { error: "Cette fiche n'est pas verrouillée." };
-
-  const { error } = await supabase
-    .from("fiches_placement")
-    .update({
-      statut: fiche.statut_precedent ?? "traces_deposes",
-      deverrouille_par: authId,
-      deverrouille_le: new Date().toISOString(),
-    })
-    .eq("id", ficheId);
-  if (error) return { error: error.message };
-
-  await supabase.from("audit_log").insert({
-    user_id: authId,
-    action: "deverrouiller_fiche_placement",
-    entity_type: "fiche_placement",
-    entity_id: ficheId,
-  });
-
-  revalidatePath("/atelier/patronnage");
-  revalidatePath(`/atelier/patronnage/${ficheId}`);
-  return {};
-}
-
 export async function archiveFiche(ficheId: string) {
   const { authId } = await requirePermission("archive");
   const supabase = await createClient();
@@ -693,45 +633,52 @@ export async function deleteFicheDefinitively(ficheId: string) {
 }
 
 // ------------------------------------------------------------
-// Tracé de rattrapage (lot 3) — demande, approbation, refus.
-// Seule porte d'entrée pour toucher une fiche "Bon pour coupe" : le circuit
-// normal (addTrace...) reste bloqué par assertFicheModifiable/la RLS.
+// Statut par tracé (TR-1a, migration 0147) : valider, modifier un tracé
+// validé, annuler. Les règles (droits de la matrice Patronnage, motif,
+// surplus sans tolérance) sont dans les fonctions de la base.
 // ------------------------------------------------------------
 
-/** Chef de section (ou tout rôle create/modify sur patronnage) : demande motivée. */
-export async function requestCorrectiveTrace(ficheId: string, justification: string) {
-  await requirePermission("modify");
+/** Valide un tracé « Bon pour coupe » ; un surplus par rapport à la demande exige un motif. */
+export async function validerTrace(traceId: string, ficheId: string, motif?: string) {
+  await requirePermission("validate");
   const supabase = await createClient();
-  const { data, error } = await supabase.rpc("request_corrective_trace", {
-    p_fiche_id: ficheId,
-    p_justification: justification,
+  const { error } = await supabase.rpc("valider_trace", { p_trace_id: traceId, p_motif: motif?.trim() || null });
+  if (error) return { error: error.message, motifRequis: /motif est obligatoire/.test(error.message) };
+
+  revalidatePath("/atelier/patronnage");
+  revalidatePath(`/atelier/patronnage/${ficheId}`);
+  return {};
+}
+
+/** Modifie un tracé validé, pas encore coupé, sans revalidation (droit « déverrouiller » + motif). */
+export async function modifierTraceValide(traceId: string, ficheId: string, formData: FormData) {
+  await requirePermission("unlock");
+  const supabase = await createClient();
+  const num = (k: string) => (formData.get(k) ? Number(formData.get(k)) : null);
+  const { error } = await supabase.rpc("modifier_trace_valide", {
+    p_trace_id: traceId,
+    p_nb_plis: num("nb_plis"),
+    p_repartition: await repartitionJson(formData, "couche"),
+    p_longueur_cm: num("longueur_matelas_cm"),
+    p_largeur_cm: num("largeur_matelas_cm"),
+    p_motif: String(formData.get("motif") ?? "").trim(),
   });
   if (error) return { error: error.message };
 
   revalidatePath("/atelier/patronnage");
   revalidatePath(`/atelier/patronnage/${ficheId}`);
-  return { traceId: data as string };
-}
-
-/** Chef de production (has_permission('patronnage','validate')) : approuve — le tracé redevient éditable. */
-export async function approveCorrectiveTrace(traceId: string) {
-  await requirePermission("validate");
-  const supabase = await createClient();
-  const { error } = await supabase.rpc("approve_corrective_trace", { p_trace_id: traceId });
-  if (error) return { error: error.message };
-
-  revalidatePath("/atelier/patronnage");
   return {};
 }
 
-/** Chef de production : refuse une demande encore en attente — la ligne est supprimée (jamais entrée dans le circuit normal). */
-export async function rejectCorrectiveTrace(traceId: string, motif: string) {
-  await requirePermission("validate");
+/** Annule un tracé pas encore coupé (motif obligatoire ; « déverrouiller » s'il est validé). */
+export async function annulerTrace(traceId: string, ficheId: string, motif: string) {
+  await requireTracePermission("modify");
   const supabase = await createClient();
-  const { error } = await supabase.rpc("reject_corrective_trace", { p_trace_id: traceId, p_motif: motif });
+  const { error } = await supabase.rpc("annuler_trace", { p_trace_id: traceId, p_motif: motif.trim() });
   if (error) return { error: error.message };
 
   revalidatePath("/atelier/patronnage");
+  revalidatePath(`/atelier/patronnage/${ficheId}`);
   return {};
 }
 
@@ -741,7 +688,7 @@ export async function rejectCorrectiveTrace(traceId: string, motif: string) {
 
 export async function addTrace(ficheId: string, formData: FormData) {
   await requireTracePermission("create");
-  const gate = await assertFicheModifiable(ficheId);
+  const gate = await assertFicheOuverteAuxTraces(ficheId);
   if ("error" in gate) return gate;
 
   const supabase = await createClient();

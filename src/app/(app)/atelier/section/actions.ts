@@ -119,6 +119,20 @@ export async function closeMatelas(
   return {};
 }
 
+/**
+ * Démarrer le matelas (TR-1a, 0147) : le tracé passe « en coupe » ; il ne
+ * peut alors plus être annulé. Mêmes personnes que la clôture du matelas.
+ */
+export async function demarrerMatelas(traceId: string): Promise<RecordQuantityResult> {
+  await requireUser();
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("demarrer_matelas", { p_trace_id: traceId });
+  if (error) return { error: error.message };
+  revalidatePath("/atelier/section");
+  revalidatePath("/atelier/patronnage");
+  return {};
+}
+
 export type CreateLotResult = { error: string } | { code: string };
 
 /**
