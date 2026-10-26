@@ -31,6 +31,8 @@ import { RealCostTab } from "./real-cost-tab";
 import { ProductionReportTab } from "./production-report-tab";
 import { PiecesCoupeesTable } from "@/components/atelier/pieces-coupees-table";
 import { groupPiecesCoupees, type PieceCoupeeRow } from "@/lib/pieces-coupees";
+import { CouvertureCoupeCard } from "./couverture-coupe-card";
+import { groupCouverture, resumeEcarts, type CouvertureRow } from "@/lib/production/couverture-coupe";
 import { OdfRolls } from "./odf-rolls";
 import { ConsumptionPanel, type ConsumptionRow } from "./consumption-panel";
 import { odfClientLabel } from "@/lib/production/client-label";
@@ -745,7 +747,7 @@ export default async function ProductionOrderDetailPage({
 
   // Rapport de production (0145) : visible de qui voit l'ODF dès qu'il en existe un ;
   // ses valeurs, seulement avec le droit Tarification.
-  const [{ count: nbRapports }, canSeeCosts, { data: piecesCoupeesRows }] = await Promise.all([
+  const [{ count: nbRapports }, canSeeCosts, { data: piecesCoupeesRows }, { data: couvertureRows }] = await Promise.all([
     supabase.from("production_reports").select("id", { count: "exact", head: true }).eq("production_order_id", order.id),
     can("tarification", "view"),
     // Pièces coupées par semi-fini, figées à la clôture des matelas (0146).
@@ -753,7 +755,10 @@ export default async function ProductionOrderDetailPage({
       .from("pieces_coupees")
       .select("source,statut,semi_fini_id,piece,taille,quantite,semi_fini:product_models(name)")
       .eq("production_order_id", order.id),
+    // Couverture de coupe calculée en continu (TR-1b, 0148).
+    supabase.rpc("couverture_coupe", { p_production_order_id: order.id }),
   ]);
+  const couverture = groupCouverture((couvertureRows ?? []) as CouvertureRow[]);
   const semiFiniNames = new Map(
     (piecesCoupeesRows ?? [])
       .filter((r) => r.semi_fini_id)
@@ -893,15 +898,12 @@ export default async function ProductionOrderDetailPage({
 
       {tab === "general" && (
         <>
-        {order.mention_surplus_traces && (
-          <Card className="border-info/30 bg-info-soft/40">
+        {/* Écarts de coupe calculés en continu (TR-1b) — remplace la mention figée au lancement. */}
+        {resumeEcarts(couverture) && (
+          <Card className="border-warning/30 bg-warning-soft/40">
             <CardBody>
-              <p className="text-xs font-medium text-foreground-muted">Surplus tracé vs quantité demandée</p>
-              <p className="text-sm text-foreground">
-                {Object.entries(order.mention_surplus_traces as Record<string, number>)
-                  .map(([taille, surplus]) => `${taille} : +${surplus}`)
-                  .join(" · ")}
-              </p>
+              <p className="text-xs font-medium text-foreground-muted">Écarts de coupe (coupé + à couper − demandé)</p>
+              <p className="text-sm text-foreground">{resumeEcarts(couverture)}</p>
             </CardBody>
           </Card>
         )}
@@ -1003,6 +1005,8 @@ export default async function ProductionOrderDetailPage({
         {bilanCloture && (
           <ClosureBalance bilan={bilanCloture} motif={order.motif_cloture_en_cours ?? null} sizes={allSizes} />
         )}
+
+        {couverture.length > 0 && <CouvertureCoupeCard articles={couverture} sizes={allSizes} />}
 
         <WhereArePieces lines={whereArePiecesLines} sizes={allSizes} />
 

@@ -1,4 +1,5 @@
 import { requireModule } from "@/lib/auth/permissions";
+import { groupCouverture, surplusSiCoupe, type CouvertureRow } from "@/lib/production/couverture-coupe";
 import { createClient } from "@/lib/supabase/server";
 import { getSizes } from "@/lib/sizes";
 import { PageHeader } from "@/components/shell/page-header";
@@ -159,7 +160,7 @@ export default async function SectionQueuePage({
     const { data: fiches } = await supabase
       .from("fiches_placement")
       .select(
-        "id,numero_ot,production_order_line_id,tissu_type,couleur,grammage,traces_placement(id,ordre,reference,reference_patron,longueur_matelas_cm,largeur_matelas_cm,nb_plis,repartition_par_couche,est_correctif,justification,statut,demarre_le)"
+        "id,numero_ot,production_order_line_id,tissu_type,couleur,grammage,traces_placement(id,ordre,reference,reference_patron,longueur_matelas_cm,largeur_matelas_cm,nb_plis,repartition_par_couche,est_correctif,justification,statut,demarre_le,motif_validation)"
       )
       .in("production_order_line_id", lineIds)
       .eq("statut", "bon_pour_coupe");
@@ -234,6 +235,15 @@ export default async function SectionQueuePage({
       }
     }
 
+    // TR-1b (0148) : couverture de coupe de chaque ODF, pour alerter avant de
+    // couper un matelas qui créerait un surplus (aucune tolérance).
+    const couvertures = await Promise.all(
+      [...new Set(productionOrderIds)].map((id) => supabase.rpc("couverture_coupe", { p_production_order_id: id }))
+    );
+    const couvertureByLineId = new Map(
+      groupCouverture(couvertures.flatMap((c) => (c.data ?? []) as CouvertureRow[])).map((a) => [a.lineId, a])
+    );
+
     const matelasByLineId: Record<string, MatelasRow[]> = {};
     const traceOptionsByLineId: Record<string, TraceOption[]> = {};
     const numeroOtByLineId: Record<string, string> = {};
@@ -253,6 +263,7 @@ export default async function SectionQueuePage({
         justification: string | null;
         statut: string;
         demarre_le: string | null;
+        motif_validation: string | null;
       }[];
       // TR-1a : seuls les tracés validés (Bon pour coupe, en coupe) ou coupés vont à la Coupe.
       const usable = traces.filter((t) => ["bon_pour_coupe", "en_coupe", "termine"].includes(t.statut));
@@ -274,6 +285,14 @@ export default async function SectionQueuePage({
           justification: t.justification,
           statut: t.statut,
           demarreLe: t.demarre_le,
+          surplusSiCoupe:
+            t.statut === "termine"
+              ? {}
+              : surplusSiCoupe(
+                  couvertureByLineId.get(lineId),
+                  Object.fromEntries(Object.entries(t.repartition_par_couche ?? {}).map(([k, n]) => [k, Number(n) * (t.nb_plis ?? 0)]))
+                ),
+          motifSurplus: t.motif_validation,
           dechets: dechetsByTraceId[t.id] ?? [],
           rouleaux: rouleauxByTraceId[t.id] ?? [],
           cloture: clotureByTraceId.get(t.id) ?? null,

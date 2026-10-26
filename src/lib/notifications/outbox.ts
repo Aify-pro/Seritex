@@ -53,6 +53,28 @@ async function construire(l: Ligne): Promise<Construit | null> {
       related: { type: "request", id: m.request_id },
     };
   }
+  if (l.event_key.startsWith("ecart_coupe_")) {
+    // Écart de coupe après un matelas (TR-1b, migration 0148) : manquant ou surplus d'un article.
+    const poId = String(l.payload.production_order_id ?? l.entity_id ?? "");
+    const { data: po } = await db
+      .from("production_orders")
+      .select("id, reference, company_id, request_id, companies(name)")
+      .eq("id", poId)
+      .maybeSingle();
+    if (!po) return null;
+    return {
+      variables: {
+        numero_odf: po.reference,
+        nom_client: nomSociete(po.companies) || "Stock",
+        article: String(l.payload.article ?? ""),
+        manquants: String(l.payload.manquants ?? "") || "aucun",
+        surplus: String(l.payload.surplus ?? "") || "aucun",
+        chemin_lien: `/atelier/production/${po.id}?onglet=production`,
+      },
+      ctx: { requestId: po.request_id, companyId: po.company_id },
+      related: { type: "production_order", id: po.id },
+    };
+  }
   if (l.event_key.startsWith("odf_")) {
     const poId = String(l.payload.production_order_id ?? l.entity_id ?? "");
     const { data: po } = await db
