@@ -54,6 +54,10 @@ export type MatelasRow = {
   /** Statut du tracé (TR-1a, 0147) : bon_pour_coupe, en_coupe (démarré) ou termine. */
   statut: string;
   demarreLe: string | null;
+  /** Surplus que ce matelas créerait par taille (TR-1b, 0148) — alerte, jamais bloquant. */
+  surplusSiCoupe: Record<string, number>;
+  /** Motif donné à la validation du tracé quand il créait déjà un surplus. */
+  motifSurplus: string | null;
   /** Rouleaux scannés pour ce matelas (migration 0096). */
   rouleaux?: { code: string; laizeCm: number | null; bain: string | null; poidsKg: number }[];
   /** Pesées de sac déjà faites pour ce matelas, de la plus ancienne à la plus récente. */

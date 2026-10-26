@@ -834,6 +834,24 @@ function MatelasDetailDialog({
           </div>
         )}
 
+        {!matelas.cloture && Object.keys(matelas.surplusSiCoupe).length > 0 && (
+          <div className="flex items-start gap-1.5 rounded-md border border-warning/30 bg-warning-soft px-2.5 py-2 text-sm text-foreground">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+            <span>
+              Ce matelas créerait un surplus par rapport à la demande :{" "}
+              <strong>
+                {Object.entries(matelas.surplusSiCoupe)
+                  .map(([t, n]) => `+${n} ${t.split("/").pop()}`)
+                  .join(", ")}
+              </strong>
+              .{" "}
+              {matelas.motifSurplus
+                ? `Motif donné à la validation : ${matelas.motifSurplus}.`
+                : "Voir avec le responsable : réduire les couches ou faire annuler le tracé."}
+            </span>
+          </div>
+        )}
+
         {/* ---------- Théorique : ce que dit le tracé ---------- */}
         <section className="space-y-3">
           <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground-muted">Tracé</h3>

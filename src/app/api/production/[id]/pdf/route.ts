@@ -55,6 +55,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     { data: zoneTemplatesAll },
     { data: mediaFiles },
     { data: visuelAffectations },
+    { data: couvertureCoupe },
   ] = await Promise.all([
     // ODF multi-lignes : modèle/tissu/couleur/tailles/sections par article
     // (migrations 0035/0037) — même jointure que la Configuration produit
@@ -85,6 +86,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       .from("production_order_line_section_visuels")
       .select("production_order_line_id,section_id,media_file_id,sections(name),media_files(file_name)")
       .eq("production_order_id", id),
+    supabase.rpc("couverture_coupe", { p_production_order_id: id }),
   ]);
 
   // Une fiche par article passant en Coupe (migration 0037, plus une seule
@@ -407,9 +409,10 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     plannedEnd: order.planned_end_date ? formatFr(order.planned_end_date) : null,
     articles,
     sousOdf,
-    surplusTraces: order.mention_surplus_traces
-      ? Object.entries(order.mention_surplus_traces as Record<string, number>)
-      : [],
+    // Couverture de coupe calculée (TR-1b, 0148) plutôt que la mention figée au lancement.
+    ecartsCoupe: ((couvertureCoupe ?? []) as { description: string; taille: string; ecart: number }[])
+      .filter((c) => c.ecart !== 0)
+      .map((c) => [`${c.description} — ${c.taille.split("/").pop()}`, c.ecart] as [string, number]),
     circuitValidation,
     clotureNote: order.cloture_note ?? null,
   };

@@ -108,7 +108,8 @@ export type OdfPdfData = {
   plannedEnd: string | null;
   articles: OdfPdfArticle[];
   sousOdf: OdfPdfSousOdf[];
-  surplusTraces: [string, number][];
+  /** Écarts de coupe non nuls (TR-1b, 0148) : [« article — taille », coupé + à couper − demandé]. */
+  ecartsCoupe: [string, number][];
   /**
    * Circuit de validation avant soumission (migration 0050, demande Ayman
    * 18/09) — remplace l'ancienne « Traçabilité du cycle de vie » : ce
@@ -953,10 +954,10 @@ export async function buildOdfPdf(data: OdfPdfData): Promise<Uint8Array> {
   // ---------------------------------------------------------------------
   // 5. Mentions et traçabilité
   // ---------------------------------------------------------------------
-  if (data.surplusTraces.length > 0) {
-    sectionTitle("Surplus tracé vs quantité demandée");
+  if (data.ecartsCoupe.length > 0) {
+    sectionTitle("Écarts de coupe (coupé + à couper - demandé)");
     drawCellGrid(
-      data.surplusTraces.map(([taille, surplus]) => ({ label: `Taille ${taille}`, value: `+${surplus} pièces` })),
+      data.ecartsCoupe.map(([libelle, ecart]) => ({ label: libelle, value: ecart < 0 ? `il manque ${-ecart} pièces` : `+${ecart} pièces` })),
       { x: LEFT, width: CONTENT_W, separators: true }
     );
     y -= 14;

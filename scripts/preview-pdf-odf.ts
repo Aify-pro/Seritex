@@ -116,9 +116,9 @@ const data: OdfPdfData = {
     { reference: "OT-2026-0505", section: "Contrôle qualité", sectionDisplayOrder: 5, planned: 450, done: 0 },
     { reference: "OT-2026-0506", section: "Emballage et expédition", sectionDisplayOrder: 6, planned: 1450, done: 0 },
   ],
-  surplusTraces: [
-    ["M", 6],
-    ["L", 4],
+  ecartsCoupe: [
+    ["T-shirt col rond — M", 6],
+    ["T-shirt col rond — L", -4],
   ],
   circuitValidation: [
     { event: "Comptabilité — compte client", date: "17 sept. 2026", by: "Fatou Ndiaye" },
