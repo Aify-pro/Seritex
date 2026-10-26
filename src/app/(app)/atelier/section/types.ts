@@ -51,6 +51,9 @@ export type MatelasRow = {
   grammage: number | null;
   estCorrectif: boolean;
   justification: string | null;
+  /** Statut du tracé (TR-1a, 0147) : bon_pour_coupe, en_coupe (démarré) ou termine. */
+  statut: string;
+  demarreLe: string | null;
   /** Rouleaux scannés pour ce matelas (migration 0096). */
   rouleaux?: { code: string; laizeCm: number | null; bain: string | null; poidsKg: number }[];
   /** Pesées de sac déjà faites pour ce matelas, de la plus ancienne à la plus récente. */

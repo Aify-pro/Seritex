@@ -159,7 +159,7 @@ export default async function SectionQueuePage({
     const { data: fiches } = await supabase
       .from("fiches_placement")
       .select(
-        "id,numero_ot,production_order_line_id,tissu_type,couleur,grammage,traces_placement(id,ordre,reference,reference_patron,longueur_matelas_cm,largeur_matelas_cm,nb_plis,repartition_par_couche,est_correctif,approuve_par,justification)"
+        "id,numero_ot,production_order_line_id,tissu_type,couleur,grammage,traces_placement(id,ordre,reference,reference_patron,longueur_matelas_cm,largeur_matelas_cm,nb_plis,repartition_par_couche,est_correctif,justification,statut,demarre_le)"
       )
       .in("production_order_line_id", lineIds)
       .eq("statut", "bon_pour_coupe");
@@ -250,10 +250,12 @@ export default async function SectionQueuePage({
         nb_plis: number | null;
         repartition_par_couche: Record<string, number>;
         est_correctif: boolean;
-        approuve_par: string | null;
         justification: string | null;
+        statut: string;
+        demarre_le: string | null;
       }[];
-      const usable = traces.filter((t) => !t.est_correctif || t.approuve_par);
+      // TR-1a : seuls les tracés validés (Bon pour coupe, en coupe) ou coupés vont à la Coupe.
+      const usable = traces.filter((t) => ["bon_pour_coupe", "en_coupe", "termine"].includes(t.statut));
       // Un matelas clôturé reste dans la liste, marqué terminé (étiquettes du lot).
       matelasByLineId[lineId] = usable
         .sort((a, b) => a.ordre - b.ordre)
@@ -270,6 +272,8 @@ export default async function SectionQueuePage({
           grammage: (fiche.grammage as number | null) ?? null,
           estCorrectif: t.est_correctif,
           justification: t.justification,
+          statut: t.statut,
+          demarreLe: t.demarre_le,
           dechets: dechetsByTraceId[t.id] ?? [],
           rouleaux: rouleauxByTraceId[t.id] ?? [],
           cloture: clotureByTraceId.get(t.id) ?? null,

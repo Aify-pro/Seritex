@@ -1,6 +1,6 @@
 import "server-only";
 import { createClient } from "@/lib/supabase/server";
-import type { FichePlacement, PatronReconnu, PieceNonReconnue, RendementTrace } from "@/lib/patronnage/types";
+import type { FichePlacement, PatronReconnu, PieceNonReconnue, RendementTrace, TracePlacement } from "@/lib/patronnage/types";
 
 const FICHE_SELECT = `id,numero_ot,statut,statut_precedent,production_order_line_id,premiere_liaison_le,client_code,client_libelle,
    date_emission,date_retour_souhaitee,designation_article,reference_modele,product_model_id,quantite_totale,
@@ -8,7 +8,8 @@ const FICHE_SELECT = `id,numero_ot,statut,statut_precedent,production_order_line
    valide_le,created_at,
    production_order_lines(description,production_orders(reference)),
    traces_placement(id,ordre,reference,reference_patron,longueur_matelas_cm,largeur_matelas_cm,nb_plis,
-     repartition_par_couche,fichier_path,fichier_nom,charge_le,est_correctif,justification,approuve_le,
+     repartition_par_couche,fichier_path,fichier_nom,charge_le,est_correctif,justification,
+     statut,valide_le,motif_validation,surplus_valide,modifie_valide_le,annule_le,motif_annulation,demarre_le,termine_le,
      analyses_trace(id,nb_pieces_detectees,facteur_echelle,patrons_reconnus,pieces_non_reconnues,
        taux_reconnaissance,reconnaissance_complete,alerte_miroir,alerte_echelle,analysee_le))`;
 
@@ -71,7 +72,15 @@ type FicheRow = {
     charge_le: string | null;
     est_correctif: boolean;
     justification: string | null;
-    approuve_le: string | null;
+    statut: TracePlacement["statut"];
+    valide_le: string | null;
+    motif_validation: string | null;
+    surplus_valide: Record<string, number> | null;
+    modifie_valide_le: string | null;
+    annule_le: string | null;
+    motif_annulation: string | null;
+    demarre_le: string | null;
+    termine_le: string | null;
     // `analyses_trace.trace_id` est UNIQUE : PostgREST renvoie alors l'analyse
     // comme un OBJET (relation 1-1), pas comme une liste. Les deux formes sont
     // acceptées pour ne pas dépendre de ce détail de schéma.
@@ -151,9 +160,17 @@ async function mapFiches(
           fichierPath: t.fichier_path,
           fichierNom: t.fichier_nom,
           chargeLe: t.charge_le,
+          statut: t.statut,
+          valideLe: t.valide_le,
+          motifValidation: t.motif_validation,
+          surplusValide: t.surplus_valide,
+          modifieValideLe: t.modifie_valide_le,
+          annuleLe: t.annule_le,
+          motifAnnulation: t.motif_annulation,
+          demarreLe: t.demarre_le,
+          termineLe: t.termine_le,
           estCorrectif: t.est_correctif,
           justification: t.justification,
-          approuveLe: t.approuve_le,
           rendement: rendementByTraceId.get(t.id) ?? null,
           analyse: analyse
             ? {

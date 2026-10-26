@@ -19,7 +19,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { formatDateTime, cn } from "@/lib/utils";
-import { recordWorkOrderQuantity, closeMatelas, createArticleLot } from "./actions";
+import { recordWorkOrderQuantity, closeMatelas, createArticleLot, demarrerMatelas } from "./actions";
 import { reportAnomaly } from "../production/actions";
 import { QrScanButton } from "./qr-scan-button";
 import { MatelasClosedDialog } from "./matelas-closed-dialog";
@@ -646,6 +646,11 @@ function MatelasList({
                       terminé
                     </span>
                   )}
+                  {!m.cloture && m.statut === "en_coupe" && (
+                    <span className="shrink-0 rounded-sm bg-warning-soft px-1.5 py-0.5 text-[10px] font-medium text-warning">
+                      en coupe
+                    </span>
+                  )}
                   {m.estCorrectif && (
                     <span className="shrink-0 rounded-sm bg-warning-soft px-1.5 py-0.5 text-[10px] font-medium text-warning">
                       rattrapage
@@ -707,6 +712,8 @@ function MatelasDetailDialog({
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  // TR-1a : « Démarrer le matelas » fait passer le tracé en coupe (plus annulable).
+  const [demarre, setDemarre] = useState(matelas.statut === "en_coupe" || !!matelas.cloture);
   const referentiel = useSizes();
 
   // Tailles posées sur le tracé, dans l'ordre du référentiel — puis, par
@@ -1019,7 +1026,7 @@ function MatelasDetailDialog({
                 className="w-full rounded-md border border-border bg-surface p-2 text-base outline-none focus:ring-2 focus:ring-brand/30"
               />
               <p className="mt-1 text-[11px] text-foreground-muted">
-                Un tracé de rattrapage sera demandé automatiquement.
+                Un tracé de rattrapage sera créé automatiquement, à préparer et valider dans le Patronnage.
               </p>
             </div>
           )}
@@ -1028,6 +1035,26 @@ function MatelasDetailDialog({
         {/* Barre d'action en bas de la modale : c'est là que le pouce tombe. */}
         <div className="sticky bottom-0 -mx-5 -mb-5 space-y-2 border-t border-border bg-surface px-5 py-3">
           {blocage && <p className="text-xs text-warning">{blocage}</p>}
+          {!demarre && (
+            <Button
+              size="md"
+              variant="secondary"
+              className="w-full"
+              loading={pending}
+              onClick={() =>
+                startTransition(async () => {
+                  const res = await demarrerMatelas(matelas.id);
+                  if (res.error) setError(res.error);
+                  else {
+                    setDemarre(true);
+                    toast.success(`${matelas.reference} : coupe démarrée`);
+                  }
+                })
+              }
+            >
+              <Scissors className="h-4 w-4" /> Démarrer le matelas
+            </Button>
+          )}
           <div className="flex flex-col gap-2 sm:flex-row-reverse">
             <Button size="md" className="w-full sm:w-auto" onClick={submit} loading={pending} disabled={!!blocage}>
               Clôturer le matelas

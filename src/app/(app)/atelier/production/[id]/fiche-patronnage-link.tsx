@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { searchFichesForLine, linkLine, generateFicheFromLine } from "@/app/(app)/atelier/patronnage/fiches-actions";
-import type { StatutFiche } from "@/lib/patronnage/types";
+import { STATUT_TRACE_LABELS, STATUT_TRACE_TONES, type StatutFiche, type StatutTrace } from "@/lib/patronnage/types";
 
 const STATUT_LABELS: Record<StatutFiche, string> = {
   demande: "Demande",
@@ -23,6 +23,14 @@ const STATUT_TONE: Record<StatutFiche, "info" | "brand" | "success" | "neutral">
   bon_pour_coupe: "success",
   archive: "neutral",
 };
+
+/** Fiche liée à l'article, avec le statut de chacun de ses tracés (TR-1a, 0147). */
+export interface FicheLiee {
+  id: string;
+  numeroOt: string;
+  statut: StatutFiche;
+  traces: { reference: string; statut: StatutTrace; pieces: number }[];
+}
 
 interface FicheOption {
   id: string;
@@ -52,7 +60,7 @@ export function FichePatronnageLink({
 }: {
   lineId: string;
   editable: boolean;
-  fiche: { id: string; numeroOt: string; statut: StatutFiche } | null;
+  fiche: FicheLiee | null;
   /** Modèle de l'article — la génération automatique en a besoin (lot C2). */
   productModelId: string | null;
 }) {
@@ -123,7 +131,7 @@ export function FichePatronnageLink({
       <div>
         <p className="text-xs font-medium text-foreground-muted">Fiche Patronnage liée</p>
         <p className="text-[11px] text-foreground-muted">
-          Obligatoire pour valider l&apos;ODF tant qu&apos;une section Coupe est retenue sur cet article.
+          Pour lancer l&apos;ODF, au moins un tracé « Bon pour coupe » (tous articles confondus) ; les autres tracés peuvent être faits en cours de production.
         </p>
       </div>
       {fiche ? (
@@ -139,6 +147,17 @@ export function FichePatronnageLink({
               <div className="mt-1">
                 <Badge tone={STATUT_TONE[fiche.statut]}>{STATUT_LABELS[fiche.statut]}</Badge>
               </div>
+              {fiche.traces.length > 0 && (
+                <ul className="mt-2 space-y-1 text-xs">
+                  {fiche.traces.map((t) => (
+                    <li key={t.reference} className="flex flex-wrap items-center gap-1.5">
+                      <span className="font-mono text-foreground-muted">{t.reference}</span>
+                      <Badge tone={STATUT_TRACE_TONES[t.statut]}>{STATUT_TRACE_LABELS[t.statut]}</Badge>
+                      {t.pieces > 0 && <span className="text-foreground-muted">{t.pieces} pièces</span>}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
             {editable && (
               <Button size="sm" variant="ghost" loading={pending} onClick={unlink}>
@@ -152,7 +171,7 @@ export function FichePatronnageLink({
 
         {needsAttention && (
           <p className="text-xs text-warning">
-            ⚠ La validation de l&apos;ODF sera refusée tant que cette fiche n&apos;est pas au statut « Bon pour coupe ».
+            ⚠ Aucun tracé de cette fiche n&apos;est encore « Bon pour coupe » : l&apos;ODF ne se lance que s&apos;il en a au moins un.
           </p>
         )}
 

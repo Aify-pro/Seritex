@@ -98,7 +98,7 @@ export default async function WorkOrderDetailPage({
   if (isCoupe && productionOrder) {
     const { data: fiches } = await supabase
       .from("fiches_placement")
-      .select("id,traces_placement(id,ordre,reference,repartition_par_couche,est_correctif,approuve_par)")
+      .select("id,traces_placement(id,ordre,reference,repartition_par_couche,est_correctif,statut)")
       .eq("production_order_line_id", wo.production_order_line_id)
       .eq("statut", "bon_pour_coupe");
 
@@ -110,11 +110,12 @@ export default async function WorkOrderDetailPage({
           reference: string;
           repartition_par_couche: RepartitionTailles;
           est_correctif: boolean;
-          approuve_par: string | null;
+          statut: string;
         }[]
     );
     pendingMatelas = traces
-      .filter((t) => (!t.est_correctif || t.approuve_par) && !closedTraceIds.has(t.id))
+      // TR-1a : matelas validés (Bon pour coupe) ou démarrés, pas encore clôturés.
+      .filter((t) => ["bon_pour_coupe", "en_coupe"].includes(t.statut) && !closedTraceIds.has(t.id))
       .sort((a, b) => a.ordre - b.ordre)
       .map((t) => ({
         id: t.id,
