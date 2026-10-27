@@ -62,7 +62,12 @@ export async function createClientRequest(formData: FormData) {
   const { data: company } = await supabase.from("companies").select("name").eq("id", profile.company_id).maybeSingle();
   await sendNotification("nouvelle_demande_client_portail", {
     to: await resolveRoleEmails("commercial"),
-    variables: { numero_demande: reference, nom_client: company?.name ?? "", description: parsed.data.description },
+    variables: {
+      numero_demande: reference,
+      nom_client: company?.name ?? "",
+      description: parsed.data.description,
+      chemin_lien: `/commercial/demandes/${data.id as string}`,
+    },
     relatedEntityType: "request",
     relatedEntityId: data.id as string,
   });

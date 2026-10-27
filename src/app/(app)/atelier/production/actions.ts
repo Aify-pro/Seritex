@@ -23,6 +23,7 @@ async function notifyCommandeTerminee(productionOrderId: string) {
     variables: {
       numero_odf: po?.reference ?? "",
       nom_client: (po?.companies as unknown as { name: string } | null)?.name ?? "",
+      chemin_lien: "/espace-client/commandes",
     },
     relatedEntityType: "production_order",
     relatedEntityId: productionOrderId,

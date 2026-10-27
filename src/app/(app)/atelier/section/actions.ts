@@ -55,7 +55,7 @@ export async function recordWorkOrderQuantity(
     const po = before.production_orders as unknown as { reference: string; companies: { name: string } | null } | null;
     await sendNotification("commande_en_impression", {
       to: await resolveContactEmailForProductionOrder(before.production_order_id),
-      variables: { numero_odf: po?.reference ?? "", nom_client: po?.companies?.name ?? "" },
+      variables: { numero_odf: po?.reference ?? "", nom_client: po?.companies?.name ?? "", chemin_lien: "/espace-client/commandes" },
       relatedEntityType: "production_order",
       relatedEntityId: before.production_order_id,
     });
@@ -454,7 +454,7 @@ export async function declareProduction(
     const po = before.production_orders as unknown as { reference: string; companies: { name: string } | null } | null;
     await sendNotification("commande_en_impression", {
       to: await resolveContactEmailForProductionOrder(before.production_order_id),
-      variables: { numero_odf: po?.reference ?? "", nom_client: po?.companies?.name ?? "" },
+      variables: { numero_odf: po?.reference ?? "", nom_client: po?.companies?.name ?? "", chemin_lien: "/espace-client/commandes" },
       relatedEntityType: "production_order",
       relatedEntityId: before.production_order_id,
     });

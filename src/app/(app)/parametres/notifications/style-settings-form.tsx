@@ -80,6 +80,15 @@ export function StyleSettingsForm({ style }: { style: NotificationStyleSettings 
             className="w-full rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm text-foreground"
           />
         </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-foreground-muted">URL du site (liens destinés aux clients)</label>
+          <input
+            name="site_base_url"
+            defaultValue={style.site_base_url ?? ""}
+            placeholder="https://www.seritex.ci"
+            className="w-full rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm text-foreground"
+          />
+        </div>
       </div>
       <div>
         <label className="mb-1 block text-xs font-medium text-foreground-muted">Pied de page</label>
