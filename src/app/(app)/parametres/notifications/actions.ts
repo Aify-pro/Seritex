@@ -52,6 +52,7 @@ const styleSchema = z.object({
   logo_url: z.string().url("URL invalide").optional().or(z.literal("")),
   footer_text: z.string().optional().or(z.literal("")),
   app_base_url: z.string().url("URL invalide").optional().or(z.literal("")),
+  site_base_url: z.string().url("URL invalide").optional().or(z.literal("")),
 });
 
 export async function updateNotificationStyleSettings(id: string, formData: FormData) {
@@ -63,6 +64,7 @@ export async function updateNotificationStyleSettings(id: string, formData: Form
     logo_url: formData.get("logo_url"),
     footer_text: formData.get("footer_text"),
     app_base_url: formData.get("app_base_url"),
+    site_base_url: formData.get("site_base_url"),
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message };
 
@@ -76,6 +78,7 @@ export async function updateNotificationStyleSettings(id: string, formData: Form
       logo_url: parsed.data.logo_url || null,
       footer_text: parsed.data.footer_text || null,
       app_base_url: parsed.data.app_base_url || null,
+      site_base_url: parsed.data.site_base_url || null,
       updated_at: new Date().toISOString(),
       updated_by: current.profile.id,
     })

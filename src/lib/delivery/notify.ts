@@ -52,13 +52,13 @@ export async function resolveShipmentRecipients(shipmentId: string): Promise<Not
 }
 
 /** Service livraison (litige interne). */
-async function resolveDeliveryTeam(): Promise<NotificationRecipient[]> {
+export async function resolveDeliveryTeam(): Promise<NotificationRecipient[]> {
   const admin = createAdminClient();
   const { data } = await admin.from("app_users").select("email,full_name").eq("role", "responsable_livraison").eq("active", true);
   return (data ?? []).map((u) => ({ email: u.email, label: u.full_name }));
 }
 
-async function shipmentVariables(shipmentId: string) {
+export async function shipmentVariables(shipmentId: string) {
   const admin = createAdminClient();
   const { data: s } = await admin
     .from("shipments")
@@ -103,7 +103,8 @@ export async function notifyShipment(
     const to = event === "livraison_litige" ? await resolveDeliveryTeam() : await resolveShipmentRecipients(shipmentId);
     await sendNotification(event, {
       to,
-      variables: { ...variables, ...extra },
+      // Lien par défaut : la livraison dans l'espace client du site (le litige, interne, ouvre la plateforme).
+      variables: { chemin_lien: event === "livraison_litige" ? `/livraisons/${shipmentId}` : `/espace-client/livraisons/${shipmentId}`, ...variables, ...extra },
       relatedEntityType: "shipment",
       relatedEntityId: shipmentId,
       useServiceRole: opts.withoutSession,

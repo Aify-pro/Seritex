@@ -1006,6 +1006,8 @@ export interface NotificationStyleSettings {
   logo_url: string | null;
   footer_text: string | null;
   app_base_url: string | null;
+  /** Adresse du site www.seritex.ci (liens clients des e-mails) — null = valeur par défaut. */
+  site_base_url: string | null;
   updated_at: string;
   updated_by: string | null;
 }

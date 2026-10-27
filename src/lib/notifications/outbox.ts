@@ -2,7 +2,8 @@ import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveConfiguredRecipients, type RecipientContext } from "./recipients";
 import { sendNotification } from "./send";
-import { PRODUCTION_ORDER_STATUS_LABELS, type ProductionOrderStatus } from "@/lib/types/domain";
+import { resolveDeliveryTeam, shipmentVariables } from "@/lib/delivery/notify";
+import { PRODUCTION_ORDER_STATUS_LABELS, type NotificationRecipient, type ProductionOrderStatus } from "@/lib/types/domain";
 
 /**
  * Vide la file des événements déclenchés par la base (migration 0129) : devis accepté, message d'un client…
@@ -13,7 +14,13 @@ import { PRODUCTION_ORDER_STATUS_LABELS, type ProductionOrderStatus } from "@/li
  */
 
 type Ligne = { id: string; event_key: string; entity_type: string | null; entity_id: string | null; payload: Record<string, unknown>; attempts: number };
-type Construit = { variables: Record<string, string | number>; ctx: RecipientContext; related?: { type: string; id: string } };
+type Construit = {
+  variables: Record<string, string | number>;
+  ctx: RecipientContext;
+  related?: { type: string; id: string };
+  /** Destinataires par défaut, utilisés tant que rien n'est réglé dans Paramètres > Notifications. */
+  parDefaut?: NotificationRecipient[];
+};
 
 const nomSociete = (c: unknown) => (c as { name: string } | null)?.name ?? "";
 
@@ -27,7 +34,12 @@ async function construire(l: Ligne): Promise<Construit | null> {
     ]);
     if (!q) return null;
     return {
-      variables: { numero_devis: q.reference, nom_client: nomSociete(q.companies), numero_odf: po?.reference ?? "" },
+      variables: {
+        numero_devis: q.reference,
+        nom_client: nomSociete(q.companies),
+        numero_odf: po?.reference ?? "",
+        chemin_lien: po ? `/atelier/production/${po.id}` : "/commercial/devis",
+      },
       ctx: { requestId: q.request_id, companyId: q.company_id },
       related: po ? { type: "production_order", id: po.id } : { type: "quote", id: quoteId },
     };
@@ -51,6 +63,19 @@ async function construire(l: Ligne): Promise<Construit | null> {
       },
       ctx: { requestId: m.request_id, companyId: r.company_id },
       related: { type: "request", id: m.request_id },
+    };
+  }
+  if (l.event_key === "livraison_litige") {
+    // Problème signalé par le client depuis le site (confirmation de réception) : alerte le service livraison.
+    const shipmentId = String(l.payload.shipment_id ?? l.entity_id ?? "");
+    const variables = await shipmentVariables(shipmentId);
+    if (!variables) return null;
+    const { data: s } = await db.from("shipments").select("company_id").eq("id", shipmentId).maybeSingle();
+    return {
+      variables: { ...variables, commentaire: String(l.payload.commentaire ?? ""), chemin_lien: `/livraisons/${shipmentId}` },
+      ctx: { companyId: s?.company_id ?? null },
+      related: { type: "shipment", id: shipmentId },
+      parDefaut: await resolveDeliveryTeam(),
     };
   }
   if (l.event_key.startsWith("ecart_coupe_")) {
@@ -120,9 +145,9 @@ export async function traiterFile(limite = 20): Promise<{ reserves: number; envo
         abandonnes += 1;
         continue;
       }
-      const { recipients } = await resolveConfiguredRecipients(l.event_key, c.ctx);
+      const { configured, recipients } = await resolveConfiguredRecipients(l.event_key, c.ctx);
       const r = await sendNotification(l.event_key, {
-        to: recipients,
+        to: configured ? recipients : (c.parDefaut ?? recipients),
         variables: c.variables,
         relatedEntityType: c.related?.type,
         relatedEntityId: c.related?.id,

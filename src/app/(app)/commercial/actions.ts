@@ -729,7 +729,8 @@ export async function validateQuote(quoteId: string) {
         nom_client: (quote.companies as unknown as { name: string } | null)?.name ?? "",
         // Montant déjà formaté avec sa devise : le modèle d'e-mail n'y ajoute plus d'unité (migration 0061).
         montant_total: formatMoney(Number(quote.total_amount), quote.devise ?? "XOF"),
-        chemin_lien: `/client/devis/${quote.id}`,
+        // Le client valide sa proforma depuis le site (espace client), plus depuis la plateforme.
+        chemin_lien: `/espace-client/devis/${quote.id}`,
       },
       relatedEntityType: "quote",
       relatedEntityId: quote.id as string,

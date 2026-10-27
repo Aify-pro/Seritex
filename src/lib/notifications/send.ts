@@ -5,6 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { getResendClient } from "./client";
 import { renderTemplate } from "./template";
 import { wrapHtml } from "./wrapper";
+import { adresseSite } from "./liens";
 import type { NotificationLogStatus, NotificationRecipient } from "@/lib/types/domain";
 
 export type SendNotificationInput = {
@@ -120,7 +121,7 @@ export async function sendNotification(eventKey: string, input: SendNotification
       return { attempted: 0, sent: 0, skipped: true };
     }
 
-    const mergedVariables = { ...input.variables, lien_base: style?.app_base_url ?? "" };
+    const mergedVariables = { ...input.variables, lien_base: style?.app_base_url ?? "", lien_site: adresseSite(style?.site_base_url) };
     const resend = getResendClient();
     const rows: LogRow[] = [];
 
