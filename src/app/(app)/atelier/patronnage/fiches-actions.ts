@@ -633,6 +633,136 @@ export async function deleteFicheDefinitively(ficheId: string) {
 }
 
 // ------------------------------------------------------------
+// Ordres de coupe regroupés par pièce (étape 3a, migration 0149) : un
+// semi-fini coupé pour plusieurs articles d'ODF, couches attribuées à chaque
+// article. Les contrôles (nomenclature, pas de mélange avec la coupe en
+// t-shirts entiers, couches figées après validation) sont dans la base.
+// ------------------------------------------------------------
+
+export interface BesoinSemiFini {
+  lineId: string;
+  productionOrderId: string;
+  odf: string;
+  statutOdf: string;
+  client: string;
+  article: string;
+  couleur: string | null;
+  parPieces: boolean;
+  dejaEntier: boolean;
+  tailles: { taille: string; demandees: number; coupees: number; prevues: number; reste: number }[];
+}
+
+/** Articles d'ODF ouverts qui ont besoin d'un semi-fini, avec le reste à couper par taille. */
+export async function besoinsSemiFini(semiFiniId: string): Promise<BesoinSemiFini[] | { error: string }> {
+  await requirePermission("view");
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("besoins_semi_fini", { p_semi_fini_id: semiFiniId });
+  if (error) return { error: error.message };
+  const map = new Map<string, BesoinSemiFini>();
+  for (const r of (data ?? []) as Record<string, unknown>[]) {
+    const id = r.line_id as string;
+    const b =
+      map.get(id) ??
+      ({
+        lineId: id,
+        productionOrderId: r.production_order_id as string,
+        odf: r.odf as string,
+        statutOdf: r.statut_odf as string,
+        client: r.client as string,
+        article: r.article as string,
+        couleur: (r.couleur as string | null) ?? null,
+        parPieces: !!r.par_pieces,
+        dejaEntier: !!r.deja_entier,
+        tailles: [],
+      } satisfies BesoinSemiFini);
+    b.tailles.push({
+      taille: r.taille as string,
+      demandees: Number(r.demandees),
+      coupees: Number(r.coupees),
+      prevues: Number(r.prevues),
+      reste: Number(r.reste),
+    });
+    map.set(id, b);
+  }
+  return [...map.values()];
+}
+
+/** Crée un ordre de coupe regroupé pour un semi-fini et les articles choisis. */
+export async function createFicheRegroupee(semiFiniId: string, lineIds: string[]) {
+  const { authId } = await requirePermission("create");
+  if (lineIds.length === 0) return { error: "Choisissez au moins un article d'ODF." };
+  const supabase = await createClient();
+  const { data: sf } = await supabase.from("product_models").select("name").eq("id", semiFiniId).maybeSingle();
+  const { data: fiche, error } = await supabase
+    .from("fiches_placement")
+    .insert({ semi_fini_id: semiFiniId, designation_article: sf?.name ?? null, cree_par: authId })
+    .select("id,numero_ot")
+    .single();
+  if (error || !fiche) return { error: error?.message ?? "Création impossible" };
+  const { error: e2 } = await supabase
+    .from("coupe_groupee_lignes")
+    .insert(lineIds.map((production_order_line_id) => ({ fiche_id: fiche.id, production_order_line_id })));
+  if (e2) {
+    await supabase.from("fiches_placement").delete().eq("id", fiche.id);
+    return { error: e2.message };
+  }
+  await supabase.from("audit_log").insert({
+    user_id: authId,
+    action: "creer_ordre_coupe_regroupe",
+    entity_type: "fiche_placement",
+    entity_id: fiche.id,
+    metadata: { numero_ot: fiche.numero_ot, semi_fini_id: semiFiniId, lignes: lineIds },
+  });
+  revalidatePath("/atelier/patronnage");
+  return { id: fiche.id as string, numeroOt: fiche.numero_ot as string };
+}
+
+/** Ajoute un article d'ODF à un ordre regroupé. */
+export async function ajouterLigneRegroupee(ficheId: string, lineId: string) {
+  await requirePermission("modify");
+  const supabase = await createClient();
+  const { error } = await supabase.from("coupe_groupee_lignes").insert({ fiche_id: ficheId, production_order_line_id: lineId });
+  if (error) return { error: error.code === "23505" ? "Cet article est déjà dans l'ordre regroupé." : error.message };
+  revalidatePath(`/atelier/patronnage/${ficheId}`);
+  return {};
+}
+
+/** Retire un article d'un ordre regroupé (tant qu'aucun matelas n'est en coupe ou coupé). */
+export async function retirerLigneRegroupee(ficheId: string, lineId: string) {
+  await requirePermission("modify");
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("coupe_groupee_lignes")
+    .delete()
+    .eq("fiche_id", ficheId)
+    .eq("production_order_line_id", lineId)
+    .select("id");
+  if (error) return { error: error.message };
+  if (!data?.length) return { error: "Impossible de retirer cet article : un matelas de cet ordre est déjà en coupe ou coupé." };
+  revalidatePath(`/atelier/patronnage/${ficheId}`);
+  return {};
+}
+
+/** Couches d'un tracé regroupé par article (remplace la répartition ; plis = somme). */
+export async function enregistrerCouches(traceId: string, ficheId: string, couches: Record<string, number>): Promise<{ error?: string }> {
+  await requireTracePermission("modify");
+  const gate = await assertTraceEditable(traceId, ficheId);
+  if ("error" in gate) return { error: gate.error };
+  const supabase = await createClient();
+  const lignes = Object.entries(couches).filter(([, n]) => Number.isInteger(n) && n > 0);
+  const { error: delError } = await supabase.from("trace_couches").delete().eq("trace_id", traceId);
+  if (delError) return { error: delError.message };
+  if (lignes.length) {
+    const { error } = await supabase
+      .from("trace_couches")
+      .insert(lignes.map(([production_order_line_id, nb_couches]) => ({ trace_id: traceId, production_order_line_id, nb_couches })));
+    if (error) return { error: error.message };
+  }
+  revalidatePath(`/atelier/patronnage/${ficheId}`);
+  return {};
+}
+
+// ------------------------------------------------------------
 // Statut par tracé (TR-1a, migration 0147) : valider, modifier un tracé
 // validé, annuler. Les règles (droits de la matrice Patronnage, motif,
 // surplus sans tolérance) sont dans les fonctions de la base.
@@ -729,7 +859,8 @@ export async function updateTrace(traceId: string, ficheId: string, formData: Fo
       reference_patron: String(formData.get("reference_patron") ?? "").trim() || null,
       longueur_matelas_cm: formData.get("longueur_matelas_cm") ? Number(formData.get("longueur_matelas_cm")) : null,
       largeur_matelas_cm: formData.get("largeur_matelas_cm") ? Number(formData.get("largeur_matelas_cm")) : null,
-      nb_plis: formData.get("nb_plis") ? Number(formData.get("nb_plis")) : null,
+      // Tracé regroupé (0149) : les plis sont la somme des couches par article, le champ n'est pas envoyé.
+      ...(formData.has("nb_plis") ? { nb_plis: formData.get("nb_plis") ? Number(formData.get("nb_plis")) : null } : {}),
       repartition_par_couche: await repartitionJson(formData, "couche"),
       updated_at: new Date().toISOString(),
     })

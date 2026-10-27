@@ -29,6 +29,7 @@ import { STATUT_TRACE_LABELS, STATUT_TRACE_TONES, type FichePlacement, type Repa
 import { createContext, useContext } from "react";
 import type { Size } from "@/lib/sizes";
 import { repartitionDepuisTraces, repartitionTotal } from "@/lib/patronnage/dispatching";
+import { ArticlesRegroupesCard, CouchesEditor, NouvelOrdreRegroupeDialog } from "@/components/atelier/patronnage/coupe-regroupee";
 import {
   createFiche,
   updateFiche,
@@ -106,6 +107,7 @@ export function FichesPlacementClient({
   permissions,
   sizes = [],
   productModels = [],
+  semiFinis = [],
 }: {
   fiches: FichePlacement[];
   currentUserRole: string;
@@ -114,9 +116,12 @@ export function FichesPlacementClient({
   sizes?: Size[];
   /** Modèles actifs, pour le cadre 1 (lot C2). */
   productModels?: ProductModelOption[];
+  /** Semi-finis actifs, pour créer un ordre de coupe regroupé (0149). */
+  semiFinis?: { id: string; code: string | null; name: string }[];
 }) {
   const [filtreStatut, setFiltreStatut] = useState<StatutFiche | "tous">("tous");
   const [showCreate, setShowCreate] = useState(false);
+  const [showRegroupe, setShowRegroupe] = useState(false);
 
   const filtered = fiches.filter((f) => filtreStatut === "tous" || f.statut === filtreStatut);
 
@@ -141,9 +146,14 @@ export function FichesPlacementClient({
             ))}
           </div>
           {permissions.canCreate && (
-            <Button size="sm" onClick={() => setShowCreate(true)}>
-              <Plus className="h-3.5 w-3.5" /> Nouvelle fiche
-            </Button>
+            <div className="flex gap-2">
+              <Button size="sm" variant="secondary" onClick={() => setShowRegroupe(true)}>
+                <Plus className="h-3.5 w-3.5" /> Ordre de coupe regroupé
+              </Button>
+              <Button size="sm" onClick={() => setShowCreate(true)}>
+                <Plus className="h-3.5 w-3.5" /> Nouvelle fiche
+              </Button>
+            </div>
           )}
         </div>
 
@@ -168,9 +178,23 @@ export function FichesPlacementClient({
                   <Tr key={f.id}>
                     <Td className="font-mono text-xs">{f.numeroOt}</Td>
                     <Td>{f.clientLibelle ?? <span className="text-foreground-muted">—</span>}</Td>
-                    <Td>{f.designationArticle ?? f.referenceModele ?? <span className="text-foreground-muted">—</span>}</Td>
                     <Td>
-                      {f.odfReference ? (
+                      {f.semiFini ? (
+                        <span>
+                          <span className="mr-1.5 rounded-sm bg-brand-soft px-1.5 py-0.5 text-[10px] font-medium text-brand">Regroupé</span>
+                          {f.semiFini.name}
+                        </span>
+                      ) : (
+                        f.designationArticle ?? f.referenceModele ?? <span className="text-foreground-muted">—</span>
+                      )}
+                    </Td>
+                    <Td>
+                      {f.semiFini ? (
+                        <span className="text-foreground">
+                          {f.lignesRegroupees.length} article{f.lignesRegroupees.length > 1 ? "s" : ""} :{" "}
+                          {[...new Set(f.lignesRegroupees.map((l) => l.odfReference).filter(Boolean))].join(", ")}
+                        </span>
+                      ) : f.odfReference ? (
                         <span className="text-foreground">{f.odfReference}</span>
                       ) : (
                         <span className="text-foreground-muted">—</span>
@@ -202,6 +226,7 @@ export function FichesPlacementClient({
         <Dialog open={showCreate} onOpenChange={setShowCreate} title="Nouvelle fiche de placement" size="lg">
           <CreateFicheForm onCreated={() => setShowCreate(false)} productModels={productModels} />
         </Dialog>
+        <NouvelOrdreRegroupeDialog open={showRegroupe} onOpenChange={setShowRegroupe} semiFinis={semiFinis} />
       </div>
     </SizesContext.Provider>
   );
@@ -738,6 +763,10 @@ export function FicheDetailContent({
           </div>
         )}
 
+        {fiche.semiFini ? (
+          <ArticlesRegroupesCard fiche={fiche} canModify={permissions.canModify && fiche.statut !== "archive"} />
+        ) : (
+          <>
         {/* Lien ODF (article précis, migration 0037) */}
         <Card>
           <CardHeader title="Article d'ODF lié" description={fiche.premiereLiaisonLe ? `Première liaison le ${formatDate(fiche.premiereLiaisonLe)}` : "Optionnel"} />
@@ -793,6 +822,8 @@ export function FicheDetailContent({
             )}
           </CardBody>
         </Card>
+          </>
+        )}
 
         {/* Cadres 1-4 */}
         <Card>
@@ -1222,7 +1253,7 @@ function TraceDetailBody({
               <input type="number" name="largeur_matelas_cm" defaultValue={trace.largeurMatelasCm ?? ""} disabled={!champsModifiables} className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground disabled:opacity-60" />
             </Field>
             <Field label="Nombre de plis">
-              <input type="number" name="nb_plis" defaultValue={trace.nbPlis ?? ""} disabled={!champsModifiables} className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground disabled:opacity-60" />
+              <input type="number" name={fiche.semiFini ? undefined : "nb_plis"} defaultValue={trace.nbPlis ?? ""} disabled={!champsModifiables || !!fiche.semiFini} title={fiche.semiFini ? "Somme des couches par article" : undefined} className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground disabled:opacity-60" />
             </Field>
           </div>
           <Field label={`Répartition par couche (total/couche ${totalCouche}${totalTrace !== null ? ` · théorique tracé ${totalTrace}` : ""})`}>
@@ -1253,6 +1284,8 @@ function TraceDetailBody({
             </div>
           )}
         </form>
+
+        {fiche.semiFini && <CouchesEditor fiche={fiche} trace={trace} editable={!effectiveLocked && canModify} onChanged={onChanged} />}
 
         <div className="rounded-md border border-dashed border-border bg-surface-muted p-3">
           <input ref={fileInputRef} type="file" accept=".dxf" onChange={handleUpload} className="hidden" />

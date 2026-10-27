@@ -135,6 +135,8 @@ export interface TracePlacement {
   // TR-1a, un tracé ordinaire en préparation, sans approbation.
   estCorrectif: boolean;
   justification: string | null;
+  /** Couches par article d'ODF d'un tracé regroupé (0149) ; vide pour un tracé d'article. */
+  couches: { lineId: string; nbCouches: number }[];
   // Lot 8 — voir RendementTrace ci-dessus. null tant que le matelas
   // correspondant (section Coupe) n'a pas été clôturé.
   rendement: RendementTrace | null;
@@ -173,6 +175,10 @@ export interface FichePlacement {
   valideLe: string | null;
   createdAt: string;
   traces: TracePlacement[];
+  /** Ordre de coupe regroupé (0149) : le semi-fini coupé pour plusieurs articles d'ODF ; null pour une fiche d'article. */
+  semiFini: { id: string; name: string } | null;
+  /** Articles d'ODF regroupés (ordre regroupé seulement). */
+  lignesRegroupees: { lineId: string; description: string; odfReference: string | null }[];
 }
 
 export interface FicheListItem {
