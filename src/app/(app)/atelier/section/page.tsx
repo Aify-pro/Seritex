@@ -1,4 +1,5 @@
 import { requireModule } from "@/lib/auth/permissions";
+import { MatelasRegroupes, type MatelasRegroupe } from "./matelas-regroupes";
 import { groupCouverture, surplusSiCoupe, type CouvertureRow } from "@/lib/production/couverture-coupe";
 import { createClient } from "@/lib/supabase/server";
 import { getSizes } from "@/lib/sizes";
@@ -415,6 +416,51 @@ export default async function SectionQueuePage({
     }
   }
 
+  // Étape 3b (0150) : matelas regroupés à couper (tracés validés ou en coupe
+  // d'ordres regroupés dont au moins un article est en production).
+  let matelasRegroupes: MatelasRegroupe[] = [];
+  if (isCoupe && !isStockManager) {
+    const { data: tracesRegroupes } = await supabase
+      .from("traces_placement")
+      .select(
+        "id,reference,statut,repartition_par_couche,longueur_matelas_cm,largeur_matelas_cm,fiches_placement!inner(semi_fini_id,designation_article),trace_couches(production_order_line_id,nb_couches,production_order_lines(description,colors!production_order_lines_couleur_unique_id_fkey(name),production_orders(reference,status)))"
+      )
+      .not("fiches_placement.semi_fini_id", "is", null)
+      .in("statut", ["bon_pour_coupe", "en_coupe"])
+      .order("created_at");
+    type CoucheRow = {
+      production_order_line_id: string;
+      nb_couches: number;
+      production_order_lines: { description: string; colors: { name: string } | null; production_orders: { reference: string; status: string } | null } | null;
+    };
+    matelasRegroupes = (tracesRegroupes ?? [])
+      .map((t) => {
+        const couches = (t.trace_couches ?? []) as unknown as CoucheRow[];
+        return {
+          traceId: t.id as string,
+          reference: t.reference as string,
+          semiFini: ((t.fiches_placement as unknown as { designation_article: string | null } | null)?.designation_article ?? "Pièce") as string,
+          statut: t.statut as string,
+          repartitionParCouche: (t.repartition_par_couche ?? {}) as Record<string, number>,
+          longueurCm: (t.longueur_matelas_cm as number | null) ?? null,
+          laizeCm: (t.largeur_matelas_cm as number | null) ?? null,
+          articles: couches.map((c) => ({
+            lineId: c.production_order_line_id,
+            odf: c.production_order_lines?.production_orders?.reference ?? "—",
+            article: c.production_order_lines?.description ?? "—",
+            couleur: c.production_order_lines?.colors?.name ?? null,
+            couches: c.nb_couches,
+            enProduction: c.production_order_lines?.production_orders?.status === "en_production",
+          })),
+        };
+      })
+      .filter((m) => m.articles.length > 0 && m.articles.every((a) => a.enProduction))
+      .map((m) => ({
+        ...m,
+        articles: m.articles.map((a) => ({ lineId: a.lineId, odf: a.odf, article: a.article, couleur: a.couleur, couches: a.couches })),
+      }));
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -444,6 +490,8 @@ export default async function SectionQueuePage({
           </CardBody>
         </Card>
       )}
+
+      {matelasRegroupes.length > 0 && <MatelasRegroupes matelas={matelasRegroupes} />}
 
       {isStockManager ? (
         <SectionBoardLegacy

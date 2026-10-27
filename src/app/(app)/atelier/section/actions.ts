@@ -133,6 +133,36 @@ export async function demarrerMatelas(traceId: string): Promise<RecordQuantityRe
   return {};
 }
 
+/**
+ * Clôture pièce par pièce d'un matelas regroupé (étape 3b, migration 0150) :
+ * pour chaque article d'ODF, couches réelles et pièces obtenues par taille ;
+ * la base répartit tissu et déchets au prorata des couches et assemble les
+ * t-shirts complets.
+ */
+export async function cloturerMatelasRegroupe(
+  traceId: string,
+  lignes: { lineId: string; couchesReelles: number; obtenus: Record<string, number> }[],
+  mesures: { longueurCm: number; laizeCm: number; poidsTissuKg: number; dechetsKg: number },
+  justification?: string
+): Promise<{ error?: string; kits?: Record<string, number> }> {
+  await requireUser();
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("cloturer_matelas_regroupe", {
+    p_trace_id: traceId,
+    p_lignes: lignes.map((l) => ({ line_id: l.lineId, couches_reelles: l.couchesReelles, obtenus: l.obtenus })),
+    p_longueur_cm: mesures.longueurCm,
+    p_laize_cm: mesures.laizeCm,
+    p_poids_tissu_kg: mesures.poidsTissuKg,
+    p_dechets_kg: mesures.dechetsKg,
+    p_justification: justification?.trim() || null,
+  });
+  if (error) return { error: error.message };
+  revalidatePath("/atelier/section");
+  revalidatePath("/atelier/production");
+  revalidatePath("/atelier/patronnage");
+  return { kits: ((data as { kits_assembles?: Record<string, number> } | null)?.kits_assembles ?? {}) };
+}
+
 export type CreateLotResult = { error: string } | { code: string };
 
 /**
