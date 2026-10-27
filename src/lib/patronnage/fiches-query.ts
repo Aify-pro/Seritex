@@ -5,11 +5,14 @@ import type { FichePlacement, PatronReconnu, PieceNonReconnue, RendementTrace, T
 const FICHE_SELECT = `id,numero_ot,statut,statut_precedent,production_order_line_id,premiere_liaison_le,client_code,client_libelle,
    date_emission,date_retour_souhaitee,designation_article,reference_modele,product_model_id,quantite_totale,
    repartition_tailles,tissu_type,grammage,couleur,laize_utile_cm,contraintes,observations,
-   valide_le,created_at,
+   valide_le,created_at,semi_fini_id,
+   semi_fini:product_models!fiches_placement_semi_fini_id_fkey(id,name),
+   coupe_groupee_lignes(production_order_line_id,production_order_lines(description,production_orders(reference))),
    production_order_lines(description,production_orders(reference)),
    traces_placement(id,ordre,reference,reference_patron,longueur_matelas_cm,largeur_matelas_cm,nb_plis,
      repartition_par_couche,fichier_path,fichier_nom,charge_le,est_correctif,justification,
      statut,valide_le,motif_validation,surplus_valide,modifie_valide_le,annule_le,motif_annulation,demarre_le,termine_le,
+     trace_couches(production_order_line_id,nb_couches),
      analyses_trace(id,nb_pieces_detectees,facteur_echelle,patrons_reconnus,pieces_non_reconnues,
        taux_reconnaissance,reconnaissance_complete,alerte_miroir,alerte_echelle,analysee_le))`;
 
@@ -54,6 +57,14 @@ type FicheRow = {
   observations: string | null;
   valide_le: string | null;
   created_at: string;
+  semi_fini_id: string | null;
+  semi_fini: { id: string; name: string } | { id: string; name: string }[] | null;
+  coupe_groupee_lignes:
+    | {
+        production_order_line_id: string;
+        production_order_lines: { description: string; production_orders: { reference: string } | { reference: string }[] | null } | null;
+      }[]
+    | null;
   production_order_lines:
     | { description: string; production_orders: { reference: string } | { reference: string }[] | null }
     | { description: string; production_orders: { reference: string } | { reference: string }[] | null }[]
@@ -81,6 +92,7 @@ type FicheRow = {
     motif_annulation: string | null;
     demarre_le: string | null;
     termine_le: string | null;
+    trace_couches: { production_order_line_id: string; nb_couches: number }[] | null;
     // `analyses_trace.trace_id` est UNIQUE : PostgREST renvoie alors l'analyse
     // comme un OBJET (relation 1-1), pas comme une liste. Les deux formes sont
     // acceptées pour ne pas dépendre de ce détail de schéma.
@@ -144,6 +156,15 @@ async function mapFiches(
     observations: f.observations,
     valideLe: f.valide_le,
     createdAt: f.created_at,
+    semiFini: (Array.isArray(f.semi_fini) ? f.semi_fini[0] : f.semi_fini) ?? null,
+    lignesRegroupees: (f.coupe_groupee_lignes ?? []).map((g) => {
+      const po = g.production_order_lines?.production_orders;
+      return {
+        lineId: g.production_order_line_id,
+        description: g.production_order_lines?.description ?? "—",
+        odfReference: (Array.isArray(po) ? po[0]?.reference : po?.reference) ?? null,
+      };
+    }),
     traces: (f.traces_placement ?? [])
       .sort((a, b) => a.ordre - b.ordre)
       .map((t) => {
@@ -171,6 +192,7 @@ async function mapFiches(
           termineLe: t.termine_le,
           estCorrectif: t.est_correctif,
           justification: t.justification,
+          couches: (t.trace_couches ?? []).map((c) => ({ lineId: c.production_order_line_id, nbCouches: c.nb_couches })),
           rendement: rendementByTraceId.get(t.id) ?? null,
           analyse: analyse
             ? {
