@@ -28,6 +28,10 @@ export type Reglages = {
   rentreMm: number;
   /** Blancs des textiles foncés : sous-couche et rehaut. */
   blancs: OptionsSousCouche;
+  /** Support des films : A5, A4, A3 ou automatique. */
+  format: "auto" | "A5" | "A4" | "A3";
+  /** Plusieurs films par page (économie de support). */
+  grouper: boolean;
 };
 
 /** Angles AM par défaut : 22,5° pour tous les écrans (le plus sûr contre le moiré avec la maille). */
@@ -52,6 +56,8 @@ export const REGLAGES_DEFAUT: Reglages = {
   recouvrementMm: 0,
   rentreMm: 0.2,
   blancs: SOUS_COUCHE_DEFAUT,
+  format: "auto",
+  grouper: false,
 };
 
 /** Quadrichromie proposée : angles classiques C 15°, M 75°, J 0°, N 45°. */
@@ -77,6 +83,11 @@ export const AM_DEFAUT: Extract<Rendu, { type: "am" }> = {
   pointMaxPct: 95,
 };
 
+const tonalitesSchema = z
+  .array(z.object({ densitePct: z.number().min(20).max(200), milieux: z.number().min(-50).max(50) }))
+  .max(13)
+  .optional();
+
 const renduSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("aplat") }),
   z.object({ type: z.literal("diffusion"), algo: z.enum(["floyd-steinberg", "atkinson", "stucki"]) }),
@@ -88,6 +99,7 @@ const renduSchema = z.discriminatedUnion("type", [
     forme: z.enum(["rond", "elliptique", "ligne"]),
     pointMinPct: z.number().min(0).max(50),
     pointMaxPct: z.number().min(50).max(100),
+    tonalites: tonalitesSchema,
   }),
   z.object({
     type: z.literal("cmjn"),
@@ -99,6 +111,7 @@ const renduSchema = z.discriminatedUnion("type", [
     engraissementPct: z.number().min(0).max(40),
     pointMinPct: z.number().min(0).max(50),
     pointMaxPct: z.number().min(50).max(100),
+    tonalites: tonalitesSchema,
   }),
 ]);
 
@@ -152,6 +165,8 @@ export const reglagesSchema = z.object({
   recouvrementMm: z.number().min(0).max(2),
   rentreMm: z.number().min(0).max(2),
   blancs: blancsSchema,
+  format: z.enum(["auto", "A5", "A4", "A3"]),
+  grouper: z.boolean(),
 });
 
 /** Lit des réglages enregistrés : complète avec les valeurs par défaut, null si invalides. */

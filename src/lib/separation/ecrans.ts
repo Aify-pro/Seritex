@@ -6,7 +6,7 @@
  */
 import { HORS_DESSIN, sansIlots } from "./separer";
 import { ecransBlancs, luminosites, SOUS_COUCHE_DEFAUT, type OptionsSousCouche } from "./sous-couche";
-import { empaqueter, recouvrir, rvbDeHex, tableMelanges, ton, pur, tramerAM, versCmjn, type Rendu } from "./trame";
+import { empaqueter, recouvrir, rvbDeHex, tableMelanges, ton, pur, tonaliser, tramerAM, versCmjn, type Rendu, type Tonalite } from "./trame";
 import { ajusterImage, imageNeutre, type ReglagesImage } from "./image";
 import { ecranAMVecteur, ecranMasqueVecteur, type EcranVecteur } from "./vecteur";
 
@@ -189,16 +189,29 @@ export function tonsCmjn(px: Uint8ClampedArray | Uint8Array, w: number, h: numbe
   return out;
 }
 
+/** Applique la tonalité réglée pour chaque écran (table de 256 valeurs par écran). */
+function tonaliserTons(tons: Uint8Array[], tonalites: Tonalite[] | undefined): Uint8Array[] {
+  if (!tonalites) return tons;
+  tons.forEach((t, k) => {
+    const r = tonalites[k];
+    if (!r || (r.densitePct === 100 && r.milieux === 0)) return;
+    const table = Uint8Array.from({ length: 256 }, (_, v) => tonaliser(v, r));
+    for (let p = 0; p < t.length; p++) t[p] = table[t[p]];
+  });
+  return tons;
+}
+
 /** Ton (0 à 255) de chaque encre en chaque pixel : base de la trame AM et de son aperçu. */
 export function tonsRendu(px: Uint8ClampedArray | Uint8Array, w: number, h: number, e: Entree): Uint8Array[] {
-  if (e.rendu.type === "cmjn") return tonsCmjn(px, w, h, e);
+  if (e.rendu.type === "cmjn") return tonaliserTons(tonsCmjn(px, w, h, e), e.rendu.tonalites);
   const n = w * h;
   const { vals } = melanges(px, n, e);
-  return e.encres.map((_, k) => {
+  const tons = e.encres.map((_, k) => {
     const t = new Uint8Array(n);
     for (let p = 0; p < n; p++) if (vals[p] !== TRANSPARENT) t[p] = ton(vals[p], k);
     return t;
   });
+  return e.rendu.type === "am" ? tonaliserTons(tons, e.rendu.tonalites) : tons;
 }
 
 export type EntreeFilms = Entree & {

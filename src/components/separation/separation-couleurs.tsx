@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { dessiner, lireImage, loupeRendu, renduApercu, separerPixels, type ResultatSeparation } from "@/lib/separation/client";
 import { ANGLE_AM_DEFAUT, REGLAGES_DEFAUT, type Reglages } from "@/lib/separation/reglages";
 import { ajusterImage, imageNeutre } from "@/lib/separation/image";
-import { ENCRES_CMJN } from "@/lib/separation/trame";
+import { ENCRES_CMJN, TONALITE_NEUTRE, type Tonalite } from "@/lib/separation/trame";
 import { luminosites, modeSousCouche, tonsBlancs } from "@/lib/separation/sous-couche";
 import { OptionsBlancs } from "./options-blancs";
 import { HORS_DESSIN } from "@/lib/separation/separer";
@@ -388,6 +388,15 @@ export function SeparationCouleurs({
     setReglages({ ...reglages, rendu: { ...r, angles: r.angles.map((a, j) => (j === i ? v : a)) } });
   }
 
+  /** Tonalité d'un écran tramé (densité, demi-teintes) : mise à jour de la couche i seulement. */
+  function tonaliteEcran(i: number, v: Partial<Tonalite>) {
+    const rendu = reglages.rendu;
+    if ((rendu.type !== "am" && rendu.type !== "cmjn") || !resultat) return;
+    const nb = rendu.type === "cmjn" ? 4 : resultat.couleurs.length;
+    const tonalites = Array.from({ length: nb }, (_, j) => ({ ...TONALITE_NEUTRE, ...(rendu.tonalites?.[j] ?? {}), ...(j === i ? v : {}) }));
+    setReglages({ ...reglages, rendu: { ...rendu, tonalites } });
+  }
+
   async function telechargerFilms() {
     if (!resultat) return;
     setErreurFilms(null);
@@ -414,6 +423,8 @@ export function SeparationCouleurs({
           recouvrementMm: reglages.recouvrementMm,
           image: reglages.image,
           largeurAnalyse: resultat.largeur,
+          format: reglages.format,
+          grouper: reglages.grouper,
         },
         setEtapeFilms,
       );
@@ -423,8 +434,13 @@ export function SeparationCouleurs({
       a.download = `films-${nom.replace(/\.[^.]+$/, "")}.pdf`;
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
-    } catch {
-      setErreurFilms("Les films n'ont pas pu être préparés (visuel illisible ou mémoire insuffisante : essayez une largeur plus petite).");
+    } catch (e) {
+      const { ErreurMiseEnPage } = await import("@/lib/separation/films");
+      setErreurFilms(
+        e instanceof ErreurMiseEnPage
+          ? e.message
+          : "Les films n'ont pas pu être préparés (visuel illisible ou mémoire insuffisante : essayez une largeur plus petite).",
+      );
     } finally {
       setEtapeFilms(null);
     }
@@ -710,6 +726,43 @@ export function SeparationCouleurs({
                       />
                       °
                     </label>
+                  )}
+                  {(reglages.rendu.type === "am" || reglages.rendu.type === "cmjn") && (
+                    <div className="mt-1 space-y-1 px-0.5 text-xs text-foreground-muted">
+                      <label className="flex items-center gap-1.5" title="Quantité d'encre déposée par cet écran : 100 % = ton calculé, moins = couche plus légère, plus = couche plus chargée.">
+                        Densité
+                        <input
+                          type="range"
+                          min={20}
+                          max={200}
+                          step={5}
+                          value={reglages.rendu.tonalites?.[i]?.densitePct ?? 100}
+                          onChange={(e) => tonaliteEcran(i, { densitePct: Number(e.target.value) })}
+                          className="h-4 min-w-0 flex-1"
+                          aria-label={`Densité de l'écran ${estCmjn ? ENCRES_CMJN[i].nom : c.hex}`}
+                        />
+                        <span className="w-9 text-right tabular-nums">{reglages.rendu.tonalites?.[i]?.densitePct ?? 100} %</span>
+                      </label>
+                      <label className="flex items-center gap-1.5" title="Éclaircit (valeur négative) ou charge (valeur positive) les demi-teintes de cet écran sans toucher aux aplats ni aux zones vides.">
+                        Demi-teintes
+                        <input
+                          type="range"
+                          min={-50}
+                          max={50}
+                          step={5}
+                          value={reglages.rendu.tonalites?.[i]?.milieux ?? 0}
+                          onChange={(e) => tonaliteEcran(i, { milieux: Number(e.target.value) })}
+                          className="h-4 min-w-0 flex-1"
+                          aria-label={`Demi-teintes de l'écran ${estCmjn ? ENCRES_CMJN[i].nom : c.hex}`}
+                        />
+                        <span className="w-9 text-right tabular-nums">{reglages.rendu.tonalites?.[i]?.milieux ?? 0}</span>
+                      </label>
+                      {(reglages.rendu.tonalites?.[i]?.densitePct ?? 100) !== 100 || (reglages.rendu.tonalites?.[i]?.milieux ?? 0) !== 0 ? (
+                        <button type="button" onClick={() => tonaliteEcran(i, TONALITE_NEUTRE)} className="underline hover:text-foreground">
+                          Réinitialiser la tonalité
+                        </button>
+                      ) : null}
+                    </div>
                   )}
                   {encre && !estCmjn && (
                     <div className="mt-1 space-y-0.5 px-0.5">
