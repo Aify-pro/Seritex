@@ -68,7 +68,8 @@ await test("matelas de cols clôturé : assemblage = min(manches ÷ 2, cols ÷ 1
   assert.deepEqual([r.kits_assembles[A.line.id], r.kits_assembles[B.line.id]], [30, 19]);
   assert.equal(await kitsDeclares(A.line.id), 30);
   assert.equal(await kitsDeclares(B.line.id), 19);
-  const lots = await one(`select count(*)::int n, sum((composition_taille->>$2)::int)::int q from article_lots where production_order_line_id=$1`, [B.line.id, M]);
+  // Lot de t-shirts de l'assemblage (les paquets de pièces, 0153, ont un semi-fini).
+  const lots = await one(`select count(*)::int n, sum((composition_taille->>$2)::int)::int q from article_lots where production_order_line_id=$1 and semi_fini_id is null`, [B.line.id, M]);
   assert.deepEqual([lots.n, lots.q], [1, 19]);
   const st = await one(`select coupees, assemblees, en_attente from stock_tampon_semi_fini($1) where line_id=$2`, [col.id, B.line.id]);
   assert.deepEqual([st.coupees, st.assemblees, st.en_attente], [20, 19, 1]); // 1 col en attente (manches manquantes)
