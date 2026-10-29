@@ -462,7 +462,7 @@ export default async function SectionQueuePage({
       }));
   }
 
-  // Étape 4a (0151) : stock tampon de l'atelier (lots détenus et en transit).
+  // Étape 4a (0152) : stock tampon de l'atelier (lots détenus et en transit).
   const { data: lotsAtelier } = isStockManager
     ? { data: [] }
     : await supabase.rpc("stock_tampon_atelier", { p_section_id: sectionId });

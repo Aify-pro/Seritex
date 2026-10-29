@@ -1,5 +1,5 @@
 -- ============================================================================
--- 0151 — Semi-finis, étape 4a : contrat d'étape, stock tampon par atelier,
+-- 0152 — Semi-finis, étape 4a : contrat d'étape, stock tampon par atelier,
 --        verrouillage à l'entrée en personnalisation, destination d'un lot
 -- ============================================================================
 --
@@ -37,9 +37,9 @@ alter table atelier_categories
     constraint atelier_categories_granularite_valide check (granularite in ('kit', 'composant'));
 
 comment on column atelier_categories.personnalise is
-  'Contrat d''étape (0151, S13) : entrer dans une section de cette catégorie rend le produit spécifique à la ligne d''ODF (verrouillage du lot au scan d''entrée).';
+  'Contrat d''étape (0152, S13) : entrer dans une section de cette catégorie rend le produit spécifique à la ligne d''ODF (verrouillage du lot au scan d''entrée).';
 comment on column atelier_categories.granularite is
-  'Contrat d''étape (0151, §4.7) : déclaration au kit (une pièce complète) ou par composant (semi-fini).';
+  'Contrat d''étape (0152, §4.7) : déclaration au kit (une pièce complète) ou par composant (semi-fini).';
 
 update atelier_categories set personnalise = true where cle = 'impression';
 
@@ -52,7 +52,7 @@ alter table article_lots
   add column if not exists verrouille_section_id uuid references sections(id);
 
 comment on column article_lots.verrouille_le is
-  'Lot verrouillé sur sa ligne d''ODF à son entrée dans une section de personnalisation (0151, S13) : il ne peut plus être réorienté.';
+  'Lot verrouillé sur sa ligne d''ODF à son entrée dans une section de personnalisation (0152, S13) : il ne peut plus être réorienté.';
 
 create or replace function article_lot_events_verrou()
 returns trigger

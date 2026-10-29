@@ -496,7 +496,7 @@ export async function correctDeclaration(
  * est celui de la section affichée pour l'article du lot — un responsable de
  * production scanne ainsi depuis la section choisie au sélecteur.
  */
-/** Destination d'un lot affichée au scan (étape 4a, 0151, S17) : jamais le client. */
+/** Destination d'un lot affichée au scan (étape 4a, 0152, S17) : jamais le client. */
 export interface DestinationLot {
   code: string;
   odf: string;
