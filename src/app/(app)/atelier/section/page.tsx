@@ -1,4 +1,5 @@
 import { requireModule } from "@/lib/auth/permissions";
+import { LotsAtelierCard, type LotAtelierRow } from "./lots-atelier-card";
 import { MatelasRegroupes, type MatelasRegroupe } from "./matelas-regroupes";
 import { groupCouverture, surplusSiCoupe, type CouvertureRow } from "@/lib/production/couverture-coupe";
 import { createClient } from "@/lib/supabase/server";
@@ -461,6 +462,11 @@ export default async function SectionQueuePage({
       }));
   }
 
+  // Étape 4a (0151) : stock tampon de l'atelier (lots détenus et en transit).
+  const { data: lotsAtelier } = isStockManager
+    ? { data: [] }
+    : await supabase.rpc("stock_tampon_atelier", { p_section_id: sectionId });
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -492,6 +498,8 @@ export default async function SectionQueuePage({
       )}
 
       {matelasRegroupes.length > 0 && <MatelasRegroupes matelas={matelasRegroupes} />}
+
+      <LotsAtelierCard lots={(lotsAtelier ?? []) as LotAtelierRow[]} />
 
       {isStockManager ? (
         <SectionBoardLegacy
