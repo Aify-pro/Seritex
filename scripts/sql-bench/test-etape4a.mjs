@@ -1,4 +1,4 @@
-// Scénarios SQL de l'étape 4a (migration 0151) : contrat d'étape
+// Scénarios SQL de l'étape 4a (migration 0152) : contrat d'étape
 // (personnalisation = Impression), verrouillage d'un lot à l'entrée en
 // personnalisation, stock tampon par atelier (détenteur, transit),
 // destination d'un lot sans le client.

@@ -14,7 +14,7 @@ export interface LotAtelierRow {
 }
 
 /**
- * Stock tampon de l'atelier (étape 4a, migration 0151, S25) : lots détenus
+ * Stock tampon de l'atelier (étape 4a, migration 0152, S25) : lots détenus
  * par la section (dernier scan d'entrée, ou créés ici et jamais scannés), et
  * lots partis d'ici pas encore reçus ailleurs (en transit). Consultation.
  */
