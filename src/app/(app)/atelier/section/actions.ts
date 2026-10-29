@@ -496,7 +496,27 @@ export async function correctDeclaration(
  * est celui de la section affichée pour l'article du lot — un responsable de
  * production scanne ainsi depuis la section choisie au sélecteur.
  */
-export async function scanArticleLot(code: string, sens: "entree" | "sortie", sectionId: string): Promise<{ error?: string; message?: string }> {
+/** Destination d'un lot affichée au scan (étape 4a, 0151, S17) : jamais le client. */
+export interface DestinationLot {
+  code: string;
+  odf: string;
+  article: string | null;
+  modele: string | null;
+  tailles: Record<string, number>;
+  couleur_unique: string | null;
+  couleurs_zones: { zone: string; couleur: string }[];
+  composants: { composant: string; quantite: number; couleur: string | null }[];
+  verrouille: boolean;
+  verrouille_section: string | null;
+  detenteur: string | null;
+  en_transit: boolean | null;
+}
+
+export async function scanArticleLot(
+  code: string,
+  sens: "entree" | "sortie",
+  sectionId: string
+): Promise<{ error?: string; message?: string; destination?: DestinationLot | null }> {
   await requireUser();
   const supabase = await createClient();
   const clean = code.trim().toUpperCase();
@@ -520,8 +540,12 @@ export async function scanArticleLot(code: string, sens: "entree" | "sortie", se
   const { data, error } = await supabase.rpc("scan_article_lot", { p_code: clean, p_sens: sens, p_work_order_id: workOrderId });
   if (error) return { error: error.message };
   const r = data as { code: string; etape: number; section: string };
+  const { data: destination } = await supabase.rpc("destination_lot", { p_code: clean });
   revalidatePath("/atelier/section");
-  return { message: `${r.code} : ${sens === "entree" ? "entrée" : "sortie"} ${r.section} (étape ${r.etape})` };
+  return {
+    message: `${r.code} : ${sens === "entree" ? "entrée" : "sortie"} ${r.section} (étape ${r.etape})`,
+    destination: (destination as DestinationLot | null) ?? null,
+  };
 }
 
 /**
