@@ -4,6 +4,7 @@ import { requireArticles } from "@/lib/articles/access";
 import { can } from "@/lib/auth/permissions";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
 import { Table, Thead, Tbody, Tr, Th, Td, EmptyRow } from "@/components/ui/table";
+import { PaquetsCard, type PaquetRow } from "./paquets-card";
 
 const nf = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 });
 
@@ -22,14 +23,18 @@ export default async function ArticleStockTamponPage({ params }: { params: Promi
   await requireArticles();
   const { id } = await params;
   const supabase = await createClient();
-  const [{ data }, canOdf] = await Promise.all([
+  const [{ data }, canOdf, { data: paquets }, canReorienter] = await Promise.all([
     supabase.rpc("stock_tampon_semi_fini", { p_semi_fini_id: id }),
     can("ordres_fabrication", "view"),
+    // Paquets QR de ce semi-fini et leur atelier (étape 4b, 0153).
+    supabase.rpc("paquets_semi_fini", { p_semi_fini_id: id }),
+    can("ordres_fabrication", "modify"),
   ]);
   const rows = (data ?? []) as Row[];
   const total = (k: "coupees" | "assemblees" | "en_attente") => rows.reduce((s, r) => s + Number(r[k]), 0);
 
   return (
+    <div className="space-y-4">
     <Card>
       <CardHeader
         title="Stock tampon — pièces coupées en production"
@@ -94,5 +99,7 @@ export default async function ArticleStockTamponPage({ params }: { params: Promi
         </Table>
       </CardBody>
     </Card>
+    <PaquetsCard paquets={(paquets ?? []) as PaquetRow[]} semiFiniId={id} canReorienter={canReorienter} />
+    </div>
   );
 }

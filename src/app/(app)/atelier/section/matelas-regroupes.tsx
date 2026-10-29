@@ -31,7 +31,9 @@ const num = (v: string) => (v.trim() === "" ? NaN : Number(v.replace(",", ".")))
  * chaque couche appartenant à un article. À la clôture, on saisit par article
  * les couches réellement matelassées et les pièces obtenues par taille ; tout
  * manque est justifié (aucune tolérance). Les t-shirts complets sont ensuite
- * déclarés automatiquement sur la Coupe de chaque article.
+ * déclarés automatiquement sur la Coupe de chaque article. À la clôture, un
+ * paquet QR par article × taille est créé et sa planche d'étiquettes s'ouvre
+ * (étape 4b).
  */
 export function MatelasRegroupes({ matelas }: { matelas: MatelasRegroupe[] }) {
   const [ouvert, setOuvert] = useState<MatelasRegroupe | null>(null);
@@ -118,6 +120,8 @@ function MatelasRegroupeDialog({ matelas, onClose }: { matelas: MatelasRegroupe;
       }
       const assembles = Object.values(res.kits ?? {}).reduce((s, n) => s + Number(n || 0), 0);
       toast.success(`${matelas.reference} clôturé${assembles ? ` — ${assembles} t-shirt(s) complet(s) déclaré(s)` : ""}`);
+      // Étape 4b : un paquet QR par article × taille — la planche d'étiquettes s'ouvre aussitôt.
+      window.open(`/api/atelier/matelas-regroupe/${matelas.traceId}/etiquettes`, "_blank", "noopener");
       onClose();
       router.refresh();
     });
