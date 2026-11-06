@@ -141,7 +141,7 @@ export async function demarrerMatelas(traceId: string): Promise<RecordQuantityRe
  */
 export async function cloturerMatelasRegroupe(
   traceId: string,
-  lignes: { lineId: string; couchesReelles: number; obtenus: Record<string, number> }[],
+  lignes: { lineId: string; couchesReelles: number; obtenus: Record<string, Record<string, number>> }[],
   mesures: { longueurCm: number; laizeCm: number; poidsTissuKg: number; dechetsKg: number },
   justification?: string
 ): Promise<{ error?: string; kits?: Record<string, number> }> {

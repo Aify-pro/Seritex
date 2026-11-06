@@ -28,12 +28,14 @@ await q(`update production_order_lines set couleur_unique_id=(select couleur_uni
 const C = await odf(10, rouge.id); // autre couleur : incompatible
 
 async function ordre(sf, numero, rep, couches) {
-  const f = await one(`insert into fiches_placement(numero_ot, semi_fini_id, designation_article) values ($1,$2,$3) returning id`, [numero, sf.id, sf === manche ? "Manche courte" : "Col rond"]);
+  const f = await one(`insert into fiches_placement(numero_ot, regroupee, designation_article) values ($1,true,$2) returning id`, [numero, sf === manche ? "Manche courte" : "Col rond"]);
   const lignes = Object.keys(couches);
   for (const l of lignes) await q(`insert into coupe_groupee_lignes(fiche_id, production_order_line_id) values ($1,$2)`, [f.id, l]);
-  const t = await one(`insert into traces_placement(fiche_id, ordre, reference, repartition_par_couche) values ($1,1,$2,$3::jsonb) returning id`, [f.id, numero + "-T1", JSON.stringify(rep)]);
+  const t = await one(`insert into traces_placement(fiche_id, ordre, reference) values ($1,1,$2) returning id`, [f.id, numero + "-T1"]);
+  for (const [taille, n] of Object.entries(rep)) await q(`insert into trace_semi_finis(trace_id, semi_fini_id, taille, quantite_par_couche) values ($1,$2,$3,$4)`, [t.id, sf.id, taille, n]);
   for (const [l, n] of Object.entries(couches)) await q(`insert into trace_couches(trace_id, production_order_line_id, nb_couches) values ($1,$2,$3)`, [t.id, l, n]);
   await q(`select valider_trace($1,'marge')`, [t.id]);
+  t.sf = sf;
   return t;
 }
 // A : 16 couches × 4 = 64 manches (4 de marge) ; B : 10 × 4 = 40 ; C : 5 × 4 = 20.
@@ -44,7 +46,8 @@ for (const o of [A, B, C]) {
   await q(`select validate_production_order($1)`, [o.po.id]);
 }
 const cloturer = (t, lignes, justif = null) =>
-  one(`select cloturer_matelas_regroupe($1,$2::jsonb,600,180,15,1,$3) r`, [t.id, JSON.stringify(lignes), justif]);
+  one(`select cloturer_matelas_regroupe($1,$2::jsonb,600,180,15,1,$3) r`,
+      [t.id, JSON.stringify(lignes.map((l) => ({ ...l, obtenus: { [t.sf.id]: l.obtenus } }))), justif]);
 const kits = async (line) =>
   (await one(`select coalesce(sum(e.quantity),0)::int n from work_order_events e join work_orders w on w.id=e.work_order_id
               where w.production_order_line_id=$1 and e.event_type='matelas_cloture' and e.trace_id is null`, [line])).n;

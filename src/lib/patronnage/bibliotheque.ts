@@ -26,12 +26,12 @@ interface PatternPieceRow {
     id: string;
     size: string;
     article_id: string;
-    pattern_articles: { article_code: string } | null;
+    pattern_articles: { article_code: string; migre_le: string | null } | null;
   } | null;
 }
 
 const SELECT_COLUMNS =
-  "id,name,area,perimeter,radial_signature,points,pattern_id,patterns(id,size,article_id,pattern_articles(article_code))";
+  "id,name,area,perimeter,radial_signature,points,pattern_id,patterns(id,size,article_id,pattern_articles(article_code,migre_le))";
 
 export async function loadReferenceLibrary(
   supabase: SupabaseClient
@@ -47,6 +47,9 @@ export async function loadReferenceLibrary(
 
   const references: ReferencePiece[] = (data as unknown as PatternPieceRow[])
     .filter((r) => r.patterns !== null)
+    // Un ancien patron de produit fini déjà repris dans des semi-finis (0155) ne sert plus de référence :
+    // ses pièces existent en double dans les patrons des semi-finis.
+    .filter((r) => !r.patterns!.pattern_articles?.migre_le)
     // Une pièce dont la signature ou les points sont incomplets fausserait
     // toutes les comparaisons : on l'écarte plutôt que de la comparer à vide.
     .filter((r) => Array.isArray(r.points) && r.points.length >= 3 && Array.isArray(r.radial_signature))

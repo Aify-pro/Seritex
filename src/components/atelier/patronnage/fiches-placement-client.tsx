@@ -29,7 +29,7 @@ import { STATUT_TRACE_LABELS, STATUT_TRACE_TONES, type FichePlacement, type Repa
 import { createContext, useContext } from "react";
 import type { Size } from "@/lib/sizes";
 import { repartitionDepuisTraces, repartitionTotal } from "@/lib/patronnage/dispatching";
-import { ArticlesRegroupesCard, CouchesEditor, NouvelOrdreRegroupeDialog } from "@/components/atelier/patronnage/coupe-regroupee";
+import { ArticlesRegroupesCard, CouchesEditor, PiecesTraceEditor } from "@/components/atelier/patronnage/coupe-regroupee";
 import {
   createFiche,
   updateFiche,
@@ -107,7 +107,7 @@ export function FichesPlacementClient({
   permissions,
   sizes = [],
   productModels = [],
-  semiFinis = [],
+  coupeEntiereFermee = false,
 }: {
   fiches: FichePlacement[];
   currentUserRole: string;
@@ -116,12 +116,11 @@ export function FichesPlacementClient({
   sizes?: Size[];
   /** Modèles actifs, pour le cadre 1 (lot C2). */
   productModels?: ProductModelOption[];
-  /** Semi-finis actifs, pour créer un ordre de coupe regroupé (0149). */
-  semiFinis?: { id: string; code: string | null; name: string }[];
+  /** Ancien chemin « t-shirt entier » fermé (0156) : plus de création de fiche d'article. */
+  coupeEntiereFermee?: boolean;
 }) {
   const [filtreStatut, setFiltreStatut] = useState<StatutFiche | "tous">("tous");
   const [showCreate, setShowCreate] = useState(false);
-  const [showRegroupe, setShowRegroupe] = useState(false);
 
   const filtered = fiches.filter((f) => filtreStatut === "tous" || f.statut === filtreStatut);
 
@@ -147,12 +146,16 @@ export function FichesPlacementClient({
           </div>
           {permissions.canCreate && (
             <div className="flex gap-2">
-              <Button size="sm" variant="secondary" onClick={() => setShowRegroupe(true)}>
-                <Plus className="h-3.5 w-3.5" /> Ordre de coupe regroupé
-              </Button>
-              <Button size="sm" onClick={() => setShowCreate(true)}>
-                <Plus className="h-3.5 w-3.5" /> Nouvelle fiche
-              </Button>
+              <Link href="/atelier/patronnage/besoins">
+                <Button size="sm" variant="secondary">
+                  <Plus className="h-3.5 w-3.5" /> Besoins de coupe
+                </Button>
+              </Link>
+              {!coupeEntiereFermee && (
+                <Button size="sm" onClick={() => setShowCreate(true)}>
+                  <Plus className="h-3.5 w-3.5" /> Nouvelle fiche
+                </Button>
+              )}
             </div>
           )}
         </div>
@@ -179,17 +182,17 @@ export function FichesPlacementClient({
                     <Td className="font-mono text-xs">{f.numeroOt}</Td>
                     <Td>{f.clientLibelle ?? <span className="text-foreground-muted">—</span>}</Td>
                     <Td>
-                      {f.semiFini ? (
+                      {f.regroupee ? (
                         <span>
                           <span className="mr-1.5 rounded-sm bg-brand-soft px-1.5 py-0.5 text-[10px] font-medium text-brand">Regroupé</span>
-                          {f.semiFini.name}
+                          {f.designationArticle ?? "Ordre de coupe regroupé"}
                         </span>
                       ) : (
                         f.designationArticle ?? f.referenceModele ?? <span className="text-foreground-muted">—</span>
                       )}
                     </Td>
                     <Td>
-                      {f.semiFini ? (
+                      {f.regroupee ? (
                         <span className="text-foreground">
                           {f.lignesRegroupees.length} article{f.lignesRegroupees.length > 1 ? "s" : ""} :{" "}
                           {[...new Set(f.lignesRegroupees.map((l) => l.odfReference).filter(Boolean))].join(", ")}
@@ -226,7 +229,6 @@ export function FichesPlacementClient({
         <Dialog open={showCreate} onOpenChange={setShowCreate} title="Nouvelle fiche de placement" size="lg">
           <CreateFicheForm onCreated={() => setShowCreate(false)} productModels={productModels} />
         </Dialog>
-        <NouvelOrdreRegroupeDialog open={showRegroupe} onOpenChange={setShowRegroupe} semiFinis={semiFinis} />
       </div>
     </SizesContext.Provider>
   );
@@ -763,7 +765,7 @@ export function FicheDetailContent({
           </div>
         )}
 
-        {fiche.semiFini ? (
+        {fiche.regroupee ? (
           <ArticlesRegroupesCard fiche={fiche} canModify={permissions.canModify && fiche.statut !== "archive"} />
         ) : (
           <>
@@ -1175,7 +1177,7 @@ function TraceDetailBody({
                 <CheckCircle2 className="h-3.5 w-3.5" /> Valider — Bon pour coupe
               </Button>
             )}
-            {trace.statut === "bon_pour_coupe" && canUnlock && !modeModif && (
+            {trace.statut === "bon_pour_coupe" && canUnlock && !modeModif && !fiche.regroupee && (
               <Button size="sm" variant="secondary" onClick={() => setModeModif(true)} disabled={pending}>
                 Modifier (motif)
               </Button>
@@ -1253,14 +1255,16 @@ function TraceDetailBody({
               <input type="number" name="largeur_matelas_cm" defaultValue={trace.largeurMatelasCm ?? ""} disabled={!champsModifiables} className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground disabled:opacity-60" />
             </Field>
             <Field label="Nombre de plis">
-              <input type="number" name={fiche.semiFini ? undefined : "nb_plis"} defaultValue={trace.nbPlis ?? ""} disabled={!champsModifiables || !!fiche.semiFini} title={fiche.semiFini ? "Somme des couches par article" : undefined} className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground disabled:opacity-60" />
+              <input type="number" name={fiche.regroupee ? undefined : "nb_plis"} defaultValue={trace.nbPlis ?? ""} disabled={!champsModifiables || fiche.regroupee} title={fiche.regroupee ? "Somme des couches par article" : undefined} className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground disabled:opacity-60" />
             </Field>
           </div>
-          <Field label={`Répartition par couche (total/couche ${totalCouche}${totalTrace !== null ? ` · théorique tracé ${totalTrace}` : ""})`}>
-            <fieldset disabled={!champsModifiables}>
-              <RepartitionFields prefix="couche" initial={trace.repartitionParCouche} />
-            </fieldset>
-          </Field>
+          {!fiche.regroupee && (
+            <Field label={`Répartition par couche (total/couche ${totalCouche}${totalTrace !== null ? ` · théorique tracé ${totalTrace}` : ""})`}>
+              <fieldset disabled={!champsModifiables}>
+                <RepartitionFields prefix="couche" initial={trace.repartitionParCouche} />
+              </fieldset>
+            </Field>
+          )}
           {modeModif && (
             <Field label="Motif de la modification (obligatoire)">
               <textarea
@@ -1285,7 +1289,12 @@ function TraceDetailBody({
           )}
         </form>
 
-        {fiche.semiFini && <CouchesEditor fiche={fiche} trace={trace} editable={!effectiveLocked && canModify} onChanged={onChanged} />}
+        {fiche.regroupee && (
+          <>
+            <PiecesTraceEditor fiche={fiche} trace={trace} editable={!effectiveLocked && canModify} canUnlock={canUnlock} archived={archived} onChanged={onChanged} />
+            <CouchesEditor fiche={fiche} trace={trace} editable={!effectiveLocked && canModify} onChanged={onChanged} />
+          </>
+        )}
 
         <div className="rounded-md border border-dashed border-border bg-surface-muted p-3">
           <input ref={fileInputRef} type="file" accept=".dxf" onChange={handleUpload} className="hidden" />

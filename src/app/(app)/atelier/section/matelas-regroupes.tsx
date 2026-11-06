@@ -9,13 +9,15 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
 import { cloturerMatelasRegroupe, demarrerMatelas } from "./actions";
 
-/** Matelas regroupé à couper (étape 3b) : un semi-fini, des couches par article d'ODF. */
+/** Matelas regroupé à couper (étapes 3b et 3c) : une ou plusieurs pièces (semi-finis), des couches par article d'ODF. */
 export interface MatelasRegroupe {
   traceId: string;
   reference: string;
+  /** Noms des pièces du tracé, pour l'affichage. */
   semiFini: string;
   statut: string;
-  repartitionParCouche: Record<string, number>;
+  /** Pièces posées par couche : semi-fini × taille × quantité. */
+  pieces: { semiFiniId: string; semiFini: string; taille: string; quantiteParCouche: number }[];
   longueurCm: number | null;
   laizeCm: number | null;
   articles: { lineId: string; odf: string; article: string; couleur: string | null; couches: number }[];
@@ -26,10 +28,11 @@ const inputClass = "h-10 w-full rounded-md border border-border bg-surface px-2 
 const num = (v: string) => (v.trim() === "" ? NaN : Number(v.replace(",", ".")));
 
 /**
- * Matelas regroupés de la section Coupe (étape 3b, migration 0150) : un
- * matelas porte une seule pièce (semi-fini) pour plusieurs articles d'ODF,
- * chaque couche appartenant à un article. À la clôture, on saisit par article
- * les couches réellement matelassées et les pièces obtenues par taille ; tout
+ * Matelas regroupés de la section Coupe (étapes 3b et 3c, migrations 0150 et
+ * 0155) : un matelas porte une ou plusieurs pièces (semi-finis) pour plusieurs
+ * articles d'ODF, chaque couche appartenant à un article. À la clôture, on
+ * saisit par article les couches réellement matelassées et les pièces
+ * obtenues par pièce et par taille ; tout
  * manque est justifié (aucune tolérance). Les t-shirts complets sont ensuite
  * déclarés automatiquement sur la Coupe de chaque article. À la clôture, un
  * paquet QR par article × taille est créé et sa planche d'étiquettes s'ouvre
@@ -42,7 +45,7 @@ export function MatelasRegroupes({ matelas }: { matelas: MatelasRegroupe[] }) {
     <Card>
       <CardHeader
         title="Matelas regroupés"
-        description="Une pièce coupée pour plusieurs articles d'ODF : chaque couche appartient à un article (tissu, couleur, grammage). À la clôture, pièces obtenues article par article."
+        description="Des pièces coupées pour plusieurs articles d'ODF : chaque couche appartient à un article (tissu, couleur, grammage). À la clôture, pièces obtenues article par article."
       />
       <CardBody className="p-0">
         <ul className="divide-y divide-border">
@@ -77,11 +80,13 @@ function MatelasRegroupeDialog({ matelas, onClose }: { matelas: MatelasRegroupe;
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [demarre, setDemarre] = useState(matelas.statut === "en_coupe");
-  const tailles = Object.entries(matelas.repartitionParCouche).filter(([, n]) => Number(n) > 0);
-  // Par article : couches réelles et pièces obtenues par taille, préremplies au théorique.
+  const pieces0 = matelas.pieces.filter((p) => p.quantiteParCouche > 0);
+  const cle = (p: { semiFiniId: string; taille: string }) => `${p.semiFiniId}|${p.taille}`;
+  const theorique = (couchesReelles: number) => Object.fromEntries(pieces0.map((p) => [cle(p), String(p.quantiteParCouche * couchesReelles)]));
+  // Par article : couches réelles et pièces obtenues par semi-fini et par taille, préremplies au théorique.
   const [couches, setCouches] = useState<Record<string, string>>(Object.fromEntries(matelas.articles.map((a) => [a.lineId, String(a.couches)])));
   const [pieces, setPieces] = useState<Record<string, Record<string, string>>>(
-    Object.fromEntries(matelas.articles.map((a) => [a.lineId, Object.fromEntries(tailles.map(([t, n]) => [t, String(Number(n) * a.couches)]))]))
+    Object.fromEntries(matelas.articles.map((a) => [a.lineId, theorique(a.couches)]))
   );
   const [longueur, setLongueur] = useState(matelas.longueurCm ? String(matelas.longueurCm) : "");
   const [laize, setLaize] = useState(matelas.laizeCm ? String(matelas.laizeCm) : "");
@@ -90,7 +95,7 @@ function MatelasRegroupeDialog({ matelas, onClose }: { matelas: MatelasRegroupe;
   const [justification, setJustification] = useState("");
 
   const manque = matelas.articles.some(
-    (a) => num(couches[a.lineId] ?? "") < a.couches || tailles.some(([t, n]) => num(pieces[a.lineId]?.[t] ?? "") < Number(n) * a.couches)
+    (a) => num(couches[a.lineId] ?? "") < a.couches || pieces0.some((p) => num(pieces[a.lineId]?.[cle(p)] ?? "") < p.quantiteParCouche * a.couches)
   );
   const mesuresOk = num(longueur) > 0 && num(laize) > 0 && num(poids) > 0 && num(dechets) >= 0;
 
@@ -98,7 +103,7 @@ function MatelasRegroupeDialog({ matelas, onClose }: { matelas: MatelasRegroupe;
     setCouches((c) => ({ ...c, [lineId]: v }));
     // Les pièces suivent les couches réelles (répartition × couches).
     const n = Math.trunc(num(v));
-    if (n > 0) setPieces((p) => ({ ...p, [lineId]: Object.fromEntries(tailles.map(([t, par]) => [t, String(Number(par) * n)])) }));
+    if (n > 0) setPieces((p) => ({ ...p, [lineId]: theorique(n) }));
   }
 
   function cloturer() {
@@ -109,7 +114,10 @@ function MatelasRegroupeDialog({ matelas, onClose }: { matelas: MatelasRegroupe;
         matelas.articles.map((a) => ({
           lineId: a.lineId,
           couchesReelles: Math.trunc(num(couches[a.lineId] ?? "")),
-          obtenus: Object.fromEntries(tailles.map(([t]) => [t, Math.trunc(num(pieces[a.lineId]?.[t] ?? "0")) || 0])),
+          obtenus: pieces0.reduce<Record<string, Record<string, number>>>((acc, p) => {
+            (acc[p.semiFiniId] ??= {})[p.taille] = Math.trunc(num(pieces[a.lineId]?.[cle(p)] ?? "0")) || 0;
+            return acc;
+          }, {}),
         })),
         { longueurCm: num(longueur), laizeCm: num(laize), poidsTissuKg: num(poids), dechetsKg: num(dechets) },
         justification
@@ -136,7 +144,7 @@ function MatelasRegroupeDialog({ matelas, onClose }: { matelas: MatelasRegroupe;
           </div>
         )}
         <p className="text-xs text-foreground-muted">
-          Pièces par couche : {tailles.map(([t, n]) => `${n} ${libelleTaille(t)}`).join(", ") || "—"}. Jamais plus que le tracé ; tout manque est justifié.
+          Pièces par couche : {pieces0.map((p) => `${p.quantiteParCouche} ${p.semiFini} ${libelleTaille(p.taille)}`).join(", ") || "—"}. Jamais plus que le tracé ; tout manque est justifié.
         </p>
 
         {matelas.articles.map((a) => (
@@ -150,13 +158,13 @@ function MatelasRegroupeDialog({ matelas, onClose }: { matelas: MatelasRegroupe;
                 Couches réelles
                 <input inputMode="numeric" value={couches[a.lineId] ?? ""} onChange={(e) => setCouchesArticle(a.lineId, e.target.value)} className={inputClass} />
               </label>
-              {tailles.map(([t]) => (
-                <label key={t} className="space-y-1 text-xs text-foreground-muted">
-                  Pièces {libelleTaille(t)}
+              {pieces0.map((p) => (
+                <label key={cle(p)} className="space-y-1 text-xs text-foreground-muted">
+                  {p.semiFini} {libelleTaille(p.taille)}
                   <input
                     inputMode="numeric"
-                    value={pieces[a.lineId]?.[t] ?? ""}
-                    onChange={(e) => setPieces((p) => ({ ...p, [a.lineId]: { ...p[a.lineId], [t]: e.target.value } }))}
+                    value={pieces[a.lineId]?.[cle(p)] ?? ""}
+                    onChange={(e) => setPieces((prev) => ({ ...prev, [a.lineId]: { ...prev[a.lineId], [cle(p)]: e.target.value } }))}
                     className={inputClass}
                   />
                 </label>

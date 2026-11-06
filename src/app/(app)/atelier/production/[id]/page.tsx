@@ -18,7 +18,8 @@ import { ProductionOrderMediaFiles, type AttachableMediaFile } from "./productio
 import { getMediaFilePreviewUrls } from "@/lib/media/preview";
 import { StockMovementsPanel } from "./stock-movements-panel";
 import type { StatutFiche, StatutTrace } from "@/lib/patronnage/types";
-import type { FicheLiee } from "./fiche-patronnage-link";
+import type { FicheLiee, OrdreCoupeLie } from "./fiche-patronnage-link";
+import { coupeEntiereFermee } from "@/lib/patronnage/chemin";
 import type { DownloadableMediaFile, MaquetteFile, StockMovement, StockExportFiche, SampleRequestStatus } from "@/lib/types/domain";
 import { ValidationCircuitPanel } from "./validation-circuit-panel";
 import { WhereArePieces, type WhereArePiecesLine } from "./where-are-pieces";
@@ -534,6 +535,35 @@ export default async function ProductionOrderDetailPage({
     };
   }
 
+  // Ordres de coupe regroupés (0155) où chaque article est coupé par pièces : leurs tracés et les couches de l'article.
+  type GroupeeRow = {
+    production_order_line_id: string;
+    fiche_id: string;
+    fiches_placement: {
+      numero_ot: string;
+      traces_placement: { ordre: number; reference: string; statut: StatutTrace; trace_couches: { production_order_line_id: string; nb_couches: number }[] | null }[] | null;
+    } | null;
+  };
+  const { data: groupees } = lines.length
+    ? await supabase
+        .from("coupe_groupee_lignes")
+        .select("production_order_line_id,fiche_id,fiches_placement(numero_ot,traces_placement(ordre,reference,statut,trace_couches(production_order_line_id,nb_couches)))")
+        .in("production_order_line_id", lines.map((l) => l.id))
+    : { data: [] };
+  const ordresParLigne: Record<string, OrdreCoupeLie[]> = {};
+  for (const g of (groupees ?? []) as unknown as GroupeeRow[]) {
+    const traces = (g.fiches_placement?.traces_placement ?? [])
+      .sort((a, b) => a.ordre - b.ordre)
+      .map((t) => ({
+        reference: t.reference,
+        statut: t.statut,
+        couches: (t.trace_couches ?? []).filter((c) => c.production_order_line_id === g.production_order_line_id).reduce((n, c) => n + c.nb_couches, 0),
+      }))
+      .filter((t) => t.couches > 0);
+    (ordresParLigne[g.production_order_line_id] ??= []).push({ id: g.fiche_id, numeroOt: g.fiches_placement?.numero_ot ?? "—", traces });
+  }
+  const coupeFermee = await coupeEntiereFermee(supabase);
+
   // Sections retenues, fiche Patronnage, visuel, maquette et zones
   // imprimables intégrés à la carte de chaque article (« Configuration
   // produit ») plutôt qu'en cartes séparées en bas de page (demande Ayman,
@@ -577,6 +607,8 @@ export default async function ProductionOrderDetailPage({
       stockAvailability: stockAvailabilityByLine[line.id],
       coupeSelected: !!coupeSelectedByLine[line.id],
       fiche: fichesByLine[line.id] ?? null,
+      ordresCoupe: ordresParLigne[line.id] ?? [],
+      coupeFermee,
       impressionSectionSelected: !!impressionSectionSelectedByLine[line.id],
       visuelsFromDevis: (quoteLineId ? visuelsByQuoteLine[quoteLineId] : undefined)?.map((f) => ({
         ...f,

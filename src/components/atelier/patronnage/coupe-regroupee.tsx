@@ -1,178 +1,80 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Layers, Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, FileSearch, Plus, Trash2 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
-import { Dialog } from "@/components/ui/dialog";
 import type { FichePlacement, TracePlacement } from "@/lib/patronnage/types";
 import {
-  besoinsSemiFini,
-  createFicheRegroupee,
+  besoinsCoupe,
   ajouterLigneRegroupee,
   retirerLigneRegroupee,
   enregistrerCouches,
-  type BesoinSemiFini,
+  enregistrerPiecesTrace,
+  preRemplirPiecesTrace,
+  derogerControleTrace,
+  type BesoinCoupeGroupe,
 } from "@/app/(app)/atelier/patronnage/fiches-actions";
 
 /**
- * Ordres de coupe regroupés par pièce (étape 3a, migration 0149, décisions
- * S41-S46) : un semi-fini coupé pour plusieurs articles d'ODF, chaque couche
- * du matelas appartenant à un article (son tissu, sa couleur, son grammage).
- * La clôture pièce par pièce et l'assemblage en t-shirts viennent avec 3b.
+ * Ordres de coupe regroupés (étapes 3a et 3c, migrations 0149 et 0155,
+ * décisions S41-S47) : un tracé porte n'importe quel ensemble de semi-finis,
+ * composé par la PAO selon l'efficience ; chaque couche du matelas appartient
+ * à un article d'ODF (son tissu, sa couleur, son grammage) qui doit avoir TOUS
+ * les semi-finis du tracé. Le fichier du tracé fait référence : les pièces s'en
+ * pré-remplissent et la base contrôle qu'elles lui correspondent.
  */
 
 const libelleTaille = (cle: string) => cle.split("/").pop() ?? cle;
 
-function resteTexte(b: BesoinSemiFini) {
-  return b.tailles
-    .filter((t) => t.demandees > 0)
-    .map((t) => `${libelleTaille(t.taille)} ${Math.max(t.reste, 0)}/${t.demandees}`)
+/** Reste à couper par article d'ODF et par semi-fini, déduit du tableau des besoins agrégés. */
+function restesParLigne(groupes: BesoinCoupeGroupe[]) {
+  const lignes = new Map<
+    string,
+    { lineId: string; odf: string; client: string; article: string; couleur: string | null; dejaEntier: boolean; parSemiFini: Map<string, number> }
+  >();
+  for (const g of groupes) {
+    for (const l of g.lignes) {
+      const e =
+        lignes.get(l.lineId) ??
+        { lineId: l.lineId, odf: l.odf, client: l.client, article: l.article, couleur: g.couleur, dejaEntier: l.dejaEntier, parSemiFini: new Map<string, number>() };
+      e.parSemiFini.set(g.semiFiniNom, (e.parSemiFini.get(g.semiFiniNom) ?? 0) + Math.max(l.reste, 0));
+      lignes.set(l.lineId, e);
+    }
+  }
+  return lignes;
+}
+
+function resteTexte(parSemiFini: Map<string, number> | undefined) {
+  if (!parSemiFini) return "";
+  return [...parSemiFini.entries()]
+    .filter(([, n]) => n > 0)
+    .map(([nom, n]) => `${nom} ${n}`)
     .join(" · ");
 }
 
-/** Création : choisir un semi-fini, puis les articles d'ODF qui en ont besoin (S44). */
-export function NouvelOrdreRegroupeDialog({
-  open,
-  onOpenChange,
-  semiFinis,
-}: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-  semiFinis: { id: string; code: string | null; name: string }[];
-}) {
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
-  const [semiFiniId, setSemiFiniId] = useState("");
-  const [besoins, setBesoins] = useState<BesoinSemiFini[] | null>(null);
-  const [choisis, setChoisis] = useState<Set<string>>(new Set());
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!semiFiniId) return;
-    let annule = false;
-    besoinsSemiFini(semiFiniId).then((res) => {
-      if (annule) return;
-      if ("error" in res) setError(res.error);
-      else {
-        setBesoins(res);
-        // Préselection : articles qui ont encore des pièces à couper, pas déjà coupés en t-shirts entiers.
-        setChoisis(new Set(res.filter((b) => !b.dejaEntier && b.tailles.some((t) => t.reste > 0)).map((b) => b.lineId)));
-      }
-    });
-    return () => {
-      annule = true;
-    };
-  }, [semiFiniId]);
-
-  function creer() {
-    setError(null);
-    startTransition(async () => {
-      const res = await createFicheRegroupee(semiFiniId, [...choisis]);
-      if ("error" in res && res.error) setError(res.error);
-      else if ("id" in res) {
-        toast.success(`Ordre de coupe regroupé ${res.numeroOt} créé`);
-        onOpenChange(false);
-        router.push(`/atelier/patronnage/${res.id}`);
-      }
-    });
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange} title="Nouvel ordre de coupe regroupé" size="lg">
-      <div className="space-y-4">
-        <p className="text-xs text-foreground-muted">
-          Une pièce (semi-fini) coupée pour plusieurs articles d&apos;ODF, quels que soient leur couleur et leur grammage : chaque couche du matelas
-          appartient à un article. Un article coupé par pièces l&apos;est entièrement (toutes ses pièces par des ordres regroupés).
-        </p>
-        <label className="block space-y-1 text-xs font-medium text-foreground">
-          Semi-fini
-          <select
-            value={semiFiniId}
-            onChange={(e) => {
-              setSemiFiniId(e.target.value);
-              setBesoins(null);
-              setError(null);
-            }}
-            className="h-9 w-full rounded-md border border-border bg-surface px-2 text-sm"
-          >
-            <option value="">— Choisir —</option>
-            {semiFinis.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.code ? `${s.code} · ` : ""}
-                {s.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        {semiFinis.length === 0 && <p className="text-xs text-warning">Aucun semi-fini : créez-les dans Articles (nature « Semi-fini »).</p>}
-        {error && <p className="text-xs text-danger">{error}</p>}
-        {semiFiniId && besoins === null && !error && <p className="text-xs text-foreground-muted">Recherche des articles…</p>}
-        {besoins && besoins.length === 0 && (
-          <p className="text-xs text-foreground-muted">Aucun article d&apos;ODF ouvert n&apos;a ce semi-fini dans sa nomenclature.</p>
-        )}
-        {besoins && besoins.length > 0 && (
-          <ul className="max-h-80 divide-y divide-border overflow-y-auto rounded-md border border-border">
-            {besoins.map((b) => (
-              <li key={b.lineId} className="flex items-start gap-2 px-3 py-2 text-sm">
-                <input
-                  type="checkbox"
-                  className="mt-1"
-                  disabled={b.dejaEntier}
-                  checked={choisis.has(b.lineId)}
-                  onChange={(e) =>
-                    setChoisis((prev) => {
-                      const n = new Set(prev);
-                      if (e.target.checked) n.add(b.lineId);
-                      else n.delete(b.lineId);
-                      return n;
-                    })
-                  }
-                />
-                <span className="min-w-0 flex-1">
-                  <span className="font-medium">{b.odf}</span> · {b.client} · {b.article}
-                  {b.couleur ? ` · ${b.couleur}` : ""}
-                  <span className="block text-xs text-foreground-muted">Reste à couper : {resteTexte(b) || "—"}</span>
-                  {b.dejaEntier && <span className="block text-xs text-warning">Déjà coupé ou validé en t-shirts entiers : ne peut pas être regroupé.</span>}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Annuler
-          </Button>
-          <Button loading={pending} disabled={!semiFiniId || choisis.size === 0} onClick={creer}>
-            <Layers className="h-3.5 w-3.5" /> Créer l&apos;ordre regroupé
-          </Button>
-        </div>
-      </div>
-    </Dialog>
-  );
-}
-
-/** Articles d'un ordre regroupé : reste à couper par taille, ajout et retrait. */
+/** Articles d'un ordre regroupé : reste à couper par semi-fini, ajout et retrait. */
 export function ArticlesRegroupesCard({ fiche, canModify }: { fiche: FichePlacement; canModify: boolean }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [besoins, setBesoins] = useState<BesoinSemiFini[] | null>(null);
+  const [groupes, setGroupes] = useState<BesoinCoupeGroupe[] | null>(null);
   const [ajout, setAjout] = useState("");
-  const semiFiniId = fiche.semiFini?.id ?? "";
   const regroupees = new Set(fiche.lignesRegroupees.map((l) => l.lineId));
 
   useEffect(() => {
-    if (!semiFiniId) return;
     let annule = false;
-    besoinsSemiFini(semiFiniId).then((res) => {
-      if (!annule && !("error" in res)) setBesoins(res);
+    besoinsCoupe().then((res) => {
+      if (!annule && !("error" in res)) setGroupes(res);
     });
     return () => {
       annule = true;
     };
-  }, [semiFiniId, fiche.lignesRegroupees.length, fiche.traces.length]);
+  }, [fiche.lignesRegroupees.length, fiche.traces.length]);
+
+  const lignes = useMemo(() => restesParLigne(groupes ?? []), [groupes]);
 
   function run(action: () => Promise<{ error?: string }>, ok: string) {
     startTransition(async () => {
@@ -186,13 +88,13 @@ export function ArticlesRegroupesCard({ fiche, canModify }: { fiche: FichePlacem
     });
   }
 
-  const candidats = (besoins ?? []).filter((b) => !regroupees.has(b.lineId) && !b.dejaEntier);
+  const candidats = [...lignes.values()].filter((l) => !regroupees.has(l.lineId) && !l.dejaEntier && [...l.parSemiFini.values()].some((n) => n > 0));
 
   return (
     <Card>
       <CardHeader
-        title={`Articles regroupés — ${fiche.semiFini?.name ?? ""}`}
-        description="Chaque article reçoit les pièces des couches qui lui sont attribuées dans les tracés. Reste = demandé × quantité de la nomenclature − coupé − prévu (tracés validés)."
+        title="Articles de l'ordre de coupe"
+        description="Chaque article reçoit les pièces des couches qui lui sont attribuées dans les tracés. Reste = demandé × quantité de la nomenclature − coupé − prévu (tracés validés). Un article doit avoir tous les semi-finis d'un tracé pour y recevoir des couches."
       />
       <CardBody className="space-y-3">
         {fiche.lignesRegroupees.length === 0 ? (
@@ -200,13 +102,16 @@ export function ArticlesRegroupesCard({ fiche, canModify }: { fiche: FichePlacem
         ) : (
           <ul className="divide-y divide-border rounded-md border border-border">
             {fiche.lignesRegroupees.map((l) => {
-              const b = besoins?.find((x) => x.lineId === l.lineId);
+              const b = lignes.get(l.lineId);
               return (
                 <li key={l.lineId} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
                   <span className="min-w-0">
                     <span className="font-medium">{l.odfReference ?? "—"}</span> · {l.description}
                     {b?.couleur ? ` · ${b.couleur}` : ""}
-                    {b && <span className="block text-xs text-foreground-muted">Reste à couper : {resteTexte(b) || "—"}</span>}
+                    <span className="block text-xs text-foreground-muted">
+                      Pièces de sa nomenclature : {l.semiFinis.map((x) => x.nom).join(", ") || "aucune"}
+                    </span>
+                    {b && <span className="block text-xs text-foreground-muted">Reste à couper : {resteTexte(b.parSemiFini) || "—"}</span>}
                   </span>
                   {canModify && (
                     <button
@@ -227,10 +132,10 @@ export function ArticlesRegroupesCard({ fiche, canModify }: { fiche: FichePlacem
           <div className="flex flex-wrap items-center gap-2">
             <select value={ajout} onChange={(e) => setAjout(e.target.value)} className="h-9 min-w-64 rounded-md border border-border bg-surface px-2 text-sm">
               <option value="">Ajouter un article d&apos;ODF…</option>
-              {candidats.map((b) => (
-                <option key={b.lineId} value={b.lineId}>
-                  {b.odf} · {b.article}
-                  {b.couleur ? ` · ${b.couleur}` : ""} — reste {resteTexte(b)}
+              {candidats.map((l) => (
+                <option key={l.lineId} value={l.lineId}>
+                  {l.odf} · {l.article}
+                  {l.couleur ? ` · ${l.couleur}` : ""} — reste {resteTexte(l.parSemiFini)}
                 </option>
               ))}
             </select>
@@ -241,6 +146,255 @@ export function ArticlesRegroupesCard({ fiche, canModify }: { fiche: FichePlacem
         )}
       </CardBody>
     </Card>
+  );
+}
+
+type LignePiece = { semiFiniId: string; taille: string; quantite: string };
+
+/**
+ * Pièces d'un tracé regroupé (0155) : semi-fini, taille et quantité posée par
+ * couche. Pré-remplies depuis le fichier du tracé, modifiables à la main, et
+ * contrôlées par la base contre ce que le fichier contient (D2).
+ */
+export function PiecesTraceEditor({
+  fiche,
+  trace,
+  editable,
+  canUnlock,
+  archived,
+  onChanged,
+}: {
+  fiche: FichePlacement;
+  trace: TracePlacement;
+  editable: boolean;
+  canUnlock: boolean;
+  archived: boolean;
+  onChanged: () => void;
+}) {
+  const [pending, startTransition] = useTransition();
+  const signature = JSON.stringify(trace.pieces);
+  const depuisTrace = (): LignePiece[] => trace.pieces.map((p) => ({ semiFiniId: p.semiFiniId, taille: p.taille, quantite: String(p.quantiteParCouche) }));
+  const [lignes, setLignes] = useState<LignePiece[]>(depuisTrace);
+  const [motif, setMotif] = useState("");
+  // Les pièces enregistrées ont changé (rechargement, pré-remplissage) : on repart d'elles.
+  const [signatureVue, setSignatureVue] = useState(signature);
+  if (signatureVue !== signature) {
+    setSignatureVue(signature);
+    setLignes(depuisTrace());
+  }
+
+  const semiFinis = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const l of fiche.lignesRegroupees) for (const sf of l.semiFinis) m.set(sf.id, sf.nom);
+    for (const p of trace.pieces) m.set(p.semiFiniId, p.semiFiniNom);
+    return [...m.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  }, [fiche.lignesRegroupees, trace.pieces]);
+  const tailles = useMemo(() => {
+    const t = new Set<string>();
+    for (const l of fiche.lignesRegroupees) for (const x of l.tailles) t.add(x);
+    for (const p of trace.pieces) t.add(p.taille);
+    return [...t].sort();
+  }, [fiche.lignesRegroupees, trace.pieces]);
+
+  function run(action: () => Promise<{ error?: string }>, ok: string) {
+    startTransition(async () => {
+      const res = await action();
+      if (res.error) toast.error(res.error);
+      else {
+        toast.success(ok);
+        onChanged();
+      }
+    });
+  }
+
+  const modifie = JSON.stringify(lignes) !== JSON.stringify(depuisTrace());
+  const c = trace.controle;
+  const peutDeroger = canUnlock && !archived && c.statut === "ecart" && !c.derogationMotif && ["previsionnel", "en_preparation", "bon_pour_coupe"].includes(trace.statut);
+
+  return (
+    <div className="space-y-3 rounded-md border border-border p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs font-medium text-foreground">Pièces du tracé (quantité posée par couche)</p>
+        {c.statut === "conforme" && (
+          <Badge tone="success" dot>
+            Conforme au fichier du tracé
+          </Badge>
+        )}
+        {c.statut === "ecart" && (
+          <Badge tone={c.derogationMotif ? "warning" : "danger"} dot>
+            {c.derogationMotif ? "Écart accepté par dérogation" : "Écart avec le fichier du tracé"}
+          </Badge>
+        )}
+        {c.statut === "non_verifie" && <Badge tone="neutral">Sans contrôle du tracé</Badge>}
+      </div>
+
+      {lignes.length === 0 ? (
+        <p className="text-sm text-foreground-muted">
+          Aucune pièce. {trace.analyse ? "Pré-remplissez-les depuis le fichier du tracé ou ajoutez-les à la main." : "Déposez le fichier du tracé pour les pré-remplir, ou ajoutez-les à la main."}
+        </p>
+      ) : (
+        <ul className="space-y-1.5">
+          {lignes.map((l, i) => {
+            const source = trace.pieces.find((p) => p.semiFiniId === l.semiFiniId && p.taille === l.taille)?.source;
+            return (
+              <li key={i} className="flex flex-wrap items-center gap-2 text-sm">
+                <select
+                  value={l.semiFiniId}
+                  disabled={!editable}
+                  onChange={(e) => setLignes((v) => v.map((x, j) => (j === i ? { ...x, semiFiniId: e.target.value } : x)))}
+                  className="h-8 min-w-40 rounded-md border border-border bg-surface px-2 text-sm disabled:opacity-60"
+                  aria-label="Semi-fini"
+                >
+                  <option value="">— Semi-fini —</option>
+                  {semiFinis.map(([id, nom]) => (
+                    <option key={id} value={id}>
+                      {nom}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={l.taille}
+                  disabled={!editable}
+                  onChange={(e) => setLignes((v) => v.map((x, j) => (j === i ? { ...x, taille: e.target.value } : x)))}
+                  className="h-8 w-28 rounded-md border border-border bg-surface px-2 text-sm disabled:opacity-60"
+                  aria-label="Taille"
+                >
+                  <option value="">— Taille —</option>
+                  {tailles.map((t) => (
+                    <option key={t} value={t}>
+                      {libelleTaille(t)}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={l.quantite}
+                  disabled={!editable}
+                  onChange={(e) => setLignes((v) => v.map((x, j) => (j === i ? { ...x, quantite: e.target.value } : x)))}
+                  className="h-8 w-20 rounded-md border border-border bg-surface px-2 text-right text-sm disabled:opacity-60"
+                  aria-label="Quantité par couche"
+                />
+                {source && <span className="text-xs text-foreground-muted">{source === "dxf" ? "lu dans le fichier" : "saisi"}</span>}
+                {editable && (
+                  <button
+                    type="button"
+                    onClick={() => setLignes((v) => v.filter((_, j) => j !== i))}
+                    className="text-foreground-muted hover:text-danger"
+                    aria-label="Retirer cette pièce"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      {editable && (
+        <div className="flex flex-wrap justify-between gap-2">
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="ghost" type="button" onClick={() => setLignes((v) => [...v, { semiFiniId: "", taille: "", quantite: "1" }])}>
+              <Plus className="h-3.5 w-3.5" /> Ajouter une pièce
+            </Button>
+            {trace.analyse && (
+              <Button
+                size="sm"
+                variant="secondary"
+                type="button"
+                loading={pending}
+                onClick={() =>
+                  run(async () => {
+                    const res = await preRemplirPiecesTrace(trace.id, fiche.id);
+                    return res.error ? { error: res.error } : {};
+                  }, "Pièces pré-remplies depuis le fichier du tracé")
+                }
+              >
+                <FileSearch className="h-3.5 w-3.5" /> Pré-remplir depuis le fichier
+              </Button>
+            )}
+          </div>
+          <Button
+            size="sm"
+            variant="secondary"
+            type="button"
+            loading={pending}
+            disabled={!modifie}
+            onClick={() =>
+              run(
+                () =>
+                  enregistrerPiecesTrace(
+                    trace.id,
+                    fiche.id,
+                    lignes.map((l) => ({ semiFiniId: l.semiFiniId, taille: l.taille, quantite: Math.trunc(Number(l.quantite) || 0) }))
+                  ),
+                "Pièces enregistrées"
+              )
+            }
+          >
+            Enregistrer les pièces
+          </Button>
+        </div>
+      )}
+
+      {c.statut === "ecart" && c.detail && (
+        <div className="space-y-1 rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-xs text-foreground">
+          <p className="flex items-center gap-1.5 font-medium text-danger">
+            <AlertTriangle className="h-3.5 w-3.5" /> Ce que le fichier contient ne correspond pas aux pièces déclarées
+          </p>
+          <ul className="list-disc space-y-0.5 pl-5">
+            {c.detail.ecarts.map((e, i) => (
+              <li key={i}>
+                {e.semi_fini} {libelleTaille(e.taille)} : déclaré {e.declare}, dans le fichier {e.reconnu}
+              </li>
+            ))}
+            {c.detail.hors_semi_fini.map((e, i) => (
+              <li key={`h${i}`}>
+                {e.semi_fini} {libelleTaille(e.taille)} : pièce d&apos;un ancien patron de produit fini (à migrer vers ses semi-finis)
+              </li>
+            ))}
+            {c.detail.quantites_non_entieres.map((e, i) => (
+              <li key={`q${i}`}>
+                {e.semi_fini} {libelleTaille(e.taille)} : le nombre de pièces du fichier n&apos;est pas un nombre entier d&apos;exemplaires du patron
+              </li>
+            ))}
+            {c.detail.pieces_non_reconnues > 0 && (
+              <li>
+                {c.detail.pieces_non_reconnues} pièce{c.detail.pieces_non_reconnues > 1 ? "s" : ""} du fichier non reconnue{c.detail.pieces_non_reconnues > 1 ? "s" : ""} dans la bibliothèque de patrons
+              </li>
+            )}
+          </ul>
+          <p className="text-foreground-muted">Le tracé ne peut pas passer « Bon pour coupe » tant que cet écart n&apos;est pas corrigé ou accepté par un responsable.</p>
+        </div>
+      )}
+      {c.derogationMotif && (
+        <p className="flex items-center gap-1.5 text-xs text-warning">
+          <CheckCircle2 className="h-3.5 w-3.5" /> Dérogation{c.derogationLe ? ` du ${new Date(c.derogationLe).toLocaleDateString("fr-FR")}` : ""} : {c.derogationMotif}
+        </p>
+      )}
+      {peutDeroger && (
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            value={motif}
+            onChange={(e) => setMotif(e.target.value)}
+            placeholder="Motif de la dérogation (obligatoire)"
+            className="h-8 min-w-64 flex-1 rounded-md border border-border bg-surface px-2 text-sm"
+          />
+          <Button
+            size="sm"
+            variant="secondary"
+            type="button"
+            loading={pending}
+            disabled={!motif.trim()}
+            onClick={() => run(() => derogerControleTrace(trace.id, fiche.id, motif.trim()), "Dérogation enregistrée")}
+          >
+            Accepter l&apos;écart
+          </Button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -261,6 +415,10 @@ export function CouchesEditor({
     Object.fromEntries(fiche.lignesRegroupees.map((l) => [l.lineId, String(trace.couches.find((c) => c.lineId === l.lineId)?.nbCouches ?? "")]))
   );
   const total = Object.values(valeurs).reduce((s, v) => s + (Number(v) || 0), 0);
+  const semiFinisTrace = [...new Map(trace.pieces.map((p) => [p.semiFiniId, p.semiFiniNom])).entries()];
+  // D1 : un article sans toutes les pièces du tracé ne reçoit pas de couches.
+  const manquants = (l: FichePlacement["lignesRegroupees"][number]) =>
+    semiFinisTrace.filter(([id]) => !l.semiFinis.some((x) => x.id === id)).map(([, nom]) => nom);
 
   function enregistrer() {
     startTransition(async () => {
@@ -281,23 +439,31 @@ export function CouchesEditor({
     <div className="space-y-2 rounded-md border border-border p-3">
       <p className="text-xs font-medium text-foreground">Couches par article (total {total} = nombre de plis du tracé)</p>
       <ul className="space-y-1.5">
-        {fiche.lignesRegroupees.map((l) => (
-          <li key={l.lineId} className="flex items-center justify-between gap-3 text-sm">
-            <span className="min-w-0 truncate">
-              {l.odfReference ?? "—"} · {l.description}
-            </span>
-            <input
-              type="number"
-              min={0}
-              step={1}
-              value={valeurs[l.lineId] ?? ""}
-              disabled={!editable}
-              onChange={(e) => setValeurs((v) => ({ ...v, [l.lineId]: e.target.value }))}
-              className="h-8 w-24 rounded-md border border-border bg-surface px-2 text-right text-sm disabled:opacity-60"
-              aria-label={`Couches pour ${l.description}`}
-            />
-          </li>
-        ))}
+        {fiche.lignesRegroupees.map((l) => {
+          const manque = manquants(l);
+          return (
+            <li key={l.lineId} className="flex items-center justify-between gap-3 text-sm">
+              <span className="min-w-0">
+                <span className="block truncate">
+                  {l.odfReference ?? "—"} · {l.description}
+                </span>
+                {manque.length > 0 && (
+                  <span className="block text-xs text-danger">Pas de couches possibles : sa nomenclature n&apos;a pas {manque.join(", ")}.</span>
+                )}
+              </span>
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={valeurs[l.lineId] ?? ""}
+                disabled={!editable || manque.length > 0}
+                onChange={(e) => setValeurs((v) => ({ ...v, [l.lineId]: e.target.value }))}
+                className="h-8 w-24 rounded-md border border-border bg-surface px-2 text-right text-sm disabled:opacity-60"
+                aria-label={`Couches pour ${l.description}`}
+              />
+            </li>
+          );
+        })}
       </ul>
       {editable && (
         <div className="flex justify-end">
