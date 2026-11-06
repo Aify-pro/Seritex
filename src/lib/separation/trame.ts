@@ -17,6 +17,23 @@ type Vec = [number, number, number];
 
 export type FormePoint = "rond" | "elliptique" | "ligne";
 
+/** Réglage de tonalité d'un écran tramé : neutre = 100 % et 0. */
+export type Tonalite = {
+  /** Quantité d'encre, % du ton calculé (100 = inchangé, 50 = moitié moins de matière). */
+  densitePct: number;
+  /** Demi-teintes, de -50 (plus claires) à +50 (plus chargées) ; les noirs et les blancs restent. */
+  milieux: number;
+};
+
+export const TONALITE_NEUTRE: Tonalite = { densitePct: 100, milieux: 0 };
+
+/** Applique la tonalité à un ton (0 à 255) : courbe de gamma sur les demi-teintes, puis densité. */
+export function tonaliser(ton: number, t: Tonalite): number {
+  if (ton <= 0) return 0;
+  const gamma = 2 ** (-t.milieux / 50);
+  return Math.min(255, Math.max(0, Math.round(255 * (ton / 255) ** gamma * (t.densitePct / 100))));
+}
+
 export type Rendu =
   | { type: "aplat" }
   | { type: "diffusion"; algo: "floyd-steinberg" | "atkinson" | "stucki" }
@@ -32,6 +49,8 @@ export type Rendu =
       pointMinPct: number;
       /** Ton au-delà duquel l'aplat est plein (points qui se bouchent), %. */
       pointMaxPct: number;
+      /** Tonalité de chaque écran de couleur (ordre des couleurs) ; absent = neutre. */
+      tonalites?: Tonalite[];
     }
   | {
       /** Quadrichromie : 4 écrans cyan, magenta, jaune, noir tramés en AM. */
@@ -48,6 +67,8 @@ export type Rendu =
       engraissementPct: number;
       pointMinPct: number;
       pointMaxPct: number;
+      /** Tonalité de chaque encre C, M, J, N ; absent = neutre. */
+      tonalites?: Tonalite[];
     };
 
 export const LIBELLES_RENDU: Record<Rendu["type"], string> = {

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { ARCHETYPES } from "@/lib/separation/archetypes";
 import { AM_DEFAUT, ANGLE_AM_DEFAUT, CMJN_DEFAUT, REGLAGES_DEFAUT, type Reglages } from "@/lib/separation/reglages";
 import { IMAGE_NEUTRE, imageNeutre, type ReglagesImage } from "@/lib/separation/image";
-import { PARAMS_EXPERT } from "@/lib/separation/expert";
+import { DETAILS_EXPERT, GROUPES_EXPERT, PARAMS_EXPERT } from "@/lib/separation/expert";
 import { PROFILS_ADAPTATIFS } from "@/lib/separation/separer";
 import { LIBELLES_RENDU, lpiMaxPourMaillage, type Rendu } from "@/lib/separation/trame";
 import { cn } from "@/lib/utils";
@@ -324,50 +324,83 @@ export function ReglagesAvances({
               {Object.keys(m.expert).length > 0 && <span className="text-foreground-muted">({Object.keys(m.expert).length} modifié(s))</span>}
             </button>
             {expertOuvert && (
-              <div className="space-y-2 rounded-md bg-surface-muted/50 p-3">
-                <p className="text-[11px] text-foreground-muted">Vide ou « Profil » : la valeur du profil choisi. Chaque changement relance la séparation.</p>
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {PARAMS_EXPERT.map((p) => {
-                    const v = m.expert[p.cle];
-                    return (
-                      <label key={p.cle} className="block text-xs text-foreground-muted" title={p.aide}>
-                        {p.libelle}
-                        {p.type === "nombre" ? (
-                          <input
-                            type="number"
-                            min={p.min}
-                            max={p.max}
-                            step={p.pas}
-                            value={typeof v === "number" ? v : ""}
-                            placeholder="profil"
-                            onChange={(e) => majExpert(p.cle, e.target.value === "" ? null : Math.min(p.max, Math.max(p.min, Number(e.target.value))))}
-                            className={cn(champ, "mt-1")}
-                          />
-                        ) : p.type === "choix" ? (
-                          <select value={typeof v === "string" ? v : ""} onChange={(e) => majExpert(p.cle, e.target.value || null)} className={cn(champ, "mt-1")}>
-                            <option value="">Profil</option>
-                            {p.choix.map((c) => (
-                              <option key={c.valeur} value={c.valeur}>
-                                {c.libelle}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          <select
-                            value={v === true ? "oui" : v === false ? "non" : ""}
-                            onChange={(e) => majExpert(p.cle, e.target.value === "" ? null : e.target.value === "oui")}
-                            className={cn(champ, "mt-1")}
-                          >
-                            <option value="">Profil</option>
-                            <option value="oui">Oui</option>
-                            <option value="non">Non</option>
-                          </select>
-                        )}
-                        <span className="mt-0.5 block text-[11px]">{p.aide}</span>
-                      </label>
-                    );
-                  })}
-                </div>
+              <div className="space-y-3 rounded-md bg-surface-muted/50 p-3">
+                <p className="text-xs text-foreground-muted">
+                  Ces réglages affinent la façon dont le moteur choisit les encres. <strong className="font-medium text-foreground">Laissez-les sur « Profil »</strong> tant que le résultat
+                  vous convient : chaque champ vide reprend la valeur du profil choisi plus haut. Un changement relance la séparation ; modifiez un réglage à la fois pour voir son effet.
+                </p>
+                {GROUPES_EXPERT.map((g) => {
+                  const params = g.cles.map((cle) => PARAMS_EXPERT.find((p) => p.cle === cle)).filter((p) => !!p);
+                  const modifies = params.filter((p) => m.expert[p.cle] !== undefined).length;
+                  return (
+                    <fieldset key={g.id} className="rounded-md border border-border bg-surface">
+                      <legend className="sr-only">{g.titre}</legend>
+                      <div className="border-b border-border px-3 py-2">
+                        <p className="flex items-center gap-2 text-xs font-semibold text-foreground">
+                          {g.titre}
+                          {modifies > 0 && <span className="rounded-full bg-brand/10 px-1.5 py-px text-[10px] font-medium text-brand">{modifies} modifié(s)</span>}
+                        </p>
+                        <p className="text-[11px] text-foreground-muted">{g.intro}</p>
+                      </div>
+                      <div className="divide-y divide-border">
+                        {params.map((p) => {
+                          const v = m.expert[p.cle];
+                          const modifie = v !== undefined;
+                          return (
+                            <div key={p.cle} className="grid gap-x-4 gap-y-1 px-3 py-2.5 md:grid-cols-[15rem_1fr]">
+                              <label className="block text-xs">
+                                <span className={cn("font-medium", modifie ? "text-foreground" : "text-foreground-muted")}>
+                                  {p.libelle}
+                                  {modifie && <span className="ml-1.5 text-[10px] font-normal text-brand">modifié</span>}
+                                </span>
+                                {p.type === "nombre" ? (
+                                  <input
+                                    type="number"
+                                    min={p.min}
+                                    max={p.max}
+                                    step={p.pas}
+                                    value={typeof v === "number" ? v : ""}
+                                    placeholder="profil"
+                                    onChange={(e) => majExpert(p.cle, e.target.value === "" ? null : Math.min(p.max, Math.max(p.min, Number(e.target.value))))}
+                                    className={cn(champ, "mt-1")}
+                                  />
+                                ) : p.type === "choix" ? (
+                                  <select value={typeof v === "string" ? v : ""} onChange={(e) => majExpert(p.cle, e.target.value || null)} className={cn(champ, "mt-1")}>
+                                    <option value="">Profil</option>
+                                    {p.choix.map((c) => (
+                                      <option key={c.valeur} value={c.valeur}>
+                                        {c.libelle}
+                                      </option>
+                                    ))}
+                                  </select>
+                                ) : (
+                                  <select
+                                    value={v === true ? "oui" : v === false ? "non" : ""}
+                                    onChange={(e) => majExpert(p.cle, e.target.value === "" ? null : e.target.value === "oui")}
+                                    className={cn(champ, "mt-1")}
+                                  >
+                                    <option value="">Profil</option>
+                                    <option value="oui">Oui</option>
+                                    <option value="non">Non</option>
+                                  </select>
+                                )}
+                                {p.type === "nombre" && (
+                                  <span className="mt-0.5 block text-[10px] text-foreground-muted">
+                                    de {p.min.toLocaleString("fr-FR")} à {p.max.toLocaleString("fr-FR")}
+                                  </span>
+                                )}
+                              </label>
+                              <div className="text-[11px] leading-relaxed text-foreground-muted">
+                                <p className="font-medium text-foreground">{p.aide}</p>
+                                {DETAILS_EXPERT[p.cle] && <p className="mt-0.5">{DETAILS_EXPERT[p.cle]}</p>}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </fieldset>
+                  );
+                })}
                 {Object.keys(m.expert).length > 0 && (
                   <Button type="button" size="sm" variant="ghost" onClick={() => majMoteur({ expert: {} })}>
                     Revenir aux valeurs du profil
@@ -537,6 +570,27 @@ export function ReglagesAvances({
                 onChange={(v) => onChange({ ...reglages, recouvrementMm: v })}
                 aide="Aplats : clair sous foncé, contre les défauts de calage."
               />
+              <label className="block text-xs text-foreground-muted">
+                Support des films
+                <select value={reglages.format} onChange={(e) => onChange({ ...reglages, format: e.target.value as Reglages["format"] })} className={cn(champ, "mt-1")}>
+                  <option value="auto">Automatique (A4 ou A3)</option>
+                  <option value="A5">A5 (148 × 210 mm)</option>
+                  <option value="A4">A4 (210 × 297 mm)</option>
+                  <option value="A3">A3 (297 × 420 mm)</option>
+                </select>
+                <span className="mt-0.5 block text-[11px]">Format des feuilles de film, portrait ou paysage selon ce qui convient.</span>
+              </label>
+              <div className="flex items-start sm:col-span-4">
+                <label className="flex items-start gap-2 text-xs text-foreground">
+                  <input type="checkbox" checked={reglages.grouper} onChange={(e) => onChange({ ...reglages, grouper: e.target.checked })} className="mt-0.5" />
+                  <span>
+                    Plusieurs films par page
+                    <span className="block text-[11px] text-foreground-muted">
+                      Place autant d&apos;écrans que la feuille peut en contenir (ex. deux films A4 sur une feuille A3), séparés par un filet gris de découpe. En automatique, la feuille utilisée est l&apos;A3.
+                    </span>
+                  </span>
+                </label>
+              </div>
 
             </div>
           </div>

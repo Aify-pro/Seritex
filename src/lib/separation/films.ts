@@ -21,6 +21,7 @@ import { dimensionsFilms, PPP_FILMS } from "./dimensions-films";
 import type { ResultatSeparation } from "./separer";
 import { ENCRES_CMJN, type Rendu } from "./trame";
 import type { ReglagesImage } from "./image";
+import { ErreurMiseEnPage, miseEnPage, type FormatPage } from "./mise-en-page";
 import { modeSousCouche, type OptionsSousCouche } from "./sous-couche";
 
 const MM = 72 / 25.4;
@@ -28,8 +29,7 @@ const MM = 72 / 25.4;
 const POINT_MIN_MM = 0.5;
 const MARGE_MM = 20;
 const LEGENDE_MM = 28;
-const A4: [number, number] = [210, 297];
-const A3: [number, number] = [297, 420];
+export { ErreurMiseEnPage };
 
 export type OptionsFilms = {
   /** Largeur imprimée du dessin, en cm. */
@@ -58,6 +58,10 @@ export type OptionsFilms = {
   largeurAnalyse?: number;
   /** Films en tracés vectoriels (défaut : oui) plutôt qu'en image 1 bit pixélisée au zoom. */
   vectoriel?: boolean;
+  /** Support des films : A5, A4, A3, ou « auto » (plus petit format A4/A3 qui convient). */
+  format?: FormatPage;
+  /** Plusieurs films par page quand le format le permet (économie de support). */
+  grouper?: boolean;
 };
 
 /** Résumé du rendu pour la légende d'un écran (k : index de couleur, -1 : sous-couche). */
@@ -126,17 +130,6 @@ export async function dessinerVecteur(doc: PDFDocument, page: PDFPage, v: EcranV
   page.node.addContentStream(doc.context.register(flux));
 }
 
-/** Plus petit format (A4 puis A3, portrait ou paysage) qui contient le film ; sinon sur mesure. */
-function formatPage(lmm: number, hmm: number): [number, number] {
-  const besoinL = lmm + 2 * MARGE_MM;
-  const besoinH = hmm + 2 * MARGE_MM + LEGENDE_MM;
-  for (const [a, b] of [A4, A3]) {
-    if (besoinL <= a && besoinH <= b) return [a, b];
-    if (besoinL <= b && besoinH <= a) return [b, a];
-  }
-  return [Math.ceil(besoinL), Math.ceil(besoinH)];
-}
-
 /** Cible de calage : cercle et croix, centrée en (x, y) en points. */
 function cible(page: PDFPage, x: number, y: number) {
   const noir = rgb(0, 0, 0);
@@ -194,7 +187,12 @@ export async function preparerFilms(
   const gras = await doc.embedFont(StandardFonts.HelveticaBold);
   const lmm = options.largeurCm * 10;
   const hmm = (lmm * films.hauteur) / films.largeur;
-  const [pl, ph] = formatPage(lmm, hmm);
+  const cl = lmm + 2 * MARGE_MM;
+  const ch = hmm + 2 * MARGE_MM + LEGENDE_MM;
+  const { pl, ph, cols, rows } = miseEnPage(cl, ch, options.format ?? "auto", options.grouper ?? false);
+  const parPage = cols * rows;
+  const decalX = (pl - cols * cl) / 2;
+  const decalY = (ph - rows * ch) / 2;
   // Écrans dans l'ordre d'impression : la sous-couche d'abord (même ordre que films.ecrans).
   const titres: { titre: string; k: number }[] = [];
   const blancs = options.sousCouche?.options;
@@ -214,11 +212,20 @@ export async function preparerFilms(
   if (options.sousCouche && blancs?.rehaut.actif) titres.push({ titre: `Rehaut · ${options.sousCouche.nom} (hautes lumières, imprimé en dernier)`, k: -2 });
   const n = films.ecrans.length;
 
+  let page!: PDFPage;
   for (let k = 0; k < n; k++) {
     etape(`Écran ${k + 1} sur ${n}…`);
-    const page = doc.addPage([pl * MM, ph * MM]);
-    const x = ((pl - lmm) / 2) * MM;
-    const y = (MARGE_MM + LEGENDE_MM) * MM;
+    if (k % parPage === 0) page = doc.addPage([pl * MM, ph * MM]);
+    // Case du film sur la page (colonnes de gauche à droite, lignes du haut vers le bas).
+    const c = k % parPage;
+    const caseX = decalX + (c % cols) * cl;
+    const caseY = decalY + (rows - 1 - Math.floor(c / cols)) * ch;
+    if (parPage > 1) {
+      // Repère de découpe : filet gris fin autour de la case.
+      page.drawRectangle({ x: caseX * MM, y: caseY * MM, width: cl * MM, height: ch * MM, borderColor: rgb(0.7, 0.7, 0.7), borderWidth: 0.25 });
+    }
+    const x = (caseX + MARGE_MM) * MM;
+    const y = (caseY + MARGE_MM + LEGENDE_MM) * MM;
     const vecteur = films.vecteurs[k];
     if (vecteur) await dessinerVecteur(doc, page, vecteur, films, x, y, lmm * MM, hmm * MM, options.miroir);
     else await dessinerMasque(doc, page, films.ecrans[k], films, x, y, lmm * MM, hmm * MM);
@@ -246,8 +253,8 @@ export async function preparerFilms(
         .filter(Boolean)
         .join(" · "),
     );
-    page.drawText(titre, { x, y: (MARGE_MM + 4) * MM, size: 11, font: gras });
-    page.drawText(detail, { x, y: MARGE_MM * MM - 2, size: 8, font: police });
+    page.drawText(titre, { x, y: (caseY + MARGE_MM + 4) * MM, size: 11, font: gras });
+    page.drawText(detail, { x, y: (caseY + MARGE_MM) * MM - 2, size: 8, font: police });
   }
 
   const octets = await doc.save();

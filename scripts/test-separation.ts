@@ -33,8 +33,9 @@ import { appliquerEncres, separer, sousCouche, HORS_DESSIN, type OptionsSeparati
 import { estFonce, qualite, rapprocher, type Encre } from "../src/lib/separation/nuancier";
 import { chiffrer, grilleProposee, prixAuKg, type ParametresSerigraphie } from "../src/lib/separation/prix-revient";
 import { printCostPerPiece } from "../src/lib/pricing";
-import { ecransFilms, indicesRendu } from "../src/lib/separation/ecrans";
-import { recouvrir, seuilsAM, tramerAM } from "../src/lib/separation/trame";
+import { ecransFilms, indicesRendu, tonsRendu } from "../src/lib/separation/ecrans";
+import { ErreurMiseEnPage, miseEnPage } from "../src/lib/separation/mise-en-page";
+import { recouvrir, seuilsAM, TONALITE_NEUTRE, tonaliser, tramerAM } from "../src/lib/separation/trame";
 import { lireReglages, REGLAGES_DEFAUT } from "../src/lib/separation/reglages";
 import { ecranConvient, tientSurMachine } from "../src/lib/atelier/parc";
 import { ajusterImage, IMAGE_NEUTRE } from "../src/lib/separation/image";
@@ -604,6 +605,49 @@ await test("vectoriel : le ton moyen des points suit le ton demandé, zones plei
   const niveaux = new Set(v.gabarits.map((g) => g.niveau));
   for (let i = 0; i < v.points.length; i += 3) assert.ok(niveaux.has(v.points[i]), "chaque point a son gabarit");
   return `${v.points.length / 3} points, ${v.gabarits.length} gabarits`;
+});
+
+await test("tonalité par couche : densité et demi-teintes sur l'écran choisi seulement", async () => {
+  assert.equal(tonaliser(0, { densitePct: 150, milieux: 50 }), 0, "le blanc reste vide");
+  assert.equal(tonaliser(255, { densitePct: 100, milieux: 30 }), 255, "l'aplat reste plein sans densité");
+  assert.equal(tonaliser(128, TONALITE_NEUTRE), 128);
+  assert.equal(tonaliser(200, { densitePct: 50, milieux: 0 }), 100);
+  assert.ok(tonaliser(128, { densitePct: 100, milieux: 30 }) > 128, "demi-teintes chargées");
+  assert.ok(tonaliser(128, { densitePct: 100, milieux: -30 }) < 128, "demi-teintes éclaircies");
+  // Image 2 aplats à 50 % de ton chacun : seul le premier écran est allégé.
+  const w = 40;
+  const h = 40;
+  const px = new Uint8ClampedArray(w * h * 4);
+  for (let p = 0; p < w * h; p++) px.set(p % w < 20 ? [255, 128, 128, 255] : [128, 255, 128, 255], p * 4);
+  const rendu = { type: "am" as const, lpi: 45, angles: [22.5], forme: "rond" as const, pointMinPct: 0, pointMaxPct: 100 };
+  const entree = { encres: ["#FF0000", "#00FF00"], fond: "#FFFFFF", transparent: false, ppp: 360 };
+  const avant = tonsRendu(px, w, h, { ...entree, rendu });
+  const apres = tonsRendu(px, w, h, { ...entree, rendu: { ...rendu, tonalites: [{ densitePct: 50, milieux: 0 }, TONALITE_NEUTRE] } });
+  const somme = (t: Uint8Array) => t.reduce((a, v) => a + v, 0);
+  assert.ok(somme(apres[0]) < somme(avant[0]) * 0.6, "écran 1 allégé");
+  assert.equal(somme(apres[1]), somme(avant[1]), "écran 2 inchangé");
+  return "blancs et aplats préservés, couche choisie seule modifiée";
+});
+
+await test("mise en page : formats A5/A4/A3, films groupés sur la feuille", async () => {
+  // Film de 150 × 220 mm de dessin : case de 190 × 288 mm (marges 20 mm, légende 28 mm).
+  const cl = 190;
+  const ch = 288;
+  const seul = miseEnPage(cl, ch, "auto", false);
+  assert.deepEqual([seul.pl, seul.ph, seul.cols * seul.rows], [210, 297, 1], "auto : A4 portrait");
+  const a3 = miseEnPage(cl, ch, "A3", true);
+  assert.deepEqual([a3.pl, a3.ph, a3.cols * a3.rows], [420, 297, 2], "2 films A4 côte à côte sur une feuille A3 paysage");
+  // Petit film (100 × 150 mm de dessin) : case de 140 × 218 mm.
+  const petit = miseEnPage(140, 218, "A3", true);
+  assert.equal(petit.cols * petit.rows, 3, "3 petits films sur une feuille A3 paysage");
+  const paysage = miseEnPage(140, 218, "A3", false);
+  assert.equal(paysage.cols * paysage.rows, 1, "sans regroupement : un par feuille");
+  const autoGroupe = miseEnPage(140, 218, "auto", true);
+  assert.deepEqual([Math.min(autoGroupe.pl, autoGroupe.ph), Math.max(autoGroupe.pl, autoGroupe.ph)], [297, 420], "auto + regroupement : A3");
+  assert.throws(() => miseEnPage(cl, ch, "A5", false), ErreurMiseEnPage);
+  const mesure = miseEnPage(400, 500, "auto", false);
+  assert.deepEqual([mesure.pl, mesure.ph], [400, 500], "trop grand : sur mesure");
+  return "A4 auto, 2 × A4 ou 3 petits films sur A3, erreur claire si trop grand, sur mesure sinon";
 });
 
 console.log(`${n} tests réussis`);
