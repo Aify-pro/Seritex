@@ -106,6 +106,29 @@ export const STATUT_TRACE_TONES: Record<StatutTrace, "neutral" | "info" | "succe
   annule: "danger",
 };
 
+/** Pièce posée sur un tracé regroupé (0155). */
+export interface PieceTrace {
+  semiFiniId: string;
+  semiFiniNom: string;
+  taille: string;
+  quantiteParCouche: number;
+  /** « dxf » : lue dans le fichier du tracé ; « saisie » : saisie à la main. */
+  source: "dxf" | "saisie";
+}
+
+/** Écart de contrôle : ce qui est déclaré ne correspond pas à ce que le fichier du tracé contient. */
+export interface ControleTrace {
+  statut: "non_verifie" | "conforme" | "ecart";
+  detail: {
+    ecarts: { semi_fini: string; taille: string; declare: number; reconnu: number }[];
+    hors_semi_fini: { semi_fini: string; taille: string }[];
+    quantites_non_entieres: { semi_fini: string; taille: string }[];
+    pieces_non_reconnues: number;
+  } | null;
+  derogationMotif: string | null;
+  derogationLe: string | null;
+}
+
 export interface TracePlacement {
   id: string;
   ordre: number;
@@ -137,6 +160,10 @@ export interface TracePlacement {
   justification: string | null;
   /** Couches par article d'ODF d'un tracé regroupé (0149) ; vide pour un tracé d'article. */
   couches: { lineId: string; nbCouches: number }[];
+  /** Pièces d'un tracé regroupé (0155) : semi-fini, taille et quantité par couche ; vide pour un tracé d'article. */
+  pieces: PieceTrace[];
+  /** Contrôle de cohérence entre les pièces déclarées et le fichier du tracé (0155, D2). */
+  controle: ControleTrace;
   // Lot 8 — voir RendementTrace ci-dessus. null tant que le matelas
   // correspondant (section Coupe) n'a pas été clôturé.
   rendement: RendementTrace | null;
@@ -175,10 +202,16 @@ export interface FichePlacement {
   valideLe: string | null;
   createdAt: string;
   traces: TracePlacement[];
-  /** Ordre de coupe regroupé (0149) : le semi-fini coupé pour plusieurs articles d'ODF ; null pour une fiche d'article. */
-  semiFini: { id: string; name: string } | null;
-  /** Articles d'ODF regroupés (ordre regroupé seulement). */
-  lignesRegroupees: { lineId: string; description: string; odfReference: string | null }[];
+  /** Ordre de coupe regroupé (0149, 0155) : ses tracés portent des semi-finis pour plusieurs articles d'ODF ; faux pour une fiche d'article. */
+  regroupee: boolean;
+  /** Articles d'ODF regroupés (ordre regroupé seulement), avec les semi-finis de leur nomenclature et leurs tailles. */
+  lignesRegroupees: {
+    lineId: string;
+    description: string;
+    odfReference: string | null;
+    semiFinis: { id: string; nom: string }[];
+    tailles: string[];
+  }[];
 }
 
 export interface FicheListItem {

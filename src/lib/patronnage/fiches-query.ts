@@ -1,18 +1,19 @@
 import "server-only";
 import { createClient } from "@/lib/supabase/server";
-import type { FichePlacement, PatronReconnu, PieceNonReconnue, RendementTrace, TracePlacement } from "@/lib/patronnage/types";
+import type { ControleTrace, FichePlacement, PatronReconnu, PieceNonReconnue, RendementTrace, TracePlacement } from "@/lib/patronnage/types";
 
 const FICHE_SELECT = `id,numero_ot,statut,statut_precedent,production_order_line_id,premiere_liaison_le,client_code,client_libelle,
    date_emission,date_retour_souhaitee,designation_article,reference_modele,product_model_id,quantite_totale,
    repartition_tailles,tissu_type,grammage,couleur,laize_utile_cm,contraintes,observations,
-   valide_le,created_at,semi_fini_id,
-   semi_fini:product_models!fiches_placement_semi_fini_id_fkey(id,name),
-   coupe_groupee_lignes(production_order_line_id,production_order_lines(description,production_orders(reference))),
+   valide_le,created_at,regroupee,
+   coupe_groupee_lignes(production_order_line_id,production_order_lines(description,product_model_id,production_order_sizes(taille),production_orders(reference))),
    production_order_lines(description,production_orders(reference)),
    traces_placement(id,ordre,reference,reference_patron,longueur_matelas_cm,largeur_matelas_cm,nb_plis,
      repartition_par_couche,fichier_path,fichier_nom,charge_le,est_correctif,justification,
      statut,valide_le,motif_validation,surplus_valide,modifie_valide_le,annule_le,motif_annulation,demarre_le,termine_le,
      trace_couches(production_order_line_id,nb_couches),
+     controle_statut,controle_detail,controle_derogation_motif,controle_derogation_le,
+     trace_semi_finis(semi_fini_id,taille,quantite_par_couche,source,semi_fini:product_models(name)),
      analyses_trace(id,nb_pieces_detectees,facteur_echelle,patrons_reconnus,pieces_non_reconnues,
        taux_reconnaissance,reconnaissance_complete,alerte_miroir,alerte_echelle,analysee_le))`;
 
@@ -57,12 +58,16 @@ type FicheRow = {
   observations: string | null;
   valide_le: string | null;
   created_at: string;
-  semi_fini_id: string | null;
-  semi_fini: { id: string; name: string } | { id: string; name: string }[] | null;
+  regroupee: boolean;
   coupe_groupee_lignes:
     | {
         production_order_line_id: string;
-        production_order_lines: { description: string; production_orders: { reference: string } | { reference: string }[] | null } | null;
+        production_order_lines: {
+          description: string;
+          product_model_id: string | null;
+          production_order_sizes: { taille: string }[] | null;
+          production_orders: { reference: string } | { reference: string }[] | null;
+        } | null;
       }[]
     | null;
   production_order_lines:
@@ -93,6 +98,19 @@ type FicheRow = {
     demarre_le: string | null;
     termine_le: string | null;
     trace_couches: { production_order_line_id: string; nb_couches: number }[] | null;
+    controle_statut: ControleTrace["statut"];
+    controle_detail: ControleTrace["detail"];
+    controle_derogation_motif: string | null;
+    controle_derogation_le: string | null;
+    trace_semi_finis:
+      | {
+          semi_fini_id: string;
+          taille: string;
+          quantite_par_couche: number;
+          source: "dxf" | "saisie";
+          semi_fini: { name: string } | { name: string }[] | null;
+        }[]
+      | null;
     // `analyses_trace.trace_id` est UNIQUE : PostgREST renvoie alors l'analyse
     // comme un OBJET (relation 1-1), pas comme une liste. Les deux formes sont
     // acceptées pour ne pas dépendre de ce détail de schéma.
@@ -128,6 +146,32 @@ async function mapFiches(
     ])
   );
 
+  // Semi-finis de la nomenclature des articles regroupés (D1 : un article doit
+  // avoir tous les semi-finis d'un tracé pour recevoir des couches).
+  const modelIds = [
+    ...new Set(
+      fichesRaw.flatMap((f) => (f.coupe_groupee_lignes ?? []).map((g) => g.production_order_lines?.product_model_id).filter((x): x is string => !!x))
+    ),
+  ];
+  const semiFinisParModele = new Map<string, { id: string; nom: string }[]>();
+  if (modelIds.length > 0) {
+    const { data: nomRows } = await supabase
+      .from("nomenclature_lines")
+      .select("product_model_id,semi_fini_id")
+      .in("product_model_id", modelIds)
+      .not("semi_fini_id", "is", null);
+    const sfIds = [...new Set((nomRows ?? []).map((r) => r.semi_fini_id as string))];
+    const { data: sfRows } = sfIds.length
+      ? await supabase.from("product_models").select("id,name").in("id", sfIds)
+      : { data: [] as { id: string; name: string }[] };
+    const noms = new Map((sfRows ?? []).map((r) => [r.id as string, r.name as string]));
+    for (const r of nomRows ?? []) {
+      const liste = semiFinisParModele.get(r.product_model_id as string) ?? [];
+      if (!liste.some((x) => x.id === r.semi_fini_id)) liste.push({ id: r.semi_fini_id as string, nom: noms.get(r.semi_fini_id as string) ?? "?" });
+      semiFinisParModele.set(r.product_model_id as string, liste);
+    }
+  }
+
   return fichesRaw.map((f) => {
     const line = Array.isArray(f.production_order_lines) ? f.production_order_lines[0] : f.production_order_lines;
     const odf = line ? (Array.isArray(line.production_orders) ? line.production_orders[0] : line.production_orders) : null;
@@ -156,13 +200,16 @@ async function mapFiches(
     observations: f.observations,
     valideLe: f.valide_le,
     createdAt: f.created_at,
-    semiFini: (Array.isArray(f.semi_fini) ? f.semi_fini[0] : f.semi_fini) ?? null,
+    regroupee: f.regroupee,
     lignesRegroupees: (f.coupe_groupee_lignes ?? []).map((g) => {
       const po = g.production_order_lines?.production_orders;
+      const modele = g.production_order_lines?.product_model_id ?? null;
       return {
         lineId: g.production_order_line_id,
         description: g.production_order_lines?.description ?? "—",
         odfReference: (Array.isArray(po) ? po[0]?.reference : po?.reference) ?? null,
+        semiFinis: modele ? (semiFinisParModele.get(modele) ?? []) : [],
+        tailles: (g.production_order_lines?.production_order_sizes ?? []).map((x) => x.taille),
       };
     }),
     traces: (f.traces_placement ?? [])
@@ -193,6 +240,21 @@ async function mapFiches(
           estCorrectif: t.est_correctif,
           justification: t.justification,
           couches: (t.trace_couches ?? []).map((c) => ({ lineId: c.production_order_line_id, nbCouches: c.nb_couches })),
+          pieces: (t.trace_semi_finis ?? [])
+            .map((p) => ({
+              semiFiniId: p.semi_fini_id,
+              semiFiniNom: (Array.isArray(p.semi_fini) ? p.semi_fini[0]?.name : p.semi_fini?.name) ?? "?",
+              taille: p.taille,
+              quantiteParCouche: p.quantite_par_couche,
+              source: p.source,
+            }))
+            .sort((a, b) => a.semiFiniNom.localeCompare(b.semiFiniNom) || a.taille.localeCompare(b.taille)),
+          controle: {
+            statut: t.controle_statut,
+            detail: t.controle_detail,
+            derogationMotif: t.controle_derogation_motif,
+            derogationLe: t.controle_derogation_le,
+          },
           rendement: rendementByTraceId.get(t.id) ?? null,
           analyse: analyse
             ? {

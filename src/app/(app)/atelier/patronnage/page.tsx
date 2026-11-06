@@ -7,8 +7,9 @@ import { PageHeader } from "@/components/shell/page-header";
 import { Button } from "@/components/ui/button";
 import { BookMarked } from "lucide-react";
 import { getFichesPlacement, getProductModelOptions } from "@/lib/patronnage/fiches-query";
-import { createClient } from "@/lib/supabase/server";
 import { FichesPlacementClient } from "@/components/atelier/patronnage/fiches-placement-client";
+import { coupeEntiereFermee } from "@/lib/patronnage/chemin";
+import { createClient } from "@/lib/supabase/server";
 
 export default async function PatronnagePage() {
   const { profile } = await requireUser();
@@ -37,12 +38,7 @@ export default async function PatronnagePage() {
   const canLearn = profile.role === "responsable_production" || profile.role === "administrateur";
   if (!canView) redirect("/dashboard?erreur=acces_refuse");
 
-  const [fiches, productModels, { data: semiFinis }] = await Promise.all([
-    getFichesPlacement(),
-    getProductModelOptions(),
-    // Ordres de coupe regroupés par pièce (0149).
-    (await createClient()).from("product_models").select("id,code,name").eq("nature", "semi_fini").eq("active", true).order("name"),
-  ]);
+  const [fiches, productModels, fermee] = await Promise.all([getFichesPlacement(), getProductModelOptions(), coupeEntiereFermee(await createClient())]);
 
   return (
     <div className="space-y-6">
@@ -66,7 +62,7 @@ export default async function PatronnagePage() {
         permissions={{ canCreate, canModify, canAddTrace, canModifyTrace, canValidate, canUnlock, canArchive, canDelete, canLearn }}
         sizes={sizes}
         productModels={productModels}
-        semiFinis={(semiFinis ?? []).map((s) => ({ id: s.id as string, code: (s.code as string | null) ?? null, name: s.name as string }))}
+        coupeEntiereFermee={fermee}
       />
     </div>
   );

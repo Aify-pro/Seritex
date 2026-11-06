@@ -17,7 +17,7 @@ import type { Size } from "@/lib/sizes";
 import { LineSectionsPicker } from "./line-sections-picker";
 import { RouteApplier } from "./route-applier";
 import { SplitLineButton, StockAvailability, type StockAvailabilityRow } from "./line-stock-tools";
-import { FichePatronnageLink, type FicheLiee } from "./fiche-patronnage-link";
+import { FichePatronnageLink, type FicheLiee, type OrdreCoupeLie } from "./fiche-patronnage-link";
 import { LineVisuelPicker } from "./line-visuel-picker";
 import { LineMaquettePicker } from "./line-maquette-picker";
 import { LinePrintableZonesPicker, type PrintableZoneOption, type SelectedPrintableZone } from "./line-printable-zones-picker";
@@ -77,6 +77,10 @@ export interface LineData {
   /** Une section de catégorie Coupe est-elle retenue ? Conditionne l'affichage de la fiche Patronnage. */
   coupeSelected: boolean;
   fiche: FicheLiee | null;
+  /** Ordres de coupe regroupés où l'article est coupé par pièces (0155). */
+  ordresCoupe?: OrdreCoupeLie[];
+  /** Ancien chemin « t-shirt entier » fermé (0156). */
+  coupeFermee?: boolean;
   /**
    * Une section exigeant un visuel (ex. Impression) est-elle retenue ?
    * Conditionne aussi l'affichage de la maquette et des zones imprimables
@@ -472,12 +476,14 @@ function LineCard({
           />
         )}
 
-        {(line.coupeSelected || line.fiche) && (
+        {(line.coupeSelected || line.fiche || (line.ordresCoupe ?? []).length > 0) && (
           <FichePatronnageLink
             lineId={line.id}
             editable={editable}
             fiche={line.fiche}
             productModelId={line.productModelId}
+            ordres={line.ordresCoupe ?? []}
+            fermee={line.coupeFermee ?? false}
           />
         )}
 

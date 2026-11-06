@@ -7,7 +7,15 @@ process.on("unhandledRejection", (e) => {
 });
 
 export async function setup(opts = {}) {
-  const db = await boot({ quiet: true, ...opts });
+  const { coupeEntiereFermee = false, ...bootOpts } = opts;
+  const db = await boot({ quiet: true, ...bootOpts });
+  // La migration 0156 ferme l'ancien chemin « t-shirt entier ». Les scénarios
+  // historiques qui le testent le rouvrent ; ceux de 0156 le laissent fermé.
+  await db.exec(`do $$ begin
+    if exists (select 1 from information_schema.columns where table_name = 'fabrication_settings' and column_name = 'coupe_t_shirt_entier_ferme') then
+      update fabrication_settings set coupe_t_shirt_entier_ferme = ${coupeEntiereFermee ? "true" : "false"};
+    end if;
+  end $$;`);
   const q = async (sql, params) => (await db.query(sql, params)).rows;
   const one = async (sql, params) => (await q(sql, params))[0];
   const as = async (uid) => db.query(`select set_config('request.jwt.claim.sub', $1, false)`, [uid ?? ""]);

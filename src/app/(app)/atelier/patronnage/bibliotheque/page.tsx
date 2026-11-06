@@ -20,6 +20,7 @@ export default async function PatronnageBibliothequePage() {
     .select(
       "id,article_code,designation,tolerance_pct,product_model_id,patterns(id,size,pattern_pieces(id,name,expected_count,area,perimeter,points))"
     )
+    .is("migre_le", null)
     .order("article_code");
   const [canModify, canDelete, used] = await Promise.all([
     can("patronnage", "modify"),
@@ -61,12 +62,22 @@ export default async function PatronnageBibliothequePage() {
         title="Bibliothèque de patrons de référence"
         description="Sert de référence à la reconnaissance automatique de tous les tracés déposés dans le module Patronnage."
         action={
-          <Link
-            href="/atelier/patronnage"
-            className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-sm font-medium text-foreground hover:bg-surface-muted"
-          >
-            <ArrowLeft className="h-4 w-4" /> Retour au patronnage
-          </Link>
+          <div className="flex items-center gap-2">
+            {canModify && (
+              <Link
+                href="/atelier/patronnage/bibliotheque/migration"
+                className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-sm font-medium text-foreground hover:bg-surface-muted"
+              >
+                Reprendre un ancien patron
+              </Link>
+            )}
+            <Link
+              href="/atelier/patronnage"
+              className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-sm font-medium text-foreground hover:bg-surface-muted"
+            >
+              <ArrowLeft className="h-4 w-4" /> Retour au patronnage
+            </Link>
+          </div>
         }
       />
       <PatronBibliothequeManager

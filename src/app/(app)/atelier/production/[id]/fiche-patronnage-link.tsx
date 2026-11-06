@@ -32,6 +32,13 @@ export interface FicheLiee {
   traces: { reference: string; statut: StatutTrace; pieces: number }[];
 }
 
+/** Ordre de coupe regroupé (0155) où l'article est coupé par pièces : ses tracés et les couches de l'article. */
+export interface OrdreCoupeLie {
+  id: string;
+  numeroOt: string;
+  traces: { reference: string; statut: StatutTrace; couches: number }[];
+}
+
 interface FicheOption {
   id: string;
   numero_ot: string;
@@ -57,10 +64,16 @@ export function FichePatronnageLink({
   editable,
   fiche,
   productModelId,
+  ordres = [],
+  fermee = false,
 }: {
   lineId: string;
   editable: boolean;
   fiche: FicheLiee | null;
+  /** Ordres de coupe regroupés où l'article est coupé par pièces (0155). */
+  ordres?: OrdreCoupeLie[];
+  /** Ancien chemin « t-shirt entier » fermé (0156) : plus de fiche d'article à générer ni à lier. */
+  fermee?: boolean;
   /** Modèle de l'article — la génération automatique en a besoin (lot C2). */
   productModelId: string | null;
 }) {
@@ -134,6 +147,31 @@ export function FichePatronnageLink({
           Pour lancer l&apos;ODF, au moins un tracé « Bon pour coupe » (tous articles confondus) ; les autres tracés peuvent être faits en cours de production.
         </p>
       </div>
+      {ordres.length > 0 && (
+        <div className="space-y-2 rounded-md border border-border px-3 py-2">
+          <p className="text-xs font-medium text-foreground-muted">Coupé par pièces — ordres de coupe regroupés</p>
+          {ordres.map((o) => (
+            <div key={o.id} className="text-sm">
+              <Link href={`/atelier/patronnage/${o.id}`} className="inline-flex items-center gap-1 font-medium text-brand hover:underline">
+                {o.numeroOt} <ExternalLink className="h-3 w-3" />
+              </Link>
+              {o.traces.length > 0 ? (
+                <ul className="mt-1 space-y-1 text-xs">
+                  {o.traces.map((t) => (
+                    <li key={t.reference} className="flex flex-wrap items-center gap-1.5">
+                      <span className="font-mono text-foreground-muted">{t.reference}</span>
+                      <Badge tone={STATUT_TRACE_TONES[t.statut]}>{STATUT_TRACE_LABELS[t.statut]}</Badge>
+                      <span className="text-foreground-muted">{t.couches} couche{t.couches > 1 ? "s" : ""} pour cet article</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-1 text-xs text-foreground-muted">Aucun tracé encore pour cet article.</p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
       {fiche ? (
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -166,7 +204,19 @@ export function FichePatronnageLink({
             )}
           </div>
         ) : (
-          <p className="text-sm text-foreground-muted">Aucune fiche liée.</p>
+          fermee ? (
+            ordres.length === 0 && (
+              <p className="text-sm text-foreground-muted">
+                Cet article se coupe par pièces : ajoutez-le à un ordre de coupe regroupé depuis{" "}
+                <Link href="/atelier/patronnage/besoins" className="font-medium text-brand hover:underline">
+                  Besoins de coupe
+                </Link>
+                .
+              </p>
+            )
+          ) : (
+            <p className="text-sm text-foreground-muted">Aucune fiche liée.</p>
+          )
         )}
 
         {needsAttention && (
@@ -181,7 +231,7 @@ export function FichePatronnageLink({
           </p>
         )}
 
-        {editable && !fiche && (
+        {editable && !fiche && !fermee && (
           <div className="flex items-center justify-between gap-3 rounded-md border border-dashed border-border px-2.5 py-2">
             <p className="text-xs text-foreground-muted">
               {productModelId
@@ -194,7 +244,7 @@ export function FichePatronnageLink({
           </div>
         )}
 
-        {editable && (
+        {editable && !fermee && (
           <div className="relative">
             <div className="flex items-center gap-2 rounded-md border border-border bg-surface px-2.5 py-2">
               <Search className="h-3.5 w-3.5 text-foreground-muted" />

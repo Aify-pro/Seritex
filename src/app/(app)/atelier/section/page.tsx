@@ -424,9 +424,9 @@ export default async function SectionQueuePage({
     const { data: tracesRegroupes } = await supabase
       .from("traces_placement")
       .select(
-        "id,reference,statut,repartition_par_couche,longueur_matelas_cm,largeur_matelas_cm,fiches_placement!inner(semi_fini_id,designation_article),trace_couches(production_order_line_id,nb_couches,production_order_lines(description,colors!production_order_lines_couleur_unique_id_fkey(name),production_orders(reference,status)))"
+        "id,reference,statut,longueur_matelas_cm,largeur_matelas_cm,fiches_placement!inner(regroupee),trace_semi_finis(semi_fini_id,taille,quantite_par_couche,semi_fini:product_models(name)),trace_couches(production_order_line_id,nb_couches,production_order_lines(description,colors!production_order_lines_couleur_unique_id_fkey(name),production_orders(reference,status)))"
       )
-      .not("fiches_placement.semi_fini_id", "is", null)
+      .eq("fiches_placement.regroupee", true)
       .in("statut", ["bon_pour_coupe", "en_coupe"])
       .order("created_at");
     type CoucheRow = {
@@ -434,15 +434,22 @@ export default async function SectionQueuePage({
       nb_couches: number;
       production_order_lines: { description: string; colors: { name: string } | null; production_orders: { reference: string; status: string } | null } | null;
     };
+    type PieceRow = { semi_fini_id: string; taille: string; quantite_par_couche: number; semi_fini: { name: string } | { name: string }[] | null };
     matelasRegroupes = (tracesRegroupes ?? [])
       .map((t) => {
         const couches = (t.trace_couches ?? []) as unknown as CoucheRow[];
+        const pieces = ((t.trace_semi_finis ?? []) as unknown as PieceRow[]).map((p) => ({
+          semiFiniId: p.semi_fini_id,
+          semiFini: (Array.isArray(p.semi_fini) ? p.semi_fini[0]?.name : p.semi_fini?.name) ?? "Pièce",
+          taille: p.taille,
+          quantiteParCouche: p.quantite_par_couche,
+        }));
         return {
           traceId: t.id as string,
           reference: t.reference as string,
-          semiFini: ((t.fiches_placement as unknown as { designation_article: string | null } | null)?.designation_article ?? "Pièce") as string,
+          semiFini: [...new Set(pieces.map((p) => p.semiFini))].join(" + ") || "Pièces",
           statut: t.statut as string,
-          repartitionParCouche: (t.repartition_par_couche ?? {}) as Record<string, number>,
+          pieces,
           longueurCm: (t.longueur_matelas_cm as number | null) ?? null,
           laizeCm: (t.largeur_matelas_cm as number | null) ?? null,
           articles: couches.map((c) => ({

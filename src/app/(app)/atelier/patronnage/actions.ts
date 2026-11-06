@@ -467,3 +467,26 @@ export async function analyzeTraceDxf(formData: FormData): Promise<TraceAnalysis
 
   return construireAnalyseDetaillee(contours, library.references, threshold);
 }
+
+/**
+ * Reprend un ancien patron de produit fini dans des patrons de semi-finis
+ * (migration 0155) : pour chaque pièce, le semi-fini qui la porte, ou « ignorée »
+ * explicitement. Décision humaine pièce par pièce, jamais devinée. L'ancien
+ * patron est conservé pour l'historique des analyses mais retiré de la
+ * reconnaissance.
+ */
+export async function migrerAncienPatron(
+  patternArticleId: string,
+  affectations: { piece: string; semiFiniId: string | null }[]
+): Promise<{ error?: string; crees?: number }> {
+  await requirePermission("patronnage", "modify");
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("migrer_ancien_patron", {
+    p_pattern_article_id: patternArticleId,
+    p_affectations: affectations.map((a) => ({ piece: a.piece, semi_fini_id: a.semiFiniId })),
+  });
+  if (error) return { error: error.message };
+  revalidatePath("/atelier/patronnage/bibliotheque");
+  revalidatePath("/atelier/patronnage/bibliotheque/migration");
+  return { crees: Array.isArray(data) ? data.length : 0 };
+}

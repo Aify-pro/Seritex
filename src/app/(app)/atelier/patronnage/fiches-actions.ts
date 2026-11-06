@@ -57,6 +57,11 @@ async function requireTracePermission(action: "create" | "modify") {
  * lues au référentiel plutôt qu'à une liste figée, donc la fonction est
  * asynchrone — `getSizes()` est mise en cache par requête serveur.
  */
+function hasRepartition(formData: FormData): boolean {
+  for (const k of formData.keys()) if (k.startsWith("couche_")) return true;
+  return false;
+}
+
 async function repartitionJson(formData: FormData, prefix: string, allowedSizes?: Size[]): Promise<RepartitionTailles> {
   const out: RepartitionTailles = {};
   const sizes = allowedSizes ?? (await getSizes());
@@ -633,88 +638,245 @@ export async function deleteFicheDefinitively(ficheId: string) {
 }
 
 // ------------------------------------------------------------
-// Ordres de coupe regroupés par pièce (étape 3a, migration 0149) : un
-// semi-fini coupé pour plusieurs articles d'ODF, couches attribuées à chaque
-// article. Les contrôles (nomenclature, pas de mélange avec la coupe en
-// t-shirts entiers, couches figées après validation) sont dans la base.
+// Ordres de coupe regroupés (étapes 3a, 3c ; migrations 0149, 0155) : un
+// tracé porte n'importe quel ensemble de semi-finis, composé par la PAO ;
+// chaque couche appartient à un article d'ODF. Les contrôles (tous les
+// semi-finis du tracé dans la nomenclature de l'article, cohérence avec le
+// fichier du tracé, pas de mélange avec la coupe en t-shirts entiers, couches
+// figées après validation) sont dans la base.
 // ------------------------------------------------------------
 
-export interface BesoinSemiFini {
+export interface BesoinCoupeLigne {
   lineId: string;
   productionOrderId: string;
   odf: string;
   statutOdf: string;
   client: string;
   article: string;
-  couleur: string | null;
+  demandees: number;
+  coupees: number;
+  prevues: number;
+  reste: number;
   parPieces: boolean;
   dejaEntier: boolean;
-  tailles: { taille: string; demandees: number; coupees: number; prevues: number; reste: number }[];
 }
 
-/** Articles d'ODF ouverts qui ont besoin d'un semi-fini, avec le reste à couper par taille. */
-export async function besoinsSemiFini(semiFiniId: string): Promise<BesoinSemiFini[] | { error: string }> {
+export interface BesoinCoupeGroupe {
+  semiFiniId: string;
+  semiFiniCode: string | null;
+  semiFiniNom: string;
+  taille: string;
+  textileId: string | null;
+  tissu: string | null;
+  grammage: number | null;
+  couleurId: string | null;
+  couleur: string | null;
+  demandees: number;
+  coupees: number;
+  prevues: number;
+  reste: number;
+  nbLignes: number;
+  nbOdf: number;
+  lignes: BesoinCoupeLigne[];
+}
+
+/** Besoin de coupe de toutes les ODF ouvertes, par semi-fini × taille × tissu × couleur. */
+export async function besoinsCoupe(): Promise<BesoinCoupeGroupe[] | { error: string }> {
   await requirePermission("view");
   const supabase = await createClient();
-  const { data, error } = await supabase.rpc("besoins_semi_fini", { p_semi_fini_id: semiFiniId });
+  const { data, error } = await supabase.rpc("besoins_coupe_agreges");
   if (error) return { error: error.message };
-  const map = new Map<string, BesoinSemiFini>();
-  for (const r of (data ?? []) as Record<string, unknown>[]) {
-    const id = r.line_id as string;
-    const b =
-      map.get(id) ??
-      ({
-        lineId: id,
-        productionOrderId: r.production_order_id as string,
-        odf: r.odf as string,
-        statutOdf: r.statut_odf as string,
-        client: r.client as string,
-        article: r.article as string,
-        couleur: (r.couleur as string | null) ?? null,
-        parPieces: !!r.par_pieces,
-        dejaEntier: !!r.deja_entier,
-        tailles: [],
-      } satisfies BesoinSemiFini);
-    b.tailles.push({
-      taille: r.taille as string,
-      demandees: Number(r.demandees),
-      coupees: Number(r.coupees),
-      prevues: Number(r.prevues),
-      reste: Number(r.reste),
-    });
-    map.set(id, b);
-  }
-  return [...map.values()];
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    semiFiniId: r.semi_fini_id as string,
+    semiFiniCode: (r.semi_fini_code as string | null) ?? null,
+    semiFiniNom: r.semi_fini_nom as string,
+    taille: r.taille as string,
+    textileId: (r.textile_id as string | null) ?? null,
+    tissu: (r.tissu as string | null) ?? null,
+    grammage: r.grammage === null || r.grammage === undefined ? null : Number(r.grammage),
+    couleurId: (r.couleur_id as string | null) ?? null,
+    couleur: (r.couleur as string | null) ?? null,
+    demandees: Number(r.demandees),
+    coupees: Number(r.coupees),
+    prevues: Number(r.prevues),
+    reste: Number(r.reste),
+    nbLignes: Number(r.nb_lignes),
+    nbOdf: Number(r.nb_odf),
+    lignes: ((r.lignes as Record<string, unknown>[]) ?? []).map((l) => ({
+      lineId: l.line_id as string,
+      productionOrderId: l.production_order_id as string,
+      odf: l.odf as string,
+      statutOdf: l.statut_odf as string,
+      client: l.client as string,
+      article: l.article as string,
+      demandees: Number(l.demandees),
+      coupees: Number(l.coupees),
+      prevues: Number(l.prevues),
+      reste: Number(l.reste),
+      parPieces: !!l.par_pieces,
+      dejaEntier: !!l.deja_entier,
+    })),
+  }));
 }
 
-/** Crée un ordre de coupe regroupé pour un semi-fini et les articles choisis. */
-export async function createFicheRegroupee(semiFiniId: string, lineIds: string[]) {
+export interface SelectionBesoin {
+  semiFiniId: string;
+  taille: string;
+  lineIds: string[];
+}
+
+/**
+ * Crée un tracé à partir des lignes cochées dans le tableau des besoins : dans
+ * un ordre de coupe regroupé existant, ou dans un nouvel ordre. Les pièces du
+ * tracé (semi-fini × taille) sont pré-remplies avec la quantité de la
+ * nomenclature, à corriger par la PAO ; les articles sont ajoutés à l'ordre ;
+ * les couches se répartissent ensuite sur la fiche.
+ */
+export async function creerTraceDepuisBesoins(input: { ficheId: string | null; selections: SelectionBesoin[] }) {
   const { authId } = await requirePermission("create");
-  if (lineIds.length === 0) return { error: "Choisissez au moins un article d'ODF." };
+  await requireTracePermission("create");
+  const selections = input.selections.filter((x) => x.lineIds.length > 0);
+  if (selections.length === 0) return { error: "Cochez au moins une ligne du tableau des besoins." };
   const supabase = await createClient();
-  const { data: sf } = await supabase.from("product_models").select("name").eq("id", semiFiniId).maybeSingle();
-  const { data: fiche, error } = await supabase
-    .from("fiches_placement")
-    .insert({ semi_fini_id: semiFiniId, designation_article: sf?.name ?? null, cree_par: authId })
-    .select("id,numero_ot")
-    .single();
-  if (error || !fiche) return { error: error?.message ?? "Création impossible" };
+  const lineIds = [...new Set(selections.flatMap((x) => x.lineIds))];
+
+  let ficheId = input.ficheId;
+  let numeroOt: string;
+  let creee = false;
+  if (ficheId) {
+    const gate = await assertFicheOuverteAuxTraces(ficheId);
+    if ("error" in gate) return gate;
+    const { data: f } = await supabase.from("fiches_placement").select("regroupee").eq("id", ficheId).single();
+    if (!f?.regroupee) return { error: "Cette fiche n'est pas un ordre de coupe regroupé." };
+    numeroOt = gate.numeroOt;
+  } else {
+    const { data: fiche, error } = await supabase
+      .from("fiches_placement")
+      .insert({ regroupee: true, designation_article: "Ordre de coupe regroupé", cree_par: authId })
+      .select("id,numero_ot")
+      .single();
+    if (error || !fiche) return { error: error?.message ?? "Création impossible" };
+    ficheId = fiche.id as string;
+    numeroOt = fiche.numero_ot as string;
+    creee = true;
+  }
+  const annuler = async (message: string) => {
+    if (creee && ficheId) await supabase.from("fiches_placement").delete().eq("id", ficheId);
+    return { error: message };
+  };
+
   const { error: e2 } = await supabase
     .from("coupe_groupee_lignes")
-    .insert(lineIds.map((production_order_line_id) => ({ fiche_id: fiche.id, production_order_line_id })));
-  if (e2) {
-    await supabase.from("fiches_placement").delete().eq("id", fiche.id);
-    return { error: e2.message };
+    .upsert(
+      lineIds.map((production_order_line_id) => ({ fiche_id: ficheId, production_order_line_id })),
+      { onConflict: "fiche_id,production_order_line_id", ignoreDuplicates: true }
+    );
+  if (e2) return annuler(e2.message);
+
+  const { data: existing } = await supabase.from("traces_placement").select("ordre").eq("fiche_id", ficheId).order("ordre", { ascending: false }).limit(1);
+  const ordre = (existing?.[0]?.ordre ?? 0) + 1;
+  const { data: trace, error: e3 } = await supabase
+    .from("traces_placement")
+    .insert({ fiche_id: ficheId, ordre, reference: `${numeroOt}-T${ordre}` })
+    .select("id")
+    .single();
+  if (e3 || !trace) return annuler(e3?.message ?? "Création du tracé impossible");
+
+  // Quantité de la nomenclature par semi-fini (point de départ, à corriger) et articles auxquels il manque une pièce.
+  const { data: lignes } = await supabase.from("production_order_lines").select("id,description,product_model_id").in("id", lineIds);
+  const modeles = [...new Set((lignes ?? []).map((l) => l.product_model_id as string).filter(Boolean))];
+  const { data: nomenclature } = modeles.length
+    ? await supabase.from("nomenclature_lines").select("product_model_id,semi_fini_id,quantite_par_piece").in("product_model_id", modeles).not("semi_fini_id", "is", null)
+    : { data: [] as { product_model_id: string; semi_fini_id: string; quantite_par_piece: number }[] };
+  const semiFinisChoisis = [...new Set(selections.map((x) => x.semiFiniId))];
+  const quantiteParModele = (modele: string, sf: string) =>
+    (nomenclature ?? []).filter((n) => n.product_model_id === modele && n.semi_fini_id === sf).reduce((t, n) => t + Number(n.quantite_par_piece), 0);
+  const premierModele = modeles[0];
+  const pieces = [...new Map(selections.map((x) => [`${x.semiFiniId}|${x.taille}`, x])).values()].map((x) => ({
+    trace_id: trace.id as string,
+    semi_fini_id: x.semiFiniId,
+    taille: x.taille,
+    quantite_par_couche: Math.max(1, Math.trunc(quantiteParModele(premierModele, x.semiFiniId)) || 1),
+    source: "saisie" as const,
+  }));
+  const { error: e4 } = await supabase.from("trace_semi_finis").insert(pieces);
+  if (e4) return annuler(e4.message);
+
+  const avertissements: string[] = [];
+  for (const l of lignes ?? []) {
+    const manquants = semiFinisChoisis.filter((sf) => quantiteParModele(l.product_model_id as string, sf) === 0);
+    if (manquants.length) avertissements.push(`« ${l.description} » n'a pas toutes les pièces de ce tracé : aucune couche ne pourra lui être attribuée.`);
   }
+
   await supabase.from("audit_log").insert({
     user_id: authId,
-    action: "creer_ordre_coupe_regroupe",
-    entity_type: "fiche_placement",
-    entity_id: fiche.id,
-    metadata: { numero_ot: fiche.numero_ot, semi_fini_id: semiFiniId, lignes: lineIds },
+    action: "creer_trace_depuis_besoins",
+    entity_type: "trace_placement",
+    entity_id: trace.id,
+    metadata: { numero_ot: numeroOt, fiche_id: ficheId, lignes: lineIds, pieces: pieces.length },
   });
   revalidatePath("/atelier/patronnage");
-  return { id: fiche.id as string, numeroOt: fiche.numero_ot as string };
+  revalidatePath("/atelier/patronnage/besoins");
+  return { ficheId: ficheId as string, traceId: trace.id as string, numeroOt, avertissements };
+}
+
+/** Remplace les pièces d'un tracé regroupé par la saisie (semi-fini × taille × quantité par couche). */
+export async function enregistrerPiecesTrace(
+  traceId: string,
+  ficheId: string,
+  pieces: { semiFiniId: string; taille: string; quantite: number }[]
+): Promise<{ error?: string }> {
+  await requireTracePermission("modify");
+  const gate = await assertTraceEditable(traceId, ficheId);
+  if ("error" in gate) return { error: gate.error };
+  const supabase = await createClient();
+  const lignes = pieces.filter((p) => p.semiFiniId && p.taille && Number.isInteger(p.quantite) && p.quantite > 0);
+  const cles = new Set(lignes.map((p) => `${p.semiFiniId}|${p.taille}`));
+  if (cles.size !== lignes.length) return { error: "Un semi-fini ne figure qu'une fois par taille sur un tracé." };
+  const { data: avant } = await supabase.from("trace_semi_finis").select("semi_fini_id,taille,quantite_par_couche,source").eq("trace_id", traceId);
+  const ancien = new Map((avant ?? []).map((a) => [`${a.semi_fini_id}|${a.taille}`, a]));
+  const { error: delError } = await supabase.from("trace_semi_finis").delete().eq("trace_id", traceId);
+  if (delError) return { error: delError.message };
+  if (lignes.length) {
+    const { error } = await supabase.from("trace_semi_finis").insert(
+      lignes.map((p) => {
+        const a = ancien.get(`${p.semiFiniId}|${p.taille}`);
+        // Une quantité lue dans le fichier garde sa source tant qu'on ne la change pas.
+        const source = a && a.source === "dxf" && a.quantite_par_couche === p.quantite ? "dxf" : "saisie";
+        return { trace_id: traceId, semi_fini_id: p.semiFiniId, taille: p.taille, quantite_par_couche: p.quantite, source };
+      })
+    );
+    if (error) {
+      // Remet les pièces d'avant : la base a refusé (par ex. un article sans toutes les pièces).
+      if (avant?.length) await supabase.from("trace_semi_finis").insert(avant.map((a) => ({ trace_id: traceId, ...a })));
+      return { error: error.message };
+    }
+  }
+  revalidatePath(`/atelier/patronnage/${ficheId}`);
+  return {};
+}
+
+/** Pré-remplit les pièces d'un tracé regroupé avec ce que son fichier contient (D2). */
+export async function preRemplirPiecesTrace(traceId: string, ficheId: string): Promise<{ error?: string; lignes?: number }> {
+  await requireTracePermission("modify");
+  const gate = await assertTraceEditable(traceId, ficheId);
+  if ("error" in gate) return { error: gate.error };
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("pre_remplir_pieces_trace", { p_trace_id: traceId });
+  if (error) return { error: error.message };
+  revalidatePath(`/atelier/patronnage/${ficheId}`);
+  return { lignes: Number(data ?? 0) };
+}
+
+/** Dérogation d'un responsable à un écart entre les pièces déclarées et le fichier du tracé (motif obligatoire). */
+export async function derogerControleTrace(traceId: string, ficheId: string, motif: string): Promise<{ error?: string }> {
+  await requirePermission("unlock");
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("deroger_controle_trace", { p_trace_id: traceId, p_motif: motif });
+  if (error) return { error: error.message };
+  revalidatePath("/atelier/patronnage");
+  revalidatePath(`/atelier/patronnage/${ficheId}`);
+  return {};
 }
 
 /** Ajoute un article d'ODF à un ordre regroupé. */
@@ -861,7 +1023,8 @@ export async function updateTrace(traceId: string, ficheId: string, formData: Fo
       largeur_matelas_cm: formData.get("largeur_matelas_cm") ? Number(formData.get("largeur_matelas_cm")) : null,
       // Tracé regroupé (0149) : les plis sont la somme des couches par article, le champ n'est pas envoyé.
       ...(formData.has("nb_plis") ? { nb_plis: formData.get("nb_plis") ? Number(formData.get("nb_plis")) : null } : {}),
-      repartition_par_couche: await repartitionJson(formData, "couche"),
+      // Tracé regroupé (0155) : ses pièces sont dans trace_semi_finis, pas de répartition par couche à écrire.
+      ...(hasRepartition(formData) ? { repartition_par_couche: await repartitionJson(formData, "couche") } : {}),
       updated_at: new Date().toISOString(),
     })
     .eq("id", traceId)
@@ -1039,7 +1202,15 @@ async function persisterAnalyse(
     },
     { onConflict: "trace_id" }
   );
-  return error ? error.message : null;
+  if (error) return error.message;
+  // Tracé d'un ordre regroupé sans pièces : le fichier les pré-remplit (D2) ;
+  // la saisie manuelle reste possible et rien n'est jamais écrasé ici.
+  const { data: t } = await supabase.from("traces_placement").select("fiches_placement(regroupee),trace_semi_finis(id)").eq("id", traceId).maybeSingle();
+  const fiche = Array.isArray(t?.fiches_placement) ? t?.fiches_placement[0] : t?.fiches_placement;
+  if (fiche?.regroupee && (t?.trace_semi_finis ?? []).length === 0) {
+    await supabase.rpc("pre_remplir_pieces_trace", { p_trace_id: traceId });
+  }
+  return null;
 }
 
 function sanitizeFileName(name: string) {
