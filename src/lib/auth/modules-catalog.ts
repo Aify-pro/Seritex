@@ -81,6 +81,7 @@ export const MODULE_META: Record<string, ModuleMeta> = {
   stockage_cibles: { group: "parametres", actions: VIEW, platformAdminOnly: true },
   notifications: { group: "parametres", actions: VIEW, platformAdminOnly: true },
   site_web: { group: "parametres", actions: ["view", "modify"] },
+  personnel: { group: "parametres", actions: ["view", "create", "modify", "delete", "validate"] },
   parametres_prospection: { group: "parametres", actions: ["view", "create", "modify", "delete"] },
 };
 
