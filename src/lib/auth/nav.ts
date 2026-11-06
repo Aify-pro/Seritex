@@ -143,6 +143,7 @@ const STAFF_NAV: NavItem[] = [
   { href: "/parametres/dispatching", label: "Dispatching des tailles", icon: navIcon(ChartPie), section: PARAMETRES, module: "dispatching" },
   { href: "/parametres/livraison", label: "Livraison", icon: navIcon(MapPinned), section: PARAMETRES, module: "parametres_livraison" },
   { href: "/parametres/prospection", label: "Prospection", icon: navIcon(Briefcase), section: PARAMETRES, module: "parametres_prospection" },
+  { href: "/parametres/personnel", label: "Personnel", icon: navIcon(Users), section: PARAMETRES, module: "personnel" },
   { href: "/parametres/sage", label: "Intégration Sage", icon: navIcon(Plug), section: PARAMETRES, module: "parametres_sage" },
   { href: "/parametres/clients-sage", label: "Clients Sage (lecture)", icon: navIcon(Building2), section: PARAMETRES, module: "clients_sage" },
   { href: "/parametres/articles-sage", label: "Articles Sage (lecture)", icon: navIcon(Package), section: PARAMETRES, module: "articles_sage" },
