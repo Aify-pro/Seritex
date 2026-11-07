@@ -91,12 +91,12 @@ const HUBS: HubDefinition[] = [
     label: "Personnel",
     icon: Users,
     tabs: [
-      { href: "/parametres/personnel/import", label: "Import mensuel" },
       { href: "/parametres/personnel/fiches", label: "Fiches" },
       { href: "/parametres/personnel/departements", label: "Départements" },
       { href: "/parametres/personnel/ateliers", label: "Ateliers et sections" },
       { href: "/parametres/personnel/rubriques", label: "Rubriques de paie" },
       { href: "/parametres/personnel/alertes", label: "Alertes" },
+      { href: "/parametres/personnel/import", label: "Import mensuel" },
     ],
   },
   {
