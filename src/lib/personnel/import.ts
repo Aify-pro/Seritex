@@ -1,19 +1,15 @@
 /**
- * Import mensuel du personnel (migration 0157) : lecture et contrôle des
- * fichiers produits par le programme pointage-drh. Fonctions PURES (aucun
- * accès base) : le contexte (employés et sections existants) est passé en
- * paramètre, ce qui permet de les tester sans Supabase.
+ * Imports du personnel (migrations 0157 et 0159) : lecture et contrôle des
+ * fichiers. Fonctions PURES (aucun accès base) : le contexte (employés,
+ * ateliers) est passé en paramètre, ce qui permet de les tester sans Supabase.
  *
- * Trois fichiers CSV (séparateur « ; » ou « , », en-tête obligatoire, accents
- * et majuscules ignorés dans les en-têtes) :
- *
- *   fiches    matricule;nom;fonction;type;section;salaire_base;primes_fixes;
- *             avantages;charges_patronales;date_entree;date_sortie;statut;confidentiel
- *   paie      matricule;mois;salaire_base;primes;heures_sup;avantages;charges_patronales
- *   presence  matricule;jour;statut;heures
- *
- * Le format définitif sera fixé avec le journal de paie réel (question Q3 du
- * plan) ; il reste volontairement plat et simple.
+ *   fiches    liste du personnel, Excel (.xlsx) ou CSV, « format spécial » :
+ *             matricule ; nom ; prénom ; atelier ; fonction ; type_contrat ; statut
+ *             Un matricule déjà connu est SAUTÉ (rien n'est mis à jour) ; un
+ *             matricule inconnu est ajouté.
+ *   paie      livre de paie exporté de Sage → voir livre-paie.ts
+ *   presence  matricule ; jour ; statut ; heures   (CSV, provisoire : viendra
+ *             de pointage-drh)
  */
 
 export type TypeImport = "fiches" | "paie" | "presence";
@@ -24,6 +20,8 @@ export const STATUTS_EMPLOYE = ["actif", "suspendu", "sorti"] as const;
 export type StatutEmploye = (typeof STATUTS_EMPLOYE)[number];
 export const STATUTS_PRESENCE = ["present", "absent", "conge", "maladie", "ferie", "repos"] as const;
 export type StatutPresence = (typeof STATUTS_PRESENCE)[number];
+export const TYPES_CONTRAT = ["CDI", "CDD"] as const;
+export type TypeContrat = (typeof TYPES_CONTRAT)[number];
 
 export const LIBELLES_TYPE_EMPLOI: Record<TypeEmploi, string> = {
   production_directe: "Production directe",
@@ -32,16 +30,24 @@ export const LIBELLES_TYPE_EMPLOI: Record<TypeEmploi, string> = {
 };
 
 export const LIBELLES_IMPORT: Record<TypeImport, string> = {
-  fiches: "Fiches du personnel",
-  paie: "Paie du mois",
-  presence: "Présence jour par jour",
+  fiches: "Liste du personnel (Excel)",
+  paie: "Livre de paie (Sage)",
+  presence: "Présence jour par jour (CSV)",
 };
 
-export const COLONNES_IMPORT: Record<TypeImport, string[]> = {
-  fiches: ["matricule", "nom", "fonction", "type", "section", "salaire_base", "primes_fixes", "avantages", "charges_patronales", "date_entree", "date_sortie", "statut", "confidentiel"],
-  paie: ["matricule", "mois", "salaire_base", "primes", "heures_sup", "avantages", "charges_patronales"],
-  presence: ["matricule", "jour", "statut", "heures"],
+/** Colonnes de la liste du personnel (Excel) : modèle téléchargeable et export. */
+export const COLONNES_LISTE = ["matricule", "nom", "prenom", "atelier", "fonction", "type_contrat", "statut"] as const;
+export const ENTETES_LISTE: Record<(typeof COLONNES_LISTE)[number], string> = {
+  matricule: "Matricule",
+  nom: "Nom",
+  prenom: "Prénom",
+  atelier: "Atelier",
+  fonction: "Fonction",
+  type_contrat: "Type de contrat",
+  statut: "Statut",
 };
+
+export const COLONNES_PRESENCE = ["matricule", "jour", "statut", "heures"];
 
 /* ------------------------------------------------------------------------ */
 /* Lecture CSV                                                              */
@@ -94,8 +100,11 @@ export function lireCsv(texte: string): string[][] {
 export function lireMontant(valeur: string): number | null {
   const v = valeur.replace(/[\s ]/g, "").replace(/f(cfa)?$/i, "");
   if (v === "") return null;
-  const nettoye = /,\d{1,2}$/.test(v) ? v.replace(/\./g, "").replace(",", ".") : v.replace(/[.,](?=\d{3}(\D|$))/g, "");
-  return /^\d+(\.\d+)?$/.test(nettoye) ? Number(nettoye) : Number.NaN;
+  const negatif = v.startsWith("-");
+  const abs = negatif ? v.slice(1) : v;
+  const nettoye = /,\d{1,2}$/.test(abs) ? abs.replace(/\./g, "").replace(",", ".") : abs.replace(/[.,](?=\d{3}(\D|$))/g, "");
+  if (!/^\d+(\.\d+)?$/.test(nettoye)) return Number.NaN;
+  return negatif ? -Number(nettoye) : Number(nettoye);
 }
 
 /** Date « 2026-11-30 » ou « 30/11/2026 » → ISO ; null si vide ; undefined si illisible. */
@@ -111,23 +120,15 @@ export function lireDate(valeur: string): string | null | undefined {
   return Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== iso ? undefined : iso;
 }
 
-function lireBooleen(valeur: string): boolean | undefined {
-  const v = normaliser(valeur);
-  if (v === "") return false;
-  if (["1", "oui", "o", "vrai", "true", "x", "yes"].includes(v)) return true;
-  if (["0", "non", "n", "faux", "false", "no"].includes(v)) return false;
-  return undefined;
-}
-
 /* ------------------------------------------------------------------------ */
-/* Contrôle des lignes                                                      */
+/* Contexte et lignes de contrôle                                           */
 /* ------------------------------------------------------------------------ */
 
 export interface ContexteImport {
   /** Employés existants, par matricule normalisé. */
-  employes: Map<string, { id: string; confidentiel: boolean }>;
-  /** Sections d'atelier, par nom normalisé. */
-  sections: Map<string, { id: string; nom: string }>;
+  employes: Map<string, { id: string; confidentiel: boolean; nomComplet?: string }>;
+  /** Ateliers connus (Fiche de tâches), par nom ou libellé normalisé. */
+  ateliers?: Map<string, { atelier: string; sectionId: string | null; structure: boolean }>;
 }
 
 export interface LigneImport {
@@ -147,157 +148,165 @@ export interface ResultatLecture {
   mois?: string | null;
 }
 
-/** Section(s) d'une fiche : « Coupe » ou « Coupe:60|Finition:40 » (somme 100). */
-function lireSections(valeur: string, ctx: ContexteImport, erreurs: string[]): { section_id: string; nom: string; pourcentage: number }[] {
-  if (valeur === "") return [];
-  const morceaux = valeur.split("|").map((s) => s.trim()).filter(Boolean);
-  const resultat: { section_id: string; nom: string; pourcentage: number }[] = [];
-  for (const morceau of morceaux) {
-    const [nomBrut, pctBrut] = morceau.split(":").map((s) => s.trim());
-    const section = ctx.sections.get(normaliser(nomBrut ?? ""));
-    if (!section) {
-      erreurs.push(`Section inconnue : « ${nomBrut} »`);
-      continue;
-    }
-    const pct = pctBrut === undefined ? 100 : lireMontant(pctBrut.replace("%", ""));
-    if (pct === null || Number.isNaN(pct) || pct <= 0 || pct > 100) {
-      erreurs.push(`Pourcentage invalide pour la section « ${section.nom} »`);
-      continue;
-    }
-    resultat.push({ section_id: section.id, nom: section.nom, pourcentage: pct });
-  }
-  if (resultat.length > 0 && erreurs.length === 0) {
-    const total = resultat.reduce((s, r) => s + r.pourcentage, 0);
-    if (Math.abs(total - 100) > 0.01) erreurs.push(`La répartition entre sections fait ${total} %, elle doit faire 100 %`);
-  }
-  return resultat;
+/** Autres intitulés acceptés pour une colonne (clé et alias déjà normalisés). */
+const ALIAS_COLONNES: Record<string, string[]> = {
+  typecontrat: ["typedecontrat", "contrat"],
+  prenom: ["prenoms"],
+  atelier: ["section", "departement", "service"],
+  fonction: ["poste"],
+};
+
+/** Indexe les colonnes d'un tableau de cellules par nom normalisé (alias compris). */
+function indexerColonnes(enTete: string[]): (ligne: string[], colonne: string) => string {
+  const idx = new Map<string, number>();
+  enTete.map(normaliser).forEach((nom, i) => idx.set(nom, i));
+  return (ligne, colonne) => {
+    const cle = normaliser(colonne);
+    const i = idx.get(cle) ?? (ALIAS_COLONNES[cle] ?? []).map((a) => idx.get(a)).find((v) => v !== undefined);
+    return (ligne[i ?? -1] ?? "").trim();
+  };
 }
 
+const aColonne = (enTete: string[], colonne: string) => {
+  const noms = enTete.map(normaliser);
+  const cle = normaliser(colonne);
+  return noms.includes(cle) || (ALIAS_COLONNES[cle] ?? []).some((a) => noms.includes(a));
+};
+
+/** Matricule d'une cellule : Excel perd les zéros de tête (« 5 » pour « 0005 ») ; les matricules numériques courts sont complétés à 4 chiffres. */
+export function lireMatricule(valeur: string): string {
+  const v = valeur.replace(/^=/, "").replace(/\.0+$/, "").trim();
+  return /^\d{1,3}$/.test(v) ? v.padStart(4, "0") : v;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Liste du personnel                                                       */
+/* ------------------------------------------------------------------------ */
+
 /**
- * Lit un fichier et produit une ligne de contrôle par ligne du fichier.
- * Rien n'est écrit ici : l'aperçu est montré, puis appliqué sur validation.
+ * Liste du personnel. Matricule connu → sauté (nom identique) ou sauté avec
+ * alerte (nom différent : rien n'est écrasé). Matricule inconnu → ajouté.
  */
-export function controlerFichier(type: TypeImport, texte: string, ctx: ContexteImport): ResultatLecture {
-  const cellules = lireCsv(texte);
+export function controlerFiches(cellules: string[][], ctx: ContexteImport): ResultatLecture {
   if (cellules.length < 2) return { lignes: [], erreurFichier: "Le fichier est vide ou ne contient que l'en-tête." };
-
-  const attendues = COLONNES_IMPORT[type];
-  const enTete = cellules[0].map(normaliser);
-  const idx = new Map<string, number>();
-  enTete.forEach((nom, i) => idx.set(nom, i));
-  const obligatoires = type === "fiches" ? ["matricule", "nom"] : type === "paie" ? ["matricule", "mois"] : ["matricule", "jour", "statut"];
-  const manquantes = obligatoires.filter((c) => !idx.has(normaliser(c)));
+  const enTete = cellules[0];
+  const manquantes = ["matricule", "nom"].filter((c) => !aColonne(enTete, c));
   if (manquantes.length > 0) {
-    return { lignes: [], erreurFichier: `Colonnes manquantes : ${manquantes.join(", ")}. Colonnes attendues : ${attendues.join(" ; ")}.` };
+    return { lignes: [], erreurFichier: `Colonnes manquantes : ${manquantes.join(", ")}. Colonnes attendues : ${COLONNES_LISTE.map((c) => ENTETES_LISTE[c]).join(" ; ")}.` };
   }
-  const val = (ligne: string[], col: string) => (ligne[idx.get(normaliser(col)) ?? -1] ?? "").trim();
-
+  const val = indexerColonnes(enTete);
   const lignes: LigneImport[] = [];
   const vus = new Set<string>();
-  let mois: string | null | undefined;
 
   cellules.slice(1).forEach((cells, i) => {
-    const numero = i + 2;
     const erreurs: string[] = [];
     const avertissements: string[] = [];
-    const matricule = val(cells, "matricule");
+    const matricule = lireMatricule(val(cells, "matricule"));
     const cle = normaliser(matricule);
+    const nom = val(cells, "nom");
+    const prenom = val(cells, "prenom");
+    const nomComplet = `${nom} ${prenom}`.trim();
     const existant = ctx.employes.get(cle);
-    const donnees: Record<string, unknown> = { matricule };
 
     if (!matricule) erreurs.push("Matricule manquant");
+    if (matricule && vus.has(cle)) erreurs.push("Matricule présent deux fois dans le fichier");
+    vus.add(cle);
 
-    if (type === "fiches") {
-      const nom = val(cells, "nom");
-      if (!nom) erreurs.push("Nom manquant");
-      const typeBrut = normaliser(val(cells, "type"));
-      const typeEmploi = typeBrut === "" ? "production_directe" : TYPES_EMPLOI.find((t) => normaliser(t) === typeBrut || normaliser(LIBELLES_TYPE_EMPLOI[t]) === typeBrut);
-      if (!typeEmploi) erreurs.push(`Type inconnu : « ${val(cells, "type")} » (production_directe, encadrement_production ou structure)`);
-      const statutBrut = normaliser(val(cells, "statut"));
-      const statut = statutBrut === "" ? "actif" : STATUTS_EMPLOYE.find((s) => s === statutBrut);
-      if (!statut) erreurs.push(`Statut inconnu : « ${val(cells, "statut")} » (actif, suspendu ou sorti)`);
-      const confidentiel = lireBooleen(val(cells, "confidentiel"));
-      if (confidentiel === undefined) erreurs.push("« confidentiel » : répondre oui ou non");
-      const montants: Record<string, number | null> = {};
-      for (const champ of ["salaire_base", "primes_fixes", "avantages", "charges_patronales"]) {
-        const m = lireMontant(val(cells, champ));
-        if (Number.isNaN(m)) erreurs.push(`Montant illisible : ${champ}`);
-        montants[champ] = m;
-      }
-      const entree = lireDate(val(cells, "date_entree"));
-      const sortie = lireDate(val(cells, "date_sortie"));
-      if (entree === undefined) erreurs.push("Date d'entrée illisible (AAAA-MM-JJ ou JJ/MM/AAAA)");
-      if (sortie === undefined) erreurs.push("Date de sortie illisible (AAAA-MM-JJ ou JJ/MM/AAAA)");
-      if (entree && sortie && sortie < entree) erreurs.push("La sortie est antérieure à l'entrée");
-      const sectionsLues = lireSections(val(cells, "section"), ctx, erreurs);
-      if (confidentiel === true) {
-        if (Object.values(montants).some((m) => m !== null)) avertissements.push("Employé confidentiel : les montants du fichier sont ignorés");
-        for (const c of Object.keys(montants)) montants[c] = null;
-      }
-      Object.assign(donnees, {
+    let action: LigneImport["action"] = existant ? "ignorer" : "creer";
+    if (existant) {
+      if (existant.nomComplet && normaliser(existant.nomComplet) !== normaliser(nomComplet)) {
+        avertissements.push(`Matricule déjà connu sous un autre nom (« ${existant.nomComplet} ») : fiche non modifiée`);
+      } else avertissements.push("Déjà présent : sauté");
+    } else if (!nom) erreurs.push("Nom manquant");
+
+    const contratBrut = val(cells, "type_contrat").toUpperCase().replace(/\s/g, "");
+    const contrat = contratBrut === "" ? null : contratBrut === "CDI" || contratBrut === "CDD" ? contratBrut : undefined;
+    if (contrat === undefined) erreurs.push(`Type de contrat inconnu : « ${val(cells, "type_contrat")} » (CDI ou CDD)`);
+    const statutBrut = normaliser(val(cells, "statut"));
+    const statut = statutBrut === "" ? "actif" : STATUTS_EMPLOYE.find((s) => s === statutBrut);
+    if (!statut) erreurs.push(`Statut inconnu : « ${val(cells, "statut")} » (actif, suspendu ou sorti)`);
+
+    // Atelier → section de la plateforme, ou structure, ou « à classer ».
+    const atelierBrut = val(cells, "atelier");
+    const atelier = atelierBrut ? ctx.ateliers?.get(normaliser(atelierBrut)) : undefined;
+    let typeEmploi: TypeEmploi = "production_directe";
+    const sections: { section_id: string; pourcentage: number }[] = [];
+    if (atelier?.structure) typeEmploi = "structure";
+    else if (atelier?.sectionId) sections.push({ section_id: atelier.sectionId, pourcentage: 100 });
+    else if (atelierBrut && !existant) {
+      avertissements.push(`Atelier « ${atelierBrut} » ${atelier ? "pas encore rattaché à une section" : "inconnu"} : section à classer (Paramètres > Personnel)`);
+    }
+
+    if (existant?.confidentiel) action = "ignorer";
+
+    lignes.push({
+      ligne: i + 2,
+      action,
+      matricule,
+      donnees: {
+        matricule,
         nom,
+        prenom: prenom || null,
         fonction: val(cells, "fonction") || null,
         type_emploi: typeEmploi,
+        type_contrat: contrat ?? null,
         statut,
-        confidentiel: confidentiel === true,
-        ...montants,
-        date_entree: entree ?? null,
-        date_sortie: sortie ?? null,
-        sections: sectionsLues,
-        section_renseignee: val(cells, "section") !== "",
-      });
-    } else {
-      if (matricule && !existant) erreurs.push(`Matricule inconnu : « ${matricule} » (importez d'abord les fiches)`);
-      if (existant?.confidentiel) avertissements.push("Employé confidentiel : ligne ignorée (aucun montant ni présence enregistré)");
-
-      if (type === "paie") {
-        const brut = val(cells, "mois");
-        const m = /^(\d{4})-(\d{2})(?:-\d{2})?$/.exec(brut) ?? (/^(\d{2})\/(\d{4})$/.test(brut) ? /^(\d{2})\/(\d{4})$/.exec(brut) : null);
-        const moisLu = m ? (brut.includes("/") ? `${m[2]}-${m[1]}-01` : `${m[1]}-${m[2]}-01`) : null;
-        if (!moisLu || lireDate(moisLu) === undefined) erreurs.push("Mois illisible (AAAA-MM)");
-        else if (mois !== undefined && mois !== moisLu) erreurs.push("Plusieurs mois dans le même fichier : un fichier de paie = un mois");
-        else mois = moisLu;
-        const montants: Record<string, number> = {};
-        for (const champ of ["salaire_base", "primes", "heures_sup", "avantages", "charges_patronales"]) {
-          const v = lireMontant(val(cells, champ));
-          if (v !== null && (Number.isNaN(v) || v < 0)) erreurs.push(`Montant illisible : ${champ}`);
-          montants[champ] = v === null || Number.isNaN(v) ? 0 : v;
-        }
-        if (Object.values(montants).every((v) => v === 0)) avertissements.push("Tous les montants sont à zéro");
-        Object.assign(donnees, { mois: moisLu, ...montants });
-        const doublon = `${cle}|${moisLu}`;
-        if (vus.has(doublon)) erreurs.push("Matricule présent deux fois pour ce mois");
-        vus.add(doublon);
-      } else {
-        const jour = lireDate(val(cells, "jour"));
-        if (!jour) erreurs.push("Jour illisible (AAAA-MM-JJ ou JJ/MM/AAAA)");
-        const statutBrut = normaliser(val(cells, "statut"));
-        const statut = STATUTS_PRESENCE.find((s) => s === statutBrut);
-        if (!statut) erreurs.push(`Statut de présence inconnu : « ${val(cells, "statut")} » (${STATUTS_PRESENCE.join(", ")})`);
-        const heuresBrutes = lireMontant(val(cells, "heures"));
-        if (heuresBrutes !== null && (Number.isNaN(heuresBrutes) || heuresBrutes > 24)) erreurs.push("Heures invalides (0 à 24)");
-        Object.assign(donnees, { jour: jour ?? null, statut, heures: heuresBrutes !== null && !Number.isNaN(heuresBrutes) ? heuresBrutes : null });
-        const doublon = `${cle}|${jour}`;
-        if (vus.has(doublon)) erreurs.push("Matricule présent deux fois ce jour-là");
-        vus.add(doublon);
-      }
-    }
-
-    if (type === "fiches") {
-      if (matricule && vus.has(cle)) erreurs.push("Matricule présent deux fois dans le fichier");
-      vus.add(cle);
-    }
-
-    const ignorer = type !== "fiches" && existant?.confidentiel === true;
-    lignes.push({
-      ligne: numero,
-      action: ignorer ? "ignorer" : existant ? "modifier" : "creer",
-      matricule,
-      donnees,
+        atelier_source: atelierBrut ? (atelier?.atelier ?? normaliser(atelierBrut)) : null,
+        atelier_libelle: atelierBrut || null,
+        sections,
+      },
       erreurs,
       avertissements,
     });
   });
+  return { lignes };
+}
 
-  return { lignes, mois: mois ?? null };
+/* ------------------------------------------------------------------------ */
+/* Présence                                                                 */
+/* ------------------------------------------------------------------------ */
+
+export function controlerPresence(texte: string, ctx: ContexteImport): ResultatLecture {
+  const cellules = lireCsv(texte);
+  if (cellules.length < 2) return { lignes: [], erreurFichier: "Le fichier est vide ou ne contient que l'en-tête." };
+  const enTete = cellules[0];
+  const manquantes = ["matricule", "jour", "statut"].filter((c) => !aColonne(enTete, c));
+  if (manquantes.length > 0) {
+    return { lignes: [], erreurFichier: `Colonnes manquantes : ${manquantes.join(", ")}. Colonnes attendues : ${COLONNES_PRESENCE.join(" ; ")}.` };
+  }
+  const val = indexerColonnes(enTete);
+  const lignes: LigneImport[] = [];
+  const vus = new Set<string>();
+
+  cellules.slice(1).forEach((cells, i) => {
+    const erreurs: string[] = [];
+    const avertissements: string[] = [];
+    const matricule = lireMatricule(val(cells, "matricule"));
+    const existant = ctx.employes.get(normaliser(matricule));
+    if (!matricule) erreurs.push("Matricule manquant");
+    else if (!existant) erreurs.push(`Matricule inconnu : « ${matricule} » (importez d'abord la liste du personnel)`);
+    if (existant?.confidentiel) avertissements.push("Employé confidentiel : ligne ignorée (aucune présence enregistrée)");
+
+    const jour = lireDate(val(cells, "jour"));
+    if (!jour) erreurs.push("Jour illisible (AAAA-MM-JJ ou JJ/MM/AAAA)");
+    const statutBrut = normaliser(val(cells, "statut"));
+    const statut = STATUTS_PRESENCE.find((s) => s === statutBrut);
+    if (!statut) erreurs.push(`Statut de présence inconnu : « ${val(cells, "statut")} » (${STATUTS_PRESENCE.join(", ")})`);
+    const heures = lireMontant(val(cells, "heures"));
+    if (heures !== null && (Number.isNaN(heures) || heures < 0 || heures > 24)) erreurs.push("Heures invalides (0 à 24)");
+
+    const doublon = `${normaliser(matricule)}|${jour}`;
+    if (vus.has(doublon)) erreurs.push("Matricule présent deux fois ce jour-là");
+    vus.add(doublon);
+
+    lignes.push({
+      ligne: i + 2,
+      action: existant?.confidentiel ? "ignorer" : "creer",
+      matricule,
+      donnees: { matricule, jour: jour ?? null, statut, heures: heures !== null && !Number.isNaN(heures) ? heures : null },
+      erreurs,
+      avertissements,
+    });
+  });
+  return { lignes };
 }

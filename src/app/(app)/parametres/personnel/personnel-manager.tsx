@@ -2,21 +2,24 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { Download, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog } from "@/components/ui/dialog";
 import { Table, Thead, Th, Tbody, Tr, Td, EmptyRow } from "@/components/ui/table";
 import { ConfirmDelete } from "@/app/(app)/parametres/couleurs/confirm-delete";
 import { formatAmount } from "@/lib/utils";
-import { LIBELLES_TYPE_EMPLOI, STATUTS_EMPLOYE, TYPES_EMPLOI, type StatutEmploye, type TypeEmploi } from "@/lib/personnel/import";
+import { LIBELLES_TYPE_EMPLOI, STATUTS_EMPLOYE, TYPES_CONTRAT, TYPES_EMPLOI, type StatutEmploye, type TypeContrat, type TypeEmploi } from "@/lib/personnel/import";
 import { enregistrerEmploye, supprimerEmploye } from "./actions";
 
 export interface EmployeVue {
   id: string;
   matricule: string;
   nom: string;
+  prenom: string | null;
   fonction: string | null;
+  typeContrat: TypeContrat | null;
+  atelierSource: string | null;
   typeEmploi: TypeEmploi;
   statut: StatutEmploye;
   confidentiel: boolean;
@@ -71,7 +74,7 @@ export function PersonnelManager({
       (e) =>
         (!filtreStatut || e.statut === filtreStatut) &&
         (!filtreSection || e.sections.some((s) => s.sectionId === filtreSection)) &&
-        (!q || e.nom.toLowerCase().includes(q) || e.matricule.toLowerCase().includes(q) || (e.fonction ?? "").toLowerCase().includes(q))
+        (!q || `${e.nom} ${e.prenom ?? ""}`.toLowerCase().includes(q) || e.matricule.toLowerCase().includes(q) || (e.fonction ?? "").toLowerCase().includes(q))
     );
   }, [employes, recherche, filtreSection, filtreStatut]);
 
@@ -100,6 +103,9 @@ export function PersonnelManager({
             </option>
           ))}
         </select>
+        <a href="/api/personnel/export" className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-sm text-foreground hover:bg-surface-muted">
+          <Download className="h-3.5 w-3.5" /> Exporter Excel
+        </a>
         {peutCreer && (
           <Button type="button" size="sm" onClick={() => setEdition("nouveau")}>
             <Plus className="h-3.5 w-3.5" /> Ajouter un employé
@@ -113,20 +119,22 @@ export function PersonnelManager({
             <Th>Matricule</Th>
             <Th>Nom</Th>
             <Th>Fonction</Th>
+            <Th>Contrat</Th>
             <Th>Type</Th>
             <Th>Section</Th>
-            <Th align="right">Coût mensuel chargé</Th>
+            <Th align="right">Coût fiche</Th>
             <Th>Statut</Th>
             <Th />
           </tr>
         </Thead>
         <Tbody>
-          {visibles.length === 0 && <EmptyRow colSpan={8}>Aucun employé ne correspond.</EmptyRow>}
+          {visibles.length === 0 && <EmptyRow colSpan={9}>Aucun employé ne correspond.</EmptyRow>}
           {visibles.map((e) => (
             <Tr key={e.id}>
               <Td className="font-mono text-xs">{e.matricule}</Td>
-              <Td className="font-medium">{e.nom}</Td>
+              <Td className="font-medium">{e.nom}{e.prenom ? ` ${e.prenom}` : ""}</Td>
               <Td>{e.fonction ?? "—"}</Td>
+              <Td>{e.typeContrat ?? "—"}</Td>
               <Td>{LIBELLES_TYPE_EMPLOI[e.typeEmploi]}</Td>
               <Td>
                 {e.sections.length === 0
@@ -158,7 +166,7 @@ export function PersonnelManager({
         </Tbody>
       </Table>
       <p className="text-xs text-foreground-muted">
-        {visibles.length} employé{visibles.length > 1 ? "s" : ""} · coût mensuel chargé affiché : {formatAmount(totalMensuel)} (hors employés confidentiels, dont le coût est un poste de structure global).
+        {visibles.length} employé{visibles.length > 1 ? "s" : ""}. Le coût réel d&apos;un mois vient du livre de paie importé (voir plus bas), pas de la fiche.{totalMensuel > 0 ? ` Montants saisis sur les fiches affichées : ${formatAmount(totalMensuel)}.` : ""}
       </p>
 
       <Dialog open={edition !== null} onOpenChange={(o) => !o && setEdition(null)} title={edition === "nouveau" ? "Nouvel employé" : edition ? `Modifier ${edition.nom}` : ""} size="lg">
@@ -186,6 +194,8 @@ function FormulaireEmploye({ employe, sections, onFini }: { employe: EmployeVue 
       const res = await enregistrerEmploye(employe?.id ?? null, {
         matricule: String(formData.get("matricule") ?? ""),
         nom: String(formData.get("nom") ?? ""),
+        prenom: String(formData.get("prenom") ?? ""),
+        type_contrat: (String(formData.get("type_contrat") ?? "") || null) as TypeContrat | null,
         fonction: String(formData.get("fonction") ?? ""),
         type_emploi: String(formData.get("type_emploi")) as TypeEmploi,
         statut: String(formData.get("statut")) as StatutEmploye,
@@ -221,13 +231,28 @@ function FormulaireEmploye({ employe, sections, onFini }: { employe: EmployeVue 
           <label className={etiquette}>Matricule</label>
           <input name="matricule" required defaultValue={employe?.matricule} className={champ} />
         </div>
-        <div className="sm:col-span-2">
+        <div>
           <label className={etiquette}>Nom</label>
           <input name="nom" required defaultValue={employe?.nom} className={champ} />
         </div>
-        <div className="sm:col-span-2">
+        <div>
+          <label className={etiquette}>Prénom</label>
+          <input name="prenom" defaultValue={employe?.prenom ?? ""} className={champ} />
+        </div>
+        <div>
           <label className={etiquette}>Fonction</label>
           <input name="fonction" defaultValue={employe?.fonction ?? ""} className={champ} />
+        </div>
+        <div>
+          <label className={etiquette}>Contrat</label>
+          <select name="type_contrat" defaultValue={employe?.typeContrat ?? ""} className={champ}>
+            <option value="">—</option>
+            {TYPES_CONTRAT.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
         </div>
         <div>
           <label className={etiquette}>Statut</label>
