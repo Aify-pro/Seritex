@@ -79,6 +79,25 @@ assert.ok(L[7].erreurs.some((e) => e.includes("contrat")));
 assert.ok(L[8].erreurs.some((e) => e.includes("deux fois")));
 assert.match(controlerFiches([["nom"], ["A"]], ctx).erreurFichier ?? "", /matricule/);
 
+// Liste de salariés Sage avec colonne « Etat » : E et C importés, M (parti) ignoré
+const sage = controlerFiches(
+  [
+    ["Matricule", "Civilité", "Nom", "Prénom", "Paie", "Clôture", "Etat"],
+    ["0020", "M", "ACTIF", "UN", "31/10/2026", "30/09/2026", "E"],
+    ["0021", "Mme", "CONGE", "DEUX", "31/10/2026", "30/09/2026", "C"],
+    ["0022", "M", "PARTI", "TROIS", "31/10/2026", "30/11/2017", "M"],
+    ["0023", "M", "", "", "31/10/2026", "30/11/2017", "M"], // ancien sans nom : ignoré sans erreur
+    ["0024", "M", "BIZARRE", "QUATRE", "31/10/2026", "", "X"],
+  ],
+  ctx
+);
+assert.equal(sage.erreurFichier, undefined);
+assert.deepEqual(sage.lignes.map((l) => l.action), ["creer", "creer", "ignorer", "ignorer", "creer"]);
+assert.equal(sage.lignes[1].donnees.statut, "actif", "C = actif en congés");
+assert.deepEqual(sage.lignes[2].erreurs.concat(sage.lignes[3].erreurs), [], "les anciens ne produisent aucune erreur");
+assert.ok(sage.lignes[2].avertissements[0].includes("Ancien salarié"));
+assert.ok(sage.lignes[4].erreurs[0].includes("État inconnu"));
+
 // Décodage de l'export Sage (é = 0x80, à = 0x85, û = 0x96)
 assert.equal(decoderLivre(Uint8Array.of(0x50, 0x72, 0x80, 0x73)), "Prés");
 assert.equal(decoderLivre(Uint8Array.of(0x4e, 0x65, 0x74, 0x20, 0x85)), "Net à");
