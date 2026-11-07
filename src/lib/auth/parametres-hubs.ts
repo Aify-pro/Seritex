@@ -7,7 +7,7 @@ import {
   SlidersHorizontal,
   Truck,
   Briefcase,
-  Calculator,
+  Users,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { createElement, type ReactNode } from "react";
@@ -87,10 +87,17 @@ const HUBS: HubDefinition[] = [
     tabs: [{ href: "/parametres/prospection", label: "Prospection" }],
   },
   {
-    key: "prix-de-revient",
-    label: "Prix de revient",
-    icon: Calculator,
-    tabs: [{ href: "/parametres/personnel", label: "Personnel" }],
+    key: "personnel",
+    label: "Personnel",
+    icon: Users,
+    tabs: [
+      { href: "/parametres/personnel/import", label: "Import mensuel" },
+      { href: "/parametres/personnel/fiches", label: "Fiches" },
+      { href: "/parametres/personnel/departements", label: "Départements" },
+      { href: "/parametres/personnel/ateliers", label: "Ateliers et sections" },
+      { href: "/parametres/personnel/rubriques", label: "Rubriques de paie" },
+      { href: "/parametres/personnel/alertes", label: "Alertes" },
+    ],
   },
   {
     key: "acces",

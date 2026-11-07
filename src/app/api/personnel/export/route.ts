@@ -6,7 +6,7 @@ import { ecrireListe, type LigneListe } from "@/lib/personnel/xlsx";
 
 /**
  * Export Excel de la liste du personnel (migration 0159), au « format
- * spécial » que l'import relit : Matricule, Nom, Prénom, Atelier, Fonction,
+ * spécial » que l'import relit : Matricule, Nom, Prénom, Département (code Sage), Atelier, Fonction,
  * Type de contrat, Statut. `?modele=1` renvoie le classeur vide (en-têtes et
  * listes déroulantes). AUCUN montant : seuls les salaires du livre de paie
  * sont des données sensibles, et ils ne sortent pas d'ici.
@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
     const [{ data: employes, error }, { data: ateliers }] = await Promise.all([
       supabase
         .from("employes")
-        .select("matricule, nom, prenom, fonction, type_contrat, statut, atelier_source, employes_sections(sections(name))")
+        .select("matricule, nom, prenom, fonction, type_contrat, statut, atelier_source, departement_code, employes_sections(sections(name))")
         .order("matricule")
         .limit(20000),
       supabase.from("ateliers_vers_sections").select("atelier, libelle"),
@@ -42,6 +42,7 @@ export async function GET(request: NextRequest) {
         matricule: e.matricule as string,
         nom: e.nom as string,
         prenom: (e.prenom as string | null) ?? "",
+        departement: (e.departement_code as string | null) ?? "",
         atelier,
         fonction: (e.fonction as string | null) ?? "",
         type_contrat: (e.type_contrat as string | null) ?? "",
