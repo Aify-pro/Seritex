@@ -9,7 +9,7 @@ import {
   TYPES_CONTRAT,
   TYPES_EMPLOI,
   controlerFiches,
-  controlerPresence,
+  controlerPresenceCellules,
   lireCsv,
   normaliser,
   type ContexteImport,
@@ -26,6 +26,7 @@ import {
   type PaieEmploye,
 } from "@/lib/personnel/livre-paie";
 import { lireClasseur } from "@/lib/personnel/xlsx";
+import { compterLignes, conserverExclusions, exclureLigne, reintegrerLigne, tableauCorrige } from "@/lib/personnel/apercu";
 
 /**
  * Paramètres > Personnel (migrations 0157 et 0159) : fiches, imports avec
@@ -263,7 +264,7 @@ async function creerApercu(formData: FormData): Promise<Result & { id?: string }
     if (lu.erreurFichier) return { error: lu.erreurFichier };
     lignes = lu.lignes;
   } else {
-    const lu = controlerPresence(new TextDecoder("utf-8").decode(octets), ctx);
+    const lu = controlerPresenceCellules(lireCsv(new TextDecoder("utf-8").decode(octets)), ctx);
     if (lu.erreurFichier) return { error: lu.erreurFichier };
     lignes = lu.lignes;
   }
@@ -307,6 +308,70 @@ async function creerApercu(formData: FormData): Promise<Result & { id?: string }
   }
   fin();
   return { id: data.id as string };
+}
+
+/* ------------------------------------------------------------------------ */
+/* Import : correction et exclusion de lignes dans l'aperçu                 */
+/* ------------------------------------------------------------------------ */
+
+async function chargerApercu(supabase: Client, importId: string) {
+  const { data, error } = await supabase.from("imports_personnel").select("id, type, statut, apercu").eq("id", importId).single();
+  if (error || !data) return { erreur: "Import introuvable" as const };
+  if (data.statut !== "apercu") return { erreur: "Cet import a déjà été traité" as const };
+  return { lot: { type: data.type as TypeImport, lignes: data.apercu as LigneImport[] } };
+}
+
+async function enregistrerApercu(supabase: Client, importId: string, lignes: LigneImport[]): Promise<Result> {
+  const { error } = await supabase.from("imports_personnel").update({ apercu: lignes, ...compterLignes(lignes) }).eq("id", importId).eq("statut", "apercu");
+  if (error) return { error: error.message };
+  fin();
+  return {};
+}
+
+/**
+ * Corrige une ligne de l'aperçu (liste du personnel ou présence) : les valeurs
+ * du fichier sont modifiées, puis TOUT le fichier est contrôlé de nouveau
+ * (doublons, matricule déjà connu, département…). Les lignes déjà exclues le
+ * restent. Le fichier d'origine n'est pas modifié : seul l'aperçu l'est.
+ */
+export async function corrigerLigneImport(importId: string, ligne: number, champs: Record<string, string>): Promise<Result> {
+  return proteger(() => corriger(importId, ligne, champs), "Correction impossible");
+}
+
+async function corriger(importId: string, ligne: number, champs: Record<string, string>): Promise<Result> {
+  await requirePermission("personnel", "create");
+  const supabase = await createClient();
+  const charge = await chargerApercu(supabase, importId);
+  if ("erreur" in charge) return { error: charge.erreur };
+  const { type, lignes } = charge.lot;
+  if (type === "paie") {
+    return { error: "Les montants d'un livre de paie ne se corrigent pas à la main : excluez la ligne, ou corrigez le livre dans Sage et déposez-le à nouveau." };
+  }
+  if (lignes.some((l) => !l.brut)) return { error: "Cet aperçu date d'avant la correction en ligne : déposez à nouveau le fichier." };
+  const cible = lignes.find((l) => l.ligne === ligne);
+  if (!cible) return { error: "Ligne introuvable" };
+
+  const tableau = tableauCorrige(lignes, ligne, champs);
+  const ctx = await contexteImport(supabase);
+  const lu = type === "fiches" ? controlerFiches(tableau, ctx) : controlerPresenceCellules(tableau, ctx);
+  if (lu.erreurFichier) return { error: lu.erreurFichier };
+
+  return enregistrerApercu(supabase, importId, conserverExclusions(lu.lignes, lignes));
+}
+
+/** Exclut une ligne de l'import (rien n'est enregistré pour elle), ou la réintègre dans l'état où elle était. */
+export async function exclureLigneImport(importId: string, ligne: number, exclusion: boolean): Promise<Result> {
+  return proteger(async () => {
+    await requirePermission("personnel", "create");
+    const supabase = await createClient();
+    const charge = await chargerApercu(supabase, importId);
+    if ("erreur" in charge) return { error: charge.erreur };
+    const lignes = charge.lot.lignes;
+    const cible = lignes.find((l) => l.ligne === ligne);
+    if (!cible) return { error: "Ligne introuvable" };
+    const nouvelles = lignes.map((l) => (l.ligne !== ligne ? l : exclusion ? exclureLigne(l) : reintegrerLigne(l)));
+    return enregistrerApercu(supabase, importId, nouvelles);
+  }, "Exclusion impossible");
 }
 
 /* ------------------------------------------------------------------------ */
