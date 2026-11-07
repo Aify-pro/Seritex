@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, Thead, Th, Tbody, Tr, Td } from "@/components/ui/table";
 import { LIBELLES_CATEGORIE, type CategorieRubrique } from "@/lib/personnel/livre-paie";
-import { classerAtelier, classerRubrique, rattacherEmployesAuxSections, traiterAlerte } from "./actions";
+import { ajouterDepartement, classerAtelier, classerDepartement, classerRubrique, rattacherEmployesAuxSections, traiterAlerte } from "./actions";
 
 const select = "h-8 rounded-md border border-border bg-surface px-2 text-xs";
 
@@ -166,6 +166,135 @@ export function AteliersPanel({ ateliers, sections, peutModifier }: { ateliers: 
           </Button>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------------ */
+/* Départements de la paie Sage → sections                                  */
+/* ------------------------------------------------------------------------ */
+
+export interface DepartementVue {
+  code: string;
+  libelle: string;
+  sectionId: string | null;
+  structure: boolean;
+  nbEmployes: number;
+}
+
+export function DepartementsPanel({
+  departements,
+  sections,
+  peutModifier,
+  peutCreer,
+}: {
+  departements: DepartementVue[];
+  sections: { id: string; nom: string }[];
+  peutModifier: boolean;
+  peutCreer: boolean;
+}) {
+  const [pending, startTransition] = useTransition();
+  const [nouveau, setNouveau] = useState({ code: "", libelle: "" });
+  const [seulementAClasser, setSeulementAClasser] = useState(false);
+  const valeur = (d: DepartementVue) => (d.structure ? "structure" : (d.sectionId ?? "aucune"));
+  const estAClasser = (d: DepartementVue) => !d.structure && !d.sectionId;
+  const aClasser = departements.filter(estAClasser);
+  const visibles = seulementAClasser ? aClasser : departements;
+
+  function classer(code: string, cible: string) {
+    startTransition(async () => {
+      const res = await classerDepartement(code, cible);
+      if (res.error) toast.error(res.error);
+      else toast.success("Département classé");
+    });
+  }
+
+  function rattacher() {
+    startTransition(async () => {
+      const res = await rattacherEmployesAuxSections();
+      if (res.error) toast.error(res.error);
+      else toast.success(res.rattaches ? `${res.rattaches} employé(s) rattaché(s)` : "Rien à rattacher");
+    });
+  }
+
+  function ajouter() {
+    startTransition(async () => {
+      const res = await ajouterDepartement(nouveau);
+      if (res.error) toast.error(res.error);
+      else {
+        toast.success("Département ajouté");
+        setNouveau({ code: "", libelle: "" });
+      }
+    });
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs text-foreground-muted">
+          {departements.length} départements, dont {aClasser.length} à classer.
+        </p>
+        <label className="flex items-center gap-2 text-xs text-foreground-muted">
+          <input type="checkbox" checked={seulementAClasser} onChange={(e) => setSeulementAClasser(e.target.checked)} /> Voir seulement ceux à classer
+        </label>
+      </div>
+      <Table>
+        <Thead>
+          <tr>
+            <Th>Code Sage</Th>
+            <Th>Département</Th>
+            <Th align="right">Employés</Th>
+            <Th>Section de la plateforme</Th>
+          </tr>
+        </Thead>
+        <Tbody>
+          {visibles.map((d) => (
+            <Tr key={d.code} className={estAClasser(d) ? "bg-warning-soft/40" : undefined}>
+              <Td className="font-mono text-xs">{d.code}</Td>
+              <Td className="text-xs font-medium">{d.libelle}</Td>
+              <Td align="right" className="text-xs">
+                {d.nbEmployes}
+              </Td>
+              <Td>
+                {peutModifier ? (
+                  <select value={valeur(d)} disabled={pending} onChange={(e) => classer(d.code, e.target.value)} className={select} aria-label={`Section du département ${d.libelle}`}>
+                    <option value="aucune">À classer…</option>
+                    <option value="structure">Structure (aucune section d&apos;atelier)</option>
+                    {sections.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.nom}
+                      </option>
+                    ))}
+                  </select>
+                ) : d.structure ? (
+                  "Structure"
+                ) : (
+                  (sections.find((s) => s.id === d.sectionId)?.nom ?? <Badge tone="warning">À classer</Badge>)
+                )}
+              </Td>
+            </Tr>
+          ))}
+        </Tbody>
+      </Table>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        {peutCreer ? (
+          <div className="flex flex-wrap items-end gap-2">
+            <input value={nouveau.code} onChange={(e) => setNouveau({ ...nouveau, code: e.target.value })} placeholder="Code (ex. 041)" maxLength={10} className="h-8 w-28 rounded-md border border-border bg-surface px-2 text-xs" aria-label="Code du nouveau département" />
+            <input value={nouveau.libelle} onChange={(e) => setNouveau({ ...nouveau, libelle: e.target.value })} placeholder="Nom du département" maxLength={80} className="h-8 w-52 rounded-md border border-border bg-surface px-2 text-xs" aria-label="Nom du nouveau département" />
+            <Button type="button" variant="secondary" size="sm" loading={pending} disabled={!nouveau.code.trim() || !nouveau.libelle.trim()} onClick={ajouter}>
+              Ajouter un département
+            </Button>
+          </div>
+        ) : (
+          <span />
+        )}
+        {peutModifier && (
+          <Button type="button" size="sm" loading={pending} onClick={rattacher}>
+            <Link2 className="h-3.5 w-3.5" /> Rattacher les employés aux sections
+          </Button>
+        )}
+      </div>
+      <p className="text-xs text-foreground-muted">Après un classement, rattachez les employés déjà créés : seuls ceux qui n&apos;ont pas encore de section sont touchés.</p>
     </div>
   );
 }

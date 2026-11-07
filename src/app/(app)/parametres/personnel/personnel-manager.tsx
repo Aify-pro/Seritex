@@ -20,6 +20,7 @@ export interface EmployeVue {
   fonction: string | null;
   typeContrat: TypeContrat | null;
   atelierSource: string | null;
+  departementCode: string | null;
   typeEmploi: TypeEmploi;
   statut: StatutEmploye;
   confidentiel: boolean;
@@ -140,9 +141,11 @@ export function PersonnelManager({
                 {e.sections.length === 0
                   ? e.typeEmploi === "structure"
                     ? "Structure"
-                    : e.atelierSource
-                      ? <Badge tone="warning">{`${e.atelierSource} : à classer`}</Badge>
-                      : "—"
+                    : e.departementCode
+                      ? <Badge tone="warning">{`Département ${e.departementCode} : à classer`}</Badge>
+                      : e.atelierSource
+                        ? <Badge tone="warning">{`${e.atelierSource} : à classer`}</Badge>
+                        : "—"
                   : e.sections.map((s) => `${nomSection.get(s.sectionId) ?? "?"}${s.pourcentage < 100 ? ` ${s.pourcentage} %` : ""}`).join(", ")}
               </Td>
               <Td align="right">{e.confidentiel ? <Badge tone="accent">Confidentiel</Badge> : e.coutMois === null ? "—" : formatAmount(e.coutMois)}</Td>
@@ -174,7 +177,7 @@ export function PersonnelManager({
         {libelleMois
           ? `Coût de ${libelleMois} (livre de paie) pour les employés affichés : ${formatAmount(totalMois)}.`
           : "Aucun livre de paie n'est encore appliqué : le coût apparaît après l'import et la validation d'un livre de paie."}
-        {nbSansSection > 0 ? ` ${nbSansSection} employé${nbSansSection > 1 ? "s" : ""} actif${nbSansSection > 1 ? "s" : ""} sans section : classez leur atelier dans « Ateliers et sections » puis rattachez-les.` : ""}
+        {nbSansSection > 0 ? ` ${nbSansSection} employé${nbSansSection > 1 ? "s" : ""} actif${nbSansSection > 1 ? "s" : ""} sans section : classez leur département (onglet Départements) ou leur atelier (onglet Ateliers et sections), puis rattachez-les.` : ""}
       </p>
 
       <Dialog open={edition !== null} onOpenChange={(o) => !o && setEdition(null)} title={edition === "nouveau" ? "Nouvel employé" : edition ? `Modifier ${edition.nom}` : ""} size="lg">

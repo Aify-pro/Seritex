@@ -97,6 +97,7 @@ export interface LigneListe {
   matricule: string;
   nom: string;
   prenom: string;
+  departement: string;
   atelier: string;
   fonction: string;
   type_contrat: string;
@@ -111,14 +112,17 @@ export async function ecrireListe(lignes: LigneListe[]): Promise<Uint8Array> {
   feuille.columns = COLONNES_LISTE.map((c) => ({ header: ENTETES_LISTE[c], key: c, width: c === "nom" || c === "fonction" ? 28 : 16 }));
   feuille.getRow(1).font = { bold: true };
   feuille.getColumn("matricule").numFmt = "@";
+  feuille.getColumn("departement").numFmt = "@";
+  const colContrat = COLONNES_LISTE.indexOf("type_contrat") + 1;
+  const colStatut = COLONNES_LISTE.indexOf("statut") + 1;
   feuille.views = [{ state: "frozen", ySplit: 1 }];
   for (const l of lignes) feuille.addRow(l);
   // Colonnes à valeurs fixes : listes déroulantes dans Excel.
   const dernier = Math.max(lignes.length + 200, 300);
   for (let r = 2; r <= dernier; r++) {
     feuille.getCell(r, 1).numFmt = "@";
-    feuille.getCell(r, 6).dataValidation = { type: "list", allowBlank: true, formulae: ['"CDI,CDD"'] };
-    feuille.getCell(r, 7).dataValidation = { type: "list", allowBlank: true, formulae: ['"actif,suspendu,sorti"'] };
+    feuille.getCell(r, colContrat).dataValidation = { type: "list", allowBlank: true, formulae: ['"CDI,CDD"'] };
+    feuille.getCell(r, colStatut).dataValidation = { type: "list", allowBlank: true, formulae: ['"actif,suspendu,sorti"'] };
   }
   return new Uint8Array(await classeur.xlsx.writeBuffer());
 }

@@ -39,7 +39,7 @@ import { lireClasseur } from "@/lib/personnel/xlsx";
 type Result = { error?: string };
 type Client = Awaited<ReturnType<typeof createClient>>;
 
-const fin = () => revalidatePath("/parametres/personnel");
+const fin = () => revalidatePath("/parametres/personnel", "layout");
 
 const montant = z.number().min(0, "Montant négatif impossible").max(1e10).nullable();
 
@@ -124,10 +124,19 @@ function messageErreur(error: { code?: string; message: string } | null): string
 /* ------------------------------------------------------------------------ */
 
 async function contexteImport(supabase: Client): Promise<ContexteImport> {
-  const [{ data: employes }, { data: ateliers }] = await Promise.all([
-    supabase.from("employes").select("id, matricule, nom, prenom, confidentiel"),
+  const [{ data: employes }, { data: ateliers }, { data: departements }, { data: liens }] = await Promise.all([
+    supabase.from("employes").select("id, matricule, nom, prenom, confidentiel, departement_code").limit(10000),
     supabase.from("ateliers_vers_sections").select("atelier, libelle, section_id, structure"),
+    supabase.from("departements").select("code, libelle, section_id, structure"),
+    supabase.from("employes_sections").select("employe_id").limit(20000),
   ]);
+  const avecSection = new Set((liens ?? []).map((l) => l.employe_id as string));
+  const mapDepartements: NonNullable<ContexteImport["departements"]> = new Map();
+  for (const d of departements ?? []) {
+    const valeur = { code: d.code as string, sectionId: (d.section_id as string | null) ?? null, structure: d.structure as boolean };
+    mapDepartements.set(d.code as string, valeur);
+    mapDepartements.set(normaliser(d.libelle as string), valeur);
+  }
   const mapAteliers: NonNullable<ContexteImport["ateliers"]> = new Map();
   for (const a of ateliers ?? []) {
     const valeur = { atelier: a.atelier as string, sectionId: (a.section_id as string | null) ?? null, structure: a.structure as boolean };
@@ -138,10 +147,17 @@ async function contexteImport(supabase: Client): Promise<ContexteImport> {
     employes: new Map(
       (employes ?? []).map((e) => [
         normaliser(e.matricule as string),
-        { id: e.id as string, confidentiel: e.confidentiel as boolean, nomComplet: `${e.nom} ${(e.prenom as string | null) ?? ""}`.trim() },
+        {
+          id: e.id as string,
+          confidentiel: e.confidentiel as boolean,
+          nomComplet: `${e.nom} ${(e.prenom as string | null) ?? ""}`.trim(),
+          departementCode: (e.departement_code as string | null) ?? null,
+          aSection: avecSection.has(e.id as string),
+        },
       ])
     ),
     ateliers: mapAteliers,
+    departements: mapDepartements,
   };
 }
 
@@ -354,16 +370,36 @@ async function appliquer(importId: string, motif?: string): Promise<Result> {
     if (inconnus.size > 0) {
       await supabase.from("ateliers_vers_sections").upsert([...inconnus].map(([atelier, libelle]) => ({ atelier, libelle })), { onConflict: "atelier", ignoreDuplicates: true });
     }
-    const nouvelles = lignes.filter((l) => !idDe(l.matricule));
+    // Fiches existantes complétées : seul le département est ajouté (rien n'est écrasé),
+    // avec la section qui en découle si l'employé n'en a pas encore.
+    const complements = lignes.filter((l) => idDe(l.matricule) && (l.donnees as { complement?: boolean }).complement);
+    erreur = await enParalleleParLots(complements, 20, async (l) => {
+      const d = l.donnees as { departement_code: string; sections: { section_id: string; pourcentage: number }[]; type_emploi: string; a_section: boolean };
+      const employeId = idDe(l.matricule)!;
+      const { error } = await supabase
+        .from("employes")
+        .update({ departement_code: d.departement_code, ...(d.type_emploi === "structure" ? { type_emploi: "structure" } : {}) })
+        .eq("id", employeId)
+        .is("departement_code", null);
+      if (error) return `Ligne ${l.ligne} : ${error.message}`;
+      if (!d.a_section && d.sections.length > 0) {
+        const { error: e2 } = await supabase.from("employes_sections").insert(d.sections.map((x) => ({ ...x, employe_id: employeId })));
+        if (e2) return `Ligne ${l.ligne} : ${e2.message}`;
+      }
+      return null;
+    });
+    const nouvelles = erreur ? [] : lignes.filter((l) => !idDe(l.matricule));
     for (let i = 0; i < nouvelles.length && !erreur; i += 200) {
       const lot200 = nouvelles.slice(i, i + 200);
       const { data, error } = await supabase
         .from("employes")
         .insert(
           lot200.map((l) => {
-            const { sections: _s, atelier_libelle: _a, ...fiche } = l.donnees as Record<string, unknown>;
+            const { sections: _s, atelier_libelle: _a, complement: _c, a_section: _as, ...fiche } = l.donnees as Record<string, unknown>;
             void _s;
             void _a;
+            void _c;
+            void _as;
             return { ...fiche, source: "import" };
           })
         )
@@ -482,27 +518,33 @@ export async function classerAtelier(atelier: string, cible: string): Promise<Re
 }
 
 /**
- * Rattache aux sections les employés venus d'un atelier classé depuis leur
- * création (sans section déjà choisie) ; les ateliers « structure » passent
- * leurs employés en type structure. Ne touche jamais une section déjà posée.
+ * Rattache aux sections les employés qui n'en ont pas encore, d'après leur
+ * département de paie (prioritaire) ou, à défaut, leur atelier de la Fiche de
+ * tâches ; les départements / ateliers « structure » passent leurs employés en
+ * type structure. Ne touche jamais une section déjà posée.
  */
 export async function rattacherEmployesAuxSections(): Promise<Result & { rattaches?: number }> {
   await requirePermission("personnel", "modify");
   const supabase = await createClient();
-  const [{ data: ateliers }, { data: employes }, { data: liens }] = await Promise.all([
+  const [{ data: ateliers }, { data: departements }, { data: employes }, { data: liens }] = await Promise.all([
     supabase.from("ateliers_vers_sections").select("atelier, section_id, structure"),
-    supabase.from("employes").select("id, atelier_source, type_emploi").not("atelier_source", "is", null),
-    supabase.from("employes_sections").select("employe_id"),
+    supabase.from("departements").select("code, section_id, structure"),
+    supabase.from("employes").select("id, atelier_source, departement_code, type_emploi").limit(10000),
+    supabase.from("employes_sections").select("employe_id").limit(20000),
   ]);
   const avecSection = new Set((liens ?? []).map((l) => l.employe_id as string));
   const parAtelier = new Map((ateliers ?? []).map((a) => [a.atelier as string, a]));
+  const parDepartement = new Map((departements ?? []).map((d) => [d.code as string, d]));
   const nouveaux: { employe_id: string; section_id: string; pourcentage: number }[] = [];
   const structure: string[] = [];
   for (const e of employes ?? []) {
-    const a = parAtelier.get(e.atelier_source as string);
-    if (!a) continue;
-    if (a.structure && e.type_emploi !== "structure") structure.push(e.id as string);
-    else if (a.section_id && !avecSection.has(e.id as string)) nouveaux.push({ employe_id: e.id as string, section_id: a.section_id as string, pourcentage: 100 });
+    const cible =
+      (e.departement_code && (parDepartement.get(e.departement_code as string)?.structure || parDepartement.get(e.departement_code as string)?.section_id)
+        ? parDepartement.get(e.departement_code as string)
+        : undefined) ?? parAtelier.get((e.atelier_source as string) ?? "");
+    if (!cible) continue;
+    if (cible.structure && e.type_emploi !== "structure") structure.push(e.id as string);
+    else if (cible.section_id && !avecSection.has(e.id as string)) nouveaux.push({ employe_id: e.id as string, section_id: cible.section_id as string, pourcentage: 100 });
   }
   if (nouveaux.length > 0) {
     const { error } = await supabase.from("employes_sections").insert(nouveaux);
@@ -514,6 +556,35 @@ export async function rattacherEmployesAuxSections(): Promise<Result & { rattach
   }
   fin();
   return { rattaches: nouveaux.length + structure.length };
+}
+
+/** `cible` : « structure », « aucune » (à classer) ou l'identifiant d'une section. */
+export async function classerDepartement(code: string, cible: string): Promise<Result> {
+  await requirePermission("personnel", "modify");
+  const supabase = await createClient();
+  const valeurs =
+    cible === "structure" ? { structure: true, section_id: null } : cible === "aucune" ? { structure: false, section_id: null } : { structure: false, section_id: cible };
+  if (valeurs.section_id !== null && !z.guid().safeParse(valeurs.section_id).success) return { error: "Section inconnue" };
+  const { error } = await supabase.from("departements").update(valeurs).eq("code", code);
+  if (error) return { error: error.message };
+  fin();
+  return {};
+}
+
+const departementSchema = z.object({
+  code: z.string().trim().min(1, "Code obligatoire").max(10),
+  libelle: z.string().trim().min(1, "Libellé obligatoire").max(80),
+});
+
+export async function ajouterDepartement(input: z.input<typeof departementSchema>): Promise<Result> {
+  await requirePermission("personnel", "create");
+  const parsed = departementSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Saisie invalide" };
+  const supabase = await createClient();
+  const { error } = await supabase.from("departements").insert(parsed.data);
+  if (error) return { error: error.code === "23505" ? "Ce code de département existe déjà." : error.message };
+  fin();
+  return {};
 }
 
 export async function traiterAlerte(id: string, commentaire: string): Promise<Result> {

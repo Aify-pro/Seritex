@@ -98,6 +98,50 @@ assert.deepEqual(sage.lignes[2].erreurs.concat(sage.lignes[3].erreurs), [], "les
 assert.ok(sage.lignes[2].avertissements[0].includes("Ancien salarié"));
 assert.ok(sage.lignes[4].erreurs[0].includes("État inconnu"));
 
+// Départements de la paie Sage : code → section / structure ; fiches existantes complétées sans rien écraser
+const ctxDep: ContexteImport = {
+  employes: new Map([
+    [normaliser("0001"), { id: "e1", confidentiel: false, nomComplet: "AWA KONE", departementCode: null, aSection: false }],
+    [normaliser("0002"), { id: "e2", confidentiel: false, nomComplet: "KOFFI YAO", departementCode: "026", aSection: true }],
+    [normaliser("0003"), { id: "e3", confidentiel: false, nomComplet: "ZEBRE UN", departementCode: null, aSection: false }],
+  ]),
+  ateliers: ctx.ateliers,
+  departements: new Map([
+    ["026", { code: "026", sectionId: "s-polo", structure: false }],
+    [normaliser("Polo"), { code: "026", sectionId: "s-polo", structure: false }],
+    ["022", { code: "022", sectionId: null, structure: true }],
+    ["001", { code: "001", sectionId: null, structure: false }],
+  ]),
+};
+const dep = controlerFiches(
+  [
+    ["Matricule", "Nom", "Prénom", "Département", "Etat"],
+    ["0001", "AWA", "KONE", "026", "E"], // existante sans département : complétée
+    ["0002", "KOFFI", "YAO", "022", "E"], // existante qui a déjà un département : sautée
+    ["0003", "AUTRE", "NOM", "026", "E"], // existante sous un autre nom : jamais modifiée
+    ["0010", "NOUVEAU", "POLO", "26", "E"], // « 26 » = « 026 » (Excel perd les zéros)
+    ["0011", "NOUVEAU", "DIRECTION", "022", "C"],
+    ["0012", "NOUVEAU", "CONFECTION", "001", "E"], // département pas encore classé
+    ["0013", "NOUVEAU", "INCONNU", "999", "E"],
+    ["0014", "NOUVEAU", "PAR NOM", "polo", "E"], // libellé accepté à la place du code
+  ],
+  ctxDep
+);
+const D = dep.lignes;
+assert.equal(D[0].action, "modifier");
+assert.equal(D[0].donnees.complement, true);
+assert.equal(D[0].donnees.departement_code, "026");
+assert.equal(D[1].action, "ignorer");
+assert.equal(D[2].action, "ignorer");
+assert.ok(D[2].avertissements[0].includes("autre nom"));
+assert.deepEqual((D[3].donnees.sections as { section_id: string }[]).map((x) => x.section_id), ["s-polo"]);
+assert.equal(D[3].donnees.departement_code, "026");
+assert.equal(D[4].donnees.type_emploi, "structure");
+assert.ok(D[5].avertissements[0].includes("à classer"));
+assert.equal(D[5].erreurs.length, 0);
+assert.ok(D[6].erreurs[0].includes("Département inconnu"));
+assert.deepEqual((D[7].donnees.sections as { section_id: string }[]).map((x) => x.section_id), ["s-polo"]);
+
 // Décodage de l'export Sage (é = 0x80, à = 0x85, û = 0x96)
 assert.equal(decoderLivre(Uint8Array.of(0x50, 0x72, 0x80, 0x73)), "Prés");
 assert.equal(decoderLivre(Uint8Array.of(0x4e, 0x65, 0x74, 0x20, 0x85)), "Net à");
@@ -233,9 +277,9 @@ async function classeurs() {
   assert.equal(liste.erreurFichier, undefined);
   assert.equal(liste.lignes[0].matricule, "0011");
 
-  const standard = await ecrireListe([{ matricule: "0005", nom: "SANGO", prenom: "HATO", atelier: "polo", fonction: "Couturier", type_contrat: "CDI", statut: "actif" }]);
+  const standard = await ecrireListe([{ matricule: "0005", nom: "SANGO", prenom: "HATO", departement: "026", atelier: "polo", fonction: "Couturier", type_contrat: "CDI", statut: "actif" }]);
   const relu = await lireClasseur(standard.buffer.slice(standard.byteOffset, standard.byteOffset + standard.byteLength) as ArrayBuffer);
-  assert.deepEqual(relu[1], ["0005", "SANGO", "HATO", "polo", "Couturier", "CDI", "actif"], "aller-retour du classeur standard, zéros de tête conservés");
+  assert.deepEqual(relu[1], ["0005", "SANGO", "HATO", "026", "polo", "Couturier", "CDI", "actif"], "aller-retour du classeur standard, zéros de tête conservés");
   await assert.rejects(() => lireClasseur(new TextEncoder().encode("pas un classeur").buffer as ArrayBuffer), "un fichier qui n'est pas un classeur lève une erreur");
 }
 

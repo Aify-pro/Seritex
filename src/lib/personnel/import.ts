@@ -4,9 +4,11 @@
  * ateliers) est passé en paramètre, ce qui permet de les tester sans Supabase.
  *
  *   fiches    liste du personnel, Excel (.xlsx) ou CSV, « format spécial » :
- *             matricule ; nom ; prénom ; atelier ; fonction ; type_contrat ; statut
- *             Un matricule déjà connu est SAUTÉ (rien n'est mis à jour) ; un
- *             matricule inconnu est ajouté. Si le fichier a une colonne « État »
+ *             matricule ; nom ; prénom ; département ; atelier ; fonction ; type_contrat ; statut
+ *             Un matricule déjà connu est SAUTÉ (rien n'est écrasé) ; un
+ *             matricule inconnu est ajouté. Seule exception : si la fiche
+ *             connue n'a pas encore de département et que le fichier en donne un,
+ *             le département (et la section qui en découle) est ajouté. Si le fichier a une colonne « État »
  *             (liste de salariés exportée de Sage) : E = actif et C = actif en
  *             congés sont importés ; M = ancien salarié (a quitté l'entreprise)
  *             est ignoré.
@@ -39,11 +41,12 @@ export const LIBELLES_IMPORT: Record<TypeImport, string> = {
 };
 
 /** Colonnes de la liste du personnel (Excel) : modèle téléchargeable et export. */
-export const COLONNES_LISTE = ["matricule", "nom", "prenom", "atelier", "fonction", "type_contrat", "statut"] as const;
+export const COLONNES_LISTE = ["matricule", "nom", "prenom", "departement", "atelier", "fonction", "type_contrat", "statut"] as const;
 export const ENTETES_LISTE: Record<(typeof COLONNES_LISTE)[number], string> = {
   matricule: "Matricule",
   nom: "Nom",
   prenom: "Prénom",
+  departement: "Département",
   atelier: "Atelier",
   fonction: "Fonction",
   type_contrat: "Type de contrat",
@@ -129,7 +132,9 @@ export function lireDate(valeur: string): string | null | undefined {
 
 export interface ContexteImport {
   /** Employés existants, par matricule normalisé. */
-  employes: Map<string, { id: string; confidentiel: boolean; nomComplet?: string }>;
+  employes: Map<string, { id: string; confidentiel: boolean; nomComplet?: string; departementCode?: string | null; aSection?: boolean }>;
+  /** Départements de la paie Sage, par code ou par libellé normalisé. */
+  departements?: Map<string, { code: string; sectionId: string | null; structure: boolean }>;
   /** Ateliers connus (Fiche de tâches), par nom ou libellé normalisé. */
   ateliers?: Map<string, { atelier: string; sectionId: string | null; structure: boolean }>;
 }
@@ -156,7 +161,7 @@ const ALIAS_COLONNES: Record<string, string[]> = {
   etat: ["etatsalarie", "etatdusalarie"],
   typecontrat: ["typedecontrat", "contrat"],
   prenom: ["prenoms"],
-  atelier: ["section", "departement", "service"],
+  atelier: ["section", "service"],
   fonction: ["poste"],
 };
 
@@ -176,6 +181,12 @@ const aColonne = (enTete: string[], colonne: string) => {
   const cle = normaliser(colonne);
   return noms.includes(cle) || (ALIAS_COLONNES[cle] ?? []).some((a) => noms.includes(a));
 };
+
+/** Code de département : Excel perd les zéros de tête (« 1 » pour « 001 »). */
+function cleDepartement(valeur: string): string {
+  const v = valeur.trim();
+  return /^\d{1,3}$/.test(v) ? v.padStart(3, "0") : normaliser(v);
+}
 
 /** Matricule d'une cellule : Excel perd les zéros de tête (« 5 » pour « 0005 ») ; les matricules numériques courts sont complétés à 4 chiffres. */
 export function lireMatricule(valeur: string): string {
@@ -231,10 +242,22 @@ export function controlerFiches(cellules: string[][], ctx: ContexteImport): Resu
     if (matricule && vus.has(cle)) erreurs.push("Matricule présent deux fois dans le fichier");
     vus.add(cle);
 
+    // Département de paie (code Sage ou libellé) → section ou structure.
+    const departementBrut = val(cells, "departement");
+    const departement = departementBrut ? ctx.departements?.get(cleDepartement(departementBrut)) : undefined;
+    if (departementBrut && ctx.departements && !departement) {
+      erreurs.push(`Département inconnu : « ${departementBrut} » (ajoutez-le dans l'onglet Départements)`);
+    }
+
     let action: LigneImport["action"] = existant ? "ignorer" : "creer";
+    let complement = false;
     if (existant) {
       if (existant.nomComplet && normaliser(existant.nomComplet) !== normaliser(nomComplet)) {
         avertissements.push(`Matricule déjà connu sous un autre nom (« ${existant.nomComplet} ») : fiche non modifiée`);
+      } else if (departement && !existant.departementCode && !existant.confidentiel) {
+        action = "modifier";
+        complement = true;
+        avertissements.push(`Fiche existante : département « ${departementBrut} » ajouté (rien d'autre n'est modifié)`);
       } else avertissements.push("Déjà présent : sauté");
     } else if (!nom) erreurs.push("Nom manquant");
 
@@ -250,10 +273,17 @@ export function controlerFiches(cellules: string[][], ctx: ContexteImport): Resu
     const atelier = atelierBrut ? ctx.ateliers?.get(normaliser(atelierBrut)) : undefined;
     let typeEmploi: TypeEmploi = "production_directe";
     const sections: { section_id: string; pourcentage: number }[] = [];
-    if (atelier?.structure) typeEmploi = "structure";
+    // Le département de paie l'emporte sur l'atelier de la Fiche de tâches.
+    if (departement?.structure) typeEmploi = "structure";
+    else if (departement?.sectionId) sections.push({ section_id: departement.sectionId, pourcentage: 100 });
+    else if (atelier?.structure) typeEmploi = "structure";
     else if (atelier?.sectionId) sections.push({ section_id: atelier.sectionId, pourcentage: 100 });
-    else if (atelierBrut && !existant) {
-      avertissements.push(`Atelier « ${atelierBrut} » ${atelier ? "pas encore rattaché à une section" : "inconnu"} : section à classer (Paramètres > Personnel)`);
+    else if ((departement || atelierBrut) && !existant) {
+      avertissements.push(
+        departement
+          ? `Département « ${departementBrut} » pas encore rattaché à une section : section à classer (Paramètres > Personnel > Départements)`
+          : `Atelier « ${atelierBrut} » ${atelier ? "pas encore rattaché à une section" : "inconnu"} : section à classer (Paramètres > Personnel)`
+      );
     }
 
     if (existant?.confidentiel) action = "ignorer";
@@ -270,6 +300,9 @@ export function controlerFiches(cellules: string[][], ctx: ContexteImport): Resu
         type_emploi: typeEmploi,
         type_contrat: contrat ?? null,
         statut,
+        departement_code: departement?.code ?? null,
+        complement,
+        a_section: existant?.aSection ?? false,
         atelier_source: atelierBrut ? (atelier?.atelier ?? normaliser(atelierBrut)) : null,
         atelier_libelle: atelierBrut || null,
         sections,
