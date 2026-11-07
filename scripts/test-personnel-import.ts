@@ -12,6 +12,8 @@
  */
 import assert from "node:assert/strict";
 import { controlerFiches, controlerPresence, lireCsv, lireDate, lireMatricule, lireMontant, normaliser, type ContexteImport } from "../src/lib/personnel/import";
+import JSZip from "jszip";
+import { ecrireListe, lireClasseur } from "../src/lib/personnel/xlsx";
 import { agregerParEmploye, comparerLivres, controlerLivre, controlerTotaux, decoderLivre, empreinteLivre, lireLivre, type MappingRubriques, type PaieEmploye } from "../src/lib/personnel/livre-paie";
 
 const ctx: ContexteImport = {
@@ -192,4 +194,36 @@ assert.ok(presence.lignes[2].erreurs.some((e) => e.includes("inconnu")));
 assert.ok(presence.lignes[3].erreurs.some((e) => e.includes("Heures")));
 assert.equal(presence.lignes[4].action, "ignorer");
 
-console.log("test-personnel-import : OK");
+// Classeurs Excel : export Sage non standard (espace de noms « x: », texte en ligne) et classeur standard
+async function classeurs() {
+  const zip = new JSZip();
+  zip.file("[Content_Types].xml", '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>');
+  const t = (v: string) => `<x:c t="str"><x:v>${v}</x:v></x:c>`;
+  zip.file(
+    "xl/worksheets/sheet1.xml",
+    `<?xml version="1.0" encoding="utf-8"?><x:worksheet xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><x:sheetData>` +
+      `<x:row>${t("Matricule")}${t("Nom")}${t("Prénom")}</x:row>` +
+      `<x:row>${t("0011")}${t("KONE &amp; FILS")}${t("")}</x:row>` +
+      `<x:row><x:c r="A3" t="str"><x:v>0012</x:v></x:c><x:c r="C3" t="str"><x:v>AWA</x:v></x:c></x:row>` +
+      `</x:sheetData></x:worksheet>`
+  );
+  const octets = await zip.generateAsync({ type: "arraybuffer" });
+  const sage = await lireClasseur(octets);
+  assert.deepEqual(sage, [["Matricule", "Nom", "Prénom"], ["0011", "KONE & FILS", ""], ["0012", "", "AWA"]], "classeur Sage non standard lu par le lecteur de secours");
+  const liste = controlerFiches(sage, ctx);
+  assert.equal(liste.erreurFichier, undefined);
+  assert.equal(liste.lignes[0].matricule, "0011");
+
+  const standard = await ecrireListe([{ matricule: "0005", nom: "SANGO", prenom: "HATO", atelier: "polo", fonction: "Couturier", type_contrat: "CDI", statut: "actif" }]);
+  const relu = await lireClasseur(standard.buffer.slice(standard.byteOffset, standard.byteOffset + standard.byteLength) as ArrayBuffer);
+  assert.deepEqual(relu[1], ["0005", "SANGO", "HATO", "polo", "Couturier", "CDI", "actif"], "aller-retour du classeur standard, zéros de tête conservés");
+  await assert.rejects(() => lireClasseur(new TextEncoder().encode("pas un classeur").buffer as ArrayBuffer), "un fichier qui n'est pas un classeur lève une erreur");
+}
+
+classeurs().then(
+  () => console.log("test-personnel-import : OK"),
+  (e) => {
+    console.error(e);
+    process.exit(1);
+  }
+);

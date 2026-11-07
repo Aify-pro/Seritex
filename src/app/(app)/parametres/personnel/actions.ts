@@ -150,6 +150,22 @@ async function chargerMapping(supabase: Client): Promise<MappingRubriques> {
   return new Map((data ?? []).map((r) => [r.code as string, (r.categorie as CategorieRubrique | null) ?? null]));
 }
 
+/**
+ * Une erreur imprévue pendant un import (fichier illisible, base indisponible…)
+ * ne doit jamais afficher la page d'erreur générique : on renvoie un message.
+ * Les redirections de Next (droit refusé) sont relancées telles quelles.
+ */
+async function proteger<T extends Result>(travail: () => Promise<T>, libelle: string): Promise<T | Result> {
+  try {
+    return await travail();
+  } catch (e) {
+    const digest = (e as { digest?: unknown } | null)?.digest;
+    if (typeof digest === "string" && digest.startsWith("NEXT_")) throw e;
+    console.error(`[personnel] ${libelle}`, e);
+    return { error: `${libelle} : ${(e as Error)?.message ?? "erreur inattendue"}` };
+  }
+}
+
 /* ------------------------------------------------------------------------ */
 /* Import : aperçu                                                          */
 /* ------------------------------------------------------------------------ */
@@ -163,6 +179,10 @@ const TYPES: TypeImport[] = ["fiches", "paie", "presence"];
  * le comparatif avec le livre précédent — puis valide.
  */
 export async function creerApercuImport(formData: FormData): Promise<Result & { id?: string }> {
+  return proteger(() => creerApercu(formData), "Lecture du fichier impossible");
+}
+
+async function creerApercu(formData: FormData): Promise<Result & { id?: string }> {
   const { profile } = await requirePermission("personnel", "create");
   const type = formData.get("type") as TypeImport;
   const fichier = formData.get("fichier");
@@ -293,6 +313,10 @@ async function enParalleleParLots<T>(elements: T[], taille: number, travail: (e:
  * Les écritures sont idempotentes : en cas d'échec en cours de route, on peut relancer.
  */
 export async function appliquerImport(importId: string, motif?: string): Promise<Result> {
+  return proteger(() => appliquer(importId, motif), "Application de l'import impossible");
+}
+
+async function appliquer(importId: string, motif?: string): Promise<Result> {
   const { profile } = await requirePermission("personnel", "validate");
   const supabase = await createClient();
   const { data: lot, error: errLot } = await supabase
