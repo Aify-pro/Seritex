@@ -6,7 +6,10 @@
  *   fiches    liste du personnel, Excel (.xlsx) ou CSV, « format spécial » :
  *             matricule ; nom ; prénom ; atelier ; fonction ; type_contrat ; statut
  *             Un matricule déjà connu est SAUTÉ (rien n'est mis à jour) ; un
- *             matricule inconnu est ajouté.
+ *             matricule inconnu est ajouté. Si le fichier a une colonne « État »
+ *             (liste de salariés exportée de Sage) : E = actif et C = actif en
+ *             congés sont importés ; M = ancien salarié (a quitté l'entreprise)
+ *             est ignoré.
  *   paie      livre de paie exporté de Sage → voir livre-paie.ts
  *   presence  matricule ; jour ; statut ; heures   (CSV, provisoire : viendra
  *             de pointage-drh)
@@ -150,6 +153,7 @@ export interface ResultatLecture {
 
 /** Autres intitulés acceptés pour une colonne (clé et alias déjà normalisés). */
 const ALIAS_COLONNES: Record<string, string[]> = {
+  etat: ["etatsalarie", "etatdusalarie"],
   typecontrat: ["typedecontrat", "contrat"],
   prenom: ["prenoms"],
   atelier: ["section", "departement", "service"],
@@ -207,6 +211,21 @@ export function controlerFiches(cellules: string[][], ctx: ContexteImport): Resu
     const prenom = val(cells, "prenom");
     const nomComplet = `${nom} ${prenom}`.trim();
     const existant = ctx.employes.get(cle);
+
+    // État Sage : E = actif, C = actif en congés (importés) ; M = a quitté l'entreprise (ignoré).
+    const etat = val(cells, "etat").toUpperCase();
+    if (etat === "M") {
+      lignes.push({
+        ligne: i + 2,
+        action: "ignorer",
+        matricule,
+        donnees: { matricule, nom, prenom: prenom || null },
+        erreurs: [],
+        avertissements: ["Ancien salarié (état M) : ignoré"],
+      });
+      return;
+    }
+    if (etat !== "" && etat !== "E" && etat !== "C") erreurs.push(`État inconnu : « ${etat} » (E actif, C actif en congés, M ancien salarié)`);
 
     if (!matricule) erreurs.push("Matricule manquant");
     if (matricule && vus.has(cle)) erreurs.push("Matricule présent deux fois dans le fichier");
