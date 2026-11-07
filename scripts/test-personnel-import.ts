@@ -13,6 +13,7 @@
 import assert from "node:assert/strict";
 import { controlerFiches, controlerPresence, lireCsv, lireDate, lireMatricule, lireMontant, normaliser, type ContexteImport } from "../src/lib/personnel/import";
 import JSZip from "jszip";
+import { compterLignes, conserverExclusions, exclureLigne, reintegrerLigne, tableauCorrige } from "../src/lib/personnel/apercu";
 import { ecrireListe, lireClasseur } from "../src/lib/personnel/xlsx";
 import { agregerParEmploye, comparerLivres, controlerLivre, controlerTotaux, decoderLivre, empreinteLivre, lireLivre, type MappingRubriques, type PaieEmploye } from "../src/lib/personnel/livre-paie";
 
@@ -141,6 +142,53 @@ assert.ok(D[5].avertissements[0].includes("à classer"));
 assert.equal(D[5].erreurs.length, 0);
 assert.ok(D[6].erreurs[0].includes("Département inconnu"));
 assert.deepEqual((D[7].donnees.sections as { section_id: string }[]).map((x) => x.section_id), ["s-polo"]);
+
+// Colonne « Etat paie » (nouvel intitulé du bulletin Sage) : même règle que « Etat »
+const etatPaie = controlerFiches(
+  [
+    ["Matricule", "Nom", "Prénom", "Etat paie", "Département"],
+    ["0040", "ACTIF", "UN", "E", "026"],
+    ["0041", "PARTI", "DEUX", "M", "026"],
+  ],
+  ctxDep
+).lignes;
+assert.deepEqual(etatPaie.map((l) => l.action), ["creer", "ignorer"], "« Etat paie » = « Etat » : M est ignoré");
+
+// Corriger ou exclure une ligne de l'aperçu (liste du personnel)
+const fichier = [
+  ["Matricule", "Nom", "Prénom", "Département", "Etat"],
+  ["0030", "", "SANSNOM", "026", "E"], // erreur : nom manquant
+  ["0031", "BON", "UN", "026", "E"],
+  ["0031", "DOUBLON", "DEUX", "026", "E"], // erreur : matricule en double
+  ["0032", "ANCIEN", "TROIS", "026", "M"],
+];
+const apercu = controlerFiches(fichier, ctxDep).lignes;
+assert.deepEqual(compterLignes(apercu), { nb_erreurs: 2, nb_creations: 1, nb_modifications: 0 });
+assert.ok(apercu[0].brut && apercu[0].brut["Nom"] === "", "les valeurs du fichier sont gardées");
+
+// correction : on donne un nom à la ligne 2 -> son erreur disparaît ; le doublon reste signalé
+const corrige = controlerFiches(tableauCorrige(apercu, 2, { Nom: "  KONE  " }), ctxDep).lignes;
+assert.equal(corrige[0].erreurs.length, 0);
+assert.equal(corrige[0].donnees.nom, "KONE");
+assert.equal(corrige[2].erreurs.length, 1, "contrôle du fichier entier : le doublon reste");
+// correction du doublon : nouveau matricule -> plus aucune erreur
+const corrige2 = controlerFiches(tableauCorrige(corrige, 4, { Matricule: "0033" }), ctxDep).lignes;
+assert.deepEqual(compterLignes(corrige2), { nb_erreurs: 0, nb_creations: 3, nb_modifications: 0 });
+assert.deepEqual(tableauCorrige(apercu, 2, { Inconnue: "x" }), tableauCorrige(apercu, 2, {}), "une colonne inconnue n'est pas ajoutée");
+
+// exclusion : la ligne ne compte plus, l'erreur est masquée, la réintégration la rétablit
+const exclue = exclureLigne(apercu[0]);
+assert.equal(exclue.action, "ignorer");
+assert.deepEqual(exclue.erreurs, []);
+assert.equal(exclue.exclue, true);
+assert.deepEqual(compterLignes([exclue, ...apercu.slice(1)]), { nb_erreurs: 1, nb_creations: 1, nb_modifications: 0 });
+assert.deepEqual(reintegrerLigne(exclue).erreurs, apercu[0].erreurs);
+assert.equal(reintegrerLigne(exclue).exclue, undefined);
+assert.equal(exclureLigne(exclue), exclue, "exclure deux fois ne change rien");
+// une exclusion survit à une correction d'une autre ligne
+const apres = conserverExclusions(controlerFiches(tableauCorrige([exclue, ...apercu.slice(1)], 3, { Prénom: "UN BIS" }), ctxDep).lignes, [exclue, ...apercu.slice(1)]);
+assert.equal(apres[0].exclue, true);
+assert.equal(apres[0].origine?.erreurs.length, 1);
 
 // Décodage de l'export Sage (é = 0x80, à = 0x85, û = 0x96)
 assert.equal(decoderLivre(Uint8Array.of(0x50, 0x72, 0x80, 0x73)), "Prés");

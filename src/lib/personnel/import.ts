@@ -147,6 +147,22 @@ export interface LigneImport {
   donnees: Record<string, unknown>;
   erreurs: string[];
   avertissements: string[];
+  /** Valeurs du fichier, par colonne : permet de corriger la ligne dans l'aperçu (liste et présence). */
+  brut?: Record<string, string>;
+  /** Ligne exclue de l'import par la personne qui valide. */
+  exclue?: boolean;
+  /** État de la ligne avant son exclusion, rétabli si on la réintègre. */
+  origine?: { action: LigneImport["action"]; erreurs: string[]; avertissements: string[] };
+}
+
+/** Valeurs d'une ligne par intitulé de colonne (colonnes sans intitulé ignorées). */
+export function brutDe(enTete: string[], cellules: string[]): Record<string, string> {
+  const brut: Record<string, string> = {};
+  enTete.forEach((nom, i) => {
+    const cle = nom.trim();
+    if (cle && !(cle in brut)) brut[cle] = (cellules[i] ?? "").trim();
+  });
+  return brut;
 }
 
 export interface ResultatLecture {
@@ -158,7 +174,7 @@ export interface ResultatLecture {
 
 /** Autres intitulés acceptés pour une colonne (clé et alias déjà normalisés). */
 const ALIAS_COLONNES: Record<string, string[]> = {
-  etat: ["etatsalarie", "etatdusalarie"],
+  etat: ["etatpaie", "etatsalarie", "etatdusalarie"],
   typecontrat: ["typedecontrat", "contrat"],
   prenom: ["prenoms"],
   atelier: ["section", "service"],
@@ -233,6 +249,7 @@ export function controlerFiches(cellules: string[][], ctx: ContexteImport): Resu
         donnees: { matricule, nom, prenom: prenom || null },
         erreurs: [],
         avertissements: ["Ancien salarié (état M) : ignoré"],
+        brut: brutDe(enTete, cells),
       });
       return;
     }
@@ -309,6 +326,7 @@ export function controlerFiches(cellules: string[][], ctx: ContexteImport): Resu
       },
       erreurs,
       avertissements,
+      brut: brutDe(enTete, cells),
     });
   });
   return { lignes };
@@ -319,7 +337,10 @@ export function controlerFiches(cellules: string[][], ctx: ContexteImport): Resu
 /* ------------------------------------------------------------------------ */
 
 export function controlerPresence(texte: string, ctx: ContexteImport): ResultatLecture {
-  const cellules = lireCsv(texte);
+  return controlerPresenceCellules(lireCsv(texte), ctx);
+}
+
+export function controlerPresenceCellules(cellules: string[][], ctx: ContexteImport): ResultatLecture {
   if (cellules.length < 2) return { lignes: [], erreurFichier: "Le fichier est vide ou ne contient que l'en-tête." };
   const enTete = cellules[0];
   const manquantes = ["matricule", "jour", "statut"].filter((c) => !aColonne(enTete, c));
@@ -358,6 +379,7 @@ export function controlerPresence(texte: string, ctx: ContexteImport): ResultatL
       donnees: { matricule, jour: jour ?? null, statut, heures: heures !== null && !Number.isNaN(heures) ? heures : null },
       erreurs,
       avertissements,
+      brut: brutDe(enTete, cells),
     });
   });
   return { lignes };
