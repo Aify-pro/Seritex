@@ -31,6 +31,8 @@ export interface EmployeVue {
   dateSortie: string | null;
   notes: string | null;
   sections: { sectionId: string; pourcentage: number }[];
+  /** Coût du dernier mois de paie importé (livre de paie), null s'il n'est pas dans ce livre. */
+  coutMois: number | null;
 }
 
 export interface SectionOption {
@@ -42,22 +44,18 @@ const TONE_STATUT = { actif: "success", suspendu: "warning", sorti: "neutral" } 
 const champ = "h-9 w-full rounded-md border border-border bg-surface px-2 text-sm";
 const etiquette = "mb-1 block text-xs font-medium text-foreground";
 
-/** Coût mensuel chargé d'une fiche (hors employé confidentiel : aucun montant). */
-function coutMensuel(e: EmployeVue): number | null {
-  if (e.confidentiel) return null;
-  const parts = [e.salaireBase, e.primesFixes, e.avantages, e.chargesPatronales];
-  return parts.every((p) => p === null) ? null : parts.reduce<number>((s, p) => s + (p ?? 0), 0);
-}
-
 export function PersonnelManager({
   employes,
   sections,
+  moisPaie,
   peutCreer,
   peutModifier,
   peutSupprimer,
 }: {
   employes: EmployeVue[];
   sections: SectionOption[];
+  /** Dernier mois de paie importé (1er du mois), null si aucun livre n'a encore été appliqué. */
+  moisPaie: string | null;
   peutCreer: boolean;
   peutModifier: boolean;
   peutSupprimer: boolean;
@@ -78,7 +76,9 @@ export function PersonnelManager({
     );
   }, [employes, recherche, filtreSection, filtreStatut]);
 
-  const totalMensuel = visibles.reduce((s, e) => s + (coutMensuel(e) ?? 0), 0);
+  const totalMois = visibles.reduce((s, e) => s + (e.coutMois ?? 0), 0);
+  const libelleMois = moisPaie ? new Intl.DateTimeFormat("fr-FR", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${moisPaie.slice(0, 7)}-01T00:00:00Z`)) : null;
+  const nbSansSection = visibles.filter((e) => e.sections.length === 0 && e.typeEmploi !== "structure" && e.statut === "actif").length;
 
   return (
     <div className="space-y-3">
@@ -122,7 +122,7 @@ export function PersonnelManager({
             <Th>Contrat</Th>
             <Th>Type</Th>
             <Th>Section</Th>
-            <Th align="right">Coût fiche</Th>
+            <Th align="right">{libelleMois ? `Coût ${libelleMois}` : "Coût du mois"}</Th>
             <Th>Statut</Th>
             <Th />
           </tr>
@@ -138,10 +138,14 @@ export function PersonnelManager({
               <Td>{LIBELLES_TYPE_EMPLOI[e.typeEmploi]}</Td>
               <Td>
                 {e.sections.length === 0
-                  ? "—"
+                  ? e.typeEmploi === "structure"
+                    ? "Structure"
+                    : e.atelierSource
+                      ? <Badge tone="warning">{`${e.atelierSource} : à classer`}</Badge>
+                      : "—"
                   : e.sections.map((s) => `${nomSection.get(s.sectionId) ?? "?"}${s.pourcentage < 100 ? ` ${s.pourcentage} %` : ""}`).join(", ")}
               </Td>
-              <Td align="right">{e.confidentiel ? <Badge tone="accent">Confidentiel</Badge> : formatAmount(coutMensuel(e))}</Td>
+              <Td align="right">{e.confidentiel ? <Badge tone="accent">Confidentiel</Badge> : e.coutMois === null ? "—" : formatAmount(e.coutMois)}</Td>
               <Td>
                 <Badge tone={TONE_STATUT[e.statut]}>{e.statut}</Badge>
               </Td>
@@ -166,7 +170,11 @@ export function PersonnelManager({
         </Tbody>
       </Table>
       <p className="text-xs text-foreground-muted">
-        {visibles.length} employé{visibles.length > 1 ? "s" : ""}. Le coût réel d&apos;un mois vient du livre de paie importé (voir plus bas), pas de la fiche.{totalMensuel > 0 ? ` Montants saisis sur les fiches affichées : ${formatAmount(totalMensuel)}.` : ""}
+        {visibles.length} employé{visibles.length > 1 ? "s" : ""}.{" "}
+        {libelleMois
+          ? `Coût de ${libelleMois} (livre de paie) pour les employés affichés : ${formatAmount(totalMois)}.`
+          : "Aucun livre de paie n'est encore appliqué : le coût apparaît après l'import et la validation d'un livre de paie."}
+        {nbSansSection > 0 ? ` ${nbSansSection} employé${nbSansSection > 1 ? "s" : ""} actif${nbSansSection > 1 ? "s" : ""} sans section : classez leur atelier dans « Ateliers et sections » puis rattachez-les.` : ""}
       </p>
 
       <Dialog open={edition !== null} onOpenChange={(o) => !o && setEdition(null)} title={edition === "nouveau" ? "Nouvel employé" : edition ? `Modifier ${edition.nom}` : ""} size="lg">

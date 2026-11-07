@@ -43,6 +43,15 @@ export default async function PersonnelPage() {
       .limit(30),
   ]);
 
+  // Coût du dernier mois de paie appliqué, par employé (livre de paie importé).
+  const { data: dernierMois } = await supabase.from("paies_mensuelles").select("mois").order("mois", { ascending: false }).limit(1);
+  const moisPaie = (dernierMois?.[0]?.mois as string | undefined) ?? null;
+  const coutParEmploye = new Map<string, number>();
+  if (moisPaie) {
+    const { data: paies } = await supabase.from("paies_mensuelles").select("employe_id, cout_mois").eq("mois", moisPaie).limit(5000);
+    for (const p of paies ?? []) coutParEmploye.set(p.employe_id as string, Number(p.cout_mois));
+  }
+
   const sectionsParEmploye = new Map<string, { sectionId: string; pourcentage: number }[]>();
   for (const l of liens ?? []) {
     const liste = sectionsParEmploye.get(l.employe_id as string) ?? [];
@@ -70,6 +79,7 @@ export default async function PersonnelPage() {
     dateSortie: (e.date_sortie as string | null) ?? null,
     notes: (e.notes as string | null) ?? null,
     sections: sectionsParEmploye.get(e.id as string) ?? [],
+    coutMois: coutParEmploye.get(e.id as string) ?? null,
   }));
 
   const imports: ImportVue[] = (importsBruts ?? []).map((i) => ({
@@ -144,7 +154,7 @@ export default async function PersonnelPage() {
       <Card>
         <CardHeader title="Fiches" description="Créées par l'import de la liste du personnel. Un employé confidentiel n'a aucun montant." />
         <CardBody>
-          <PersonnelManager employes={employes} sections={sectionsOptions} peutCreer={peutCreer} peutModifier={peutModifier} peutSupprimer={peutSupprimer} />
+          <PersonnelManager employes={employes} sections={sectionsOptions} moisPaie={moisPaie} peutCreer={peutCreer} peutModifier={peutModifier} peutSupprimer={peutSupprimer} />
         </CardBody>
       </Card>
 
