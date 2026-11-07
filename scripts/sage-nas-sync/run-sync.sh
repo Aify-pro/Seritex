@@ -4,7 +4,8 @@
 #
 # A executer depuis le NAS, dans le dossier ou ce projet a ete copie
 # (ex. /volume1/docker/sage-nas-sync) :
-#   sudo ./run-sync.sh
+#   sudo ./run-sync.sh          # passage rapide (15min, par defaut)
+#   sudo ./run-sync.sh nuit     # passage de nuit : rapprochement complet des factures d'achat
 #
 # Suppose que l'image a deja ete construite une fois : docker build -t sage-nas-sync .
 
@@ -16,4 +17,4 @@ if [ ! -f .env ]; then
   exit 1
 fi
 
-docker run --rm --env-file .env --network host sage-nas-sync
+docker run --rm --env-file .env --network host sage-nas-sync "${1:-15min}"

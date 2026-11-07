@@ -82,21 +82,41 @@ Supabase **avant** de reconstruire l'image et de relancer la synchro
 données à jour immédiatement) :
 ```bash
 cd /volume1/docker/sage-nas-sync
-sudo ./run-sync.sh
+sudo ./run-sync.sh          # passage rapide (15min)
+sudo ./run-sync.sh nuit     # passage de nuit (rapprochement complet)
 ```
 Le script vérifie que `.env` existe et affiche le résultat (nombre de
 lignes synchronisées par table, éventuelles erreurs).
 
-## Planification (DSM, toutes les 15 minutes)
+### Les deux modes
 
-Panneau de configuration DSM → **Planificateur de tâches** → Créer →
-**Tâche planifiée** → **Script défini par l'utilisateur** :
-- Utilisateur : `root` (nécessaire pour parler au socket Docker).
-- Déclencheur : **Répéter**, toutes les **15 minutes**.
-- Commande (onglet **Paramètres de la tâche**) :
+| Mode | Ce qu'il fait |
+|---|---|
+| `15min` (défaut) | Clients, articles, stock, devis et ODF : remplacement complet. Factures d'achat : **données du jour** seulement (pièces dont l'en-tête ou une ligne a été modifié ces `SAGE_JOURS_RECENTS` derniers jours, 3 par défaut), sans rien supprimer. |
+| `nuit` | Comme `15min`, avec le **rapprochement complet** des factures d'achat : ce qui a disparu de Sage disparaît du miroir. |
+
+Variables facultatives du `.env` : `SAGE_JOURS_RECENTS` (fenêtre « données du
+jour », 3) et `SAGE_ACHATS_DEPUIS` (début de la période des factures d'achat
+suivies, `2025-01-01`).
+
+## Planification (DSM)
+
+Deux tâches, à créer dans Panneau de configuration DSM → **Planificateur de
+tâches** → Créer → **Tâche planifiée** → **Script défini par l'utilisateur**.
+Utilisateur : `root` (nécessaire pour parler au socket Docker).
+
+**Toutes les 15 minutes** (déclencheur : **Répéter**, toutes les 15 minutes) :
   ```bash
-  /volume1/docker/sage-nas-sync/run-sync.sh
+  /volume1/docker/sage-nas-sync/copie-sage/copie-sage.sh 15min && /volume1/docker/sage-nas-sync/run-sync.sh 15min
   ```
+**Chaque nuit à 2 h** :
+  ```bash
+  /volume1/docker/sage-nas-sync/copie-sage/copie-sage.sh nuit && /volume1/docker/sage-nas-sync/run-sync.sh nuit
+  ```
+(Sans la copie Sage → NAS préalable, `copie-sage.sh`, seule la partie
+`run-sync.sh` est à lancer : elle lit ce qui est déjà sur le NAS.)
+
+Réglages communs aux deux tâches :
 - Optionnel mais recommandé : dans **Paramètres de la tâche → Envoyer les
   détails d'exécution par e-mail**, cocher "seulement en cas d'échec" pour
   être alerté si la synchro s'arrête sans avoir à consulter les journaux.

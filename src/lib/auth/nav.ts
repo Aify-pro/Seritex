@@ -149,6 +149,8 @@ const STAFF_NAV: NavItem[] = [
   { href: "/parametres/articles-sage", label: "Articles Sage (lecture)", icon: navIcon(Package), section: PARAMETRES, module: "articles_sage" },
   { href: "/parametres/stock", label: "Stock Sage (lecture)", icon: navIcon(Warehouse), section: PARAMETRES, module: "stock_sage" },
   { href: "/parametres/devis-sage", label: "Devis Sage (lecture)", icon: navIcon(FileText), section: PARAMETRES, module: "devis_sage" },
+  { href: "/parametres/odf-sage", label: "ODF Sage (lecture)", icon: navIcon(ClipboardList), section: PARAMETRES, module: "odf_sage" },
+  { href: "/parametres/achats-sage", label: "Achats Sage (lecture)", icon: navIcon(Package), section: PARAMETRES, module: "achats_sage" },
   { href: "/parametres/utilisateurs", label: "Utilisateurs", icon: navIcon(Users), section: PARAMETRES, module: "utilisateurs" },
   { href: "/parametres/roles", label: "Rôles & permissions", icon: navIcon(ShieldCheck), section: PARAMETRES, module: "roles" },
   { href: "/parametres/audit", label: "Journal d'audit", icon: navIcon(ScrollText), section: PARAMETRES, module: "audit" },

@@ -19,6 +19,15 @@
 //   - sage_client_ca / sage_client_creances (CA facture par client et par
 //                            annee, reste a encaisser ; planning de
 //                            prospection, migration 0123)
+//   - sage_documents_view / sage_document_lines_view (ODF en cours et factures
+//                            d'achat ; migration 0158)
+//
+// Usage : node sync.js [15min|nuit]   (defaut : 15min)
+//   15min : passage rapide. Remplacement complet pour les petits volumes (clients,
+//           articles, stock, devis, ODF), « donnees du jour » seulement pour les
+//           factures d'achat (pieces touchees ces derniers jours, rien supprime).
+//   nuit  : meme passage, avec rapprochement complet des factures d'achat
+//           (suppression de ce qui a disparu de Sage).
 //
 // Remplacement complet a chaque passage (upsert + suppression des lignes
 // disparues cote Sage) : volumes modestes (quelques milliers de lignes),
@@ -412,10 +421,187 @@ async function syncCreances(pool) {
   console.log(`Creances Sage : ${rows.length} client(s) avec un solde (base : ${net} - DO_MontantRegle).`);
 }
 
+// ---------------------------------------------------------------------------
+// ODF en cours et factures d'achat (migration 0158)
+// ---------------------------------------------------------------------------
+//
+// Deux familles de pieces Sage dans les memes tables miroir (colonne `kind`) :
+//   - odf           : bons de commande de vente (DO_Domaine 0, DO_Type 1) dont le
+//                     numero commence par « ODF ». Le devis est transforme en ODF,
+//                     puis l'ODF en BL et en facture, et disparait alors de Sage :
+//                     remplacement complet a chaque passage (une centaine de
+//                     pieces), avec suppression de celles qui ont disparu.
+//   - facture_achat : factures fournisseurs (DO_Domaine 1, DO_Type 16 et 17),
+//                     depuis ACHATS_DEPUIS. Mode « 15min » : seules les pieces
+//                     touchees ces derniers jours (cbModification) sont relues, sans
+//                     rien supprimer ; mode « nuit » : rapprochement complet.
+//
+// Pour suivre un autre genre de piece : ajouter une entree ici, une valeur a la
+// contrainte `kind` de la migration, et c'est tout.
+const MODE = (process.argv[2] || "15min").toLowerCase();
+if (!["15min", "nuit"].includes(MODE)) {
+  console.error(`Mode inconnu : « ${process.argv[2]} » (attendu : 15min ou nuit).`);
+  process.exit(1);
+}
+const JOURS_RECENTS = Math.max(1, parseInt(process.env.SAGE_JOURS_RECENTS || "3", 10) || 3);
+const ACHATS_DEPUIS = /^\d{4}-\d{2}-\d{2}$/.test(process.env.SAGE_ACHATS_DEPUIS || "") ? process.env.SAGE_ACHATS_DEPUIS : "2025-01-01";
+
+const DOCUMENTS_SUIVIS = [
+  { kind: "odf", libelle: "ODF en cours", domaine: 0, types: [1], pieceLike: "ODF%", depuis: null, jour: false },
+  { kind: "facture_achat", libelle: "Factures d'achat", domaine: 1, types: [16, 17], pieceLike: null, depuis: ACHATS_DEPUIS, jour: true },
+];
+
+async function syncDocumentsSage(pool, def) {
+  const enteteCols = await colonnesDe(pool, "F_DOCENTETE");
+  const ligneCols = await colonnesDe(pool, "F_DOCLIGNE");
+  if (enteteCols.size === 0 || ligneCols.size === 0) {
+    throw new Error("F_DOCENTETE / F_DOCLIGNE absentes de la base miroir du NAS (documents non copies).");
+  }
+  exigerColonnes("F_DOCENTETE", enteteCols, ["DO_Domaine", "DO_Type", "DO_Piece", "DO_Date", "DO_Tiers", "DO_TotalHT", "DO_TotalTTC"]);
+  exigerColonnes("F_DOCLIGNE", ligneCols, ["DO_Domaine", "DO_Type", "DO_Piece", "DL_Ligne", "DL_Design", "DL_Qte", "DL_PrixUnitaire", "DL_MontantHT", "AR_Ref"]);
+
+  const modeJour = def.jour && MODE === "15min";
+  if (modeJour) {
+    exigerColonnes("F_DOCENTETE", enteteCols, ["cbModification"]);
+    exigerColonnes("F_DOCLIGNE", ligneCols, ["cbModification"]);
+  }
+
+  const optE = ["DO_Ref", "CO_No", "DO_DateLivr", "DO_Statut", "DO_Cloture", "DO_MontantRegle", "cbModification"].filter((c) => enteteCols.has(c));
+  const net = enteteCols.has("DO_NetAPayer") ? "e.DO_NetAPayer" : "e.DO_TotalTTC";
+  const types = def.types.join(",");
+
+  const demande = pool.request();
+  let filtre = `e.DO_Domaine = ${def.domaine} AND e.DO_Type IN (${types})`;
+  if (def.pieceLike) filtre += ` AND e.DO_Piece LIKE '${def.pieceLike}'`;
+  if (def.depuis) {
+    demande.input("depuis", sql.VarChar, def.depuis);
+    filtre += " AND e.DO_Date >= CONVERT(date, @depuis, 23)";
+  }
+  if (modeJour) {
+    demande.input("depuisModif", sql.DateTime, new Date(Date.now() - JOURS_RECENTS * 24 * 3600 * 1000));
+    filtre +=
+      " AND (e.cbModification >= @depuisModif OR EXISTS (SELECT 1 FROM F_DOCLIGNE l" +
+      " WHERE l.DO_Domaine = e.DO_Domaine AND l.DO_Type = e.DO_Type AND l.DO_Piece = e.DO_Piece AND l.cbModification >= @depuisModif))";
+  }
+
+  const entetes = await demande.query(`
+    SELECT e.DO_Type, e.DO_Piece, e.DO_Date, e.DO_Tiers, c.CT_Intitule, e.DO_TotalHT, e.DO_TotalTTC,
+           ${net} AS NET_A_PAYER${optE.map((c) => `, e.${c}`).join("")}
+    FROM F_DOCENTETE e
+    LEFT JOIN F_COMPTET c ON c.CT_Num = e.DO_Tiers
+    WHERE ${filtre}
+  `);
+
+  const now = new Date().toISOString();
+  const pieces = [];
+  const headerRows = [];
+  for (const r of entetes.recordset) {
+    const piece = trimOrNull(r.DO_Piece);
+    const tiers = trimOrNull(r.DO_Tiers);
+    if (!piece || !tiers) continue;
+    pieces.push(piece);
+    const regle = Math.abs(Number(r.DO_MontantRegle) || 0);
+    headerRows.push({
+      kind: def.kind,
+      sage_piece: piece,
+      doc_type: Number(r.DO_Type),
+      doc_date: dateJour(r.DO_Date),
+      tiers_code: tiers,
+      tiers_name: trimOrNull(r.CT_Intitule),
+      doc_ref: trimOrNull(r.DO_Ref),
+      representant_no: r.CO_No !== null && r.CO_No !== undefined && Number(r.CO_No) > 0 ? Number(r.CO_No) : null,
+      total_ht: Number(r.DO_TotalHT) || 0,
+      total_ttc: Number(r.DO_TotalTTC) || 0,
+      montant_regle: regle,
+      reste_a_payer: def.kind === "facture_achat" ? Math.round((Math.abs(Number(r.NET_A_PAYER) || 0) - regle) * 100) / 100 : 0,
+      date_livraison: dateJour(r.DO_DateLivr),
+      statut: r.DO_Statut !== null && r.DO_Statut !== undefined ? Number(r.DO_Statut) : null,
+      cloture: Number(r.DO_Cloture) === 1,
+      sage_modified_at: dateOrNull(r.cbModification),
+      last_sync_at: now,
+    });
+  }
+
+  // Lignes des pieces retenues, par paquets (liste IN). Les lignes a quantite 0
+  // sont gardees : sur un ODF ce sont les instructions d'impression / de broderie.
+  const cleLigne = ligneCols.has("DL_No") ? "DL_No" : "DL_Ligne";
+  const optL = ["DL_No", "DL_Taxe1", "DL_PieceDE", "DL_PieceBC", "DL_PieceBL"].filter((c) => ligneCols.has(c));
+  const lineRows = [];
+  const dejaVues = new Set();
+  for (let i = 0; i < pieces.length; i += 300) {
+    const liste = pieces
+      .slice(i, i + 300)
+      .map((p) => `'${p.replace(/'/g, "''")}'`)
+      .join(",");
+    const lignes = await pool.request().query(`
+      SELECT DO_Piece, DL_Ligne, DL_Design, DL_Qte, DL_PrixUnitaire, DL_MontantHT, AR_Ref${optL.map((c) => `, ${c}`).join("")}
+      FROM F_DOCLIGNE
+      WHERE DO_Domaine = ${def.domaine} AND DO_Type IN (${types}) AND DO_Piece IN (${liste})
+        AND LTRIM(RTRIM(ISNULL(DL_Design, ''))) <> ''
+    `);
+    for (const r of lignes.recordset) {
+      const piece = trimOrNull(r.DO_Piece);
+      if (!piece) continue;
+      const quantite = Number(r.DL_Qte) || 0;
+      const pu = Number(r.DL_PrixUnitaire) || 0;
+      const montant = Number(r.DL_MontantHT) || 0;
+      const brut = quantite * pu;
+      let remise = brut > 0 ? (1 - montant / brut) * 100 : 0;
+      remise = Math.min(100, Math.max(0, Math.round(remise * 100) / 100));
+      const numero = Number(r[cleLigne]);
+      const cle = `${piece}|${numero}`;
+      if (dejaVues.has(cle)) continue;
+      dejaVues.add(cle);
+      lineRows.push({
+        kind: def.kind,
+        sage_piece: piece,
+        line_no: numero,
+        position: Number(r.DL_Ligne) || 0,
+        ar_ref: trimOrNull(r.AR_Ref),
+        designation: trimOrNull(r.DL_Design) || "(sans designation)",
+        quantity: quantite,
+        unit_price: pu,
+        remise_pct: remise,
+        tva_rate: r.DL_Taxe1 !== null && r.DL_Taxe1 !== undefined ? Number(r.DL_Taxe1) : null,
+        total_ht: montant,
+        piece_devis: trimOrNull(r.DL_PieceDE),
+        piece_commande: trimOrNull(r.DL_PieceBC),
+        piece_bl: trimOrNull(r.DL_PieceBL),
+      });
+    }
+  }
+
+  const scope = { kind: def.kind };
+  if (modeJour) {
+    // Donnees du jour : on remplace les lignes des seules pieces relues (une
+    // ligne supprimee dans Sage ne doit pas rester), sans toucher au reste.
+    await upsertAndPrune("sage_documents_view", ["kind", "sage_piece"], headerRows, { scope, prune: false });
+    for (let i = 0; i < pieces.length; i += 200) {
+      const { error } = await supabase
+        .from("sage_document_lines_view")
+        .delete()
+        .eq("kind", def.kind)
+        .in("sage_piece", pieces.slice(i, i + 200));
+      if (error) throw new Error(`Suppression lignes ${def.kind} : ${error.message}`);
+    }
+    await upsertAndPrune("sage_document_lines_view", ["kind", "sage_piece", "line_no"], lineRows, { scope, prune: false });
+    console.log(`${def.libelle} (donnees des ${JOURS_RECENTS} derniers jours) : ${headerRows.length} piece(s), ${lineRows.length} ligne(s) mises a jour.`);
+  } else {
+    // En-tetes d'abord (cle etrangere) ; la suppression d'un en-tete disparu
+    // emporte ses lignes (on delete cascade).
+    await upsertAndPrune("sage_documents_view", ["kind", "sage_piece"], headerRows, { scope });
+    await upsertAndPrune("sage_document_lines_view", ["kind", "sage_piece", "line_no"], lineRows, { scope });
+    console.log(`${def.libelle} : ${headerRows.length} piece(s), ${lineRows.length} ligne(s) synchronisees.`);
+  }
+}
+
 // Upsert de toutes les lignes actuelles, puis suppression des lignes
 // existantes en base qui n'apparaissent plus dans le resultat Sage
-// (remplacement complet, pas de suivi incremental pour ce volume).
-async function upsertAndPrune(table, keyColumns, rows) {
+// (remplacement complet).
+//   scope : colonnes fixes qui delimitent le perimetre du nettoyage (ex. { kind: "odf" }),
+//           pour qu'un genre de piece n'efface pas les autres dans une table partagee.
+//   prune : false pour un passage « donnees du jour », qui ne supprime rien.
+async function upsertAndPrune(table, keyColumns, rows, { scope = {}, prune = true } = {}) {
   // Par paquets : les lignes de devis se comptent en dizaines de milliers, une
   // seule requete depasserait la taille acceptee par l'API.
   const CHUNK = 500;
@@ -423,11 +609,13 @@ async function upsertAndPrune(table, keyColumns, rows) {
     const { error } = await supabase.from(table).upsert(rows.slice(i, i + CHUNK), { onConflict: keyColumns.join(",") });
     if (error) throw new Error(`Upsert ${table} : ${error.message}`);
   }
+  if (!prune) return;
 
   // Lecture paginee : l'API renvoie au plus 1 000 lignes par requete.
   const existing = [];
   for (let from = 0; ; from += 1000) {
     let query = supabase.from(table).select(keyColumns.join(","));
+    for (const [c, v] of Object.entries(scope)) query = query.eq(c, v);
     for (const c of keyColumns) query = query.order(c);
     const { data, error: selError } = await query.range(from, from + 999);
     if (selError) throw new Error(`Lecture ${table} : ${selError.message}`);
@@ -452,7 +640,7 @@ async function upsertAndPrune(table, keyColumns, rows) {
 }
 
 async function main() {
-  console.log(`[${new Date().toISOString()}] Debut synchronisation NAS -> Supabase`);
+  console.log(`[${new Date().toISOString()}] Debut synchronisation NAS -> Supabase (mode ${MODE})`);
   const pool = await sql.connect(nasConfig);
   try {
     await syncRepresentants(pool);
@@ -467,6 +655,15 @@ async function main() {
     } catch (err) {
       console.error("ERREUR devis Sage :", err.message);
       process.exitCode = 1;
+    }
+    // ODF en cours et factures d'achat (migration 0158) : isoles eux aussi.
+    for (const def of DOCUMENTS_SUIVIS) {
+      try {
+        await syncDocumentsSage(pool, def);
+      } catch (err) {
+        console.error(`ERREUR ${def.libelle} :`, err.message);
+        process.exitCode = 1;
+      }
     }
     // Isoles de la meme facon : CA et creances alimentent le planning de
     // prospection, pas le reste de Seritex.

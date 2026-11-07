@@ -29,13 +29,19 @@ function freshnessBadge(lastSyncAt: string | null) {
 
 async function getMirrorStatus(
   supabase: Awaited<ReturnType<typeof createClient>>,
-  table: "sage_customers_view" | "sage_articles_view" | "stock_item_view" | "sage_quotes_view",
+  table: "sage_customers_view" | "sage_articles_view" | "stock_item_view" | "sage_quotes_view" | "sage_documents_view",
   label: string,
-  href: string
+  href: string,
+  kind?: "odf" | "facture_achat"
 ): Promise<MirrorTableStatus> {
+  // `sage_documents_view` regroupe plusieurs genres de pièces : on compte chacun à part.
   const [{ count }, { data: last }] = await Promise.all([
-    supabase.from(table).select("*", { count: "exact", head: true }),
-    supabase.from(table).select("last_sync_at").order("last_sync_at", { ascending: false }).limit(1).maybeSingle(),
+    kind
+      ? supabase.from(table).select("*", { count: "exact", head: true }).eq("kind", kind)
+      : supabase.from(table).select("*", { count: "exact", head: true }),
+    kind
+      ? supabase.from(table).select("last_sync_at").eq("kind", kind).order("last_sync_at", { ascending: false }).limit(1).maybeSingle()
+      : supabase.from(table).select("last_sync_at").order("last_sync_at", { ascending: false }).limit(1).maybeSingle(),
   ]);
   return { label, href, rowCount: count ?? 0, lastSyncAt: last?.last_sync_at ?? null };
 }
@@ -52,18 +58,20 @@ export default async function SageSettingsPage() {
   await requirePlatformAdmin();
   const supabase = await createClient();
 
-  const [clients, articles, stock, devis] = await Promise.all([
+  const [clients, articles, stock, devis, odf, achats] = await Promise.all([
     getMirrorStatus(supabase, "sage_customers_view", "Clients", "/parametres/clients-sage"),
     getMirrorStatus(supabase, "sage_articles_view", "Articles", "/parametres/articles-sage"),
     getMirrorStatus(supabase, "stock_item_view", "Stock (lignes, tous dépôts)", "/parametres/articles-sage"),
     getMirrorStatus(supabase, "sage_quotes_view", "Devis en cours", "/parametres/devis-sage"),
+    getMirrorStatus(supabase, "sage_documents_view", "ODF en cours", "/parametres/odf-sage", "odf"),
+    getMirrorStatus(supabase, "sage_documents_view", "Factures d'achat", "/parametres/achats-sage", "facture_achat"),
   ]);
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Intégration Sage"
-        description="Stock, clients, articles et devis proviennent de Sage, via un pont Sage -> NAS -> Supabase alimenté par un job externe (compte technique à droits restreints). Seritex n'écrit jamais dans ces tables."
+        description="Stock, clients, articles, devis, ODF et factures d'achat proviennent de Sage, via un pont Sage -> NAS -> Supabase alimenté par un job externe (compte technique à droits restreints). Seritex n'écrit jamais dans ces tables."
       />
 
       <div className="flex items-start gap-2 rounded-md bg-info-soft px-3 py-2 text-xs text-info">
@@ -73,8 +81,8 @@ export default async function SageSettingsPage() {
         dépôt.
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {[clients, articles, stock, devis].map((s) => (
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {[clients, articles, stock, devis, odf, achats].map((s) => (
           <Card key={s.label}>
             <CardHeader title={s.label} action={freshnessBadge(s.lastSyncAt)} />
             <CardBody className="space-y-1">
