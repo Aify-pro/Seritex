@@ -73,6 +73,8 @@ export const MODULE_META: Record<string, ModuleMeta> = {
   clients_sage: { group: "parametres", actions: VIEW },
   articles_sage: { group: "parametres", actions: VIEW },
   devis_sage: { group: "parametres", actions: VIEW },
+  odf_sage: { group: "parametres", actions: VIEW },
+  achats_sage: { group: "parametres", actions: VIEW },
   parametres_sage: { group: "parametres", actions: VIEW, platformAdminOnly: true },
   utilisateurs: { group: "parametres", actions: VIEW, platformAdminOnly: true },
   roles: { group: "parametres", actions: VIEW, platformAdminOnly: true },
