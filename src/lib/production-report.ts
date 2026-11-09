@@ -1,3 +1,4 @@
+import { libelleCoupure } from "@/lib/atelier/coupures";
 import { computeRealCost, tissuOf, type RealCostResult, type SnapshotDetail, type TheoreticalRow } from "@/lib/real-cost";
 import type { PieceCoupeeStatut } from "@/lib/pieces-coupees";
 
@@ -58,6 +59,8 @@ export interface ReportContenu {
     kg_retour_stock: number | string;
     kg_sortie_lots: number | string;
     kg_dechets: number | string;
+    /** Kilos des sacs par taille de coupure (0162) ; absent des rapports antérieurs. */
+    kg_dechets_par_coupure?: Record<string, number | string>;
     matelas_clotures: number;
   };
   consommables: { code: string; designation: string; unite: string; theorique: number | string; reel: number | string | null; motif: string | null }[];
@@ -91,7 +94,7 @@ export interface ReportView {
   lignes: { description: string; quantite: number; tailles: ReportLigneTaille[]; totaux: Omit<ReportLigneTaille, "taille"> }[];
   totaux: { demande: number; sorties: number; premier_choix: number; deuxieme_choix: number; dechets: number; surplus: number; manquants: number; en_plus: number; en_cours: number };
   sections: ReportSection[];
-  tissu: { kgReception: number; kgRetour: number; kgNet: number; kgSortieLots: number; kgDechets: number; matelasClotures: number; kgParPiece: number | null };
+  tissu: { kgReception: number; kgRetour: number; kgNet: number; kgSortieLots: number; kgDechets: number; kgDechetsParCoupure: { coupure: string; kg: number }[]; matelasClotures: number; kgParPiece: number | null; piecesAuKilo: number | null };
   consommables: { code: string; designation: string; unite: string; theorique: number; reel: number | null; ecart: number | null; motif: string | null }[];
   /** Coupé au tracé, attendu par la nomenclature, écart (coupé − attendu) ; vide sans semi-fini. */
   semiFinis: { code: string | null; piece: string; statut: PieceCoupeeStatut; coupe: number; attendu: number | null; ecart: number | null }[];
@@ -164,8 +167,10 @@ export function buildReportView(c: ReportContenu): ReportView {
       kgNet,
       kgSortieLots: num(c.tissu.kg_sortie_lots),
       kgDechets: num(c.tissu.kg_dechets),
+      kgDechetsParCoupure: Object.entries(c.tissu.kg_dechets_par_coupure ?? {}).map(([coupure, valeur]) => ({ coupure: libelleCoupure(coupure) ?? "Sans coupure", kg: num(valeur) })),
       matelasClotures: c.tissu.matelas_clotures ?? 0,
       kgParPiece: kgNet > 0 && sorties > 0 ? kgNet / sorties : null,
+      piecesAuKilo: kgNet > 0 && sorties > 0 ? sorties / kgNet : null,
     },
     consommables: c.consommables.map((k) => {
       const theorique = num(k.theorique);

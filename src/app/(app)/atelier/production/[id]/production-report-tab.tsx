@@ -220,7 +220,11 @@ export async function ProductionReportTab({
             <Stat label="Retour au stock" value={kg(v.tissu.kgRetour)} />
             <Stat label="Tissu consommé (net)" value={kg(v.tissu.kgNet)} />
             <Stat label="Par pièce sortie" value={v.tissu.kgParPiece === null ? "—" : `${(v.tissu.kgParPiece * 1000).toFixed(0)} g`} />
+            <Stat label="Pièces au kilo" value={v.tissu.piecesAuKilo === null ? "—" : v.tissu.piecesAuKilo.toLocaleString("fr-FR", { maximumFractionDigits: 2 })} />
             <Stat label="Déchets de tissu (sacs)" value={kg(v.tissu.kgDechets)} />
+            {v.tissu.kgDechetsParCoupure.map((c) => (
+              <Stat key={c.coupure} label={c.coupure} value={kg(c.kg)} />
+            ))}
             <Stat label="Matelas clôturés" value={v.tissu.matelasClotures} />
           </dl>
           {v.consommables.length > 0 && (

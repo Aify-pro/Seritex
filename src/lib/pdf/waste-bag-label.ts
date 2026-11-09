@@ -30,6 +30,8 @@ export type WasteBagLabelData = {
   createdAt: string;
   /** Présent seulement pour un sac scellé (ex. « Scellé — 18,6 kg »). */
   sealedLine?: string | null;
+  /** Taille des morceaux (0162), déjà libellée. */
+  coupure?: string | null;
 };
 
 export type WasteBagLabelFormat = "thermique" | "a4";
@@ -205,7 +207,7 @@ function drawLabel(
 
   // Date / scellage
   cursor -= 3.8 * MM;
-  const infos = data.sealedLine ? `Créé le ${data.createdAt} · ${data.sealedLine}` : `Créé le ${data.createdAt}`;
+  const infos = [data.coupure, `Créé le ${data.createdAt}`, data.sealedLine].filter(Boolean).join(" · ");
   centerText(page, infos, cx, cursor, fonts.regular, fitSize(infos, fonts.regular, 7, LABEL_W - 6 * MM));
 }
 

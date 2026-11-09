@@ -15,6 +15,8 @@ export type LabelPrintData = {
   createdAt: string;
   /** Présent seulement pour un sac scellé (ex. « Scellé — 18,6 kg »). */
   sealedLine: string | null;
+  /** Taille des morceaux (0162), déjà libellée. */
+  coupure: string | null;
 };
 
 /**
@@ -33,7 +35,7 @@ export type LabelPrintData = {
  * en JS en cas d'échec — d'où le message d'aide affiché après l'envoi plutôt
  * qu'une confirmation d'impression réussie.
  */
-export function LabelPrintButton({ code, url, createdAt, sealedLine }: LabelPrintData) {
+export function LabelPrintButton({ code, url, createdAt, sealedLine, coupure }: LabelPrintData) {
   const [printing, setPrinting] = useState(false);
 
   function print() {
@@ -46,6 +48,7 @@ export function LabelPrintButton({ code, url, createdAt, sealedLine }: LabelPrin
       { op: "qr", v: url, module: qrModuleSize(modules), level: 1 },
       { op: "feed", n: 1 },
       { op: "text", v: `${code}\n`, size: 40 },
+      ...(coupure ? [{ op: "text" as const, v: `${coupure}\n`, size: 30 }] : []),
       { op: "text", v: `${createdAt}\n`, size: 30 },
       ...(sealedLine ? [{ op: "text" as const, v: `${sealedLine}\n`, size: 20 }] : []),
       { op: "feed", n: 4 },

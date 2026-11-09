@@ -327,7 +327,7 @@ export default async function SectionQueuePage({
     // pas par sous-ODF.
     const { data: bags } = await supabase
       .from("sacs_dechets")
-      .select("id,code,created_at")
+      .select("id,code,coupure,created_at")
       .eq("statut", "en_cours")
       .order("created_at", { ascending: false })
       .limit(20);
@@ -349,6 +349,7 @@ export default async function SectionQueuePage({
       code: b.code,
       currentWeightKg: lastWeightBySacId[b.id] ?? 0,
       createdAt: b.created_at,
+      coupure: b.coupure,
     }));
   }
 

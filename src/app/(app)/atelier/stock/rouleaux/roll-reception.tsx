@@ -38,6 +38,7 @@ export function RollReception({ tissus }: { tissus: TissuOption[] }) {
   const [pending, startTransition] = useTransition();
   const [tissuId, setTissuId] = useState(tissus[0]?.id ?? "");
   const [coloris, setColoris] = useState("");
+  const [forme, setForme] = useState<"ouvert" | "tubulaire">("ouvert");
   const [mode, setMode] = useState<"saisie" | "import">("saisie");
   const [rows, setRows] = useState<Draft[]>([{ ...empty }]);
   const [paste, setPaste] = useState("");
@@ -50,7 +51,7 @@ export function RollReception({ tissus }: { tissus: TissuOption[] }) {
     startTransition(async () => {
       const res = await receiveRolls(
         tissuId,
-        lignes.map((r) => ({ ...r, sage_reference: coloris })),
+        lignes.map((r) => ({ ...r, sage_reference: coloris, forme })),
         mode
       );
       if (res.error) toast.error("Réception refusée", { description: res.error });
@@ -70,7 +71,7 @@ export function RollReception({ tissus }: { tissus: TissuOption[] }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-4">
         <label className="block">
           <span className="mb-1 block text-xs font-medium text-foreground">Tissu</span>
           <select value={tissuId} onChange={(e) => { setTissuId(e.target.value); setColoris(""); }} className={input}>
@@ -91,6 +92,13 @@ export function RollReception({ tissus }: { tissus: TissuOption[] }) {
                 {c.couleur ? ` · ${c.couleur}` : ""}
               </option>
             ))}
+          </select>
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium text-foreground">Forme du tissu</span>
+          <select value={forme} onChange={(e) => setForme(e.target.value as "ouvert" | "tubulaire")} className={input}>
+            <option value="ouvert">Ouvert</option>
+            <option value="tubulaire">Tubulaire</option>
           </select>
         </label>
         <div className="flex items-end gap-1">

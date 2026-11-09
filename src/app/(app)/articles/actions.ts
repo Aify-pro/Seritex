@@ -213,6 +213,8 @@ const couleurLigneSchema = z.object({
 const newNomenclatureLineSchema = couleurLigneSchema
   .extend({
     product_model_id: z.string().uuid(),
+    // 0161 : vide = nomenclature principale de l'article.
+    nomenclature_id: optionalGuid,
     // COM-G : une ligne consommable pointe vers le référentiel des consommables ;
     // désignation et unité en sont reprises (le texte libre ne compte pas à la
     // clôture). 0143 : une ligne semi-fini pointe vers un article semi-fini ;
@@ -232,6 +234,7 @@ export async function addNomenclatureLine(formData: FormData) {
   await requirePermission("articles", "modify");
   const parsed = newNomenclatureLineSchema.safeParse({
     product_model_id: formData.get("product_model_id"),
+    nomenclature_id: formData.get("nomenclature_id") ?? "",
     consumable_id: formData.get("consumable_id") ?? "",
     semi_fini_id: formData.get("semi_fini_id") ?? "",
     mp_id: formData.get("mp_id") ?? "",
@@ -286,6 +289,54 @@ export async function removeNomenclatureLine(lineId: string) {
   await requirePermission("articles", "delete");
   const supabase = await createClient();
   const { error } = await supabase.from("nomenclature_lines").delete().eq("id", lineId);
+  if (error) return { error: error.message };
+  revalidateArticles();
+  return {};
+}
+
+const nomenclatureSchema = z.object({
+  nom: z.string().trim().min(1, "Le nom est obligatoire").max(60),
+  forme: z.enum(["ouvert", "tubulaire"]),
+});
+
+const nomenclatureErreur = (error: { code?: string; message: string }) => (error.code === "23505" ? "Cet article a déjà une nomenclature de ce nom." : error.message);
+
+/** Crée une nomenclature pour un produit fini (0161), vide ou copiée d'une autre. */
+export async function creerNomenclature(productModelId: string, input: z.input<typeof nomenclatureSchema>, copierDe: string | null): Promise<{ id?: string; error?: string }> {
+  await requirePermission("articles", "modify");
+  const parsed = nomenclatureSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message };
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("creer_nomenclature", { p_model_id: productModelId, p_nom: parsed.data.nom, p_forme: parsed.data.forme, p_copier_de: copierDe });
+  if (error) return { error: nomenclatureErreur(error) };
+  revalidateArticles();
+  return { id: data as string };
+}
+
+export async function modifierNomenclature(id: string, input: z.input<typeof nomenclatureSchema>): Promise<{ error?: string }> {
+  await requirePermission("articles", "modify");
+  const parsed = nomenclatureSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message };
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("modifier_nomenclature", { p_id: id, p_nom: parsed.data.nom, p_forme: parsed.data.forme });
+  if (error) return { error: nomenclatureErreur(error) };
+  revalidateArticles();
+  return {};
+}
+
+export async function definirNomenclaturePrincipale(id: string): Promise<{ error?: string }> {
+  await requirePermission("articles", "modify");
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("definir_nomenclature_principale", { p_id: id });
+  if (error) return { error: error.message };
+  revalidateArticles();
+  return {};
+}
+
+export async function supprimerNomenclature(id: string): Promise<{ error?: string }> {
+  await requirePermission("articles", "delete");
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("supprimer_nomenclature", { p_id: id });
   if (error) return { error: error.message };
   revalidateArticles();
   return {};

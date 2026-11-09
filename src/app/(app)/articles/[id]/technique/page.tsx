@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
 import { ZoneTemplateEditor } from "../_components/zone-template-editor";
 import { PrintableZoneEditor } from "../_components/printable-zone-editor";
-import { NomenclatureEditor } from "../_components/nomenclature-editor";
+import { NomenclaturesPanel, FORME_LABELS, type NomenclatureOption } from "../_components/nomenclatures-panel";
 import { AttachPattern } from "../_components/attach-pattern";
 import { MockupEditor, type MockupData } from "../_components/mockup-editor";
 
@@ -76,7 +76,7 @@ export default async function ArticleTechniquePage({ params }: { params: Promise
     );
   }
 
-  const [{ data: zones }, { data: printableZones }, { data: nomenclature }, { data: fiches }, { data: consumables }, { data: mockups }, { data: semiFinis }, { data: couleurs }, { data: matieres }] =
+  const [{ data: zones }, { data: printableZones }, { data: nomenclature }, { data: fiches }, { data: consumables }, { data: mockups }, { data: semiFinis }, { data: couleurs }, { data: matieres }, { data: nomenclaturesData }] =
     await Promise.all([
       supabase.from("product_zone_templates").select("*").eq("product_model_id", id).order("display_order"),
       supabase.from("product_printable_zones").select("*").eq("product_model_id", id).order("display_order"),
@@ -92,7 +92,9 @@ export default async function ArticleTechniquePage({ params }: { params: Promise
       supabase.from("product_models").select("id,code,name").eq("nature", "semi_fini").eq("active", true).order("name"),
       supabase.from("colors").select("id,name").eq("active", true).order("name"),
       supabase.from("product_models").select("id,name,unite").eq("nature", "mp").eq("active", true).order("name"),
+      supabase.from("nomenclatures").select("id,nom,forme,principale").eq("product_model_id", id).order("principale", { ascending: false }).order("nom"),
     ]);
+  const nomenclatures = (nomenclaturesData ?? []) as NomenclatureOption[];
   // Patrons : ceux des semi-finis de la nomenclature (0143), plus l'ancien
   // patron rattaché directement au produit fini s'il en a un (ART-A).
   const semiFiniIds = [...new Set((nomenclature ?? []).map((l) => l.semi_fini_id as string | null).filter((x): x is string => !!x))];
@@ -150,8 +152,9 @@ export default async function ArticleTechniquePage({ params }: { params: Promise
         />
         <CardBody>
           {canModify ? (
-            <NomenclatureEditor
+            <NomenclaturesPanel
               productModelId={id}
+              nomenclatures={nomenclatures}
               lines={nomenclature ?? []}
               consumables={(consumables ?? []).map((c) => ({ id: c.id as string, code: c.code as string, designation: c.designation as string, unite: c.unite as string }))}
               semiFinis={(semiFinis ?? []).map((s) => ({ id: s.id as string, code: (s.code as string | null) ?? null, name: s.name as string }))}
@@ -160,14 +163,28 @@ export default async function ArticleTechniquePage({ params }: { params: Promise
               couleurs={(couleurs ?? []).map((c) => ({ id: c.id as string, name: c.name as string }))}
             />
           ) : (
-            <ul className="space-y-1 text-sm">
-              {(nomenclature ?? []).map((l) => (
-                <li key={l.id}>
-                  {l.designation} — {l.quantite_par_piece} {l.unite} / pièce
-                </li>
+            <div className="space-y-3">
+              {nomenclatures.map((n) => (
+                <div key={n.id}>
+                  {nomenclatures.length > 1 && (
+                    <p className="mb-1 text-xs font-medium text-foreground-muted">
+                      {n.nom} · {FORME_LABELS[n.forme]}
+                      {n.principale ? " · principale" : ""}
+                    </p>
+                  )}
+                  <ul className="space-y-1 text-sm">
+                    {(nomenclature ?? [])
+                      .filter((l) => l.nomenclature_id === n.id)
+                      .map((l) => (
+                        <li key={l.id}>
+                          {l.designation} — {l.quantite_par_piece} {l.unite} / pièce
+                        </li>
+                      ))}
+                  </ul>
+                </div>
               ))}
-              {(nomenclature ?? []).length === 0 && <li className="text-foreground-muted">Aucune ligne.</li>}
-            </ul>
+              {nomenclatures.length === 0 && <p className="text-sm text-foreground-muted">Aucune ligne.</p>}
+            </div>
           )}
         </CardBody>
       </Card>

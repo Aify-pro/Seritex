@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
   const supabase = await createClient();
   const { data: rolls } = await supabase
     .from("textile_rolls")
-    .select("code,code_complet,bain,laize_cm,poids_initial_kg,sage_reference,textiles(nom)")
+    .select("code,code_complet,forme,bain,laize_cm,poids_initial_kg,sage_reference,textiles(nom)")
     .in("code", codes);
   if (!rolls || rolls.length === 0) return NextResponse.json({ error: "Rouleaux introuvables" }, { status: 404 });
 
@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
       lines: [
         r.code_complet ? `${r.code_complet} · ${r.code}` : (r.code as string),
         `${(r.textiles as unknown as { nom: string } | null)?.nom ?? ""}${r.sage_reference ? ` · ${r.sage_reference}` : ""}`,
-        `${r.laize_cm ? `${r.laize_cm} cm · ` : ""}${Number(r.poids_initial_kg).toLocaleString("fr-FR")} kg${r.bain ? ` · bain ${r.bain}` : ""}`,
+        `${r.forme === "tubulaire" ? "TUBULAIRE · " : ""}${r.laize_cm ? `${r.laize_cm} cm · ` : ""}${Number(r.poids_initial_kg).toLocaleString("fr-FR")} kg${r.bain ? ` · bain ${r.bain}` : ""}`,
       ] as [string, string, string],
     })),
     "Étiquettes de rouleaux"

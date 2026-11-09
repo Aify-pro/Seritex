@@ -7,6 +7,7 @@ import { Card, CardHeader, CardBody } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { SampleQrCode } from "@/components/samples/sample-qr-code";
 import { formatDate, formatDateTime } from "@/lib/utils";
+import { libelleCoupure } from "@/lib/atelier/coupures";
 import { LabelPrintButton } from "./label-print-button";
 
 /**
@@ -27,7 +28,7 @@ export default async function WasteBagPage({ params }: { params: Promise<{ code:
   const supabase = await createClient();
   const { data: bag } = await supabase
     .from("sacs_dechets")
-    .select("id,code,statut,poids_total_kg,created_at,closed_at")
+    .select("id,code,statut,coupure,poids_total_kg,created_at,closed_at")
     .eq("code", code)
     .maybeSingle();
 
@@ -62,6 +63,12 @@ export default async function WasteBagPage({ params }: { params: Promise<{ code:
                 {bag.statut === "charge" ? `${bag.poids_total_kg} kg` : "En cours de remplissage"}
               </p>
             </div>
+            {libelleCoupure(bag.coupure) && (
+              <div>
+                <p className="text-xs text-foreground-muted">Taille des morceaux</p>
+                <p className="text-sm font-medium text-foreground">{libelleCoupure(bag.coupure)}</p>
+              </div>
+            )}
             <p className="text-xs text-foreground-muted">Créé le {formatDateTime(bag.created_at)}</p>
             {bag.closed_at && <p className="text-xs text-foreground-muted">Chargé le {formatDateTime(bag.closed_at)}</p>}
           </div>
@@ -72,6 +79,7 @@ export default async function WasteBagPage({ params }: { params: Promise<{ code:
               url={`${baseUrl}/dechets/${bag.code}`}
               createdAt={formatDate(bag.created_at)}
               sealedLine={sealedLine}
+              coupure={libelleCoupure(bag.coupure)}
             />
             <SampleQrCode url={`${baseUrl}/dechets/${bag.code}`} label={bag.code} size={140} />
           </div>

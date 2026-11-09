@@ -1,3 +1,4 @@
+import { libelleCoupure } from "@/lib/atelier/coupures";
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server";
@@ -23,7 +24,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ code
   const supabase = await createClient();
   const { data: bag } = await supabase
     .from("sacs_dechets")
-    .select("code,statut,poids_total_kg,created_at")
+    .select("code,statut,coupure,poids_total_kg,created_at")
     .eq("code", code)
     .maybeSingle();
 
@@ -37,6 +38,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ code
       code: bag.code,
       url: `${await getBaseUrl()}/dechets/${bag.code}`,
       createdAt: formatLabelDate(bag.created_at),
+      coupure: libelleCoupure(bag.coupure),
       sealedLine:
         bag.statut === "charge" && bag.poids_total_kg !== null
           ? `Scellé ${Number(bag.poids_total_kg).toLocaleString("fr-FR", { maximumFractionDigits: 2 })} kg`

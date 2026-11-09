@@ -29,7 +29,7 @@ export async function RouleauxTab({ params, canAct }: { params: { tissu?: string
 
   let rollsQuery = supabase
     .from("textile_rolls")
-    .select("id,code,code_complet,statut,bain,numero_fournisseur,laize_cm,poids_kg,poids_initial_kg,emplacement,sage_reference,textile_id,colors(name),textiles(nom,product_model_id),production_orders(id,reference)")
+    .select("id,code,code_complet,statut,bain,numero_fournisseur,forme,laize_cm,poids_kg,poids_initial_kg,emplacement,sage_reference,textile_id,colors(name),textiles(nom,product_model_id),production_orders(id,reference)")
     .order("recu_le", { ascending: false })
     .limit(500);
   if (params.tissu) rollsQuery = rollsQuery.eq("textile_id", params.tissu);
@@ -67,6 +67,7 @@ export async function RouleauxTab({ params, canAct }: { params: { tissu?: string
       coloris: [r.sage_reference, (r.colors as unknown as { name: string } | null)?.name].filter(Boolean).join(" · ") || null,
       bain: (r.bain as string | null) ?? null,
       numeroFournisseur: (r.numero_fournisseur as string | null) ?? null,
+      forme: r.forme as RollRow["forme"],
       laizeCm: r.laize_cm != null ? Number(r.laize_cm) : null,
       poidsKg: Number(r.poids_kg),
       poidsInitialKg: Number(r.poids_initial_kg),

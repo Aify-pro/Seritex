@@ -78,6 +78,8 @@ export type OdfPdfArticle = {
    */
   maquette: { fileName: string; bytes: Uint8Array; format: "png" | "jpg" } | null;
   sizes: { taille: string; quantite: number }[];
+  /** Répartition entre nomenclatures (tubulaire/ouvert), si l'article en a plusieurs (0161). */
+  repartition?: string | null;
 };
 
 export type OdfPdfSousOdf = {
@@ -1157,6 +1159,13 @@ export async function buildOdfPdf(data: OdfPdfData): Promise<Uint8Array> {
     drawColorTable(article.couleurLabel, article.couleurs);
     y -= 16;
     drawSizeTable(article.sizes);
+    if (article.repartition) {
+      y -= 12;
+      ensure(LABEL_LH + 9.5 + CELL_PAD_BOTTOM);
+      text("FABRICATION", { x: LEFT + 10, baseline: y - LABEL_SIZE, size: LABEL_SIZE, font: bold, color: MUTED });
+      text(ellipsize(article.repartition, CONTENT_W - 20, 9, font), { x: LEFT + 10, baseline: y - LABEL_LH - 9, size: 9, color: INK });
+      y -= LABEL_LH + 9 + CELL_PAD_BOTTOM;
+    }
 
     // Maquette (migration 0040) : sur LA MÊME page que les informations de
     // l'article (demande Ayman, 17/09) — avant, `startPage()` ici forçait

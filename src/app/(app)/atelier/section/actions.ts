@@ -1,5 +1,6 @@
 "use server";
 
+import type { Coupure } from "@/lib/atelier/coupures";
 import { createClient } from "@/lib/supabase/server";
 import { requireUser } from "@/lib/auth/current-user";
 import { revalidatePath } from "next/cache";
@@ -246,11 +247,11 @@ export async function recordPesee(
 
 export type CreateWasteBagResult = { error: string } | { id: string; code: string };
 
-export async function createWasteBag(): Promise<CreateWasteBagResult> {
+export async function createWasteBag(coupure: Coupure): Promise<CreateWasteBagResult> {
   await requireUser();
   const supabase = await createClient();
 
-  const { data, error } = await supabase.rpc("create_waste_bag").single();
+  const { data, error } = await supabase.rpc("create_waste_bag", { p_coupure: coupure }).single();
   if (error) return { error: error.message };
 
   revalidatePath("/atelier/section");
@@ -323,6 +324,7 @@ export type WasteBagDetails = {
   id: string;
   code: string;
   statut: "en_cours" | "charge";
+  coupure: string | null;
   /** Dernier relevé pour un sac en cours, poids figé pour un sac scellé. */
   poidsKg: number;
   createdAt: string;
@@ -348,7 +350,7 @@ export async function getWasteBagByCode(code: string): Promise<GetWasteBagResult
   const { data: bag, error } = await supabase
     .from("sacs_dechets")
     .select(
-      "id,code,statut,poids_total_kg,created_at,closed_at,createur:app_users!sacs_dechets_created_by_fkey(full_name),scelleur:app_users!sacs_dechets_closed_by_fkey(full_name)"
+      "id,code,statut,coupure,poids_total_kg,created_at,closed_at,createur:app_users!sacs_dechets_created_by_fkey(full_name),scelleur:app_users!sacs_dechets_closed_by_fkey(full_name)"
     )
     .eq("code", code.trim().toUpperCase())
     .maybeSingle();
@@ -386,6 +388,7 @@ export async function getWasteBagByCode(code: string): Promise<GetWasteBagResult
       id: bag.id as string,
       code: bag.code as string,
       statut,
+      coupure: (bag.coupure as string | null) ?? null,
       poidsKg: statut === "charge" ? Number(bag.poids_total_kg ?? 0) : (weighings[0]?.poidsReleveKg ?? 0),
       createdAt: bag.created_at as string,
       createdByName: (bag.createur as unknown as { full_name: string } | null)?.full_name ?? null,

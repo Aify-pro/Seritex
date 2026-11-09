@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog } from "@/components/ui/dialog";
 import { QrScannerDialog } from "@/components/atelier/qr-scanner-dialog";
 import { formatDateTime, cn } from "@/lib/utils";
+import { COUPURES, libelleCoupure, type Coupure } from "@/lib/atelier/coupures";
 import {
   closeWasteBag,
   createWasteBag,
@@ -60,14 +61,14 @@ export function WasteBagsDialog({
   const [details, setDetails] = useState<WasteBagDetails | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  function handleCreate() {
+  function handleCreate(coupure: Coupure) {
     startCreating(async () => {
-      const res = await createWasteBag();
+      const res = await createWasteBag(coupure);
       if ("error" in res) {
         toast.error("Action refusée", { description: res.error });
         return;
       }
-      setBags((prev) => [{ id: res.id, code: res.code, currentWeightKg: 0, createdAt: new Date().toISOString() }, ...prev]);
+      setBags((prev) => [{ id: res.id, code: res.code, currentWeightKg: 0, createdAt: new Date().toISOString(), coupure }, ...prev]);
       toast.success(`Sac ${res.code} créé`);
     });
   }
@@ -110,14 +111,19 @@ export function WasteBagsDialog({
           />
         ) : (
           <div className="space-y-4">
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <Button size="md" className="w-full" onClick={handleCreate} loading={creating}>
-                <Plus className="h-4 w-4" /> Nouveau sac
-              </Button>
-              <Button size="md" variant="secondary" className="w-full" onClick={() => setScanOpen(true)}>
-                <ScanLine className="h-4 w-4" /> Scanner un sac
-              </Button>
+            <div>
+              <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-foreground-muted">Nouveau sac : taille des morceaux</h3>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                {COUPURES.map((c) => (
+                  <Button key={c.value} size="md" className="w-full" onClick={() => handleCreate(c.value)} loading={creating}>
+                    <Plus className="h-4 w-4" /> {c.label}
+                  </Button>
+                ))}
+              </div>
             </div>
+            <Button size="md" variant="secondary" className="w-full" onClick={() => setScanOpen(true)}>
+              <ScanLine className="h-4 w-4" /> Scanner un sac
+            </Button>
 
             {bags.length > 0 ? (
               <a
@@ -161,7 +167,9 @@ export function WasteBagsDialog({
                         <Trash2 className="h-4 w-4 shrink-0 text-foreground-muted" />
                         <span className="min-w-0 flex-1">
                           <span className="block truncate font-mono text-sm text-foreground">{bag.code}</span>
-                          <span className="block text-xs text-foreground-muted">Créé le {formatDateTime(bag.createdAt)}</span>
+                          <span className="block text-xs text-foreground-muted">
+                            {libelleCoupure(bag.coupure) ? `${libelleCoupure(bag.coupure)} · ` : ""}Créé le {formatDateTime(bag.createdAt)}
+                          </span>
                         </span>
                         <span className="shrink-0 text-sm font-medium tabular-nums text-foreground">
                           {formatKg(bag.currentWeightKg)}
@@ -248,6 +256,7 @@ function WasteBagDetailsView({
           {bag.closedByName && <span className="block text-xs text-foreground-muted">par {bag.closedByName}</span>}
         </Fact>
         <Fact label="Ajouts">{bag.weighings.length}</Fact>
+        <Fact label="Coupure">{libelleCoupure(bag.coupure) ?? "—"}</Fact>
         <Fact label="Étiquette">
           <a
             href={`/dechets/${bag.code}`}

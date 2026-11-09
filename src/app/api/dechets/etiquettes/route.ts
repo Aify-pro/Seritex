@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { createClient } from "@/lib/supabase/server";
 import { getBaseUrl } from "@/lib/url";
+import { libelleCoupure } from "@/lib/atelier/coupures";
 import { buildWasteBagsSheetPdf, formatLabelDate } from "@/lib/pdf/waste-bag-label";
 
 /**
@@ -23,7 +24,7 @@ export async function GET() {
   const supabase = await createClient();
   const { data: bags } = await supabase
     .from("sacs_dechets")
-    .select("code,created_at")
+    .select("code,coupure,created_at")
     .eq("statut", "en_cours")
     .order("created_at", { ascending: false });
 
@@ -37,6 +38,7 @@ export async function GET() {
       code: bag.code,
       url: `${baseUrl}/dechets/${bag.code}`,
       createdAt: formatLabelDate(bag.created_at),
+      coupure: libelleCoupure(bag.coupure),
       sealedLine: null,
     }))
   );

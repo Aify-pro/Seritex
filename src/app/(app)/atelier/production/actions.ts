@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 
-import { requirePermission } from "@/lib/auth/permissions";
+import { can, requirePermission } from "@/lib/auth/permissions";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getSizes } from "@/lib/sizes";
@@ -986,6 +986,68 @@ export async function generateStockExportFiche(productionOrderId: string): Promi
  * données passent sur une nouvelle ligne du même article — typiquement une
  * partie prise en stock, une partie fabriquée. Autorité : la base.
  */
+export interface RepartitionLigne {
+  nomenclatures: { id: string; nom: string; forme: string; principale: boolean }[];
+  tailles: { taille: string; demande: number }[];
+  /** Quantités basculées : nomenclature → taille → quantité. */
+  quantites: Record<string, Record<string, number>>;
+}
+
+async function peutAccederRepartition(action: "view" | "modify") {
+  const [odf, patronnage] = await Promise.all([can("ordres_fabrication", action), can("patronnage", action)]);
+  return odf || patronnage;
+}
+
+/** Répartition d'une ligne d'ODF entre les nomenclatures de son article (0161). */
+export async function chargerRepartition(lineId: string): Promise<{ data?: RepartitionLigne; error?: string }> {
+  if (!(await peutAccederRepartition("view"))) return { error: "Accès refusé" };
+  const supabase = await createClient();
+  const { data: line } = await supabase.from("production_order_lines").select("product_model_id").eq("id", lineId).maybeSingle();
+  if (!line?.product_model_id) return { error: "Ligne d'ODF introuvable" };
+  const [{ data: nomenclatures, error }, { data: tailles }, { data: bascules }] = await Promise.all([
+    supabase.from("nomenclatures").select("id,nom,forme,principale").eq("product_model_id", line.product_model_id).order("principale", { ascending: false }).order("nom"),
+    supabase.from("production_order_sizes").select("taille,quantite_demandee").eq("production_order_line_id", lineId),
+    supabase.from("production_order_line_nomenclatures").select("nomenclature_id,taille,quantite").eq("production_order_line_id", lineId),
+  ]);
+  if (error) return { error: error.message };
+  const quantites: RepartitionLigne["quantites"] = {};
+  for (const b of bascules ?? []) (quantites[b.nomenclature_id as string] ??= {})[b.taille as string] = Number(b.quantite);
+  return {
+    data: {
+      nomenclatures: (nomenclatures ?? []) as RepartitionLigne["nomenclatures"],
+      tailles: (tailles ?? []).map((t) => ({ taille: t.taille as string, demande: Number(t.quantite_demandee) })),
+      quantites,
+    },
+  };
+}
+
+/**
+ * Enregistre la répartition voulue. Les baisses passent d'abord, pour que la
+ * somme ne dépasse jamais le demandé quand on déplace d'une nomenclature à
+ * une autre ; la base refuse de descendre sous ce qui est coupé ou prévu.
+ */
+export async function repartirLigne(lineId: string, voulu: Record<string, Record<string, number>>): Promise<{ error?: string }> {
+  if (!(await peutAccederRepartition("modify"))) return { error: "Accès refusé" };
+  const supabase = await createClient();
+  const { data: line } = await supabase.from("production_order_lines").select("production_order_id").eq("id", lineId).maybeSingle();
+  if (!line) return { error: "Ligne d'ODF introuvable" };
+  const { data: bascules } = await supabase.from("production_order_line_nomenclatures").select("nomenclature_id,taille,quantite").eq("production_order_line_id", lineId);
+  const actuel = (nom: string, taille: string) => Number((bascules ?? []).find((b) => b.nomenclature_id === nom && b.taille === taille)?.quantite ?? 0);
+  const envoyer = async (calcul: (nom: string, taille: string, cible: number) => number) => {
+    for (const [nom, tailles] of Object.entries(voulu)) {
+      const quantites = Object.fromEntries(Object.entries(tailles).map(([t, q]) => [t, calcul(nom, t, q)]));
+      const { error } = await supabase.rpc("repartir_ligne", { p_line_id: lineId, p_nomenclature_id: nom, p_quantites: quantites });
+      if (error) return error.message;
+    }
+    return null;
+  };
+  const erreur = (await envoyer((n, t, q) => Math.min(actuel(n, t), q))) ?? (await envoyer((_n, _t, q) => q));
+  if (erreur) return { error: erreur };
+  revalidateOdf(line.production_order_id as string);
+  revalidatePath("/atelier/patronnage/besoins");
+  return {};
+}
+
 export async function splitProductionOrderLine(lineId: string, productionOrderId: string, tailles: Record<string, number>) {
   await requirePermission("ordres_fabrication", "modify");
   const supabase = await createClient();

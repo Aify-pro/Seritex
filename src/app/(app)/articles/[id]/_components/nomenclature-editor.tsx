@@ -9,6 +9,7 @@ import { Plus, Trash2 } from "lucide-react";
 
 interface NomenclatureRow {
   id: string;
+  nomenclature_id?: string | null;
   designation: string;
   quantite_par_piece: number;
   unite: string;
@@ -104,6 +105,7 @@ function CouleurOptions({ zones, couleurs }: { zones: ZoneOption[]; couleurs: Co
  */
 export function NomenclatureEditor({
   productModelId,
+  nomenclatureId,
   lines,
   consumables,
   semiFinis,
@@ -112,6 +114,8 @@ export function NomenclatureEditor({
   couleurs,
 }: {
   productModelId: string;
+  /** Nomenclature affichée (0161) ; null = l'article n'en a pas encore, la base crée la principale. */
+  nomenclatureId: string | null;
   lines: NomenclatureRow[];
   consumables: ConsumableOption[];
   semiFinis: SemiFiniOption[];
@@ -261,6 +265,7 @@ export function NomenclatureEditor({
           className="space-y-2"
         >
           <input type="hidden" name="product_model_id" value={productModelId} />
+          <input type="hidden" name="nomenclature_id" value={nomenclatureId ?? ""} />
           <div className="flex gap-4 text-sm" role="radiogroup" aria-label="Type de ligne">
             <label className="flex items-center gap-1.5">
               <input type="radio" checked={genre === "semi_fini"} onChange={() => setGenre("semi_fini")} /> Semi-fini
