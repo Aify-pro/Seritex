@@ -6,6 +6,7 @@ import { AlertTriangle, Pencil, Trash2, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
 import { PieceOverlay } from "@/components/atelier/patronnage/piece-overlay";
 import { TaillesChips } from "@/components/atelier/patronnage/tailles-chips";
 import type { LibraryArticle, LibraryPattern } from "@/lib/patronnage/types";
@@ -15,6 +16,7 @@ import {
   deleteReferenceArticle,
   deleteReferencePattern,
   previewDxfPieces,
+  renameReferenceArticle,
   replaceReferencePattern,
   saveReferencePattern,
   type PreviewedPiece,
@@ -83,6 +85,47 @@ export function PatronBibliothequeManager({
   );
 }
 
+/** Renommer un patron : code et désignation ; tailles et pièces inchangées. */
+function RenameArticleDialog({ article, onClose, onDone }: { article: LibraryArticle; onClose: () => void; onDone: () => void }) {
+  const [code, setCode] = useState(article.articleCode);
+  const [designation, setDesignation] = useState(article.designation);
+  const [busy, setBusy] = useState(false);
+  const champ = "w-full rounded-md border border-border bg-surface px-2.5 py-2 text-base text-foreground sm:text-sm";
+
+  async function enregistrer() {
+    setBusy(true);
+    const res = await renameReferenceArticle(article.id, code, designation);
+    setBusy(false);
+    if (res.error) {
+      toast.error("Modification refusée", { description: res.error });
+      return;
+    }
+    toast.success("Patron renommé");
+    onDone();
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()} title="Renommer le patron" description="Les tailles et les pièces de ce patron ne changent pas." size="sm">
+      <div className="space-y-3">
+        <Field label="Code article">
+          <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="ex. TSM01-MANCHE" className={champ} />
+        </Field>
+        <Field label="Désignation">
+          <input value={designation} onChange={(e) => setDesignation(e.target.value)} className={champ} />
+        </Field>
+        <div className="flex flex-col gap-2 sm:flex-row-reverse">
+          <Button className="w-full sm:w-auto" loading={busy} disabled={!code.trim()} onClick={enregistrer}>
+            Enregistrer
+          </Button>
+          <Button variant="ghost" className="w-full sm:w-auto" onClick={onClose}>
+            Annuler
+          </Button>
+        </div>
+      </div>
+    </Dialog>
+  );
+}
+
 /* ============================================================
    Onglet Bibliothèque — import DXF réel en deux étapes
 ============================================================ */
@@ -139,6 +182,7 @@ function BibliothequeTab({
   const [editing, setEditing] = useState<{ article: LibraryArticle; pattern: LibraryPattern } | null>(null);
   // Suppression en deux temps : « pa:<id> » (taille) ou « ar:<id> » (article entier).
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState<LibraryArticle | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [existingArticleId, setExistingArticleId] = useState(sfInitial?.articleId ?? "");
   const [productModelId, setProductModelId] = useState(sfInitial && !sfInitial.articleId ? sfInitial.id : "");
@@ -526,6 +570,16 @@ function BibliothequeTab({
             </CardBody>
           </Card>
         )}
+        {renaming && (
+          <RenameArticleDialog
+            article={renaming}
+            onClose={() => setRenaming(null)}
+            onDone={() => {
+              setRenaming(null);
+              onChanged();
+            }}
+          />
+        )}
         {library.map((art) => (
           <Card key={art.id}>
             <CardHeader
@@ -534,6 +588,11 @@ function BibliothequeTab({
               action={
                 <div className="flex items-center gap-3">
                   <span className="text-xs text-foreground-muted">seuil de reconnaissance : {art.tolerancePct}%</span>
+                  {canModify && (
+                    <Button size="sm" variant="ghost" onClick={() => setRenaming(art)}>
+                      <Pencil className="h-3.5 w-3.5" /> Renommer
+                    </Button>
+                  )}
                   {canDelete && (
                     <DeleteControl
                       label="Supprimer l'article"
