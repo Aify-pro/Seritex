@@ -6,11 +6,13 @@ import { ArrowLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { loadPiecesUtilisees } from "@/lib/patronnage/bibliotheque";
+import { getSizes } from "@/lib/sizes";
+import { taillesDesSemiFinis } from "@/lib/patronnage/tailles-semi-finis";
 import { PageHeader } from "@/components/shell/page-header";
 import { PatronBibliothequeManager } from "@/components/atelier/patronnage/patronnage-workspace";
 import type { LibraryArticle } from "@/lib/patronnage/types";
 
-export default async function PatronnageBibliothequePage() {
+export default async function PatronnageBibliothequePage({ searchParams }: { searchParams: Promise<{ semi_fini?: string; taille?: string }> }) {
   await requireUser();
   if (!(await can("patronnage", "view"))) redirect("/dashboard?erreur=acces_refuse");
 
@@ -32,6 +34,23 @@ export default async function PatronnageBibliothequePage() {
   // Un nouveau patron se rattache à un semi-fini qui n'en a pas encore (0143).
   const avecPatron = new Set((articles ?? []).map((a) => a.product_model_id as string | null).filter(Boolean));
   const { data: semiFinis } = await supabase.from("product_models").select("id,code,name").eq("active", true).eq("nature", "semi_fini").order("name");
+  const sizes = await getSizes();
+  const taillesParSf = await taillesDesSemiFinis(
+    supabase,
+    (semiFinis ?? []).map((sf) => ({
+      id: sf.id as string,
+      deposees: (articles ?? []).filter((a) => a.product_model_id === sf.id).flatMap((a) => (a.patterns ?? []).map((p) => p.size)),
+    })),
+    sizes
+  );
+  const grille = (semiFinis ?? []).map((sf) => ({
+    id: sf.id as string,
+    code: (sf.code as string | null) ?? null,
+    nom: sf.name as string,
+    articleId: (articles ?? []).find((a) => a.product_model_id === sf.id)?.id ?? null,
+    tailles: taillesParSf.get(sf.id as string) ?? [],
+  }));
+  const { semi_fini: depotSf, taille: depotTaille } = await searchParams;
   const productModels = (semiFinis ?? [])
     .filter((s) => !avecPatron.has(s.id as string))
     .map((s) => ({ id: s.id as string, name: s.code ? `${s.code} · ${s.name}` : (s.name as string) }));
@@ -83,6 +102,9 @@ export default async function PatronnageBibliothequePage() {
       <PatronBibliothequeManager
         initialLibrary={library}
         productModels={productModels}
+        semiFinis={grille}
+        sizes={sizes}
+        depotInitial={depotSf ? { semiFiniId: depotSf, taille: depotTaille ?? "" } : null}
         canModify={canModify}
         canDelete={canDelete}
       />

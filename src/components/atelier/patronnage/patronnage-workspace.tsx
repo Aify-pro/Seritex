@@ -7,7 +7,10 @@ import { toast } from "sonner";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { PieceOverlay } from "@/components/atelier/patronnage/piece-overlay";
+import { TaillesChips } from "@/components/atelier/patronnage/tailles-chips";
 import type { LibraryArticle, LibraryPattern } from "@/lib/patronnage/types";
+import type { TailleSemiFini } from "@/lib/patronnage/tailles-semi-finis";
+import type { Size } from "@/lib/sizes";
 import {
   deleteReferenceArticle,
   deleteReferencePattern,
@@ -37,15 +40,31 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
  * cette bibliothèque reste une page séparée (/atelier/patronnage/bibliotheque)
  * puisqu'elle sert de référence à toutes les fiches, pas à une seule.
  */
+export interface SemiFiniTailles {
+  id: string;
+  code: string | null;
+  nom: string;
+  /** Fiche patron du semi-fini, s'il en a une. */
+  articleId: string | null;
+  tailles: TailleSemiFini[];
+}
+
 export function PatronBibliothequeManager({
   initialLibrary,
   productModels,
+  semiFinis,
+  sizes,
+  depotInitial,
   canModify,
   canDelete,
 }: {
   initialLibrary: LibraryArticle[];
   /** Semi-finis actifs sans patron : un nouvel article de patronnage est forcément rattaché à l'un d'eux (A5, 0143). */
   productModels: { id: string; name: string }[];
+  semiFinis: SemiFiniTailles[];
+  sizes: Size[];
+  /** Dépôt demandé depuis la fiche d'un semi-fini. */
+  depotInitial: { semiFiniId: string; taille: string } | null;
   canModify: boolean;
   canDelete: boolean;
 }) {
@@ -54,6 +73,9 @@ export function PatronBibliothequeManager({
     <BibliothequeTab
       library={initialLibrary}
       productModels={productModels}
+      semiFinis={semiFinis}
+      sizes={sizes}
+      depotInitial={depotInitial}
       canModify={canModify}
       canDelete={canDelete}
       onChanged={() => router.refresh()}
@@ -95,27 +117,34 @@ function prefillFromExisting(pieces: PreviewedPiece[], existing: LibraryPattern[
 function BibliothequeTab({
   library,
   productModels,
+  semiFinis,
+  sizes,
+  depotInitial,
   canModify,
   canDelete,
   onChanged,
 }: {
   library: LibraryArticle[];
   productModels: { id: string; name: string }[];
+  semiFinis: SemiFiniTailles[];
+  sizes: Size[];
+  depotInitial: { semiFiniId: string; taille: string } | null;
   canModify: boolean;
   canDelete: boolean;
   onChanged: () => void;
 }) {
-  const [showAdd, setShowAdd] = useState(false);
+  const sfInitial = depotInitial ? semiFinis.find((s) => s.id === depotInitial.semiFiniId) : undefined;
+  const [showAdd, setShowAdd] = useState(!!sfInitial);
   // Patron (une taille) dont on remplace les pièces par un nouveau DXF.
   const [editing, setEditing] = useState<{ article: LibraryArticle; pattern: LibraryPattern } | null>(null);
   // Suppression en deux temps : « pa:<id> » (taille) ou « ar:<id> » (article entier).
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const [existingArticleId, setExistingArticleId] = useState("");
-  const [productModelId, setProductModelId] = useState("");
-  const [articleCode, setArticleCode] = useState("");
-  const [designation, setDesignation] = useState("");
-  const [size, setSize] = useState("M");
+  const [existingArticleId, setExistingArticleId] = useState(sfInitial?.articleId ?? "");
+  const [productModelId, setProductModelId] = useState(sfInitial && !sfInitial.articleId ? sfInitial.id : "");
+  const [articleCode, setArticleCode] = useState(sfInitial && !sfInitial.articleId ? (sfInitial.code ?? "") : "");
+  const [designation, setDesignation] = useState(sfInitial && !sfInitial.articleId ? sfInitial.nom : "");
+  const [size, setSize] = useState(depotInitial?.taille ?? "");
   const [file, setFile] = useState<File | null>(null);
   const [draft, setDraft] = useState<DraftPiece[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -129,7 +158,7 @@ function BibliothequeTab({
     setProductModelId("");
     setArticleCode("");
     setDesignation("");
-    setSize("M");
+    setSize("");
     setFile(null);
     setDraft(null);
     setError(null);
@@ -137,6 +166,10 @@ function BibliothequeTab({
   }
 
   async function handleAnalyze() {
+    if (!editing && !size) {
+      setError("Choisissez la taille de ce patron");
+      return;
+    }
     if (!file) {
       setError("Sélectionnez un fichier DXF");
       return;
@@ -161,6 +194,21 @@ function BibliothequeTab({
             expectedCount: 1,
           }))
     );
+  }
+
+  /** Ouvre le formulaire pour une taille d'un semi-fini (vide = à choisir). */
+  function deposer(sf: SemiFiniTailles, taille: string) {
+    setEditing(null);
+    setDraft(null);
+    setFile(null);
+    setError(null);
+    setExistingArticleId(sf.articleId ?? "");
+    setProductModelId(sf.articleId ? "" : sf.id);
+    setArticleCode(sf.articleId ? "" : (sf.code ?? ""));
+    setDesignation(sf.articleId ? "" : sf.nom);
+    setSize(taille);
+    setShowAdd(true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   async function handleDelete(kind: "pa" | "ar", id: string) {
@@ -287,12 +335,24 @@ function BibliothequeTab({
                     </select>
                   </Field>
                   <Field label="Taille de ce patron">
-                    <input
+                    <select
                       value={size}
-                      onChange={(e) => setSize(e.target.value.toUpperCase())}
-                      placeholder="ex. M"
+                      onChange={(e) => setSize(e.target.value)}
                       className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground"
-                    />
+                    >
+                      <option value="">— Choisir la taille —</option>
+                      {[...new Set(sizes.map((t) => t.groupe))].map((g) => (
+                        <optgroup key={g} label={g}>
+                          {sizes
+                            .filter((t) => t.groupe === g)
+                            .map((t) => (
+                              <option key={t.cle} value={t.cle}>
+                                {g} {t.libelle}
+                              </option>
+                            ))}
+                        </optgroup>
+                      ))}
+                    </select>
                   </Field>
                 </div>
 
@@ -417,6 +477,47 @@ function BibliothequeTab({
         </Card>
       )}
 
+      {semiFinis.length > 0 && (
+        <Card>
+          <CardHeader title="Patrons par semi-fini" description="Un patron par taille, Homme et Femme séparés. Les tailles viennent des produits finis qui emploient chaque semi-fini." />
+          <CardBody className="p-0">
+            <ul className="divide-y divide-border">
+              {semiFinis.map((sf) => (
+                <li key={sf.id} className="space-y-2 px-4 py-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-medium text-foreground">
+                      {sf.code && <span className="mr-1.5 font-mono text-xs text-foreground-muted">{sf.code}</span>}
+                      {sf.nom}
+                    </p>
+                    {canModify && (
+                      <Button size="sm" variant="ghost" onClick={() => deposer(sf, "")}>
+                        Autre taille
+                      </Button>
+                    )}
+                  </div>
+                  {sf.tailles.length === 0 ? (
+                    <p className="text-xs text-foreground-muted">Aucune taille : ajoutez ce semi-fini à la nomenclature d&apos;un produit fini, ou déposez une autre taille.</p>
+                  ) : (
+                    <TaillesChips
+                      tailles={sf.tailles}
+                      manquante={(t) =>
+                        canModify ? (
+                          <button type="button" onClick={() => deposer(sf, t.cle)} className="min-h-7 rounded-md border border-dashed border-warning px-2 text-xs font-medium text-warning hover:bg-warning-soft">
+                            {t.libelle} · déposer
+                          </button>
+                        ) : (
+                          <span className="inline-flex min-h-7 items-center rounded-md border border-dashed border-border px-2 text-xs text-foreground-muted">{t.libelle} · manquant</span>
+                        )
+                      }
+                    />
+                  )}
+                </li>
+              ))}
+            </ul>
+          </CardBody>
+        </Card>
+      )}
+
       <div className="space-y-4">
         {library.length === 0 && (
           <Card>
@@ -450,7 +551,7 @@ function BibliothequeTab({
             <div className="divide-y divide-border">
               {art.patterns.map((pat) => (
                 <div key={pat.id} className="flex items-center gap-4 px-5 py-3">
-                  <span className="w-10 shrink-0 text-xs font-medium text-foreground">{pat.size}</span>
+                  <span className="w-20 shrink-0 text-xs font-medium text-foreground">{pat.size}</span>
                   <div className="flex flex-1 gap-4 overflow-x-auto">
                     {pat.pieces.map((piece) => (
                       <div key={piece.id} className="flex shrink-0 items-center gap-2">

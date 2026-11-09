@@ -31,6 +31,9 @@ await test("patron : sur un semi-fini seulement, un seul ; l'ancien patron de PF
   await q(`update pattern_articles set designation='ancien modifié' where article_code='TS-M01'`);
   const pa = await one(`select id from pattern_articles where article_code='TS-M01'`);
   await q(`insert into patterns(article_id, size) values ($1,'Homme/M')`, [pa.id]);
+  // 0164 : la taille d'un patron vient du référentiel (Homme et Femme séparés).
+  await expectFail(() => q(`insert into patterns(article_id, size) values ($1,'S')`, [pa.id]), /patterns_size_referentiel/);
+  await q(`insert into patterns(article_id, size) values ($1,'Femme/M')`, [pa.id]);
 });
 await test("nomenclature : semi-finis par zone, entiers ; couleur imposée aussi sur un consommable ; natures contrôlées", async () => {
   pf = await one(`insert into product_models(name, nature) values ('T-shirt col V','pf') returning id`);

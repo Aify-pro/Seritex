@@ -5,6 +5,9 @@ import { can } from "@/lib/auth/permissions";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
+import { getSizes } from "@/lib/sizes";
+import { taillesDesSemiFinis } from "@/lib/patronnage/tailles-semi-finis";
+import { TaillesChips } from "@/components/atelier/patronnage/tailles-chips";
 import { ZoneTemplateEditor } from "../_components/zone-template-editor";
 import { PrintableZoneEditor } from "../_components/printable-zone-editor";
 import { NomenclaturesPanel, FORME_LABELS, type NomenclatureOption } from "../_components/nomenclatures-panel";
@@ -12,6 +15,35 @@ import { AttachPattern } from "../_components/attach-pattern";
 import { MockupEditor, type MockupData } from "../_components/mockup-editor";
 
 type PatronRow = { id: string; article_code: string; designation: string; product_model_id: string | null; patterns: { size: string }[] | null };
+
+/** Déclinaisons d'un semi-fini, déduites des produits finis qui l'emploient : par produit fini × grammage. */
+async function declinaisonsSemiFini(supabase: Awaited<ReturnType<typeof createClient>>, semiFiniId: string) {
+  const { data: lignes } = await supabase
+    .from("nomenclature_lines")
+    .select("product_model_id,couleur_imposee:colors!nomenclature_lines_couleur_imposee_id_fkey(name)")
+    .eq("semi_fini_id", semiFiniId);
+  const modeles = [...new Set((lignes ?? []).map((l) => l.product_model_id as string))];
+  if (modeles.length === 0) return [];
+  const { data: variantes } = await supabase
+    .from("product_variants")
+    .select("model_id,product_models(name),textiles(grammage),colors(name),sizes(cle,display_order)")
+    .eq("actif", true)
+    .in("model_id", modeles);
+  type Variante = { model_id: string; product_models: { name: string } | null; textiles: { grammage: number | null } | null; colors: { name: string } | null; sizes: { cle: string; display_order: number } | null };
+  const parCle = new Map<string, { modele: string; grammage: number | null; couleurImposee: string | null; couleurs: Set<string>; tailles: Map<string, number> }>();
+  for (const v of (variantes ?? []) as unknown as Variante[]) {
+    const grammage = v.textiles?.grammage ?? null;
+    const cle = `${v.model_id}|${grammage}`;
+    const imposee = (lignes ?? []).find((l) => l.product_model_id === v.model_id)?.couleur_imposee as unknown as { name: string } | null;
+    const d = parCle.get(cle) ?? { modele: v.product_models?.name ?? "—", grammage, couleurImposee: imposee?.name ?? null, couleurs: new Set<string>(), tailles: new Map<string, number>() };
+    if (v.colors?.name) d.couleurs.add(v.colors.name);
+    if (v.sizes) d.tailles.set(v.sizes.cle, v.sizes.display_order);
+    parCle.set(cle, d);
+  }
+  return [...parCle.values()]
+    .map((d) => ({ ...d, couleurs: [...d.couleurs].sort(), tailles: [...d.tailles.entries()].sort((a, b) => a[0].split("/")[0].localeCompare(b[0].split("/")[0]) || a[1] - b[1]).map(([cle]) => cle.replace("/", " ")) }))
+    .sort((a, b) => a.modele.localeCompare(b.modele) || (a.grammage ?? 0) - (b.grammage ?? 0));
+}
 
 /** Liste des patrons de la bibliothèque, avec leurs tailles. */
 function PatronList({ patterns, empty, semiFiniName }: { patterns: PatronRow[]; empty: string; semiFiniName?: (id: string | null) => string | null }) {
@@ -59,13 +91,31 @@ export default async function ArticleTechniquePage({ params }: { params: Promise
       supabase.from("pattern_articles").select("id,article_code,designation,product_model_id,patterns(size)").eq("product_model_id", id).order("article_code"),
       orphansQuery,
     ]);
+    const deposees = ((patterns ?? []) as PatronRow[]).flatMap((p) => (p.patterns ?? []).map((x) => x.size));
+    const tailles = (await taillesDesSemiFinis(supabase, [{ id, deposees }], await getSizes())).get(id) ?? [];
+    const declinaisons = await declinaisonsSemiFini(supabase, id);
     return (
+      <div className="space-y-4">
       <Card>
         <CardHeader
           title="Patron"
-          description="Patron de référence de la bibliothèque, un par taille : le même pour tous les produits finis dont la nomenclature emploie ce semi-fini. Il se dépose dans la bibliothèque de patronnage."
+          description="Patron de référence de la bibliothèque, un par taille (Homme et Femme séparés) : le même pour tous les produits finis dont la nomenclature emploie ce semi-fini. Il se dépose dans la bibliothèque de patronnage."
         />
         <CardBody className="space-y-3">
+          {tailles.length > 0 && (
+            <TaillesChips
+              tailles={tailles}
+              manquante={(t) =>
+                canPatronnage ? (
+                  <Link href={`/atelier/patronnage/bibliotheque?semi_fini=${id}&taille=${encodeURIComponent(t.cle)}`} className="inline-flex min-h-7 items-center rounded-md border border-dashed border-warning px-2 text-xs font-medium text-warning hover:bg-warning-soft">
+                    {t.libelle} · déposer
+                  </Link>
+                ) : (
+                  <span className="inline-flex min-h-7 items-center rounded-md border border-dashed border-border px-2 text-xs text-foreground-muted">{t.libelle} · manquant</span>
+                )
+              }
+            />
+          )}
           <PatronList patterns={(patterns ?? []) as PatronRow[]} empty="Aucun patron pour ce semi-fini." />
           {canModify && (patterns ?? []).length === 0 && (
             <AttachPattern productModelId={id} orphans={(orphans ?? []).map((o) => ({ id: o.id, label: `${o.article_code} — ${o.designation}` }))} />
@@ -73,6 +123,23 @@ export default async function ArticleTechniquePage({ params }: { params: Promise
           {bibliothequeLink}
         </CardBody>
       </Card>
+      <Card>
+        <CardHeader title="Déclinaisons" description="Calculées à partir des produits finis qui emploient ce semi-fini : sa couleur et son grammage suivent le produit fini, sauf couleur imposée dans la nomenclature." />
+        <CardBody className="space-y-2">
+          {declinaisons.length === 0 && <p className="text-sm text-foreground-muted">Aucune déclinaison : aucun produit fini décliné n&apos;emploie encore ce semi-fini.</p>}
+          {declinaisons.map((d) => (
+            <div key={`${d.modele}|${d.grammage}`} className="rounded-md border border-border px-3 py-2 text-sm">
+              <p className="font-medium text-foreground">
+                {d.modele}
+                {d.grammage ? ` · ${d.grammage} g` : ""}
+              </p>
+              <p className="text-xs text-foreground-muted">{d.couleurImposee ? `Couleur imposée : ${d.couleurImposee}` : `Couleurs : ${d.couleurs.join(", ")}`}</p>
+              <p className="text-xs text-foreground-muted">Tailles : {d.tailles.join(", ")}</p>
+            </div>
+          ))}
+        </CardBody>
+      </Card>
+      </div>
     );
   }
 

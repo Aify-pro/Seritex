@@ -26,7 +26,7 @@ const manche = await one(`insert into product_models(name, nature) values ('Manc
 const col = await one(`insert into product_models(name, nature) values ('Col rond','semi_fini') returning id`);
 async function piece(modelId, code, nom) {
   const pa = await one(`insert into pattern_articles(article_code, designation, product_model_id) values ($1,$2,$3) returning id`, [code, nom, modelId]);
-  const p = await one(`insert into patterns(article_id, size) values ($1,'M') returning id`, [pa.id]);
+  const p = await one(`insert into patterns(article_id, size) values ($1,'Homme/M') returning id`, [pa.id]);
   return one(`insert into pattern_pieces(pattern_id, name, expected_count, area, perimeter, radial_signature, points) values ($1,$2,1,1,1,'{}','[]') returning id`, [p.id, nom]);
 }
 const pManche = await piece(manche.id, 'MAN', 'Manche');
@@ -53,7 +53,7 @@ async function matelas(ref, reconnus, nonReconnues, couches, obtenus) {
     [woCoupe.id, t.id, obtenus, JSON.stringify({ [M]: obtenus }), couches]);
   return { trace: t, ev };
 }
-const rec = (p, quantite, nom) => ({ patron_id: p.id, article: "?", taille: "M", piece: nom, quantite, dont_en_miroir: 0 });
+const rec = (p, quantite, nom) => ({ patron_id: p.id, article: "?", taille: M, piece: nom, quantite, dont_en_miroir: 0 });
 
 await test("clôture du matelas : coupé = tracé × couches, attendu = t-shirts × nomenclature, hors semi-fini à part", async () => {
   // Tracé de 2 t-shirts par couche : 4 manches, 1 seul col (oubli), 2 poches d'un ancien patron, 1 pièce inconnue.
@@ -69,7 +69,7 @@ await test("clôture du matelas : coupé = tracé × couches, attendu = t-shirts
     ["trace", "semi_fini", "Manche", 40],
   ]);
   const m = rows.find((r) => r.piece === "Manche");
-  assert.deepEqual([m.taille, m.qpc, m.couches, m.semi_fini_id], ["M", 4, 10, manche.id]);
+  assert.deepEqual([m.taille, m.qpc, m.couches, m.semi_fini_id], [M, 4, 10, manche.id]);
 });
 
 await test("rapport de production : partie Semi-finis (coupé, attendu) et pièces hors semi-fini", async () => {

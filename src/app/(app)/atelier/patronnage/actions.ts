@@ -9,6 +9,7 @@ import { loadPiecesUtilisees, loadReferenceLibrary } from "@/lib/patronnage/bibl
 import { SEUIL_RECONNAISSANCE_DEFAUT } from "@/lib/patronnage/reconnaissance";
 import { construireAnalyseDetaillee, type TraceAnalysisDetail } from "@/lib/patronnage/detail";
 import { readDxfFile } from "@/lib/patronnage/upload";
+import { getSizes } from "@/lib/sizes";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
@@ -106,6 +107,7 @@ export async function saveReferencePattern(
 
   const size = String(formData.get("size") ?? "").trim();
   if (!size) return { error: "Taille manquante" };
+  if (!(await getSizes()).some((t) => t.cle === size)) return { error: `Taille inconnue du référentiel : « ${size} »` };
 
   const existingArticleId = String(formData.get("existing_article_id") ?? "").trim();
   const articleCode = String(formData.get("article_code") ?? "").trim();
