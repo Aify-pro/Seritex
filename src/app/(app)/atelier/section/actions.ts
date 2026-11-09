@@ -551,6 +551,25 @@ export async function scanArticleLot(
   };
 }
 
+/** Rouleau scanné sur un matelas regroupé (0163) : sorti pour un ODF du tracé, de la forme du tracé. */
+export async function attachRollToMatelasRegroupe(
+  code: string,
+  traceId: string
+): Promise<{ error?: string; roll?: { code: string; laizeCm: number | null; bain: string | null; poidsKg: number } }> {
+  await requireUser();
+  const clean = code.trim().toUpperCase();
+  if (!clean) return { error: "Code de rouleau vide" };
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("use_roll_for_matelas_regroupe", { p_code: clean, p_trace_id: traceId });
+  if (error) return { error: error.message };
+  const { data } = await supabase.from("textile_rolls").select("code,laize_cm,bain,poids_kg").eq("code", clean).maybeSingle();
+  return {
+    roll: data
+      ? { code: data.code as string, laizeCm: data.laize_cm != null ? Number(data.laize_cm) : null, bain: (data.bain as string | null) ?? null, poidsKg: Number(data.poids_kg) }
+      : { code: clean, laizeCm: null, bain: null, poidsKg: 0 },
+  };
+}
+
 /**
  * Rouleau utilisé pour un matelas (migration 0096) : scanné à la coupe ; la
  * base vérifie qu'il a été sorti pour cet ODF. Renvoie sa laize et son bain

@@ -20,6 +20,8 @@ export interface RollRow {
   bain: string | null;
   numeroFournisseur: string | null;
   forme: "ouvert" | "tubulaire";
+  /** Réservation par un tracé validé (0163). */
+  reservation: { trace: string; odfs: string[]; odfIds: string[] } | null;
   laizeCm: number | null;
   poidsKg: number;
   poidsInitialKg: number;
@@ -75,6 +77,7 @@ export function RollList({ rows, odfs, canAct }: { rows: RollRow[]; odfs: OdfOpt
               {r.poidsKg !== r.poidsInitialKg && <span className="text-xs text-foreground-muted"> / {kg(r.poidsInitialKg)}</span>}
             </span>
             <Badge tone={TONE[r.statut]}>{ROLL_STATUT_LABELS[r.statut]}</Badge>
+            {r.reservation && <Badge tone="warning">Réservé {r.reservation.odfs.join(", ")} · {r.reservation.trace}</Badge>}
             {r.odf && (
               <Link href={`/atelier/production/${r.odf.id}?onglet=stock`} className="text-xs text-brand hover:underline">
                 {r.odf.reference}
@@ -104,8 +107,10 @@ function RollActions({ roll, odfs, onDone }: { roll: RollRow; odfs: OdfOption[];
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   // Les ODF qui coupent ce tissu d'abord : c'est à eux que le rouleau est destiné.
-  const memeTissu = odfs.filter((o) => o.textileIds.includes(roll.textileId));
-  const autres = odfs.filter((o) => !o.textileIds.includes(roll.textileId));
+  // Un rouleau réservé ne part que vers les ODF de sa réservation (0163).
+  const permis = roll.reservation ? odfs.filter((o) => roll.reservation?.odfIds.includes(o.id)) : odfs;
+  const memeTissu = permis.filter((o) => o.textileIds.includes(roll.textileId));
+  const autres = permis.filter((o) => !o.textileIds.includes(roll.textileId));
   const [odf, setOdf] = useState((memeTissu[0] ?? autres[0])?.id ?? "");
   const [poids, setPoids] = useState("");
   const [motif, setMotif] = useState("");

@@ -11,7 +11,7 @@ const FICHE_SELECT = `id,numero_ot,statut,statut_precedent,production_order_line
    production_order_lines(description,production_orders(reference)),
    traces_placement(id,ordre,reference,reference_patron,longueur_matelas_cm,largeur_matelas_cm,nb_plis,
      repartition_par_couche,fichier_path,fichier_nom,charge_le,est_correctif,justification,
-     statut,valide_le,motif_validation,surplus_valide,modifie_valide_le,annule_le,motif_annulation,demarre_le,termine_le,
+     statut,forme,trace_rouleaux(roll_id),valide_le,motif_validation,surplus_valide,modifie_valide_le,annule_le,motif_annulation,demarre_le,termine_le,
      trace_couches(production_order_line_id,nb_couches),
      controle_statut,controle_detail,controle_derogation_motif,controle_derogation_le,
      trace_semi_finis(semi_fini_id,taille,quantite_par_couche,source,semi_fini:product_models(name)),
@@ -97,6 +97,8 @@ type FicheRow = {
     annule_le: string | null;
     motif_annulation: string | null;
     demarre_le: string | null;
+    forme: TracePlacement["forme"];
+    trace_rouleaux: { roll_id: string }[] | null;
     termine_le: string | null;
     trace_couches: { production_order_line_id: string; nb_couches: number }[] | null;
     controle_statut: ControleTrace["statut"];
@@ -231,6 +233,8 @@ async function mapFiches(
           fichierNom: t.fichier_nom,
           chargeLe: t.charge_le,
           statut: t.statut,
+          forme: t.forme,
+          nbRouleaux: t.trace_rouleaux?.length ?? 0,
           valideLe: t.valide_le,
           motifValidation: t.motif_validation,
           surplusValide: t.surplus_valide,

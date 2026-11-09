@@ -7,7 +7,9 @@ import { AlertTriangle, Layers, Scissors } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
-import { cloturerMatelasRegroupe, demarrerMatelas } from "./actions";
+import { LotCodeInput } from "@/components/atelier/lot-code-input";
+import { attachRollToMatelasRegroupe, cloturerMatelasRegroupe, demarrerMatelas } from "./actions";
+import type { MatelasRoll } from "./matelas-rolls";
 
 /** Matelas regroupé à couper (étapes 3b et 3c) : une ou plusieurs pièces (semi-finis), des couches par article d'ODF. */
 export interface MatelasRegroupe {
@@ -16,6 +18,11 @@ export interface MatelasRegroupe {
   /** Noms des pièces du tracé, pour l'affichage. */
   semiFini: string;
   statut: string;
+  /** Forme du tissu du tracé (0163). */
+  forme: string;
+  /** Rouleaux choisis par la PAO, et rouleaux déjà scannés. */
+  rouleauxPrevus: string[];
+  rouleauxScannes: MatelasRoll[];
   /** Pièces posées par couche : semi-fini × taille × quantité. */
   pieces: { semiFiniId: string; semiFini: string; taille: string; quantiteParCouche: number }[];
   longueurCm: number | null;
@@ -57,6 +64,7 @@ export function MatelasRegroupes({ matelas }: { matelas: MatelasRegroupe[] }) {
                   <span className="flex items-center gap-2">
                     <span className="text-sm font-medium">{m.reference}</span>
                     <span className="text-xs text-foreground-muted">{m.semiFini}</span>
+                    {m.forme === "tubulaire" && <span className="rounded-sm bg-info-soft px-1.5 py-0.5 text-[10px] font-medium text-info">tubulaire</span>}
                     {m.statut === "en_coupe" && (
                       <span className="rounded-sm bg-warning-soft px-1.5 py-0.5 text-[10px] font-medium text-warning">en coupe</span>
                     )}
@@ -93,6 +101,26 @@ function MatelasRegroupeDialog({ matelas, onClose }: { matelas: MatelasRegroupe;
   const [poids, setPoids] = useState("");
   const [dechets, setDechets] = useState("");
   const [justification, setJustification] = useState("");
+  const [codeRouleau, setCodeRouleau] = useState("");
+  const [rouleaux, setRouleaux] = useState<MatelasRoll[]>(matelas.rouleauxScannes);
+  const aScanner = matelas.rouleauxPrevus.filter((c) => !rouleaux.some((r) => r.code === c));
+
+  function scannerRouleau() {
+    setError(null);
+    startTransition(async () => {
+      const res = await attachRollToMatelasRegroupe(codeRouleau, matelas.traceId);
+      if (res.error) {
+        setError(res.error);
+        return;
+      }
+      if (res.roll) {
+        const roll = res.roll;
+        setRouleaux((prev) => (prev.some((r) => r.code === roll.code) ? prev : [...prev, roll]));
+        if (!laize.trim() && roll.laizeCm) setLaize(String(roll.laizeCm));
+      }
+      setCodeRouleau("");
+    });
+  }
 
   const manque = matelas.articles.some(
     (a) => num(couches[a.lineId] ?? "") < a.couches || pieces0.some((p) => num(pieces[a.lineId]?.[cle(p)] ?? "") < p.quantiteParCouche * a.couches)
@@ -172,6 +200,33 @@ function MatelasRegroupeDialog({ matelas, onClose }: { matelas: MatelasRegroupe;
             </div>
           </section>
         ))}
+
+        <section className="space-y-2 rounded-md border border-border p-3">
+          <p className="text-xs text-foreground-muted">
+            Rouleau(x) utilisé(s) — tissu {matelas.forme}. Scannez l&apos;étiquette du rouleau, sorti au préalable par la gestion de stock.
+          </p>
+          <div className="flex gap-2">
+            <div className="flex-1">
+              <LotCodeInput kind="roll" value={codeRouleau} onChange={setCodeRouleau} disabled={pending} placeholder="ROL-AAAA-NNNNN" />
+            </div>
+            <Button size="md" variant="secondary" loading={pending} disabled={!codeRouleau.trim()} onClick={scannerRouleau}>
+              Ajouter
+            </Button>
+          </div>
+          {aScanner.length > 0 && <p className="text-xs text-foreground-muted">Prévu(s) par la PAO : <span className="font-mono">{aScanner.join(", ")}</span></p>}
+          {rouleaux.length > 0 && (
+            <ul className="space-y-1 text-sm">
+              {rouleaux.map((r) => (
+                <li key={r.code} className="flex flex-wrap gap-x-3">
+                  <span className="font-mono text-xs">{r.code}</span>
+                  <span className="text-foreground-muted">{r.laizeCm ? `${r.laizeCm} cm` : "laize —"}</span>
+                  <span className="text-foreground-muted">bain {r.bain ?? "—"}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {new Set(rouleaux.map((r) => r.bain ?? "—")).size > 1 && <p className="text-xs text-warning">Attention : plusieurs bains sur ce matelas (risque de nuance).</p>}
+        </section>
 
         <section className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <label className="space-y-1 text-xs text-foreground-muted">
