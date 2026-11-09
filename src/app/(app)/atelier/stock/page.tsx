@@ -29,7 +29,7 @@ const ONGLETS: { key: Onglet; label: string }[] = [
 export default async function StockManagementPage({
   searchParams,
 }: {
-  searchParams: Promise<{ onglet?: string; odf?: string; q?: string; nature?: string; dispo?: string; tissu?: string; statut?: string }>;
+  searchParams: Promise<{ onglet?: string; odf?: string; q?: string; nature?: string; dispo?: string; tissu?: string; statut?: string; forme?: string }>;
 }) {
   const { profile } = await requireModule("stock_atelier");
   const params = await searchParams;

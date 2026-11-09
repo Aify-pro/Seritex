@@ -9,6 +9,8 @@ export interface TextileAvailabilityColor {
   colorId: string;
   name: string;
   rouleaux: number;
+  /** Part en tissu tubulaire (0163). */
+  kgTubulaire: number;
   kg: number;
   statut: "disponible" | "indisponible" | "non_suivi";
 }
@@ -93,7 +95,7 @@ export function TextileAvailabilityForm({
             }`}
           >
             {c.name}
-            <span className="font-normal opacity-80">{c.rouleaux > 0 ? `${c.rouleaux} rouleau(x) · ${kgFmt(c.kg)} kg` : "aucun rouleau"}</span>
+            <span className="font-normal opacity-80">{c.rouleaux > 0 ? `${c.rouleaux} rouleau(x) · ${kgFmt(c.kg)} kg${c.kgTubulaire > 0 ? ` dont ${kgFmt(c.kgTubulaire)} kg tubulaire` : ""}` : "aucun rouleau"}</span>
           </span>
         ))}
         {colors.length === 0 && <span className="text-xs text-foreground-muted">Aucune couleur (ni déclinaison ni rouleau) sur ce grammage.</span>}

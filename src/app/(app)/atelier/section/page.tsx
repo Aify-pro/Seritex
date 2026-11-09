@@ -425,7 +425,7 @@ export default async function SectionQueuePage({
     const { data: tracesRegroupes } = await supabase
       .from("traces_placement")
       .select(
-        "id,reference,statut,longueur_matelas_cm,largeur_matelas_cm,fiches_placement!inner(regroupee),trace_semi_finis(semi_fini_id,taille,quantite_par_couche,semi_fini:product_models(name)),trace_couches(production_order_line_id,nb_couches,production_order_lines(description,colors!production_order_lines_couleur_unique_id_fkey(name),production_orders(reference,status)))"
+        "id,reference,statut,forme,longueur_matelas_cm,largeur_matelas_cm,fiches_placement!inner(regroupee),trace_rouleaux(textile_rolls(code)),textile_roll_events(type,textile_rolls(code,laize_cm,bain,poids_kg)),trace_semi_finis(semi_fini_id,taille,quantite_par_couche,semi_fini:product_models(name)),trace_couches(production_order_line_id,nb_couches,production_order_lines(description,colors!production_order_lines_couleur_unique_id_fkey(name),production_orders(reference,status)))"
       )
       .eq("fiches_placement.regroupee", true)
       .in("statut", ["bon_pour_coupe", "en_coupe"])
@@ -435,6 +435,7 @@ export default async function SectionQueuePage({
       nb_couches: number;
       production_order_lines: { description: string; colors: { name: string } | null; production_orders: { reference: string; status: string } | null } | null;
     };
+    type RollEventRow = { type: string; textile_rolls: { code: string; laize_cm: number | null; bain: string | null; poids_kg: number } | null };
     type PieceRow = { semi_fini_id: string; taille: string; quantite_par_couche: number; semi_fini: { name: string } | { name: string }[] | null };
     matelasRegroupes = (tracesRegroupes ?? [])
       .map((t) => {
@@ -450,6 +451,11 @@ export default async function SectionQueuePage({
           reference: t.reference as string,
           semiFini: [...new Set(pieces.map((p) => p.semiFini))].join(" + ") || "Pièces",
           statut: t.statut as string,
+          forme: t.forme as string,
+          rouleauxPrevus: ((t.trace_rouleaux ?? []) as unknown as { textile_rolls: { code: string } | null }[]).flatMap((r) => (r.textile_rolls ? [r.textile_rolls.code] : [])),
+          rouleauxScannes: ((t.textile_roll_events ?? []) as unknown as RollEventRow[])
+            .filter((e) => e.type === "matelas" && e.textile_rolls)
+            .map((e) => ({ code: e.textile_rolls!.code, laizeCm: e.textile_rolls!.laize_cm != null ? Number(e.textile_rolls!.laize_cm) : null, bain: e.textile_rolls!.bain, poidsKg: Number(e.textile_rolls!.poids_kg) })),
           pieces,
           longueurCm: (t.longueur_matelas_cm as number | null) ?? null,
           laizeCm: (t.largeur_matelas_cm as number | null) ?? null,

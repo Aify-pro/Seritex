@@ -131,6 +131,10 @@ export interface ControleTrace {
 
 export interface TracePlacement {
   id: string;
+  /** Forme du tissu du tracé (0163). */
+  forme: "ouvert" | "tubulaire";
+  /** Rouleaux choisis par la PAO (0163). */
+  nbRouleaux: number;
   ordre: number;
   reference: string;
   referencePatron: string | null;

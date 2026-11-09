@@ -10,6 +10,8 @@ interface Row {
   suivi: boolean;
   seuil_kg: number;
   rouleaux: number;
+  rouleaux_tubulaire: number;
+  kg_tubulaire: number;
   kg: number;
   statut: TextileAvailabilityColor["statut"];
 }
@@ -46,7 +48,7 @@ export async function TextileAvailabilityPanel({ productModelId: id, canModify }
             canModify={canModify}
             colors={rows
               .filter((r) => r.textile_id === t.id)
-              .map((r) => ({ colorId: r.color_id, name: r.color_name, rouleaux: r.rouleaux, kg: Number(r.kg), statut: r.statut }))}
+              .map((r) => ({ colorId: r.color_id, name: r.color_name, rouleaux: r.rouleaux, kg: Number(r.kg), statut: r.statut, kgTubulaire: Number(r.kg_tubulaire) }))}
           />
         ))}
         {(textiles ?? []).length === 0 && <p className="text-sm text-foreground-muted">Aucun tissu relié à cet article.</p>}

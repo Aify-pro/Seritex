@@ -1,5 +1,6 @@
 "use client";
 
+import { TraceRouleaux } from "@/components/atelier/patronnage/trace-rouleaux";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -1375,6 +1376,10 @@ function TraceDetailBody({
               onChanged={onChanged}
             />
           </div>
+        )}
+
+        {!archived && (
+          <TraceRouleaux traceId={trace.id} ficheId={fiche.id} forme={trace.forme} nbRouleaux={trace.nbRouleaux} statut={trace.statut} canModify={canModify} onChanged={onChanged} />
         )}
 
         {trace.rendement && (

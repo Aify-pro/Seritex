@@ -21,7 +21,7 @@ const EVENT_LABELS: Record<string, string> = {
  * ou liste du fournisseur), recherche et scan d'un rouleau, sortie pour la
  * coupe d'un ODF (mouvement « Coupe pour ODF n° … »), retour pesé, rebut.
  */
-export async function RouleauxTab({ params, canAct }: { params: { tissu?: string; statut?: string; q?: string }; canAct: boolean }) {
+export async function RouleauxTab({ params, canAct }: { params: { tissu?: string; statut?: string; q?: string; forme?: string }; canAct: boolean }) {
   const statut = (STATUTS as readonly string[]).includes(params.statut ?? "") ? (params.statut as (typeof STATUTS)[number]) : "actifs";
   const q = (params.q ?? "").trim();
   const safe = q.replace(/[%,()]/g, "");
@@ -33,12 +33,13 @@ export async function RouleauxTab({ params, canAct }: { params: { tissu?: string
     .order("recu_le", { ascending: false })
     .limit(500);
   if (params.tissu) rollsQuery = rollsQuery.eq("textile_id", params.tissu);
+  if (params.forme === "ouvert" || params.forme === "tubulaire") rollsQuery = rollsQuery.eq("forme", params.forme);
   // Une recherche par code cherche dans tous les états.
   if (!q && statut === "actifs") rollsQuery = rollsQuery.in("statut", ["en_stock", "en_production"]);
   else if (!q && statut !== "tous") rollsQuery = rollsQuery.eq("statut", statut);
   if (q) rollsQuery = rollsQuery.or(`code.ilike.%${safe}%,code_complet.ilike.%${safe}%,bain.ilike.%${safe}%,numero_fournisseur.ilike.%${safe}%`);
 
-  const [{ data: rolls }, { data: textiles }, { data: coloris }, { data: odfs }] = await Promise.all([
+  const [{ data: rolls }, { data: textiles }, { data: coloris }, { data: odfs }, { data: reservations }] = await Promise.all([
     rollsQuery,
     supabase.from("textiles").select("id,nom").eq("active", true).order("nom"),
     supabase.from("textile_sage_articles").select("textile_id,sage_reference,colors(name)"),
@@ -47,7 +48,18 @@ export async function RouleauxTab({ params, canAct }: { params: { tissu?: string
       .select("id,reference,company_id,companies(name),production_order_lines(textile_id,product_models(textile_id))")
       .in("status", ["en_attente_validation", "en_production"])
       .order("created_at", { ascending: false }),
+    supabase.rpc("reservations_rouleaux"),
   ]);
+  // Un rouleau partagé par plusieurs tracés d'un même ODF : une seule réservation affichée, ODF réunis.
+  const reservationParRouleau = new Map<string, NonNullable<RollRow["reservation"]>>();
+  for (const r of (reservations ?? []) as { roll_id: string; trace_reference: string; odfs: string[]; odf_ids: string[] }[]) {
+    const cur = reservationParRouleau.get(r.roll_id);
+    reservationParRouleau.set(r.roll_id, {
+      trace: cur ? `${cur.trace}, ${r.trace_reference}` : r.trace_reference,
+      odfs: [...new Set([...(cur?.odfs ?? []), ...r.odfs])],
+      odfIds: [...new Set([...(cur?.odfIds ?? []), ...r.odf_ids])],
+    });
+  }
 
   const tissus: TissuOption[] = (textiles ?? []).map((t) => ({
     id: t.id as string,
@@ -68,6 +80,7 @@ export async function RouleauxTab({ params, canAct }: { params: { tissu?: string
       bain: (r.bain as string | null) ?? null,
       numeroFournisseur: (r.numero_fournisseur as string | null) ?? null,
       forme: r.forme as RollRow["forme"],
+      reservation: reservationParRouleau.get(r.id as string) ?? null,
       laizeCm: r.laize_cm != null ? Number(r.laize_cm) : null,
       poidsKg: Number(r.poids_kg),
       poidsInitialKg: Number(r.poids_initial_kg),
@@ -159,13 +172,21 @@ export async function RouleauxTab({ params, canAct }: { params: { tissu?: string
               </select>
             </label>
             <label className="text-xs">
+              <span className="mb-1 block text-foreground-muted">Forme</span>
+              <select name="forme" defaultValue={params.forme ?? ""} className="h-9 rounded-md border border-border bg-surface px-2 text-sm">
+                <option value="">Toutes</option>
+                <option value="ouvert">Ouvert</option>
+                <option value="tubulaire">Tubulaire</option>
+              </select>
+            </label>
+            <label className="text-xs">
               <span className="mb-1 block text-foreground-muted">Code, bain ou n° fournisseur</span>
               <input name="q" defaultValue={q} className="h-9 w-56 rounded-md border border-border bg-surface px-2 text-sm" />
             </label>
             <button type="submit" className="h-9 rounded-md border border-border bg-surface px-3 text-sm font-medium hover:bg-surface-muted">
               Rechercher
             </button>
-            {(params.tissu || statut !== "actifs" || q) && (
+            {(params.tissu || params.forme || statut !== "actifs" || q) && (
               <Link href="/atelier/stock?onglet=rouleaux" className="text-xs text-foreground-muted hover:underline">
                 Réinitialiser
               </Link>

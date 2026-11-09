@@ -736,6 +736,105 @@ export async function besoinsCoupe(): Promise<BesoinCoupeGroupe[] | { error: str
   }));
 }
 
+export interface RouleauTrace {
+  code: string;
+  forme: string;
+  textileId: string;
+  tissu: string;
+  couleur: string | null;
+  laizeCm: number | null;
+  poidsKg: number;
+  bain: string | null;
+  choisi: boolean;
+  /** ODF d'une réservation par un autre tracé. */
+  reservation: string | null;
+}
+
+export interface RouleauxTrace {
+  rouleaux: RouleauTrace[];
+  textilesTrace: string[];
+}
+
+/** Rouleaux en stock et rouleaux déjà choisis pour un tracé (0163). */
+export async function chargerRouleauxTrace(traceId: string): Promise<RouleauxTrace | { error: string }> {
+  await requirePermission("view");
+  const supabase = await createClient();
+  const colonnes = "id,code,forme,textile_id,laize_cm,poids_kg,bain,colors(name),textiles(nom,grammage)";
+  const [{ data: trace }, { data: choisis }, { data: stock, error }, { data: reservations }, { data: couches }] = await Promise.all([
+    supabase.from("traces_placement").select("fiche_id").eq("id", traceId).maybeSingle(),
+    supabase.from("trace_rouleaux").select(`roll_id,textile_rolls(${colonnes})`).eq("trace_id", traceId),
+    supabase.from("textile_rolls").select(colonnes).eq("statut", "en_stock").gt("poids_kg", 0).order("recu_le", { ascending: false }).limit(500),
+    supabase.rpc("reservations_rouleaux"),
+    supabase.from("trace_couches").select("production_order_line_id").eq("trace_id", traceId),
+  ]);
+  if (error) return { error: error.message };
+  type Roll = { id: string; code: string; forme: string; textile_id: string; laize_cm: number | null; poids_kg: number; bain: string | null; colors: { name: string } | null; textiles: { nom: string; grammage: number | null } | null };
+  const dejaChoisis = (choisis ?? []).map((c) => c.textile_rolls as unknown as Roll).filter(Boolean);
+  const idsChoisis = new Set(dejaChoisis.map((r) => r.id));
+  const reservation = new Map(
+    ((reservations ?? []) as { roll_id: string; trace_id: string; odfs: string[] }[]).filter((r) => r.trace_id !== traceId).map((r) => [r.roll_id, r.odfs.join(", ")])
+  );
+  const { data: groupe } = trace ? await supabase.from("coupe_groupee_lignes").select("production_order_line_id").eq("fiche_id", trace.fiche_id) : { data: [] };
+  const lineIds = [...new Set([...(couches ?? []), ...(groupe ?? [])].map((l) => l.production_order_line_id as string))];
+  const { data: lignes } = lineIds.length ? await supabase.from("production_order_lines").select("textile_id,product_models(textile_id)").in("id", lineIds) : { data: [] };
+  const textilesTrace = [
+    ...new Set(
+      ((lignes ?? []) as unknown as { textile_id: string | null; product_models: { textile_id: string | null } | null }[])
+        .map((l) => l.textile_id ?? l.product_models?.textile_id ?? null)
+        .filter((t): t is string => !!t)
+    ),
+  ];
+  const versLigne = (r: Roll, choisi: boolean): RouleauTrace => ({
+    code: r.code,
+    forme: r.forme,
+    textileId: r.textile_id,
+    tissu: `${r.textiles?.nom ?? "—"}${r.textiles?.grammage ? ` ${r.textiles.grammage} g` : ""}`,
+    couleur: r.colors?.name ?? null,
+    laizeCm: r.laize_cm != null ? Number(r.laize_cm) : null,
+    poidsKg: Number(r.poids_kg),
+    bain: r.bain,
+    choisi,
+    reservation: reservation.get(r.id) ?? null,
+  });
+  return {
+    rouleaux: [...dejaChoisis.map((r) => versLigne(r, true)), ...((stock ?? []) as unknown as Roll[]).filter((r) => !idsChoisis.has(r.id)).map((r) => versLigne(r, false))],
+    textilesTrace,
+  };
+}
+
+function apresRouleaux(ficheId: string) {
+  revalidatePath("/atelier/patronnage");
+  revalidatePath(`/atelier/patronnage/${ficheId}`);
+  revalidatePath("/atelier/stock");
+}
+
+export async function ajouterRouleauTrace(traceId: string, ficheId: string, code: string): Promise<{ error?: string }> {
+  await requireTracePermission("modify");
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("trace_ajouter_rouleau", { p_trace_id: traceId, p_code: code });
+  if (error) return { error: error.message };
+  apresRouleaux(ficheId);
+  return {};
+}
+
+export async function retirerRouleauTrace(traceId: string, ficheId: string, code: string): Promise<{ error?: string }> {
+  await requireTracePermission("modify");
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("trace_retirer_rouleau", { p_trace_id: traceId, p_code: code });
+  if (error) return { error: error.message };
+  apresRouleaux(ficheId);
+  return {};
+}
+
+export async function definirFormeTrace(traceId: string, ficheId: string, forme: "ouvert" | "tubulaire"): Promise<{ error?: string }> {
+  await requireTracePermission("modify");
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("trace_definir_forme", { p_trace_id: traceId, p_forme: forme });
+  if (error) return { error: error.message };
+  apresRouleaux(ficheId);
+  return {};
+}
+
 export interface SelectionBesoin {
   semiFiniId: string;
   taille: string;
@@ -823,6 +922,13 @@ export async function creerTraceDepuisBesoins(input: { ficheId: string | null; s
   }));
   const { error: e4 } = await supabase.from("trace_semi_finis").insert(pieces);
   if (e4) return annuler(e4.message);
+
+  // Forme proposée (0163) : tubulaire si toutes les lignes sont fabriquées en tubulaire.
+  const { data: formesActives } = idsActifs.length ? await supabase.from("nomenclatures").select("id,forme").in("id", idsActifs) : { data: [] };
+  if ((lignes ?? []).length > 0 && (lignes ?? []).every((l) => (formesActives ?? []).find((n) => n.id === meilleure(l.id as string))?.forme === "tubulaire")) {
+    const { error: e5 } = await supabase.rpc("trace_definir_forme", { p_trace_id: trace.id, p_forme: "tubulaire" });
+    if (e5) return annuler(e5.message);
+  }
 
   const avertissements: string[] = [];
   for (const l of lignes ?? []) {

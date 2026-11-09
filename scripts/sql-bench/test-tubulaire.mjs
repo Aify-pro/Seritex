@@ -71,6 +71,8 @@ async function ordre(numero, pieces, couches) {
   const t = await one(`insert into traces_placement(fiche_id, ordre, reference) values ($1,1,$2) returning id`, [f.id, numero + "-T1"]);
   for (const [s, n] of pieces) await q(`insert into trace_semi_finis(trace_id, semi_fini_id, taille, quantite_par_couche) values ($1,$2,$3,$4)`, [t.id, s.id, M, n]);
   await q(`insert into trace_couches(trace_id, production_order_line_id, nb_couches) values ($1,$2,$3)`, [t.id, A.line.id, couches]);
+  // Le corps tubulaire n'existe qu'en tubulaire (0163).
+  if (pieces.some(([s]) => s === tub)) await q(`select trace_definir_forme($1,'tubulaire')`, [t.id]);
   await q(`select valider_trace($1)`, [t.id]);
   t.pieces = pieces;
   t.couches = couches;
