@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { Printer } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { issueRoll, returnRoll, scrapRoll } from "./actions";
+import { issueRoll, returnRoll, scrapRoll, setRollForme } from "./actions";
 
 export interface RollRow {
   code: string;
@@ -19,6 +19,7 @@ export interface RollRow {
   coloris: string | null;
   bain: string | null;
   numeroFournisseur: string | null;
+  forme: "ouvert" | "tubulaire";
   laizeCm: number | null;
   poidsKg: number;
   poidsInitialKg: number;
@@ -68,6 +69,7 @@ export function RollList({ rows, odfs, canAct }: { rows: RollRow[]; odfs: OdfOpt
             </span>
             <span className="text-xs text-foreground-muted">Bain {r.bain ?? "—"}</span>
             <span className="tabular-nums">{r.laizeCm ? `${r.laizeCm} cm` : "laize —"}</span>
+            <Badge tone={r.forme === "tubulaire" ? "info" : "neutral"}>{r.forme === "tubulaire" ? "Tubulaire" : "Ouvert"}</Badge>
             <span className="tabular-nums">
               {kg(r.poidsKg)}
               {r.poidsKg !== r.poidsInitialKg && <span className="text-xs text-foreground-muted"> / {kg(r.poidsInitialKg)}</span>}
@@ -122,6 +124,17 @@ function RollActions({ roll, odfs, onDone }: { roll: RollRow; odfs: OdfOption[];
     <div className="mt-2 flex flex-wrap items-end gap-2 rounded-md border border-border bg-surface-muted/50 p-3">
       {roll.statut === "en_stock" ? (
         <>
+          <Button
+            size="sm"
+            variant="ghost"
+            loading={pending}
+            onClick={() => {
+              const forme = roll.forme === "tubulaire" ? "ouvert" : "tubulaire";
+              run(() => setRollForme(roll.code, forme), () => `${roll.code} passé en ${forme}`);
+            }}
+          >
+            Passer en {roll.forme === "tubulaire" ? "ouvert" : "tubulaire"}
+          </Button>
           <label className="text-xs">
             <span className="mb-1 block text-foreground-muted">Coupe pour l&apos;ODF</span>
             <select value={odf} onChange={(e) => setOdf(e.target.value)} className={`${input} w-72`}>

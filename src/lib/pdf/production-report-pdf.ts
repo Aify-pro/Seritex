@@ -264,6 +264,7 @@ export async function buildProductionReportPdf(d: ProductionReportPdfData): Prom
       { label: "Retour stock", width: 1, align: R },
       { label: "Consommé (net)", width: 1, align: R },
       { label: "Par pièce sortie", width: 1, align: R },
+      { label: "Pièces au kilo", width: 1, align: R },
       { label: "Déchets (sacs)", width: 1, align: R },
       { label: "Matelas clôturés", width: 1, align: R },
     ],
@@ -274,12 +275,19 @@ export async function buildProductionReportPdf(d: ProductionReportPdfData): Prom
           kg(tissu.kgRetour),
           kg(tissu.kgNet),
           tissu.kgParPiece === null ? "-" : `${(tissu.kgParPiece * 1000).toFixed(0)} g`,
+          tissu.piecesAuKilo === null ? "-" : tissu.piecesAuKilo.toLocaleString("fr-FR", { maximumFractionDigits: 2 }),
           kg(tissu.kgDechets),
           String(tissu.matelasClotures),
         ],
       },
     ]
   );
+  if (tissu.kgDechetsParCoupure.length > 0) {
+    table(
+      tissu.kgDechetsParCoupure.map((c) => ({ label: c.coupure, width: 1, align: R })),
+      [{ cells: tissu.kgDechetsParCoupure.map((c) => kg(c.kg)) }]
+    );
+  }
   if (d.view.consommables.length > 0) {
     table(
       [

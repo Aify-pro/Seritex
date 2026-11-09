@@ -595,6 +595,31 @@ export default async function ProductionOrderDetailPage({
     }));
   }
 
+  // Répartition entre nomenclatures des articles qui en ont plusieurs (0161).
+  const [{ data: nomenclaturesOdf }, { data: basculesOdf }, canRepartirOdf, canRepartirPatronnage] = await Promise.all([
+    supabase.from("nomenclatures").select("id,product_model_id,nom,forme,principale").in("product_model_id", lines.map((l) => l.productModelId).filter((x): x is string => !!x)),
+    supabase.from("production_order_line_nomenclatures").select("production_order_line_id,nomenclature_id,taille,quantite").in("production_order_line_id", lines.map((l) => l.id)),
+    can("ordres_fabrication", "modify"),
+    can("patronnage", "modify"),
+  ]);
+  const repartitionDeLigne = (line: (typeof lines)[number]) => {
+    const noms = (nomenclaturesOdf ?? []).filter((n) => n.product_model_id === line.productModelId);
+    if (noms.length < 2) return undefined;
+    const bascules = (basculesOdf ?? []).filter((b) => b.production_order_line_id === line.id);
+    const principale = line.initialSizes.reduce(
+      (s, t) => s + Math.max(t.quantite_demandee - bascules.filter((b) => b.taille === t.taille).reduce((x, b) => x + Number(b.quantite), 0), 0),
+      0
+    );
+    return [...noms]
+      .sort((a, b) => Number(b.principale) - Number(a.principale))
+      .map((n) => ({
+        nom: n.nom as string,
+        forme: n.forme as string,
+        quantite: n.principale ? principale : bascules.filter((b) => b.nomenclature_id === n.id).reduce((x, b) => x + Number(b.quantite), 0),
+      }));
+  };
+  const repartitionEditable = (canRepartirOdf || canRepartirPatronnage) && !["terminee", "annulee"].includes(order.status);
+
   const linesWithConfig: LineData[] = lines.map((line) => {
     const quoteLineId = quoteLineIdByLine[line.id];
     const maquetteFromDevisFile = quoteLineId ? maquetteByQuoteLine[quoteLineId] : undefined;
@@ -605,6 +630,8 @@ export default async function ProductionOrderDetailPage({
         .filter((r) => r.product_model_id === line.productModelId)
         .map((r) => ({ id: r.id as string, nom: r.nom as string, parDefaut: !!r.par_defaut })),
       stockAvailability: stockAvailabilityByLine[line.id],
+      repartition: repartitionDeLigne(line),
+      repartitionEditable,
       coupeSelected: !!coupeSelectedByLine[line.id],
       fiche: fichesByLine[line.id] ?? null,
       ordresCoupe: ordresParLigne[line.id] ?? [],

@@ -12,6 +12,7 @@ import { loadReferenceLibrary } from "@/lib/patronnage/bibliotheque";
 import { reconnaitreTrace } from "@/lib/patronnage/reconnaissance";
 import { construireAnalyseDetaillee, type TraceAnalysisDetail } from "@/lib/patronnage/detail";
 import { readDxfFile } from "@/lib/patronnage/upload";
+import { nomenclaturesActives } from "@/lib/patronnage/nomenclatures-actives";
 import type { StatutFiche, RepartitionTailles } from "@/lib/patronnage/types";
 import { repartitionDepuisTraces, repartitionTotal, sameRepartition } from "@/lib/patronnage/dispatching";
 import { revalidatePath } from "next/cache";
@@ -659,6 +660,10 @@ export interface BesoinCoupeLigne {
   reste: number;
   parPieces: boolean;
   dejaEntier: boolean;
+  /** Formes de tissu de cette pièce sur cette ligne (0161). */
+  formes: string[];
+  /** L'article a plusieurs nomenclatures : la ligne peut être répartie. */
+  repartissable: boolean;
 }
 
 export interface BesoinCoupeGroupe {
@@ -675,6 +680,7 @@ export interface BesoinCoupeGroupe {
   coupees: number;
   prevues: number;
   reste: number;
+  formes: string[];
   nbLignes: number;
   nbOdf: number;
   lignes: BesoinCoupeLigne[];
@@ -686,7 +692,15 @@ export async function besoinsCoupe(): Promise<BesoinCoupeGroupe[] | { error: str
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("besoins_coupe_agreges");
   if (error) return { error: error.message };
-  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+  const rows = (data ?? []) as Record<string, unknown>[];
+  // Lignes dont l'article a plusieurs nomenclatures (0161).
+  const lineIds = [...new Set(rows.flatMap((r) => ((r.lignes as { line_id: string }[]) ?? []).map((l) => l.line_id)))];
+  const { data: lignesModele } = lineIds.length ? await supabase.from("production_order_lines").select("id,product_model_id").in("id", lineIds) : { data: [] };
+  const modelesLignes = [...new Set((lignesModele ?? []).map((l) => l.product_model_id as string).filter(Boolean))];
+  const { data: nomsModele } = modelesLignes.length ? await supabase.from("nomenclatures").select("product_model_id").in("product_model_id", modelesLignes) : { data: [] };
+  const nbNomenclatures = (modele: unknown) => (nomsModele ?? []).filter((n) => n.product_model_id === modele).length;
+  const repartissables = new Set((lignesModele ?? []).filter((l) => nbNomenclatures(l.product_model_id) > 1).map((l) => l.id as string));
+  return rows.map((r) => ({
     semiFiniId: r.semi_fini_id as string,
     semiFiniCode: (r.semi_fini_code as string | null) ?? null,
     semiFiniNom: r.semi_fini_nom as string,
@@ -700,6 +714,7 @@ export async function besoinsCoupe(): Promise<BesoinCoupeGroupe[] | { error: str
     coupees: Number(r.coupees),
     prevues: Number(r.prevues),
     reste: Number(r.reste),
+    formes: (r.formes as string[] | null) ?? [],
     nbLignes: Number(r.nb_lignes),
     nbOdf: Number(r.nb_odf),
     lignes: ((r.lignes as Record<string, unknown>[]) ?? []).map((l) => ({
@@ -715,6 +730,8 @@ export async function besoinsCoupe(): Promise<BesoinCoupeGroupe[] | { error: str
       reste: Number(l.reste),
       parPieces: !!l.par_pieces,
       dejaEntier: !!l.deja_entier,
+      formes: (l.formes as string[] | null) ?? [],
+      repartissable: repartissables.has(l.line_id as string),
     })),
   }));
 }
@@ -784,19 +801,24 @@ export async function creerTraceDepuisBesoins(input: { ficheId: string | null; s
 
   // Quantité de la nomenclature par semi-fini (point de départ, à corriger) et articles auxquels il manque une pièce.
   const { data: lignes } = await supabase.from("production_order_lines").select("id,description,product_model_id").in("id", lineIds);
-  const modeles = [...new Set((lignes ?? []).map((l) => l.product_model_id as string).filter(Boolean))];
-  const { data: nomenclature } = modeles.length
-    ? await supabase.from("nomenclature_lines").select("product_model_id,semi_fini_id,quantite_par_piece").in("product_model_id", modeles).not("semi_fini_id", "is", null)
-    : { data: [] as { product_model_id: string; semi_fini_id: string; quantite_par_piece: number }[] };
+  // Seules comptent les nomenclatures utilisées par chaque ligne (0161).
+  const actives = await nomenclaturesActives(supabase, (lignes ?? []).map((l) => ({ id: l.id as string, modele: (l.product_model_id as string | null) ?? null })));
+  const idsActifs = [...new Set([...actives.values()].flat())];
+  const { data: nomenclature } = idsActifs.length
+    ? await supabase.from("nomenclature_lines").select("nomenclature_id,semi_fini_id,quantite_par_piece").in("nomenclature_id", idsActifs).not("semi_fini_id", "is", null)
+    : { data: [] as { nomenclature_id: string; semi_fini_id: string; quantite_par_piece: number }[] };
   const semiFinisChoisis = [...new Set(selections.map((x) => x.semiFiniId))];
-  const quantiteParModele = (modele: string, sf: string) =>
-    (nomenclature ?? []).filter((n) => n.product_model_id === modele && n.semi_fini_id === sf).reduce((t, n) => t + Number(n.quantite_par_piece), 0);
-  const premierModele = modeles[0];
+  const quantiteDans = (nomenclatureId: string | undefined, sf: string) =>
+    (nomenclature ?? []).filter((n) => n.nomenclature_id === nomenclatureId && n.semi_fini_id === sf).reduce((t, n) => t + Number(n.quantite_par_piece), 0);
+  // Un tracé ne porte qu'une nomenclature par ligne : celle qui a le plus des pièces cochées.
+  const meilleure = (lineId: string) =>
+    [...(actives.get(lineId) ?? [])].sort((a, b) => semiFinisChoisis.filter((sf) => quantiteDans(b, sf) > 0).length - semiFinisChoisis.filter((sf) => quantiteDans(a, sf) > 0).length)[0];
+  const premiereNomenclature = lignes?.[0] ? meilleure(lignes[0].id as string) : undefined;
   const pieces = [...new Map(selections.map((x) => [`${x.semiFiniId}|${x.taille}`, x])).values()].map((x) => ({
     trace_id: trace.id as string,
     semi_fini_id: x.semiFiniId,
     taille: x.taille,
-    quantite_par_couche: Math.max(1, Math.trunc(quantiteParModele(premierModele, x.semiFiniId)) || 1),
+    quantite_par_couche: Math.max(1, Math.trunc(quantiteDans(premiereNomenclature, x.semiFiniId)) || 1),
     source: "saisie" as const,
   }));
   const { error: e4 } = await supabase.from("trace_semi_finis").insert(pieces);
@@ -804,7 +826,7 @@ export async function creerTraceDepuisBesoins(input: { ficheId: string | null; s
 
   const avertissements: string[] = [];
   for (const l of lignes ?? []) {
-    const manquants = semiFinisChoisis.filter((sf) => quantiteParModele(l.product_model_id as string, sf) === 0);
+    const manquants = semiFinisChoisis.filter((sf) => quantiteDans(meilleure(l.id as string), sf) === 0);
     if (manquants.length) avertissements.push(`« ${l.description} » n'a pas toutes les pièces de ce tracé : aucune couche ne pourra lui être attribuée.`);
   }
 

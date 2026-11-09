@@ -1,3 +1,4 @@
+import { nomenclaturesActives } from "@/lib/patronnage/nomenclatures-actives";
 import "server-only";
 import { createClient } from "@/lib/supabase/server";
 import type { ControleTrace, FichePlacement, PatronReconnu, PieceNonReconnue, RendementTrace, TracePlacement } from "@/lib/patronnage/types";
@@ -146,29 +147,31 @@ async function mapFiches(
     ])
   );
 
-  // Semi-finis de la nomenclature des articles regroupés (D1 : un article doit
-  // avoir tous les semi-finis d'un tracé pour recevoir des couches).
-  const modelIds = [
-    ...new Set(
-      fichesRaw.flatMap((f) => (f.coupe_groupee_lignes ?? []).map((g) => g.production_order_lines?.product_model_id).filter((x): x is string => !!x))
-    ),
-  ];
-  const semiFinisParModele = new Map<string, { id: string; nom: string }[]>();
-  if (modelIds.length > 0) {
+  // Semi-finis des nomenclatures utilisées par les articles regroupés (D1 : un
+  // article doit avoir tous les semi-finis d'un tracé pour recevoir des couches).
+  const actives = await nomenclaturesActives(
+    supabase,
+    fichesRaw.flatMap((f) => (f.coupe_groupee_lignes ?? []).map((g) => ({ id: g.production_order_line_id, modele: g.production_order_lines?.product_model_id ?? null })))
+  );
+  const idsActifs = [...new Set([...actives.values()].flat())];
+  const semiFinisParLigne = new Map<string, { id: string; nom: string }[]>();
+  if (idsActifs.length > 0) {
     const { data: nomRows } = await supabase
       .from("nomenclature_lines")
-      .select("product_model_id,semi_fini_id")
-      .in("product_model_id", modelIds)
+      .select("nomenclature_id,semi_fini_id")
+      .in("nomenclature_id", idsActifs)
       .not("semi_fini_id", "is", null);
     const sfIds = [...new Set((nomRows ?? []).map((r) => r.semi_fini_id as string))];
     const { data: sfRows } = sfIds.length
       ? await supabase.from("product_models").select("id,name").in("id", sfIds)
       : { data: [] as { id: string; name: string }[] };
     const noms = new Map((sfRows ?? []).map((r) => [r.id as string, r.name as string]));
-    for (const r of nomRows ?? []) {
-      const liste = semiFinisParModele.get(r.product_model_id as string) ?? [];
-      if (!liste.some((x) => x.id === r.semi_fini_id)) liste.push({ id: r.semi_fini_id as string, nom: noms.get(r.semi_fini_id as string) ?? "?" });
-      semiFinisParModele.set(r.product_model_id as string, liste);
+    for (const [lineId, ids] of actives) {
+      const liste: { id: string; nom: string }[] = [];
+      for (const r of nomRows ?? []) {
+        if (ids.includes(r.nomenclature_id as string) && !liste.some((x) => x.id === r.semi_fini_id)) liste.push({ id: r.semi_fini_id as string, nom: noms.get(r.semi_fini_id as string) ?? "?" });
+      }
+      semiFinisParLigne.set(lineId, liste);
     }
   }
 
@@ -203,12 +206,11 @@ async function mapFiches(
     regroupee: f.regroupee,
     lignesRegroupees: (f.coupe_groupee_lignes ?? []).map((g) => {
       const po = g.production_order_lines?.production_orders;
-      const modele = g.production_order_lines?.product_model_id ?? null;
       return {
         lineId: g.production_order_line_id,
         description: g.production_order_lines?.description ?? "—",
         odfReference: (Array.isArray(po) ? po[0]?.reference : po?.reference) ?? null,
-        semiFinis: modele ? (semiFinisParModele.get(modele) ?? []) : [],
+        semiFinis: semiFinisParLigne.get(g.production_order_line_id) ?? [],
         tailles: (g.production_order_lines?.production_order_sizes ?? []).map((x) => x.taille),
       };
     }),

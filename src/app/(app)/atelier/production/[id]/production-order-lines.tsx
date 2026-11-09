@@ -17,6 +17,7 @@ import type { Size } from "@/lib/sizes";
 import { LineSectionsPicker } from "./line-sections-picker";
 import { RouteApplier } from "./route-applier";
 import { SplitLineButton, StockAvailability, type StockAvailabilityRow } from "./line-stock-tools";
+import { RepartitionNomenclatures } from "@/components/atelier/repartition-nomenclatures";
 import { FichePatronnageLink, type FicheLiee, type OrdreCoupeLie } from "./fiche-patronnage-link";
 import { LineVisuelPicker } from "./line-visuel-picker";
 import { LineMaquettePicker } from "./line-maquette-picker";
@@ -74,6 +75,9 @@ export interface LineData {
   routes?: { id: string; nom: string; parDefaut: boolean }[];
   /** Disponible en stock par taille, si l'article part du Stock (SF-2). */
   stockAvailability?: StockAvailabilityRow[];
+  /** Répartition entre les nomenclatures, si l'article en a plusieurs (0161). */
+  repartition?: { nom: string; forme: string; quantite: number }[];
+  repartitionEditable?: boolean;
   /** Une section de catégorie Coupe est-elle retenue ? Conditionne l'affichage de la fiche Patronnage. */
   coupeSelected: boolean;
   fiche: FicheLiee | null;
@@ -450,6 +454,13 @@ function LineCard({
 
       <div className="space-y-3 border-t border-border pt-3">
         {line.stockAvailability && <StockAvailability rows={line.stockAvailability} />}
+        {line.repartition && (
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <span className="text-xs font-medium text-foreground-muted">Fabrication</span>
+            <span>{line.repartition.map((r) => `${r.nom} (${r.forme}) : ${r.quantite}`).join(" · ")}</span>
+            {line.repartitionEditable && <RepartitionNomenclatures lineId={line.id} article={line.description} />}
+          </div>
+        )}
         {editable && line.initialSizes.length > 0 && (
           <SplitLineButton
             lineId={line.id}

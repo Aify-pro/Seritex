@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody } from "@/components/ui/card";
 import { Table, Thead, Tbody, Tr, Th, Td, EmptyRow } from "@/components/ui/table";
+import { RepartitionNomenclatures } from "@/components/atelier/repartition-nomenclatures";
 import { creerTraceDepuisBesoins, type BesoinCoupeGroupe } from "@/app/(app)/atelier/patronnage/fiches-actions";
 
 const libelleTaille = (cle: string) => cle.split("/").pop() ?? cle;
@@ -189,7 +190,10 @@ export function BesoinsCoupe({
                         {g.semiFiniNom}
                       </Td>
                       <Td>{libelleTaille(g.taille)}</Td>
-                      <Td>{g.tissu ? `${g.tissu}${g.grammage ? ` ${g.grammage} g` : ""}` : <span className="text-foreground-muted">—</span>}</Td>
+                      <Td>
+                        {g.tissu ? `${g.tissu}${g.grammage ? ` ${g.grammage} g` : ""}` : <span className="text-foreground-muted">—</span>}
+                        {g.formes.includes("tubulaire") && <Badge tone="info" className="ml-1.5">{g.formes.length > 1 ? "tubulaire + ouvert" : "tubulaire"}</Badge>}
+                      </Td>
                       <Td>{g.couleur ?? <span className="text-foreground-muted">—</span>}</Td>
                       <Td align="right">{g.demandees}</Td>
                       <Td align="right">{g.coupees}</Td>
@@ -219,6 +223,8 @@ export function BesoinsCoupe({
                             <span className="font-medium">{l.odf}</span> · {l.client} · {l.article}
                             {l.dejaEntier && <span className="ml-2 text-warning">déjà coupé ou validé en t-shirts entiers : ne peut pas être regroupé</span>}
                             {l.parPieces && <span className="ml-2 text-foreground-muted">déjà coupé par pièces</span>}
+                            {l.formes.includes("tubulaire") && <span className="ml-2 font-medium">{l.formes.join(" + ")}</span>}
+                            {peutCreer && l.repartissable && <span className="ml-1 inline-block"><RepartitionNomenclatures lineId={l.lineId} article={`${l.odf} · ${l.article}`} /></span>}
                           </td>
                           <Td align="right" className="text-xs">{l.demandees}</Td>
                           <Td align="right" className="text-xs">{l.coupees}</Td>

@@ -84,7 +84,7 @@ export type ProductionOrderOption = { id: string; reference: string; companyName
 export type ArticleLotOption = { id: string; code: string; categorie: string };
 
 /** Lot 7 : sac de déchets ouvert (statut en_cours), avec son dernier relevé connu. */
-export type WasteBagRow = { id: string; code: string; currentWeightKg: number; createdAt: string };
+export type WasteBagRow = { id: string; code: string; currentWeightKg: number; createdAt: string; coupure: string | null };
 
 /** Lot 10 : article du miroir Sage (stock_item_view), pour rattacher une pesée. */
 export type StockItemOption = { sageReference: string; designation: string };

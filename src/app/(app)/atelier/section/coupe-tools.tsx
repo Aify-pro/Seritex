@@ -1,5 +1,6 @@
 "use client";
 
+import { COUPURES, type Coupure } from "@/lib/atelier/coupures";
 import { useState, useTransition } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -35,27 +36,31 @@ export function WasteBagsPanel({
   const [openWeighId, setOpenWeighId] = useState<string | null>(null);
   const [lastClosedCode, setLastClosedCode] = useState<string | null>(null);
 
-  function handleCreate() {
+  function handleCreate(coupure: Coupure) {
     startCreating(async () => {
-      const res = await createWasteBag();
+      const res = await createWasteBag(coupure);
       if ("error" in res) {
         toast.error("Action refusée", { description: res.error });
         return;
       }
-      setBags((prev) => [{ id: res.id, code: res.code, currentWeightKg: 0, createdAt: new Date().toISOString() }, ...prev]);
+      setBags((prev) => [{ id: res.id, code: res.code, currentWeightKg: 0, createdAt: new Date().toISOString(), coupure }, ...prev]);
       toast.success(`Sac ${res.code} créé`);
     });
   }
 
   return (
     <Card className="p-4">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground-muted">
           Sacs de déchets en cours ({bags.length})
         </h3>
-        <Button size="sm" variant="secondary" onClick={handleCreate} loading={creating}>
-          <Plus className="h-3.5 w-3.5" /> Nouveau sac
-        </Button>
+        <span className="flex flex-wrap gap-1">
+          {COUPURES.map((c) => (
+            <Button key={c.value} size="sm" variant="secondary" onClick={() => handleCreate(c.value)} loading={creating}>
+              <Plus className="h-3.5 w-3.5" /> {c.label}
+            </Button>
+          ))}
+        </span>
       </div>
 
       {lastClosedCode && (

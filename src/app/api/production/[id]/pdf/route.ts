@@ -233,6 +233,32 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     sampleStatusesByLine.set(s.production_order_line_id, list);
   }
 
+  // Répartition entre nomenclatures des articles qui en ont plusieurs (0161).
+  const [{ data: nomenclaturesOdf }, { data: basculesOdf }] = await Promise.all([
+    supabase.from("nomenclatures").select("id,product_model_id,nom,forme,principale").in("product_model_id", (lines ?? []).map((l) => l.product_model_id).filter((x): x is string => !!x)),
+    supabase.from("production_order_line_nomenclatures").select("production_order_line_id,nomenclature_id,taille,quantite").in("production_order_line_id", lineIds),
+  ]);
+  const repartitionTexte = (line: NonNullable<typeof lines>[number]) => {
+    const noms = (nomenclaturesOdf ?? []).filter((n) => n.product_model_id === line.product_model_id);
+    if (noms.length < 2) return null;
+    const bascules = (basculesOdf ?? []).filter((b) => b.production_order_line_id === line.id);
+    const parTailles = (nomId: string | null) =>
+      (line.sizes ?? [])
+        .map((s) => {
+          const autres = bascules.filter((b) => b.taille === s.taille);
+          const q = nomId === null ? Math.max(s.quantite_demandee - autres.reduce((x, b) => x + Number(b.quantite), 0), 0) : Number(autres.find((b) => b.nomenclature_id === nomId)?.quantite ?? 0);
+          return q > 0 ? `${s.taille.split("/").pop()} ${q}` : null;
+        })
+        .filter(Boolean)
+        .join(", ");
+    return [...noms]
+      .sort((a, b) => Number(b.principale) - Number(a.principale))
+      .map((n) => ({ n, detail: parTailles(n.principale ? null : (n.id as string)) }))
+      .filter((x) => x.detail)
+      .map((x) => `${x.n.nom} (${x.n.forme}) : ${x.detail}`)
+      .join(" — ");
+  };
+
   const articles: OdfPdfArticle[] = (lines ?? []).map((line) => {
     const productModel = line.product_models as unknown as {
       name: string;
@@ -341,6 +367,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
           ? { fileName: maquette.file_name, bytes: maquetteBuffer.buffer, format: maquetteFormat }
           : null,
       sizes: (line.sizes ?? []).map((s) => ({ taille: s.taille, quantite: s.quantite_demandee })),
+      repartition: repartitionTexte(line),
     };
   });
 

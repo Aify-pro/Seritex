@@ -18,6 +18,7 @@ const rowSchema = z.object({
   laize_cm: z.union([z.number(), z.string()]).optional().default(""),
   poids_kg: z.union([z.number(), z.string()]),
   emplacement: z.string().trim().max(60).optional().default(""),
+  forme: z.enum(["ouvert", "tubulaire"]).optional().default("ouvert"),
 });
 
 function done() {
@@ -40,6 +41,16 @@ export async function receiveRolls(textileId: string, rows: z.input<typeof rowSc
   if (error) return { error: error.message };
   done();
   return { codes: ((data ?? []) as { code: string }[]).map((r) => r.code) };
+}
+
+/** Corrige la forme (ouvert / tubulaire) d'un rouleau encore en stock (0161). */
+export async function setRollForme(code: string, forme: "ouvert" | "tubulaire"): Promise<Result> {
+  await requirePermission("stock_atelier", "modify");
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("set_roll_forme", { p_code: code, p_forme: forme });
+  if (error) return { error: error.message };
+  done();
+  return {};
 }
 
 export async function issueRoll(code: string, productionOrderId: string, motif: string): Promise<Result> {
