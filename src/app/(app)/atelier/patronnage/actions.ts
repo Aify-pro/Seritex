@@ -374,6 +374,32 @@ export async function deleteReferencePattern(patternId: string): Promise<{ error
   return {};
 }
 
+/** Renomme un patron (code et désignation) ; ses tailles et ses pièces ne changent pas. */
+export async function renameReferenceArticle(articleId: string, articleCode: string, designation: string): Promise<{ error?: string }> {
+  const { authId } = await requirePermission("patronnage", "modify");
+  const code = articleCode.trim();
+  if (!code) return { error: "Code article manquant" };
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("pattern_articles")
+    .update({ article_code: code, designation: designation.trim() || "Sans désignation" })
+    .eq("id", articleId)
+    .select("id");
+  if (error) return { error: error.code === "23505" ? `Le code ${code} est déjà utilisé par un autre patron` : error.message };
+  if (!data || data.length === 0) return { error: "Modification refusée" };
+
+  await supabase.from("audit_log").insert({
+    user_id: authId,
+    action: "rename_pattern_article",
+    entity_type: "pattern_article",
+    entity_id: articleId,
+    metadata: { article_code: code },
+  });
+  revalidateBibliotheque();
+  return {};
+}
+
 /** Supprime un article de patronnage et toutes ses tailles, aux mêmes conditions que `deleteReferencePattern`. */
 export async function deleteReferenceArticle(articleId: string): Promise<{ error?: string }> {
   const { authId } = await requirePermission("patronnage", "delete");
