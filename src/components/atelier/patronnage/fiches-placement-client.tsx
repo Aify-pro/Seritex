@@ -31,6 +31,7 @@ import { createContext, useContext } from "react";
 import type { Size } from "@/lib/sizes";
 import { repartitionDepuisTraces, repartitionTotal } from "@/lib/patronnage/dispatching";
 import { ArticlesRegroupesCard, CouchesEditor, PiecesTraceEditor } from "@/components/atelier/patronnage/coupe-regroupee";
+import { PiecesArticlesCard } from "@/components/atelier/patronnage/pieces-articles-card";
 import {
   createFiche,
   updateFiche,
@@ -767,7 +768,10 @@ export function FicheDetailContent({
         )}
 
         {fiche.regroupee ? (
-          <ArticlesRegroupesCard fiche={fiche} canModify={permissions.canModify && fiche.statut !== "archive"} />
+          <>
+            <ArticlesRegroupesCard fiche={fiche} canModify={permissions.canModify && fiche.statut !== "archive"} />
+            <PiecesArticlesCard lineIds={fiche.lignesRegroupees.map((l) => l.lineId)} refreshKey={fiche.traces.length} />
+          </>
         ) : (
           <>
         {/* Lien ODF (article précis, migration 0037) */}
@@ -825,6 +829,7 @@ export function FicheDetailContent({
             )}
           </CardBody>
         </Card>
+        <PiecesArticlesCard lineIds={fiche.lineId ? [fiche.lineId] : []} refreshKey={fiche.traces.length} />
           </>
         )}
 
