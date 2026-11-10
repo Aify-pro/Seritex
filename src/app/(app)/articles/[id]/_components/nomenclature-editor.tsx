@@ -210,11 +210,18 @@ export function NomenclatureEditor({
                 })()}
               </span>
               <span className="flex items-center gap-2">
+                {/* Garde-fou 0166 : sur un article à zones, une pièce sans zone ni
+                    couleur imposée n'a pas de couleur quand l'ODF est colorié par zone. */}
+                {l.semi_fini_id && zones.length > 0 && !l.zone_key && !l.couleur_imposee_id && (
+                  <span className="text-xs text-warning" title="Sur un devis ou un ODF colorié par zone, cette pièce n'aura pas de couleur : le devis ne pourra pas être envoyé.">
+                    Zone à choisir
+                  </span>
+                )}
                 <select
                   value={couleurValue(l)}
                   disabled={pending}
                   onChange={(e) => changeCouleur(l.id, e.target.value)}
-                  className="h-7 max-w-44 rounded-md border border-border bg-surface px-1 text-xs"
+                  className={`h-7 max-w-44 rounded-md border bg-surface px-1 text-xs ${l.semi_fini_id && zones.length > 0 && !l.zone_key && !l.couleur_imposee_id ? "border-warning" : "border-border"}`}
                   aria-label={`Couleur de ${l.designation}`}
                 >
                   <CouleurOptions zones={zones} couleurs={couleurs} />
