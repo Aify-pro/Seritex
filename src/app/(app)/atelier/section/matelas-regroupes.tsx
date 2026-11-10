@@ -27,7 +27,8 @@ export interface MatelasRegroupe {
   pieces: { semiFiniId: string; semiFini: string; taille: string; quantiteParCouche: number }[];
   longueurCm: number | null;
   laizeCm: number | null;
-  articles: { lineId: string; odf: string; article: string; couleur: string | null; couches: number }[];
+  /** odfAnnule (0174) : article d'un ODF annulé — ses pièces iront en stock tampon, à réorienter. */
+  articles: { lineId: string; odf: string; article: string; couleur: string | null; couches: number; odfAnnule?: boolean }[];
 }
 
 const libelleTaille = (cle: string) => cle.split("/").pop() ?? cle;
@@ -70,7 +71,7 @@ export function MatelasRegroupes({ matelas }: { matelas: MatelasRegroupe[] }) {
                     )}
                   </span>
                   <span className="block truncate text-xs text-foreground-muted">
-                    {m.articles.map((a) => `${a.odf} · ${a.couches} couches${a.couleur ? ` ${a.couleur}` : ""}`).join(" — ")}
+                    {m.articles.map((a) => `${a.odf}${a.odfAnnule ? " (ODF annulé)" : ""} · ${a.couches} couches${a.couleur ? ` ${a.couleur}` : ""}`).join(" — ")}
                   </span>
                 </span>
               </button>
@@ -181,6 +182,11 @@ function MatelasRegroupeDialog({ matelas, onClose }: { matelas: MatelasRegroupe;
               {a.odf} · {a.article}
               {a.couleur ? ` · ${a.couleur}` : ""} <span className="text-xs text-foreground-muted">({a.couches} couches prévues)</span>
             </p>
+            {a.odfAnnule && (
+              <p className="rounded bg-danger-soft px-2 py-1 text-xs text-danger">
+                ODF annulé : les pièces coupées pour cet article restent en stock tampon, à réorienter vers un autre ODF.
+              </p>
+            )}
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <label className="space-y-1 text-xs text-foreground-muted">
                 Couches réelles

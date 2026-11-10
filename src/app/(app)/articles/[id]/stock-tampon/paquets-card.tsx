@@ -18,6 +18,11 @@ export interface PaquetRow {
   detenteur: string | null;
   en_transit: boolean;
   verrouille: boolean;
+  /** ODF annulé (0174) : pièces à réattribuer. */
+  odf_annule?: boolean;
+  /** Liste multi-semi-finis (fiche d'un ODF annulé) : la pièce du paquet. */
+  semi_fini_id?: string;
+  semi_fini?: string;
 }
 
 const tailleTexte = (c: Record<string, number>) =>
@@ -31,14 +36,23 @@ const tailleTexte = (c: Record<string, number>) =>
  * (atelier détenteur, en transit), leur verrou, et la réorientation vers une
  * autre ligne d'ODF pour les chefs de production (S48).
  */
-export function PaquetsCard({ paquets, semiFiniId, canReorienter }: { paquets: PaquetRow[]; semiFiniId: string; canReorienter: boolean }) {
+export function PaquetsCard({
+  paquets,
+  semiFiniId,
+  canReorienter,
+  title = "Paquets (lots QR)",
+  description = "Un paquet par article d'ODF et par taille, créé à la clôture d'un matelas regroupé. Un paquet suit l'atelier qui l'a scanné en dernier ; verrouillé dès son entrée en personnalisation. Les paquets d'un ODF annulé restent ici jusqu'à leur réorientation vers un autre ODF.",
+}: {
+  paquets: PaquetRow[];
+  semiFiniId?: string;
+  canReorienter: boolean;
+  title?: string;
+  description?: string;
+}) {
   const [choisi, setChoisi] = useState<PaquetRow | null>(null);
   return (
     <Card>
-      <CardHeader
-        title="Paquets (lots QR)"
-        description="Un paquet par article d'ODF et par taille, créé à la clôture d'un matelas regroupé. Un paquet suit l'atelier qui l'a scanné en dernier ; verrouillé dès son entrée en personnalisation."
-      />
+      <CardHeader title={title} description={description} />
       <CardBody className="p-0">
         {paquets.length === 0 ? (
           <p className="px-5 py-4 text-sm text-foreground-muted">Aucun paquet en cours.</p>
@@ -47,7 +61,9 @@ export function PaquetsCard({ paquets, semiFiniId, canReorienter }: { paquets: P
             {paquets.map((p) => (
               <li key={p.lot_id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 text-sm">
                 <span>
-                  <span className="font-mono text-xs">{p.code}</span> · {p.odf}
+                  <span className="font-mono text-xs">{p.code}</span>
+                  {p.semi_fini ? ` · ${p.semi_fini}` : ""} · {p.odf}
+                  {p.odf_annule && <span className="ml-1 rounded bg-danger-soft px-1.5 py-0.5 text-[11px] font-medium text-danger">ODF annulé — à réattribuer</span>}
                   {p.article ? ` · ${p.article}` : ""} · {tailleTexte(p.composition_taille)}
                   <span className="block text-xs text-foreground-muted">
                     {p.en_transit ? "En transit" : `Chez ${p.detenteur ?? "—"}`}
@@ -64,7 +80,7 @@ export function PaquetsCard({ paquets, semiFiniId, canReorienter }: { paquets: P
           </ul>
         )}
       </CardBody>
-      {choisi && <ReorienterDialog paquet={choisi} semiFiniId={semiFiniId} onClose={() => setChoisi(null)} />}
+      {choisi && <ReorienterDialog paquet={choisi} semiFiniId={choisi.semi_fini_id ?? semiFiniId ?? ""} onClose={() => setChoisi(null)} />}
     </Card>
   );
 }

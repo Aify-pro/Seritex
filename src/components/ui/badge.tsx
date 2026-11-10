@@ -56,6 +56,7 @@ const QUOTE_TONE: Record<string, Tone> = {
   accepte: "success",
   refuse: "danger",
   expire: "neutral",
+  annule: "neutral",
 };
 
 const PRODUCTION_TONE: Record<string, Tone> = {

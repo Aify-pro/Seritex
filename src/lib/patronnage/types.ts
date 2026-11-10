@@ -213,6 +213,8 @@ export interface FichePlacement {
     lineId: string;
     description: string;
     odfReference: string | null;
+    /** ODF annulé (0174) : ses pièces coupées resteront en stock tampon, à réorienter. */
+    odfAnnule: boolean;
     /** Quantité de vêtements de l'article d'ODF, et sa couleur unique s'il en a une. */
     quantite: number | null;
     couleur: string | null;

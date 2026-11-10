@@ -466,13 +466,15 @@ export default async function SectionQueuePage({
             couleur: c.production_order_lines?.colors?.name ?? null,
             couches: c.nb_couches,
             enProduction: c.production_order_lines?.production_orders?.status === "en_production",
+            // ODF annulé (0174) : l'article reste dans le matelas, ses pièces iront en stock tampon.
+            odfAnnule: c.production_order_lines?.production_orders?.status === "annulee",
           })),
         };
       })
-      .filter((m) => m.articles.length > 0 && m.articles.every((a) => a.enProduction))
+      .filter((m) => m.articles.some((a) => a.enProduction) && m.articles.every((a) => a.enProduction || a.odfAnnule))
       .map((m) => ({
         ...m,
-        articles: m.articles.map((a) => ({ lineId: a.lineId, odf: a.odf, article: a.article, couleur: a.couleur, couches: a.couches })),
+        articles: m.articles.map((a) => ({ lineId: a.lineId, odf: a.odf, article: a.article, couleur: a.couleur, couches: a.couches, odfAnnule: a.odfAnnule })),
       }));
     // Couleur des pièces du matelas pour chaque article (0165) : celle imposée
     // par la nomenclature, sinon celle de la zone, sinon la couleur unique.

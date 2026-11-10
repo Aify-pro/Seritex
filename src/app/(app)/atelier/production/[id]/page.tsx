@@ -10,6 +10,7 @@ import { notFound } from "next/navigation";
 import { ArchiveButton } from "./archive-button";
 import { LifecycleActions } from "./lifecycle-actions";
 import { ReplacementOrderPicker } from "./replacement-order-picker";
+import { PaquetsCard, type PaquetRow } from "@/app/(app)/articles/[id]/stock-tampon/paquets-card";
 import { getSizes, getSizesForProductModel } from "@/lib/sizes";
 import { SubmitOdfPanel } from "./submit-odf-panel";
 import { ConfigurationIncompleteCard, type AnomalieConfiguration } from "@/components/configuration/configuration-incomplete-card";
@@ -289,7 +290,7 @@ export default async function ProductionOrderDetailPage({
   // chargés : la fiche annulée montre vers quoi elle a été relancée, et la
   // fiche qui remplace montre ce qu'elle remplace. Les candidats ne sont
   // proposés que sur un ODF annulé, et le serveur revérifie à l'écriture.
-  const [{ data: replacedBy }, { data: replaces }, { data: replacementCandidates }] = await Promise.all([
+  const [{ data: replacedBy }, { data: replaces }, { data: replacementCandidates }, { data: paquetsAnnules }, canReorienter] = await Promise.all([
     order.replaced_by_production_order_id
       ? supabase
           .from("production_orders")
@@ -312,6 +313,9 @@ export default async function ProductionOrderDetailPage({
           .order("created_at", { ascending: false })
           .limit(50)
       : Promise.resolve({ data: [] }),
+    // ODF annulé (0174) : pièces déjà coupées restées en stock tampon, à réattribuer.
+    order.status === "annulee" ? supabase.rpc("paquets_odf", { p_production_order_id: id }) : Promise.resolve({ data: [] }),
+    order.status === "annulee" ? can("ordres_fabrication", "modify") : Promise.resolve(false),
   ]);
 
   // Un refus de validation n'est pas une annulation : il sanctionne souvent
@@ -933,13 +937,22 @@ export default async function ProductionOrderDetailPage({
       {order.cloture_note && (
         <Card className="border-warning/30 bg-warning-soft/40">
           <CardBody>
-            <p className="text-xs font-medium text-foreground-muted">Note de clôture</p>
+            <p className="text-xs font-medium text-foreground-muted">{order.status === "annulee" ? "Motif de l'annulation" : "Note de clôture"}</p>
             <p className="text-sm text-foreground">{order.cloture_note}</p>
           </CardBody>
         </Card>
       )}
 
       <AnomaliesPanel productionOrderId={order.id} anomalies={anomalyRows} canResolve={isAdmin || profile.role === "responsable_production"} />
+
+      {order.status === "annulee" && (paquetsAnnules ?? []).length > 0 && (
+        <PaquetsCard
+          paquets={((paquetsAnnules ?? []) as PaquetRow[]).map((p) => ({ ...p, odf_annule: true }))}
+          canReorienter={canReorienter}
+          title="Pièces coupées restées en stock tampon"
+          description="Cet ODF est annulé : ses paquets de pièces déjà coupées restent dans l'atelier qui les détient. Réorientez-les vers un ODF en production qui a besoin de la même pièce, dans la même couleur et le même tissu. Un paquet verrouillé (entré en personnalisation) ne se réoriente pas."
+        />
+      )}
 
       {order.status === "annulee" && (
         <ReplacementOrderPicker

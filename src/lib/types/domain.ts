@@ -37,7 +37,7 @@ export type RequestStatus =
   | "acceptee"
   | "cloturee";
 
-export type QuoteStatus = "brouillon" | "en_validation_interne" | "envoye" | "accepte" | "refuse" | "expire";
+export type QuoteStatus = "brouillon" | "en_validation_interne" | "envoye" | "accepte" | "refuse" | "expire" | "annule";
 
 // Cycle de vie ODF v2 (lot 1 — refonte module Production, 09/2026) :
 // remplace a_lancer|en_cours|terminee|bloquee|annulee. `bloquee` disparaît en
@@ -391,6 +391,9 @@ export interface Quote {
   modification_ouverte_le?: string | null;
   modifie_apres_acceptation_le?: string | null;
   modifie_apres_acceptation_motif?: string | null;
+  /** Annulation du devis (0174) : l'ODF né du devis est annulé avec lui. */
+  annule_le?: string | null;
+  annule_motif?: string | null;
   created_at: string;
   companies?: Pick<Company, "id" | "name">;
 }
@@ -834,6 +837,7 @@ export const QUOTE_STATUS_LABELS: Record<QuoteStatus, string> = {
   accepte: "Accepté",
   refuse: "Refusé",
   expire: "Expiré",
+  annule: "Annulé",
 };
 
 export const PRODUCTION_ORDER_STATUS_LABELS: Record<ProductionOrderStatus, string> = {

@@ -7,7 +7,7 @@ const FICHE_SELECT = `id,numero_ot,statut,statut_precedent,production_order_line
    date_emission,date_retour_souhaitee,designation_article,reference_modele,product_model_id,quantite_totale,
    repartition_tailles,tissu_type,grammage,couleur,laize_utile_cm,contraintes,observations,
    valide_le,created_at,regroupee,
-   coupe_groupee_lignes(production_order_line_id,production_order_lines(description,quantity,product_model_id,couleur_unique:couleur_unique_id(name),production_order_sizes(taille,quantite_demandee),production_orders(reference))),
+   coupe_groupee_lignes(production_order_line_id,production_order_lines(description,quantity,product_model_id,couleur_unique:couleur_unique_id(name),production_order_sizes(taille,quantite_demandee),production_orders(reference,status))),
    production_order_lines(description,production_orders(reference)),
    traces_placement(id,ordre,reference,reference_patron,longueur_matelas_cm,largeur_matelas_cm,nb_plis,
      repartition_par_couche,fichier_path,fichier_nom,charge_le,est_correctif,justification,
@@ -69,7 +69,7 @@ type FicheRow = {
           product_model_id: string | null;
           couleur_unique: { name: string } | { name: string }[] | null;
           production_order_sizes: { taille: string; quantite_demandee: number }[] | null;
-          production_orders: { reference: string } | { reference: string }[] | null;
+          production_orders: { reference: string; status: string } | { reference: string; status: string }[] | null;
         } | null;
       }[]
     | null;
@@ -224,6 +224,7 @@ async function mapFiches(
         lineId: g.production_order_line_id,
         description: g.production_order_lines?.description ?? "—",
         odfReference: (Array.isArray(po) ? po[0]?.reference : po?.reference) ?? null,
+        odfAnnule: (Array.isArray(po) ? po[0]?.status : po?.status) === "annulee",
         quantite: g.production_order_lines?.quantity ?? null,
         couleur: (() => {
           const cu = g.production_order_lines?.couleur_unique;

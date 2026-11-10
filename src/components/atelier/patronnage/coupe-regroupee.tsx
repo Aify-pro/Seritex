@@ -123,6 +123,7 @@ export function ArticlesRegroupesCard({ fiche, canModify }: { fiche: FichePlacem
                       <p>
                         <span className="font-medium">{l.odfReference ?? "—"}</span> · {l.description}
                         {l.couleur ? ` · ${l.couleur}` : ""}
+                        {l.odfAnnule && <span className="ml-1.5 rounded bg-danger-soft px-1.5 py-0.5 text-[11px] font-medium text-danger">ODF annulé</span>}
                       </p>
                       <p className="text-xs text-foreground-muted">
                         {l.quantite != null ? `${l.quantite} vêtement${l.quantite > 1 ? "s" : ""}` : "Quantité —"}
@@ -484,6 +485,7 @@ export function CouchesEditor({
             <li key={l.lineId} className="flex items-center justify-between gap-3 text-sm">
               <span className="min-w-0">
                 <span className="block truncate">
+                  {l.odfAnnule && <span className="mr-1.5 rounded bg-danger-soft px-1.5 py-0.5 text-[11px] font-medium text-danger">ODF annulé</span>}
                   {l.odfReference ?? "—"} · {l.description}
                   {(() => {
                     const c = [...new Set(l.semiFinis.filter((p) => semiFinisTrace.some(([id]) => id === p.id)).map((p) => p.couleur ?? "sans couleur"))];
