@@ -27,7 +27,7 @@ export interface MatelasRegroupe {
   pieces: { semiFiniId: string; semiFini: string; taille: string; quantiteParCouche: number }[];
   longueurCm: number | null;
   laizeCm: number | null;
-  /** odfAnnule (0174) : article d'un ODF annulé — ses pièces iront en stock tampon, à réorienter. */
+  /** odfAnnule (0178) : article d'un ODF annulé — ses pièces iront en stock tampon, à réorienter. */
   articles: { lineId: string; odf: string; article: string; couleur: string | null; couches: number; odfAnnule?: boolean }[];
 }
 

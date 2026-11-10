@@ -466,7 +466,7 @@ export default async function SectionQueuePage({
             couleur: c.production_order_lines?.colors?.name ?? null,
             couches: c.nb_couches,
             enProduction: c.production_order_lines?.production_orders?.status === "en_production",
-            // ODF annulé (0174) : l'article reste dans le matelas, ses pièces iront en stock tampon.
+            // ODF annulé (0178) : l'article reste dans le matelas, ses pièces iront en stock tampon.
             odfAnnule: c.production_order_lines?.production_orders?.status === "annulee",
           })),
         };

@@ -50,7 +50,7 @@ export default async function CommercialQuoteDetailPage({ params }: { params: Pr
       : Promise.resolve(null),
     // Garde-fou de configuration (0166) : ce qui bloque l'envoi puis l'acceptation.
     supabase.rpc("configuration_devis", { p_quote_id: id }),
-    // Annulation (0174) : administrateur et Direction.
+    // Annulation (0178) : administrateur et Direction.
     quote.status === "annule" ? Promise.resolve({ data: false }) : supabase.rpc("peut_annuler_devis"),
   ]);
   const { data: odfsAAnnuler } = peutAnnuler

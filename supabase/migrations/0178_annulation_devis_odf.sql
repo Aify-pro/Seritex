@@ -1,5 +1,5 @@
 -- ============================================================================
--- 0174 — Annulation d'un devis (proforma) et de son ODF
+-- 0178 — Annulation d'un devis (proforma) et de son ODF
 -- ============================================================================
 --
 -- Décisions du 2026-11-10 :
@@ -30,7 +30,7 @@ alter table quotes
   add column if not exists annule_motif text;
 
 comment on column quotes.annule_motif is
-  'Motif de l''annulation du devis (0174) ; l''ODF né du devis est annulé avec lui.';
+  'Motif de l''annulation du devis (0178) ; l''ODF né du devis est annulé avec lui.';
 
 -- ----------------------------------------------------------------------------
 -- 1. DROIT : module « annulation_devis »
@@ -438,7 +438,7 @@ begin
       raise exception 'l''article « % » n''a pas de couches dans ce matelas', coalesce(v_line.description, '?');
     end if;
     select status into v_status from production_orders where id = v_line.production_order_id;
-    -- 0174 : l'article d'un ODF annulé se clôture aussi ; ses pièces restent
+    -- 0178 : l'article d'un ODF annulé se clôture aussi ; ses pièces restent
     -- en stock tampon (paquets) pour être réorientées.
     if v_status not in ('en_production', 'annulee') then
       raise exception 'l''ODF de l''article « % » n''est pas en production (statut : %)', v_line.description, v_status;
@@ -504,7 +504,7 @@ begin
                              'manque', v_manque, 'justification', v_justif));
 
   -- Assemblage en t-shirts complets et écarts de coupe, article par article.
-  -- ODF annulé : pas d'assemblage, les pièces restent à réorienter (0174).
+  -- ODF annulé : pas d'assemblage, les pièces restent à réorienter (0178).
   for v_l in select * from jsonb_array_elements(p_lignes) loop
     if (select po.status from production_order_lines l join production_orders po on po.id = l.production_order_id
         where l.id = (v_l ->> 'line_id')::uuid) = 'annulee' then

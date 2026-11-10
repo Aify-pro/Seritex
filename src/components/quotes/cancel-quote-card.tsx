@@ -20,7 +20,7 @@ export interface OdfAAnnuler {
 }
 
 /**
- * Annulation d'un devis (migration 0174) : administrateur et Direction. La
+ * Annulation d'un devis (migration 0178) : administrateur et Direction. La
  * confirmation annonce l'ODF annulé avec le devis et les pièces déjà coupées
  * qui resteront en stock tampon, à réattribuer.
  */

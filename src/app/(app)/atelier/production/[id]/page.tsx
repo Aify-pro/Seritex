@@ -313,7 +313,7 @@ export default async function ProductionOrderDetailPage({
           .order("created_at", { ascending: false })
           .limit(50)
       : Promise.resolve({ data: [] }),
-    // ODF annulé (0174) : pièces déjà coupées restées en stock tampon, à réattribuer.
+    // ODF annulé (0178) : pièces déjà coupées restées en stock tampon, à réattribuer.
     order.status === "annulee" ? supabase.rpc("paquets_odf", { p_production_order_id: id }) : Promise.resolve({ data: [] }),
     order.status === "annulee" ? can("ordres_fabrication", "modify") : Promise.resolve(false),
   ]);
