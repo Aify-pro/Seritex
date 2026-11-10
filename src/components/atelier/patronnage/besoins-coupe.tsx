@@ -12,7 +12,7 @@ import { RepartitionNomenclatures } from "@/components/atelier/repartition-nomen
 import { creerTraceDepuisBesoins, type BesoinCoupeGroupe } from "@/app/(app)/atelier/patronnage/fiches-actions";
 
 const libelleTaille = (cle: string) => cle.split("/").pop() ?? cle;
-const cleGroupe = (g: BesoinCoupeGroupe) => [g.semiFiniId, g.taille, g.textileId ?? "", g.couleurId ?? ""].join("|");
+const cleGroupe = (g: BesoinCoupeGroupe) => [g.semiFiniId, g.taille, g.textileId ?? "", g.couleurId ?? "", g.couleur ?? ""].join("|");
 
 /** Lignes d'un groupe qu'on peut cocher : un reste à couper, pas déjà coupé en t-shirts entiers. */
 const cochables = (g: BesoinCoupeGroupe) => g.lignes.filter((l) => l.reste > 0 && !l.dejaEntier);
