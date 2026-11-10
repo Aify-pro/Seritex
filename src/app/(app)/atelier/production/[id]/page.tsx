@@ -12,6 +12,7 @@ import { LifecycleActions } from "./lifecycle-actions";
 import { ReplacementOrderPicker } from "./replacement-order-picker";
 import { getSizes, getSizesForProductModel } from "@/lib/sizes";
 import { SubmitOdfPanel } from "./submit-odf-panel";
+import { ConfigurationIncompleteCard, type AnomalieConfiguration } from "@/components/configuration/configuration-incomplete-card";
 import { AnomaliesPanel } from "./anomalies-panel";
 import { ProductionOrderLines, type LineData } from "./production-order-lines";
 import { ProductionOrderMediaFiles, type AttachableMediaFile } from "./production-order-media-files";
@@ -383,7 +384,12 @@ export default async function ProductionOrderDetailPage({
   // Même logique que le garde-fou serveur de submit_production_order()
   // (migration 0035) : sert uniquement à désactiver le bouton côté client
   // avec un message clair — le contrôle qui fait autorité reste le RPC.
+  // Garde-fou de configuration (0166) : couleur de chaque pièce de la
+  // nomenclature, en plus des contrôles ci-dessous ; la base bloque la soumission.
+  const { data: anomaliesRows } = modifiable ? await supabase.rpc("configuration_odf", { p_production_order_id: order.id }) : { data: [] };
+  const anomaliesConfiguration = (anomaliesRows ?? []) as AnomalieConfiguration[];
   const linesConfigured =
+    anomaliesConfiguration.length === 0 &&
     lines.length > 0 &&
     lines.every((line) => {
       if (!line.productModelId) return false;
@@ -1006,6 +1012,7 @@ export default async function ProductionOrderDetailPage({
           echantillons={echantillonsCircuit}
         />
 
+        {modifiable && <ConfigurationIncompleteCard anomalies={anomaliesConfiguration} bloque="l'ordre de fabrication ne peut pas être soumis" />}
         {modifiable && (
           <SubmitOdfPanel
             productionOrderId={order.id}
