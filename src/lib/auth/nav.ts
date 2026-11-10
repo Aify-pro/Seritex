@@ -39,6 +39,7 @@ import {
   Target,
   Briefcase,
   Activity,
+  Car,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { createElement, type ReactNode } from "react";
@@ -56,7 +57,7 @@ export type NavItem = {
   section?: string;
   /**
    * Groupe métier du menu principal (Commercial, Graphisme, Production,
-   * Livraison) : un en-tête discret au-dessus de ses entrées, pour que chacun
+   * Logistique) : un en-tête discret au-dessus de ses entrées, pour que chacun
    * retrouve son travail sans lire tout le menu. Omis pour le tableau de bord.
    */
   groupe?: string;
@@ -141,7 +142,8 @@ const STAFF_NAV: NavItem[] = [
   { href: "/atelier/section", label: "Terminaux de section", icon: navIcon(ClipboardList), module: "ordres_travail", groupe: "Production" },
   { href: "/atelier/stock", label: "Gestion de stock", icon: navIcon(ArrowLeftRight), module: "stock_atelier", groupe: "Production" },
   // --- Livraison -----------------------------------------------------------
-  { href: "/livraisons", label: "Livraisons", icon: navIcon(Truck), module: "livraisons", groupe: "Livraison" },
+  { href: "/livraisons", label: "Livraisons", icon: navIcon(Truck), module: "livraisons", groupe: "Logistique" },
+  { href: "/vehicules", label: "Véhicules", icon: navIcon(Car), module: "vehicules", alsoModules: ["bons_carburant"], groupe: "Logistique" },
 
   // --- Paramètres (regroupés en thèmes par parametres-hubs.ts) ------------
   { href: "/parametres/couleurs", label: "Couleurs et tailles", icon: navIcon(SwatchBook), section: PARAMETRES, module: "couleurs_tailles" },
@@ -153,6 +155,7 @@ const STAFF_NAV: NavItem[] = [
   { href: "/parametres/impression", label: "Impression", icon: navIcon(Printer), section: PARAMETRES, module: "machines_ecrans" },
   { href: "/parametres/dispatching", label: "Dispatching des tailles", icon: navIcon(ChartPie), section: PARAMETRES, module: "dispatching" },
   { href: "/parametres/livraison", label: "Livraison", icon: navIcon(MapPinned), section: PARAMETRES, module: "parametres_livraison" },
+  { href: "/parametres/vehicules", label: "Véhicules", icon: navIcon(Car), section: PARAMETRES, module: "parametres_vehicules" },
   { href: "/parametres/prospection", label: "Prospection", icon: navIcon(Briefcase), section: PARAMETRES, module: "parametres_prospection" },
   { href: "/parametres/personnel/fiches", label: "Personnel : fiches", icon: navIcon(Users), section: PARAMETRES, module: "personnel" },
   { href: "/parametres/personnel/departements", label: "Personnel : départements", icon: navIcon(Users), section: PARAMETRES, module: "personnel" },

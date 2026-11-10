@@ -8,6 +8,8 @@ import { formatDate } from "@/lib/utils";
 import { PageHeader } from "@/components/shell/page-header";
 import { redirect } from "next/navigation";
 import { ACTIVE_ODF_STATUSES } from "@/lib/production-orders/active";
+import { can } from "@/lib/auth/permissions";
+import { loadAlerts } from "@/lib/vehicules/data";
 
 export default async function DashboardPage() {
   const { profile } = await requireUser();
@@ -286,21 +288,31 @@ export default async function DashboardPage() {
   if (profile.role === "responsable_livraison") {
     const { data: shipments } = await supabase.from("shipments").select("statut").not("statut", "in", "(annulee,reception_confirmee)");
     const n = (...statuts: string[]) => (shipments ?? []).filter((x) => statuts.includes(x.statut)).length;
+    const vehicleAlerts = (await can("vehicules", "view")) ? await loadAlerts() : [];
+    const alertesCritiques = vehicleAlerts.filter((a) => a.gravite === "critique").length;
+    const bonsAValider = vehicleAlerts.filter((a) => a.nature === "bon").length;
     return (
       <div className="space-y-6">
-        <PageHeader title="Service livraison" description="Préparation, validation, planification et suivi des livraisons." />
+        <PageHeader title="Logistique" description="Livraisons (préparation, validation, planification, suivi) et véhicules (papiers, carburant, entretien)." />
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
           <StatCard label="À préparer" value={n("a_preparer")} tone="brand" />
           <StatCard label="À valider (compta)" value={n("preparee")} tone="warning" />
           <StatCard label="À planifier" value={n("validee_compta")} tone="info" />
           <StatCard label="Échecs et litiges" value={n("echec", "litige")} tone="danger" />
         </div>
-        <div className="flex gap-4 text-sm">
+        {vehicleAlerts.length > 0 && (
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+            <StatCard label="Véhicules : à traiter" value={alertesCritiques} tone={alertesCritiques ? "danger" : "neutral"} hint="Papiers expirés, pannes, entretien en retard" />
+            <StatCard label="Véhicules : à anticiper" value={vehicleAlerts.length - alertesCritiques - bonsAValider} tone="warning" />
+            <StatCard label="Bons de carburant à valider" value={bonsAValider} tone="info" />
+          </div>
+        )}
+        <div className="flex flex-wrap gap-4 text-sm">
           <Link href="/livraisons" className="font-medium text-brand hover:underline">
             Ouvrir les livraisons →
           </Link>
-          <Link href="/parametres/livraison" className="font-medium text-brand hover:underline">
-            Zones, transporteurs et véhicules →
+          <Link href="/vehicules?onglet=alertes" className="font-medium text-brand hover:underline">
+            Alertes véhicules →
           </Link>
         </div>
       </div>

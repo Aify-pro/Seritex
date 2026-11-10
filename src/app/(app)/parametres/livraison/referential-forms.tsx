@@ -5,23 +5,16 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  createCarrier,
-  createVehicle,
-  createZone,
-  setCarrierActive,
-  setVehicleActive,
-  setZoneActive,
-} from "./actions";
+import { createCarrier, createZone, setCarrierActive, setZoneActive } from "./actions";
 
 type Field =
   | { name: string; label: string; kind: "text"; placeholder?: string; required?: boolean; width?: string }
   | { name: string; label: string; kind: "select"; options: { value: string; label: string }[] };
 
-const CREATE = { zone: createZone, carrier: createCarrier, vehicle: createVehicle } as const;
-const TOGGLE = { zone: setZoneActive, carrier: setCarrierActive, vehicle: setVehicleActive } as const;
+const CREATE = { zone: createZone, carrier: createCarrier } as const;
+const TOGGLE = { zone: setZoneActive, carrier: setCarrierActive } as const;
 
-/** Formulaire d'ajout en ligne d'un référentiel de livraison (zone, transporteur, véhicule). */
+/** Formulaire d'ajout en ligne d'un référentiel de livraison (zone, transporteur). */
 export function InlineCreateForm({ kind, fields, label }: { kind: keyof typeof CREATE; fields: Field[]; label: string }) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);

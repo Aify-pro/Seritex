@@ -12,6 +12,7 @@
     "seed": "tsx scripts/seed.ts",
     "preview:pdf-odf": "tsx --require ./scripts/allow-server-only.cjs scripts/preview-pdf-odf.ts",
     "preview:pdf-rapport": "tsx --require ./scripts/allow-server-only.cjs scripts/preview-pdf-rapport.ts",
+    "preview:pdf-bon-carburant": "tsx --require ./scripts/allow-server-only.cjs scripts/preview-pdf-bon-carburant.ts",
     "preview:pdf-echantillon": "tsx --require ./scripts/allow-server-only.cjs scripts/preview-pdf-echantillon.ts",
     "test:patronnage": "tsx --require ./scripts/allow-server-only.cjs scripts/test-moteur-patronnage.ts",
     "test:dispatching": "tsx scripts/test-dispatching.ts",
@@ -24,7 +25,8 @@
     "test:codification": "tsx scripts/test-codification.ts",
     "test:livraison": "tsx scripts/test-livraison.ts",
     "test:separation": "tsx scripts/test-separation.ts",
-    "test:personnel": "tsx --require ./scripts/allow-server-only.cjs scripts/test-personnel-import.ts"
+    "test:personnel": "tsx --require ./scripts/allow-server-only.cjs scripts/test-personnel-import.ts",
+    "test:vehicules": "tsx scripts/test-vehicules.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",

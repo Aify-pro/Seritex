@@ -57,6 +57,8 @@ const ROUTE_ACCESS: { prefix: string; roles: string[] }[] = [
   { prefix: "/parametres/codification", roles: ["responsable_production", "administrateur", "gestionnaire_stock"] },
   // Référentiels de livraison (LIV-0) : le service livraison.
   { prefix: "/parametres/livraison", roles: ["responsable_livraison", "administrateur"] },
+  // Réglages du module Véhicules : le responsable logistique (ex-livraison).
+  { prefix: "/parametres/vehicules", roles: ["responsable_livraison", "administrateur"] },
   // Familles d'articles (migration 0093) : la production classe aussi les articles.
   { prefix: "/parametres/familles-articles", roles: ["responsable_production", "administrateur"] },
   // Impression (machines et écrans, ex-Atelier > Machines et écrans) : la production la gère, l'infographie et les chefs de section la consultent ; le droit fin reste celui du module machines_ecrans.

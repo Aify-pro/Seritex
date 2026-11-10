@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { requirePermission } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
+import { loadDeliveryVehicleOptions } from "@/lib/vehicules/options";
 import { PageHeader } from "@/components/shell/page-header";
 import { RoundBoard, type Candidate, type RoundView } from "./round-board";
 
@@ -12,7 +13,7 @@ export default async function RoundsPage({ searchParams }: { searchParams: Promi
   const date = /^\d{4}-\d{2}-\d{2}$/.test(dateParam ?? "") ? dateParam! : new Date().toLocaleDateString("en-CA", { timeZone: "Africa/Abidjan" });
   const supabase = await createClient();
 
-  const [{ data: rounds }, { data: candidates }, { data: livreurs }, { data: vehicles }] = await Promise.all([
+  const [{ data: rounds }, { data: candidates }, { data: livreurs }, vehicles] = await Promise.all([
     supabase
       .from("delivery_rounds")
       .select(
@@ -26,7 +27,7 @@ export default async function RoundsPage({ searchParams }: { searchParams: Promi
       .eq("mode", "livraison")
       .in("statut", ["validee_compta", "planifiee"]),
     supabase.from("app_users").select("id,full_name").eq("role", "livreur").eq("active", true).order("full_name"),
-    supabase.from("vehicles").select("id,libelle,immatriculation").eq("actif", true).order("libelle"),
+    loadDeliveryVehicleOptions(),
   ]);
 
   const roundViews: RoundView[] = (rounds ?? []).map((r) => ({
@@ -89,7 +90,7 @@ export default async function RoundsPage({ searchParams }: { searchParams: Promi
         rounds={roundViews}
         candidates={candidateViews}
         livreurs={(livreurs ?? []).map((l) => ({ id: l.id, label: l.full_name }))}
-        vehicles={(vehicles ?? []).map((v) => ({ id: v.id, label: [v.libelle, v.immatriculation].filter(Boolean).join(" · ") }))}
+        vehicles={vehicles}
       />
     </div>
   );

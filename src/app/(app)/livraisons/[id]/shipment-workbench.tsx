@@ -24,7 +24,7 @@ import {
 } from "../actions";
 import { LotCodeInput } from "@/components/atelier/lot-code-input";
 
-type Option = { id: string; label: string };
+type Option = { id: string; label: string; disabled?: boolean };
 
 const input = "h-9 rounded-md border border-border bg-surface px-2 text-sm outline-none focus:ring-2 focus:ring-brand/30 disabled:opacity-60";
 
@@ -411,7 +411,7 @@ export function PlanningForm({
           <select value={vehicleId} onChange={(e) => setVehicleId(e.target.value)} className={input}>
             <option value="">—</option>
             {vehicles.map((v) => (
-              <option key={v.id} value={v.id}>
+              <option key={v.id} value={v.id} disabled={v.disabled}>
                 {v.label}
               </option>
             ))}
