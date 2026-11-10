@@ -38,6 +38,7 @@ import {
   Printer,
   Target,
   Briefcase,
+  Activity,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { createElement, type ReactNode } from "react";
@@ -53,6 +54,12 @@ export type NavItem = {
    * quotidien : tableau de bord, demandes, atelier...).
    */
   section?: string;
+  /**
+   * Groupe métier du menu principal (Commercial, Graphisme, Production,
+   * Livraison) : un en-tête discret au-dessus de ses entrées, pour que chacun
+   * retrouve son travail sans lire tout le menu. Omis pour le tableau de bord.
+   */
+  groupe?: string;
   /**
    * Clé du module de droits qui commande la VISIBILITÉ de l'entrée : si le
    * rôle n'a pas `view` dessus, l'entrée disparaît du menu au lieu d'être
@@ -116,21 +123,25 @@ const PORTAL_NAV: Partial<Record<UserRole, NavItem[]>> = {
  */
 const STAFF_NAV: NavItem[] = [
   { href: "/dashboard", label: "Tableau de bord", icon: navIcon(LayoutDashboard) },
-  { href: "/commercial/clients", label: "Clients", icon: navIcon(Contact), module: "clients" },
-  { href: "/prospection", label: "Prospection", icon: navIcon(Target), module: "prospection" },
-  { href: "/commercial/demandes", label: "Demandes", icon: navIcon(Inbox), module: "demandes", alsoModules: ["demandes_stock"] },
-  { href: "/infographie/demandes", label: "Demandes graphiques", icon: navIcon(ImageIcon), module: "demandes_graphiques" },
-  { href: "/infographie/separation", label: "Séparation des couleurs", icon: navIcon(Layers), module: "demandes_graphiques" },
-  { href: "/commercial/devis", label: "Devis", icon: navIcon(FileText), module: "devis" },
-  { href: "/articles", label: "Articles", icon: navIcon(Tags), module: "articles" },
-  { href: "/commercial/echantillons", label: "Échantillons", icon: navIcon(FlaskConical), module: "echantillons" },
-  { href: "/mediatheque", label: "Médiathèque", icon: navIcon(FolderOpen), module: "mediatheque" },
-  { href: "/commercial/production", label: "Avancement production", icon: navIcon(Factory), module: "avancement_production" },
-  { href: "/atelier/production", label: "Ordres de fabrication", icon: navIcon(Factory), module: "ordres_fabrication" },
-  { href: "/atelier/patronnage", label: "Patronnage", icon: navIcon(Ruler), module: "patronnage" },
-  { href: "/atelier/section", label: "Terminaux de section", icon: navIcon(ClipboardList), module: "ordres_travail" },
-  { href: "/atelier/stock", label: "Gestion de stock", icon: navIcon(ArrowLeftRight), module: "stock_atelier" },
-  { href: "/livraisons", label: "Livraisons", icon: navIcon(Truck), module: "livraisons" },
+  // --- Commercial ----------------------------------------------------------
+  { href: "/commercial/clients", label: "Clients", icon: navIcon(Contact), module: "clients", groupe: "Commercial" },
+  { href: "/prospection", label: "Prospection", icon: navIcon(Target), module: "prospection", groupe: "Commercial" },
+  { href: "/commercial/demandes", label: "Demandes", icon: navIcon(Inbox), module: "demandes", alsoModules: ["demandes_stock"], groupe: "Commercial" },
+  { href: "/commercial/devis", label: "Devis", icon: navIcon(FileText), module: "devis", groupe: "Commercial" },
+  { href: "/commercial/echantillons", label: "Échantillons", icon: navIcon(FlaskConical), module: "echantillons", groupe: "Commercial" },
+  { href: "/commercial/production", label: "Avancement production", icon: navIcon(Activity), module: "avancement_production", groupe: "Commercial" },
+  // --- Graphisme -----------------------------------------------------------
+  { href: "/infographie/demandes", label: "Demandes graphiques", icon: navIcon(ImageIcon), module: "demandes_graphiques", groupe: "Graphisme" },
+  { href: "/infographie/separation", label: "Séparation des couleurs", icon: navIcon(Layers), module: "demandes_graphiques", groupe: "Graphisme" },
+  { href: "/mediatheque", label: "Médiathèque", icon: navIcon(FolderOpen), module: "mediatheque", groupe: "Graphisme" },
+  // --- Production ----------------------------------------------------------
+  { href: "/articles", label: "Articles", icon: navIcon(Tags), module: "articles", groupe: "Production" },
+  { href: "/atelier/production", label: "Ordres de fabrication", icon: navIcon(Factory), module: "ordres_fabrication", groupe: "Production" },
+  { href: "/atelier/patronnage", label: "Patronnage", icon: navIcon(Ruler), module: "patronnage", groupe: "Production" },
+  { href: "/atelier/section", label: "Terminaux de section", icon: navIcon(ClipboardList), module: "ordres_travail", groupe: "Production" },
+  { href: "/atelier/stock", label: "Gestion de stock", icon: navIcon(ArrowLeftRight), module: "stock_atelier", groupe: "Production" },
+  // --- Livraison -----------------------------------------------------------
+  { href: "/livraisons", label: "Livraisons", icon: navIcon(Truck), module: "livraisons", groupe: "Livraison" },
 
   // --- Paramètres (regroupés en thèmes par parametres-hubs.ts) ------------
   { href: "/parametres/couleurs", label: "Couleurs et tailles", icon: navIcon(SwatchBook), section: PARAMETRES, module: "couleurs_tailles" },
