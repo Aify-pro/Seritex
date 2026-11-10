@@ -87,6 +87,27 @@ export function QuoteDetail({
   return (
     <div className="space-y-6">
       {pendingValidation && editable && <ValidateQuoteCard quoteId={quote.id} canValidate={canValidate} validators={validators} />}
+      {quote.status === "accepte" && quote.modification_ouverte_le && editable && (
+        <Card className="border-warning/40 bg-warning-soft/40">
+          <CardBody className="text-sm">
+            <p className="font-medium text-foreground">Modification de la proforma non terminée</p>
+            <p className="text-foreground-muted">
+              L&apos;ODF ne peut pas être soumis tant qu&apos;elle n&apos;est pas enregistrée.
+            </p>
+            <Link href={`/commercial/demandes/${quote.request_id}`} className="mt-2 inline-block text-xs font-medium text-brand hover:underline">
+              Reprendre la modification depuis la demande →
+            </Link>
+          </CardBody>
+        </Card>
+      )}
+      {quote.status === "accepte" && quote.modifie_apres_acceptation_le && !quote.modification_ouverte_le && (
+        <Card className="border-info/30 bg-info-soft/40">
+          <CardBody className="text-sm">
+            <p className="font-medium text-foreground">Modifiée après acceptation le {formatDate(quote.modifie_apres_acceptation_le)}</p>
+            {quote.modifie_apres_acceptation_motif && <p className="text-foreground-muted">{quote.modifie_apres_acceptation_motif}</p>}
+          </CardBody>
+        </Card>
+      )}
       {quote.status === "brouillon" && quote.rejet_motif && editable && (
         <Card className="border-danger/30 bg-danger-soft/40">
           <CardBody className="text-sm">
