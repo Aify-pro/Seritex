@@ -34,14 +34,26 @@ const libelleTaille = (cle: string) => cle.split("/").pop() ?? cle;
 function restesParLigne(groupes: BesoinCoupeGroupe[]) {
   const lignes = new Map<
     string,
-    { lineId: string; odf: string; client: string; article: string; couleur: string | null; dejaEntier: boolean; parSemiFini: Map<string, number> }
+    {
+      lineId: string;
+      odf: string;
+      client: string;
+      article: string;
+      couleurs: Set<string>;
+      dejaEntier: boolean;
+      parSemiFini: Map<string, number>;
+      parPiece: Map<string, number>;
+    }
   >();
   for (const g of groupes) {
     for (const l of g.lignes) {
       const e =
         lignes.get(l.lineId) ??
-        { lineId: l.lineId, odf: l.odf, client: l.client, article: l.article, couleur: g.couleur, dejaEntier: l.dejaEntier, parSemiFini: new Map<string, number>() };
+        { lineId: l.lineId, odf: l.odf, client: l.client, article: l.article, couleurs: new Set<string>(), dejaEntier: l.dejaEntier, parSemiFini: new Map<string, number>(), parPiece: new Map<string, number>() };
+      // Couleur de la pièce (0165) : chaque pièce peut avoir la sienne.
+      if (g.couleur) e.couleurs.add(g.couleur);
       e.parSemiFini.set(g.semiFiniNom, (e.parSemiFini.get(g.semiFiniNom) ?? 0) + Math.max(l.reste, 0));
+      e.parPiece.set(g.semiFiniId, (e.parPiece.get(g.semiFiniId) ?? 0) + Math.max(l.reste, 0));
       lignes.set(l.lineId, e);
     }
   }
@@ -93,8 +105,8 @@ export function ArticlesRegroupesCard({ fiche, canModify }: { fiche: FichePlacem
   return (
     <Card>
       <CardHeader
-        title="Articles de l'ordre de coupe"
-        description="Chaque article reçoit les pièces des couches qui lui sont attribuées dans les tracés. Reste = demandé × quantité de la nomenclature − coupé − prévu (tracés validés). Un article doit avoir tous les semi-finis d'un tracé pour y recevoir des couches."
+        title="Produits finis de l'ordre de coupe"
+        description="Rempli depuis l'ODF et la nomenclature : vêtements par taille, puis les pièces (semi-finis) qui les composent avec leur couleur. Chaque article reçoit les pièces des couches qui lui sont attribuées dans les tracés. Reste = demandé × quantité de la nomenclature − coupé − prévu (tracés validés). Un article doit avoir tous les semi-finis d'un tracé pour y recevoir des couches."
       />
       <CardBody className="space-y-3">
         {fiche.lignesRegroupees.length === 0 ? (
@@ -103,25 +115,52 @@ export function ArticlesRegroupesCard({ fiche, canModify }: { fiche: FichePlacem
           <ul className="divide-y divide-border rounded-md border border-border">
             {fiche.lignesRegroupees.map((l) => {
               const b = lignes.get(l.lineId);
+              const tailles = Object.entries(l.repartition).filter(([, n]) => n > 0);
               return (
-                <li key={l.lineId} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-                  <span className="min-w-0">
-                    <span className="font-medium">{l.odfReference ?? "—"}</span> · {l.description}
-                    {b?.couleur ? ` · ${b.couleur}` : ""}
-                    <span className="block text-xs text-foreground-muted">
-                      Pièces de sa nomenclature : {l.semiFinis.map((x) => x.nom).join(", ") || "aucune"}
-                    </span>
-                    {b && <span className="block text-xs text-foreground-muted">Reste à couper : {resteTexte(b.parSemiFini) || "—"}</span>}
-                  </span>
-                  {canModify && (
-                    <button
-                      disabled={pending}
-                      onClick={() => run(() => retirerLigneRegroupee(fiche.id, l.lineId), "Article retiré")}
-                      className="text-foreground-muted hover:text-danger disabled:opacity-40"
-                      aria-label={`Retirer ${l.description}`}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
+                <li key={l.lineId} className="space-y-2 px-3 py-3 text-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p>
+                        <span className="font-medium">{l.odfReference ?? "—"}</span> · {l.description}
+                        {l.couleur ? ` · ${l.couleur}` : ""}
+                      </p>
+                      <p className="text-xs text-foreground-muted">
+                        {l.quantite != null ? `${l.quantite} vêtement${l.quantite > 1 ? "s" : ""}` : "Quantité —"}
+                        {tailles.length > 0 && ` : ${tailles.map(([t, n]) => `${libelleTaille(t)} ${n}`).join(" · ")}`}
+                      </p>
+                    </div>
+                    {canModify && (
+                      <button
+                        disabled={pending}
+                        onClick={() => run(() => retirerLigneRegroupee(fiche.id, l.lineId), "Article retiré")}
+                        className="text-foreground-muted hover:text-danger disabled:opacity-40"
+                        aria-label={`Retirer ${l.description}`}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                  {l.semiFinis.length === 0 ? (
+                    <p className="text-xs text-danger">Aucune pièce : la nomenclature de cet article n&apos;a pas de semi-finis.</p>
+                  ) : (
+                    <table className="w-full text-xs">
+                      <thead className="text-foreground-muted">
+                        <tr>
+                          <th className="py-1 text-left font-medium">Pièce (semi-fini)</th>
+                          <th className="py-1 text-left font-medium">Couleur</th>
+                          <th className="py-1 text-right font-medium">Reste à couper</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {l.semiFinis.map((p) => (
+                          <tr key={p.id} className="border-t border-border">
+                            <td className="py-1">{p.nom}</td>
+                            <td className="py-1">{p.couleur ?? <span className="text-warning">sans couleur</span>}</td>
+                            <td className="py-1 text-right">{b ? (b.parPiece.get(p.id) ?? 0) : "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   )}
                 </li>
               );
@@ -135,7 +174,7 @@ export function ArticlesRegroupesCard({ fiche, canModify }: { fiche: FichePlacem
               {candidats.map((l) => (
                 <option key={l.lineId} value={l.lineId}>
                   {l.odf} · {l.article}
-                  {l.couleur ? ` · ${l.couleur}` : ""} — reste {resteTexte(l.parSemiFini)}
+                  {l.couleurs.size > 0 ? ` · ${[...l.couleurs].join(", ")}` : ""} — reste {resteTexte(l.parSemiFini)}
                 </option>
               ))}
             </select>
@@ -446,6 +485,10 @@ export function CouchesEditor({
               <span className="min-w-0">
                 <span className="block truncate">
                   {l.odfReference ?? "—"} · {l.description}
+                  {(() => {
+                    const c = [...new Set(l.semiFinis.filter((p) => semiFinisTrace.some(([id]) => id === p.id)).map((p) => p.couleur ?? "sans couleur"))];
+                    return c.length > 0 ? ` · ${c.join(", ")}` : l.couleur ? ` · ${l.couleur}` : "";
+                  })()}
                 </span>
                 {manque.length > 0 && (
                   <span className="block text-xs text-danger">Pas de couches possibles : sa nomenclature n&apos;a pas {manque.join(", ")}.</span>

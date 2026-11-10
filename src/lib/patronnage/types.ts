@@ -213,8 +213,14 @@ export interface FichePlacement {
     lineId: string;
     description: string;
     odfReference: string | null;
-    semiFinis: { id: string; nom: string }[];
+    /** Quantité de vêtements de l'article d'ODF, et sa couleur unique s'il en a une. */
+    quantite: number | null;
+    couleur: string | null;
+    /** Pièces de sa nomenclature, avec la couleur de chacune (0165). */
+    semiFinis: { id: string; nom: string; couleur: string | null }[];
     tailles: string[];
+    /** Vêtements demandés par taille (dispatching de l'ODF). */
+    repartition: Record<string, number>;
   }[];
 }
 

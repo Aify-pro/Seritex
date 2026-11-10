@@ -7,7 +7,7 @@ const FICHE_SELECT = `id,numero_ot,statut,statut_precedent,production_order_line
    date_emission,date_retour_souhaitee,designation_article,reference_modele,product_model_id,quantite_totale,
    repartition_tailles,tissu_type,grammage,couleur,laize_utile_cm,contraintes,observations,
    valide_le,created_at,regroupee,
-   coupe_groupee_lignes(production_order_line_id,production_order_lines(description,product_model_id,production_order_sizes(taille),production_orders(reference))),
+   coupe_groupee_lignes(production_order_line_id,production_order_lines(description,quantity,product_model_id,couleur_unique:couleur_unique_id(name),production_order_sizes(taille,quantite_demandee),production_orders(reference))),
    production_order_lines(description,production_orders(reference)),
    traces_placement(id,ordre,reference,reference_patron,longueur_matelas_cm,largeur_matelas_cm,nb_plis,
      repartition_par_couche,fichier_path,fichier_nom,charge_le,est_correctif,justification,
@@ -65,8 +65,10 @@ type FicheRow = {
         production_order_line_id: string;
         production_order_lines: {
           description: string;
+          quantity: number | null;
           product_model_id: string | null;
-          production_order_sizes: { taille: string }[] | null;
+          couleur_unique: { name: string } | { name: string }[] | null;
+          production_order_sizes: { taille: string; quantite_demandee: number }[] | null;
           production_orders: { reference: string } | { reference: string }[] | null;
         } | null;
       }[]
@@ -156,6 +158,16 @@ async function mapFiches(
     fichesRaw.flatMap((f) => (f.coupe_groupee_lignes ?? []).map((g) => ({ id: g.production_order_line_id, modele: g.production_order_lines?.product_model_id ?? null })))
   );
   const idsActifs = [...new Set([...actives.values()].flat())];
+  // Couleur de chaque pièce (0165) : imposée par la nomenclature, sinon celle
+  // de sa zone, sinon la couleur unique de l'article.
+  const lignesGroupees = [...new Set(fichesRaw.flatMap((f) => (f.coupe_groupee_lignes ?? []).map((g) => g.production_order_line_id)))];
+  const couleurPiece = new Map<string, string | null>();
+  if (lignesGroupees.length > 0) {
+    const { data: couleurs } = await supabase.rpc("couleurs_pieces_lignes", { p_line_ids: lignesGroupees });
+    for (const c of (couleurs ?? []) as { line_id: string; semi_fini_id: string; couleur: string | null }[]) {
+      couleurPiece.set(`${c.line_id}|${c.semi_fini_id}`, c.couleur);
+    }
+  }
   const semiFinisParLigne = new Map<string, { id: string; nom: string }[]>();
   if (idsActifs.length > 0) {
     const { data: nomRows } = await supabase
@@ -212,8 +224,17 @@ async function mapFiches(
         lineId: g.production_order_line_id,
         description: g.production_order_lines?.description ?? "—",
         odfReference: (Array.isArray(po) ? po[0]?.reference : po?.reference) ?? null,
-        semiFinis: semiFinisParLigne.get(g.production_order_line_id) ?? [],
+        quantite: g.production_order_lines?.quantity ?? null,
+        couleur: (() => {
+          const cu = g.production_order_lines?.couleur_unique;
+          return (Array.isArray(cu) ? cu[0]?.name : cu?.name) ?? null;
+        })(),
+        semiFinis: (semiFinisParLigne.get(g.production_order_line_id) ?? []).map((x) => ({
+          ...x,
+          couleur: couleurPiece.get(`${g.production_order_line_id}|${x.id}`) ?? null,
+        })),
         tailles: (g.production_order_lines?.production_order_sizes ?? []).map((x) => x.taille),
+        repartition: Object.fromEntries((g.production_order_lines?.production_order_sizes ?? []).map((x) => [x.taille, x.quantite_demandee])),
       };
     }),
     traces: (f.traces_placement ?? [])

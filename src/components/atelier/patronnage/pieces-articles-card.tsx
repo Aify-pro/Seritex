@@ -52,7 +52,7 @@ export function PiecesArticlesCard({ lineIds, refreshKey }: { lineIds: string[];
     for (const g of groupes ?? []) {
       for (const l of g.lignes) {
         if (!ids.has(l.lineId)) continue;
-        const cle = [g.semiFiniId, g.taille, g.couleurId ?? ""].join("|");
+        const cle = [g.semiFiniId, g.taille, g.couleurId ?? "", g.couleur ?? ""].join("|");
         const e = parCle.get(cle) ?? { cle, semiFini: g.semiFiniNom, taille: g.taille, couleur: g.couleur, demandees: 0, coupees: 0, prevues: 0, reste: 0 };
         e.demandees += l.demandees;
         e.coupees += l.coupees;

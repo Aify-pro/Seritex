@@ -474,6 +474,25 @@ export default async function SectionQueuePage({
         ...m,
         articles: m.articles.map((a) => ({ lineId: a.lineId, odf: a.odf, article: a.article, couleur: a.couleur, couches: a.couches })),
       }));
+    // Couleur des pièces du matelas pour chaque article (0165) : celle imposée
+    // par la nomenclature, sinon celle de la zone, sinon la couleur unique.
+    const lineIds = [...new Set(matelasRegroupes.flatMap((m) => m.articles.map((a) => a.lineId)))];
+    if (lineIds.length > 0) {
+      const { data: couleurs } = await supabase.rpc("couleurs_pieces_lignes", { p_line_ids: lineIds });
+      const parPiece = new Map(
+        ((couleurs ?? []) as { line_id: string; semi_fini_id: string; couleur: string | null }[]).map((c) => [`${c.line_id}|${c.semi_fini_id}`, c.couleur])
+      );
+      matelasRegroupes = matelasRegroupes.map((m) => {
+        const piecesTrace = [...new Set(m.pieces.map((p) => p.semiFiniId))];
+        return {
+          ...m,
+          articles: m.articles.map((a) => {
+            const c = [...new Set(piecesTrace.map((id) => parPiece.get(`${a.lineId}|${id}`)).filter((x): x is string => !!x))];
+            return { ...a, couleur: c.length > 0 ? c.join(", ") : a.couleur };
+          }),
+        };
+      });
+    }
   }
 
   // Étape 4a (0152) : stock tampon de l'atelier (lots détenus et en transit).
