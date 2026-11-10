@@ -109,7 +109,19 @@ export function ServiceTypeForm({ t }: { t?: ServiceTypeRow }) {
   );
 }
 
-export function FuelSettingsForm({ plafond, conso, prix }: { plafond: number | null; conso: number; prix: number }) {
+export function FuelSettingsForm({
+  plafond,
+  conso,
+  prix,
+  ecartKm,
+  distance,
+}: {
+  plafond: number | null;
+  conso: number;
+  prix: number;
+  ecartKm: number;
+  distance: number;
+}) {
   return (
     <InlineForm action={saveFuelSettings}>
       <L label="Plafond d'un bon (FCFA)">
@@ -120,6 +132,12 @@ export function FuelSettingsForm({ plafond, conso, prix }: { plafond: number | n
       </L>
       <L label="Écart de prix au litre signalé (%)">
         <input name="ecart_prix_pct" inputMode="numeric" defaultValue={prix} className={`${input} w-20`} />
+      </L>
+      <L label="Écart compteur / GPS signalé (%)">
+        <input name="ecart_km_gps_pct" inputMode="numeric" defaultValue={ecartKm} className={`${input} w-20`} />
+      </L>
+      <L label="Distance max. à la station (m)">
+        <input name="distance_station_max_m" inputMode="numeric" defaultValue={distance} className={`${input} w-24`} />
       </L>
     </InlineForm>
   );

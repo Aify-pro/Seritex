@@ -14,6 +14,12 @@ export function ParametresTabs({ hubs }: { hubs: ParametresHub[] }) {
   const pathname = usePathname();
   const hub = hubs.find((h) => h.tabs.some((t) => pathname === t.href || pathname.startsWith(t.href + "/")));
   if (!hub || hub.tabs.length < 2) return null;
+  // Un seul onglet actif : celui dont l'adresse correspond le plus précisément
+  // (ex. /parametres/vehicules/alertes ne rend pas aussi actif /parametres/vehicules).
+  const matches = (href: string) => pathname === href || pathname.startsWith(href + "/");
+  const activeHref = hub.tabs
+    .filter((t) => matches(t.href))
+    .sort((a, b) => b.href.length - a.href.length)[0]?.href;
 
   return (
     <div className="mb-6">
@@ -22,7 +28,7 @@ export function ParametresTabs({ hubs }: { hubs: ParametresHub[] }) {
       </p>
       <nav aria-label={hub.label} className="-mx-1 flex gap-1 overflow-x-auto border-b border-border px-1">
         {hub.tabs.map((tab) => {
-          const active = pathname === tab.href || pathname.startsWith(tab.href + "/");
+          const active = tab.href === activeHref;
           return (
             <Link
               key={tab.href}

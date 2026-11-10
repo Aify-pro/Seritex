@@ -100,3 +100,20 @@ export function formatJours(jours: number | null | undefined): string {
   if (jours > 0) return `dans ${jours} j`;
   return `depuis ${-jours} j`;
 }
+
+export const FINE_STATUT_LABELS: Record<string, string> = {
+  a_payer: "À payer",
+  payee: "Payée par l'entreprise",
+  retenue_salaire: "Retenue sur salaire",
+  contestee: "Contestée",
+  annulee: "Annulée",
+};
+
+export const INCIDENT_STATUT_LABELS: Record<string, string> = {
+  declare: "Déclaré",
+  expertise: "En expertise",
+  en_reparation: "En réparation",
+  clos: "Clos",
+};
+
+export const ALERT_GRAVITE_TONES: Record<string, Tone> = { critique: "danger", attention: "warning", info: "info" };

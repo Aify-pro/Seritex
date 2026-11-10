@@ -81,6 +81,8 @@ const HUBS: HubDefinition[] = [
     tabs: [
       { href: "/parametres/livraison", label: "Livraison" },
       { href: "/parametres/vehicules", label: "Véhicules" },
+      { href: "/parametres/vehicules/geolocalisation", label: "Géolocalisation" },
+      { href: "/parametres/vehicules/alertes", label: "Alertes GPS" },
     ],
   },
   {

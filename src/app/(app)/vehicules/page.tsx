@@ -7,7 +7,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, Thead, Tbody, Th, Td, EmptyRow } from "@/components/ui/table";
 import { ClickableTr } from "@/components/ui/clickable-row";
-import { cn, formatAmount, formatDate } from "@/lib/utils";
+import { cn, formatAmount, formatDate, formatDateTime } from "@/lib/utils";
 import { VEHICLE_TYPE_LABELS } from "@/lib/types/domain";
 import {
   DOCUMENT_STATUT_LABELS,
@@ -15,6 +15,8 @@ import {
   FUEL_VOUCHER_STATUT_LABELS,
   FUEL_VOUCHER_STATUT_TONES,
   FUEL_VOUCHER_TABS,
+  FINE_STATUT_LABELS,
+  INCIDENT_STATUT_LABELS,
   VEHICLE_STATUT_LABELS,
   VEHICLE_STATUT_TONES,
   VEHICLE_USAGE_LABELS,
@@ -22,8 +24,22 @@ import {
   vehicleLabel,
   type DocumentStatut,
 } from "@/lib/vehicules/labels";
-import { loadAlerts, loadAnnuaire, loadCostLines, loadFleet, loadKmSince, loadVouchers, type FleetVehicle } from "@/lib/vehicules/data";
+import {
+  loadAlerts,
+  loadAnnuaire,
+  loadCostLines,
+  loadFleet,
+  loadGpsEvents,
+  loadGpsKmSince,
+  loadKmSince,
+  loadVouchers,
+  type FleetVehicle,
+  type GpsAlertEvent,
+} from "@/lib/vehicules/data";
 import { NewFuelVoucherButton, NewVehicleButton } from "@/components/vehicules/vehicle-dialogs";
+import { FleetMap, type FleetMapPoint } from "@/components/vehicules/fleet-map";
+import { GpsEventsSection } from "@/components/vehicules/gps-events-section";
+import { ExportDialog } from "@/components/vehicules/export-dialog";
 
 type Params = Record<string, string | string[] | undefined>;
 const one = (p: Params, k: string) => {
@@ -33,8 +49,10 @@ const one = (p: Params, k: string) => {
 
 const TABS = [
   { key: "parc", label: "Parc", module: "vehicules" },
+  { key: "carte", label: "Carte", module: "vehicules" },
   { key: "alertes", label: "Alertes", module: "vehicules" },
   { key: "bons", label: "Bons de carburant", module: "bons_carburant" },
+  { key: "sinistres", label: "Sinistres et amendes", module: "vehicules" },
   { key: "couts", label: "Coûts", module: "vehicules" },
 ] as const;
 type TabKey = (typeof TABS)[number]["key"];
@@ -72,8 +90,14 @@ export default async function VehiculesPage({ searchParams }: { searchParams: Pr
     canCreateVoucher ? loadAnnuaire() : Promise.resolve(new Map()),
     canCreateVoucher ? supabase.from("fuel_stations").select("id,nom").eq("actif", true).order("nom") : Promise.resolve({ data: [] }),
   ]);
-  const alerts = canVehicles ? await loadAlerts(fleet) : [];
-  const critiques = alerts.filter((a) => a.gravite === "critique").length;
+  const [alerts, gpsEvents, canModify] = await Promise.all([
+    canVehicles ? loadAlerts(fleet) : Promise.resolve([]),
+    canVehicles ? loadGpsEvents() : Promise.resolve([] as GpsAlertEvent[]),
+    can("vehicules", "modify"),
+  ]);
+  const gpsNouvelles = gpsEvents.filter((e) => e.statut === "nouvelle");
+  const totalAlertes = alerts.length + gpsNouvelles.length;
+  const critiques = alerts.filter((a) => a.gravite === "critique").length + gpsNouvelles.filter((e) => e.gravite === "critique").length;
   const enService = fleet.filter((v) => v.actif && v.statut !== "vendu");
 
   const voucherButton = canCreateVoucher ? (
@@ -91,6 +115,7 @@ export default async function VehiculesPage({ searchParams }: { searchParams: Pr
         description="Le parc, les papiers, les chauffeurs, le carburant, l'entretien et les coûts. Les expéditions et tournées restent dans Livraisons."
         action={
           <div className="flex flex-wrap gap-2">
+            {canVehicles && <ExportDialog />}
             {voucherButton}
             {canCreateVehicle && <NewVehicleButton />}
           </div>
@@ -110,9 +135,9 @@ export default async function VehiculesPage({ searchParams }: { searchParams: Pr
           >
             {t.label}
             {t.key === "parc" && <span className="ml-1 text-xs text-foreground-muted">({enService.length})</span>}
-            {t.key === "alertes" && alerts.length > 0 && (
+            {t.key === "alertes" && totalAlertes > 0 && (
               <span className={cn("ml-1.5 rounded-full px-1.5 py-0.5 text-[11px]", critiques ? "bg-danger-soft text-danger" : "bg-warning-soft text-warning")}>
-                {alerts.length}
+                {totalAlertes}
               </span>
             )}
           </Link>
@@ -120,8 +145,10 @@ export default async function VehiculesPage({ searchParams }: { searchParams: Pr
       </nav>
 
       {tab === "parc" && <ParcTab fleet={fleet} showAll={one(params, "tous") === "1"} />}
-      {tab === "alertes" && <AlertesTab alerts={alerts} />}
+      {tab === "carte" && <CarteTab fleet={fleet} />}
+      {tab === "alertes" && <AlertesTab alerts={alerts} gpsEvents={gpsEvents} fleet={fleet} canModify={canModify} />}
       {tab === "bons" && <BonsTab sub={one(params, "statut")} fleet={fleet} />}
+      {tab === "sinistres" && <SinistresTab fleet={fleet} />}
       {tab === "couts" && <CoutsTab fleet={fleet} periode={one(params, "periode")} />}
     </div>
   );
@@ -195,11 +222,21 @@ function ParcTab({ fleet, showAll }: { fleet: FleetVehicle[]; showAll: boolean }
   );
 }
 
-function AlertesTab({ alerts }: { alerts: Awaited<ReturnType<typeof loadAlerts>> }) {
-  if (alerts.length === 0) {
+function AlertesTab({
+  alerts,
+  gpsEvents,
+  fleet,
+  canModify,
+}: {
+  alerts: Awaited<ReturnType<typeof loadAlerts>>;
+  gpsEvents: GpsAlertEvent[];
+  fleet: FleetVehicle[];
+  canModify: boolean;
+}) {
+  if (alerts.length === 0 && gpsEvents.length === 0) {
     return (
       <Card className="p-6 text-sm text-foreground-muted">
-        Aucune alerte : papiers à jour, entretien à jour, pas de panne ouverte ni de bon en attente.
+        Aucune alerte : papiers à jour, entretien à jour, pas de panne ouverte, pas de bon en attente, rien de signalé par le GPS.
       </Card>
     );
   }
@@ -237,6 +274,126 @@ function AlertesTab({ alerts }: { alerts: Awaited<ReturnType<typeof loadAlerts>>
           </section>
         );
       })}
+      <GpsEventsSection events={gpsEvents} fleet={fleet} canModify={canModify} />
+    </div>
+  );
+}
+
+function CarteTab({ fleet }: { fleet: FleetVehicle[] }) {
+  const linked = fleet.filter((v) => v.position);
+  const nonRelies = fleet.filter((v) => v.actif && v.statut !== "vendu" && !v.position);
+  const points: FleetMapPoint[] = linked.map((v) => {
+    const p = v.position!;
+    // Muet : plus de 24 h entre le dernier signal et la dernière synchronisation.
+    const muet = !p.signal_le || Date.parse(p.synchro_le) - Date.parse(p.signal_le) > 24 * 3_600_000;
+    const etat: FleetMapPoint["etat"] = v.blocage ? "alerte" : muet ? "muet" : p.vitesse > 3 ? "en_route" : "arret";
+    const detail = [
+      p.vitesse > 3 ? `${p.vitesse} km/h` : p.arret_depuis_s ? `à l'arrêt depuis ${Math.round(p.arret_depuis_s / 3600)} h` : "à l'arrêt",
+      p.signal_le ? `signal ${formatDateTime(p.signal_le)}` : "aucun signal",
+      v.remplacant?.nom ?? v.titulaire?.nom ?? null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    return { id: v.id, lat: p.latitude, lng: p.longitude, label: vehicleLabel(v), detail, etat, href: `/vehicules/${v.id}` };
+  });
+  const sync = linked.map((v) => v.position!.synchro_le).sort().at(-1);
+  return (
+    <div className="space-y-3">
+      {linked.length === 0 ? (
+        <Card className="p-6 text-sm text-foreground-muted">
+          Aucun véhicule relié à FreeTrack. Configurez la connexion et reliez les traceurs dans Paramètres &gt; Logistique &gt; Géolocalisation.
+        </Card>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center gap-4 text-xs text-foreground-muted">
+            <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-[#16a34a]" /> En route</span>
+            <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-[#2563eb]" /> À l&apos;arrêt</span>
+            <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-[#9ca3af]" /> Sans signal depuis 24 h</span>
+            <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-[#dc2626]" /> Immobilisé</span>
+            {sync && <span className="ml-auto">Dernière synchronisation : {formatDateTime(sync)}</span>}
+          </div>
+          <FleetMap points={points} />
+        </>
+      )}
+      {nonRelies.length > 0 && (
+        <p className="text-xs text-foreground-muted">
+          Sans traceur relié : {nonRelies.map((v) => vehicleLabel(v)).join(", ")}.
+        </p>
+      )}
+    </div>
+  );
+}
+
+async function SinistresTab({ fleet }: { fleet: FleetVehicle[] }) {
+  const supabase = await createClient();
+  const [{ data: incidents }, { data: fines }, annuaire] = await Promise.all([
+    supabase.from("vehicle_incidents").select("id,vehicle_id,survenu_le,lieu,description,statut,cout_reel,rembourse,conducteur_id").order("survenu_le", { ascending: false }).limit(200),
+    supabase.from("vehicle_fines").select("id,vehicle_id,commise_le,motif,montant,statut,conducteur_id").order("commise_le", { ascending: false }).limit(200),
+    loadAnnuaire(),
+  ]);
+  const name = (id: string) => {
+    const v = fleet.find((x) => x.id === id);
+    return v ? vehicleLabel(v) : "—";
+  };
+  const inc = (incidents ?? []) as { id: string; vehicle_id: string; survenu_le: string; lieu: string | null; description: string; statut: string; cout_reel: number | null; rembourse: number | null; conducteur_id: string | null }[];
+  const fin = (fines ?? []) as { id: string; vehicle_id: string; commise_le: string; motif: string; montant: number; statut: string; conducteur_id: string | null }[];
+  return (
+    <div className="space-y-6">
+      <p className="text-xs text-foreground-muted">Pour déclarer un sinistre ou enregistrer une amende, ouvrez la fiche du véhicule (onglet « Sinistres et amendes »).</p>
+      <Card>
+        <Table>
+          <Thead>
+            <tr>
+              <Th>Sinistre</Th>
+              <Th>Véhicule</Th>
+              <Th>Conducteur</Th>
+              <Th>Description</Th>
+              <Th align="right">Coût net</Th>
+              <Th>Étape</Th>
+            </tr>
+          </Thead>
+          <Tbody>
+            {inc.length === 0 && <EmptyRow colSpan={6}>Aucun sinistre déclaré.</EmptyRow>}
+            {inc.map((i) => (
+              <ClickableTr key={i.id} href={`/vehicules/${i.vehicle_id}?onglet=sinistres`}>
+                <Td className="text-xs">{formatDate(i.survenu_le)}</Td>
+                <Td className="text-sm font-medium">{name(i.vehicle_id)}</Td>
+                <Td className="text-xs">{i.conducteur_id ? (annuaire.get(i.conducteur_id)?.nom ?? "—") : "—"}</Td>
+                <Td className="max-w-80 truncate text-xs">{i.description}</Td>
+                <Td align="right" className="text-xs tabular-nums">{formatAmount(Number(i.cout_reel ?? 0) - Number(i.rembourse ?? 0))}</Td>
+                <Td><Badge tone={i.statut === "clos" ? "success" : "warning"}>{INCIDENT_STATUT_LABELS[i.statut]}</Badge></Td>
+              </ClickableTr>
+            ))}
+          </Tbody>
+        </Table>
+      </Card>
+      <Card>
+        <Table>
+          <Thead>
+            <tr>
+              <Th>Amende</Th>
+              <Th>Véhicule</Th>
+              <Th>Conducteur</Th>
+              <Th>Motif</Th>
+              <Th align="right">Montant</Th>
+              <Th>Paiement</Th>
+            </tr>
+          </Thead>
+          <Tbody>
+            {fin.length === 0 && <EmptyRow colSpan={6}>Aucune amende enregistrée.</EmptyRow>}
+            {fin.map((f) => (
+              <ClickableTr key={f.id} href={`/vehicules/${f.vehicle_id}?onglet=sinistres`}>
+                <Td className="text-xs">{formatDateTime(f.commise_le)}</Td>
+                <Td className="text-sm font-medium">{name(f.vehicle_id)}</Td>
+                <Td className="text-xs">{f.conducteur_id ? (annuaire.get(f.conducteur_id)?.nom ?? "—") : "—"}</Td>
+                <Td className="text-xs">{f.motif}</Td>
+                <Td align="right" className="text-xs tabular-nums">{formatAmount(Number(f.montant))}</Td>
+                <Td><Badge tone={f.statut === "a_payer" ? "warning" : f.statut === "contestee" ? "info" : "neutral"}>{FINE_STATUT_LABELS[f.statut]}</Badge></Td>
+              </ClickableTr>
+            ))}
+          </Tbody>
+        </Table>
+      </Card>
     </div>
   );
 }
@@ -348,20 +505,36 @@ const PERIODES = [
 async function CoutsTab({ fleet, periode }: { fleet: FleetVehicle[]; periode: string }) {
   const p = PERIODES.find((x) => x.key === periode) ?? PERIODES[0];
   const since = p.since();
-  const [lines, km] = await Promise.all([loadCostLines(since), loadKmSince(since)]);
+  const [lines, kmCompteur, kmGps] = await Promise.all([loadCostLines(since), loadKmSince(since), loadGpsKmSince(since)]);
   const rows = fleet
     .map((v) => {
       const own = lines.filter((l) => l.vehicleId === v.id);
       const sum = (n: string) => own.filter((l) => l.nature === n).reduce((s, l) => s + l.montant, 0);
       const total = own.reduce((s, l) => s + l.montant, 0);
-      const parcourus = km.get(v.id) ?? null;
-      return { v, carburant: sum("carburant"), entretien: sum("entretien"), documents: sum("documents"), total, parcourus };
+      // Km parcourus : GPS (FreeTrack) quand le véhicule est relié, sinon écart des relevés de compteur.
+      const parcourus = kmGps.get(v.id) ?? kmCompteur.get(v.id) ?? null;
+      return {
+        v,
+        carburant: sum("carburant"),
+        entretien: sum("entretien"),
+        documents: sum("documents"),
+        sinistres: sum("sinistres"),
+        total,
+        parcourus,
+        gps: kmGps.has(v.id),
+      };
     })
     .filter((r) => r.total > 0 || (r.v.actif && r.v.statut !== "vendu"))
     .sort((a, b) => b.total - a.total);
   const totals = rows.reduce(
-    (s, r) => ({ carburant: s.carburant + r.carburant, entretien: s.entretien + r.entretien, documents: s.documents + r.documents, total: s.total + r.total }),
-    { carburant: 0, entretien: 0, documents: 0, total: 0 }
+    (s, r) => ({
+      carburant: s.carburant + r.carburant,
+      entretien: s.entretien + r.entretien,
+      documents: s.documents + r.documents,
+      sinistres: s.sinistres + r.sinistres,
+      total: s.total + r.total,
+    }),
+    { carburant: 0, entretien: 0, documents: 0, sinistres: 0, total: 0 }
   );
   return (
     <div className="space-y-3">
@@ -387,21 +560,26 @@ async function CoutsTab({ fleet, periode }: { fleet: FleetVehicle[]; periode: st
               <Th align="right">Carburant</Th>
               <Th align="right">Entretien</Th>
               <Th align="right">Documents</Th>
+              <Th align="right">Sinistres et amendes</Th>
               <Th align="right">Total</Th>
               <Th align="right">Km parcourus</Th>
               <Th align="right">Coût au km</Th>
             </tr>
           </Thead>
           <Tbody>
-            {rows.length === 0 && <EmptyRow colSpan={7}>Aucun coût sur la période.</EmptyRow>}
+            {rows.length === 0 && <EmptyRow colSpan={8}>Aucun coût sur la période.</EmptyRow>}
             {rows.map((r) => (
               <ClickableTr key={r.v.id} href={`/vehicules/${r.v.id}?onglet=couts`}>
                 <Td className="text-sm font-medium">{vehicleLabel(r.v)}</Td>
                 <Td align="right" className="text-xs tabular-nums">{formatAmount(r.carburant)}</Td>
                 <Td align="right" className="text-xs tabular-nums">{formatAmount(r.entretien)}</Td>
                 <Td align="right" className="text-xs tabular-nums">{formatAmount(r.documents)}</Td>
+                <Td align="right" className="text-xs tabular-nums">{formatAmount(r.sinistres)}</Td>
                 <Td align="right" className="text-sm font-medium tabular-nums">{formatAmount(r.total)}</Td>
-                <Td align="right" className="text-xs tabular-nums">{formatKm(r.parcourus)}</Td>
+                <Td align="right" className="text-xs tabular-nums">
+                  {formatKm(r.parcourus === null ? null : Math.round(r.parcourus))}
+                  {r.gps && <span className="ml-1 text-[10px] text-foreground-muted">GPS</span>}
+                </Td>
                 <Td align="right" className="text-xs tabular-nums">
                   {r.parcourus ? `${formatAmount(Math.round(r.total / r.parcourus))}` : "—"}
                 </Td>
@@ -413,6 +591,7 @@ async function CoutsTab({ fleet, periode }: { fleet: FleetVehicle[]; periode: st
                 <Td align="right" className="text-xs tabular-nums">{formatAmount(totals.carburant)}</Td>
                 <Td align="right" className="text-xs tabular-nums">{formatAmount(totals.entretien)}</Td>
                 <Td align="right" className="text-xs tabular-nums">{formatAmount(totals.documents)}</Td>
+                <Td align="right" className="text-xs tabular-nums">{formatAmount(totals.sinistres)}</Td>
                 <Td align="right" className="text-sm tabular-nums">{formatAmount(totals.total)}</Td>
                 <Td />
                 <Td />
@@ -422,8 +601,9 @@ async function CoutsTab({ fleet, periode }: { fleet: FleetVehicle[]; periode: st
         </Table>
       </Card>
       <p className="text-xs text-foreground-muted">
-        Carburant = tickets justifiés ; entretien = coût des interventions ; documents = montant des assurances, vignettes, visites… à leur date de début. Les km
-        parcourus viennent des relevés de compteur (pleins, entretien, saisies) ; FreeTrack les rendra automatiques.
+        Carburant = tickets justifiés ; entretien = coût des interventions ; documents = montant des assurances, vignettes, visites… à leur date de début ;
+        sinistres = coût moins remboursement, plus les amendes payées par l&apos;entreprise. Km parcourus : GPS (FreeTrack) pour les véhicules reliés, sinon
+        relevés de compteur.
       </p>
     </div>
   );

@@ -55,10 +55,26 @@ export interface EmployeRef {
   statut: string;
 }
 
+export interface VehiclePosition {
+  latitude: number;
+  longitude: number;
+  vitesse: number;
+  etat_traceur: string | null;
+  adresse: string | null;
+  signal_le: string | null;
+  arret_depuis_s: number | null;
+  synchro_le: string;
+}
+
 export interface FleetVehicle extends VehicleRow {
   compliance: ComplianceRow[];
   blocage: string | null;
+  /** Dernier relevé de compteur (saisie, plein, entretien). */
+  kmReleve: number | null;
+  /** Compteur estimé : dernier relevé + km GPS depuis ce relevé (FreeTrack) ; sinon le relevé. */
   kmActuel: number | null;
+  kmEstime: boolean;
+  position: VehiclePosition | null;
   titulaire: EmployeRef | null;
   remplacant: EmployeRef | null;
   pannesOuvertes: number;
@@ -79,7 +95,7 @@ export async function loadFleet(options: { vehicleId?: string } = {}): Promise<F
   let vehiclesQuery = supabase.from("vehicles").select(VEHICLE_COLUMNS).order("libelle");
   if (options.vehicleId) vehiclesQuery = vehiclesQuery.eq("id", options.vehicleId);
   const today = new Date().toISOString().slice(0, 10);
-  const [{ data: vehicles }, { data: compliance }, { data: blocages }, { data: readings }, { data: assignments }, { data: issues }, annuaire] =
+  const [{ data: vehicles }, { data: compliance }, { data: blocages }, { data: readings }, { data: assignments }, { data: issues }, annuaire, { data: positions }] =
     await Promise.all([
       vehiclesQuery,
       supabase.rpc("vehicles_compliance_all"),
@@ -88,10 +104,24 @@ export async function loadFleet(options: { vehicleId?: string } = {}): Promise<F
       supabase.from("vehicle_assignments").select("vehicle_id,employe_id,type,debut,fin").lte("debut", today),
       supabase.from("vehicle_issues").select("vehicle_id").eq("statut", "ouverte"),
       loadAnnuaire(),
+      supabase.from("vehicle_positions").select("vehicle_id,latitude,longitude,vitesse,etat_traceur,adresse,signal_le,arret_depuis_s,synchro_le"),
     ]);
 
-  const kmBy = new Map<string, number>();
-  for (const r of (readings ?? []) as { vehicle_id: string; km: number }[]) if (!kmBy.has(r.vehicle_id)) kmBy.set(r.vehicle_id, r.km);
+  const kmBy = new Map<string, { km: number; at: string }>();
+  for (const r of (readings ?? []) as { vehicle_id: string; km: number; releve_le: string }[]) {
+    if (!kmBy.has(r.vehicle_id)) kmBy.set(r.vehicle_id, { km: r.km, at: r.releve_le });
+  }
+  const positionBy = new Map(((positions ?? []) as (VehiclePosition & { vehicle_id: string })[]).map((p) => [p.vehicle_id, p]));
+  // Km GPS depuis le dernier relevé, pour les véhicules reliés à FreeTrack.
+  const gpsSince = new Map<string, number>();
+  await Promise.all(
+    ((vehicles ?? []) as VehicleRow[])
+      .filter((v) => v.freetrack_device_id && kmBy.has(v.id))
+      .map(async (v) => {
+        const { data } = await supabase.rpc("vehicle_gps_km", { p_vehicle_id: v.id, p_from: kmBy.get(v.id)!.at, p_to: new Date().toISOString() });
+        if (data !== null && data !== undefined) gpsSince.set(v.id, Number(data));
+      })
+  );
   const blocageBy = new Map(((blocages ?? []) as { vehicle_id: string; raison: string }[]).map((b) => [b.vehicle_id, b.raison]));
   const current = ((assignments ?? []) as { vehicle_id: string; employe_id: string; type: string; debut: string; fin: string | null }[]).filter(
     (a) => !a.fin || a.fin >= today
@@ -107,7 +137,10 @@ export async function loadFleet(options: { vehicleId?: string } = {}): Promise<F
       reservoir_litres: v.reservoir_litres === null ? null : Number(v.reservoir_litres),
       compliance: ((compliance ?? []) as ComplianceRow[]).filter((c) => c.vehicle_id === v.id),
       blocage: blocageBy.get(v.id) ?? null,
-      kmActuel: kmBy.get(v.id) ?? null,
+      kmReleve: kmBy.get(v.id)?.km ?? null,
+      kmActuel: kmBy.has(v.id) ? Math.round(kmBy.get(v.id)!.km + (gpsSince.get(v.id) ?? 0)) : null,
+      kmEstime: (gpsSince.get(v.id) ?? 0) > 0,
+      position: positionBy.get(v.id) ?? null,
       titulaire: titulaireId ? (annuaire.get(titulaireId) ?? null) : null,
       remplacant: remplacantId ? (annuaire.get(remplacantId) ?? null) : null,
       pannesOuvertes: ((issues ?? []) as { vehicle_id: string }[]).filter((i) => i.vehicle_id === v.id).length,
@@ -281,6 +314,11 @@ export interface VoucherRow {
   km_plein: number | null;
   ticket_path: string | null;
   annule_motif: string | null;
+  gps_km: number | null;
+  gps_distance_station_m: number | null;
+  gps_station_nom: string | null;
+  gps_verifie_le: string | null;
+  gps_note: string | null;
   demandeur: string | null;
   validateur: string | null;
 }
@@ -292,7 +330,7 @@ export interface VoucherWithAnalysis extends VoucherRow {
 }
 
 const VOUCHER_COLUMNS =
-  "id,numero,vehicle_id,beneficiaire_id,motif,montant_demande,km_demande,station_id,statut,demande_le,valide_le,refus_motif,date_plein,montant_reel,litres,km_plein,ticket_path,annule_motif,demandeur:app_users!fuel_vouchers_demande_par_fkey(full_name),validateur:app_users!fuel_vouchers_valide_par_fkey(full_name)";
+  "id,numero,vehicle_id,beneficiaire_id,motif,montant_demande,km_demande,station_id,statut,demande_le,valide_le,refus_motif,date_plein,montant_reel,litres,km_plein,ticket_path,annule_motif,gps_km,gps_distance_station_m,gps_station_nom,gps_verifie_le,gps_note,demandeur:app_users!fuel_vouchers_demande_par_fkey(full_name),validateur:app_users!fuel_vouchers_valide_par_fkey(full_name)";
 
 /**
  * Bons de carburant, avec pour les bons justifiés la distance depuis le plein
@@ -323,10 +361,14 @@ export async function loadVouchers(options: { vehicleId?: string; id?: string } 
   if (vehicleIds.length > 0) {
     const { analyzeFuelFills } = await import("./calculs");
     const [{ data: fills }, { data: vehicles }, { data: prices }, { data: reglages }] = await Promise.all([
-      supabase.from("fuel_vouchers").select("id,vehicle_id,date_plein,litres,montant_reel,km_plein").eq("statut", "justifie").in("vehicle_id", vehicleIds),
+      supabase
+        .from("fuel_vouchers")
+        .select("id,vehicle_id,date_plein,litres,montant_reel,km_plein,gps_km,gps_distance_station_m,gps_station_nom")
+        .eq("statut", "justifie")
+        .in("vehicle_id", vehicleIds),
       supabase.from("vehicles").select("id,energie,reservoir_litres").in("id", vehicleIds),
       supabase.from("fuel_prices").select("energie,prix_litre,depuis"),
-      supabase.from("vehicules_reglages").select("ecart_consommation_pct,ecart_prix_pct").maybeSingle(),
+      supabase.from("vehicules_reglages").select("ecart_consommation_pct,ecart_prix_pct,ecart_km_gps_pct,distance_station_max_m").maybeSingle(),
     ]);
     const priceList = ((prices ?? []) as { energie: "essence" | "gasoil"; prix_litre: number; depuis: string }[]).map((p) => ({
       energie: p.energie,
@@ -336,12 +378,35 @@ export async function loadVouchers(options: { vehicleId?: string; id?: string } 
     const settings = {
       ecartConsommationPct: reglages?.ecart_consommation_pct ?? 25,
       ecartPrixPct: reglages?.ecart_prix_pct ?? 10,
+      ecartKmGpsPct: reglages?.ecart_km_gps_pct ?? 15,
+      distanceStationMaxM: reglages?.distance_station_max_m ?? 500,
     };
     for (const vid of vehicleIds) {
       const veh = ((vehicles ?? []) as { id: string; energie: string | null; reservoir_litres: number | null }[]).find((x) => x.id === vid);
-      const list = ((fills ?? []) as { id: string; vehicle_id: string; date_plein: string; litres: number; montant_reel: number; km_plein: number }[])
+      const list = (
+        (fills ?? []) as {
+          id: string;
+          vehicle_id: string;
+          date_plein: string;
+          litres: number;
+          montant_reel: number;
+          km_plein: number;
+          gps_km: number | null;
+          gps_distance_station_m: number | null;
+          gps_station_nom: string | null;
+        }[]
+      )
         .filter((f) => f.vehicle_id === vid)
-        .map((f) => ({ id: f.id, datePlein: f.date_plein, litres: Number(f.litres), montant: Number(f.montant_reel), km: f.km_plein }));
+        .map((f) => ({
+          id: f.id,
+          datePlein: f.date_plein,
+          litres: Number(f.litres),
+          montant: Number(f.montant_reel),
+          km: f.km_plein,
+          gpsKm: f.gps_km === null ? null : Number(f.gps_km),
+          distanceStationM: f.gps_distance_station_m,
+          stationNom: f.gps_station_nom,
+        }));
       for (const a of analyzeFuelFills(
         list,
         { energie: veh?.energie ?? null, reservoirLitres: veh?.reservoir_litres == null ? null : Number(veh.reservoir_litres) },
@@ -374,7 +439,19 @@ export async function loadCostLines(since: string, vehicleId?: string) {
     servicesQ = servicesQ.eq("vehicle_id", vehicleId);
     documentsQ = documentsQ.eq("vehicle_id", vehicleId);
   }
-  const [{ data: fuel }, { data: services }, { data: documents }] = await Promise.all([fuelQ, servicesQ, documentsQ]);
+  let incidentsQ = supabase.from("vehicle_incidents").select("vehicle_id,survenu_le,cout_reel,rembourse").gte("survenu_le", since);
+  let finesQ = supabase.from("vehicle_fines").select("vehicle_id,commise_le,montant,statut").eq("statut", "payee").gte("commise_le", since);
+  if (vehicleId) {
+    incidentsQ = incidentsQ.eq("vehicle_id", vehicleId);
+    finesQ = finesQ.eq("vehicle_id", vehicleId);
+  }
+  const [{ data: fuel }, { data: services }, { data: documents }, { data: incidents }, { data: fines }] = await Promise.all([
+    fuelQ,
+    servicesQ,
+    documentsQ,
+    incidentsQ,
+    finesQ,
+  ]);
   type Line = import("./calculs").CostLine & { vehicleId: string };
   const lines: Line[] = [];
   for (const r of (fuel ?? []) as { vehicle_id: string; date_plein: string; montant_reel: number }[]) {
@@ -387,6 +464,14 @@ export async function loadCostLines(since: string, vehicleId?: string) {
     // Un document compte à sa date de début (à défaut, sa date de saisie).
     const date = r.date_debut ?? r.created_at.slice(0, 10);
     if (r.montant && date >= since) lines.push({ vehicleId: r.vehicle_id, date, montant: Number(r.montant), nature: "documents" });
+  }
+  // Sinistre : coût moins remboursement ; amende : seulement payée par l'entreprise.
+  for (const r of (incidents ?? []) as { vehicle_id: string; survenu_le: string; cout_reel: number | null; rembourse: number | null }[]) {
+    const net = Number(r.cout_reel ?? 0) - Number(r.rembourse ?? 0);
+    if (net > 0) lines.push({ vehicleId: r.vehicle_id, date: r.survenu_le.slice(0, 10), montant: net, nature: "sinistres" });
+  }
+  for (const r of (fines ?? []) as { vehicle_id: string; commise_le: string; montant: number }[]) {
+    if (Number(r.montant) > 0) lines.push({ vehicleId: r.vehicle_id, date: r.commise_le.slice(0, 10), montant: Number(r.montant), nature: "sinistres" });
   }
   return lines;
 }
@@ -405,5 +490,67 @@ export async function loadKmSince(since: string): Promise<Map<string, number>> {
     const end = after.at(-1)?.km;
     if (start !== undefined && end !== undefined && end > start) out.set(vid, end - start);
   }
+  return out;
+}
+
+// --- Alertes GPS (VEH-8) -----------------------------------------------------------------
+
+export interface GpsAlertEvent {
+  id: string;
+  rule_code: string;
+  vehicle_id: string;
+  survenue_le: string;
+  valeur: number | null;
+  message: string;
+  latitude: number | null;
+  longitude: number | null;
+  statut: "nouvelle" | "vue" | "classee";
+  commentaire: string | null;
+  traite_le: string | null;
+  gravite: string;
+  regle: string;
+}
+
+/** Alertes GPS ; par défaut celles qui restent à traiter (nouvelles ou vues). */
+export async function loadGpsEvents(options: { vehicleId?: string; includeClosed?: boolean; limit?: number } = {}): Promise<GpsAlertEvent[]> {
+  const supabase = await createClient();
+  let q = supabase
+    .from("vehicle_alert_events")
+    .select("id,rule_code,vehicle_id,survenue_le,valeur,message,latitude,longitude,statut,commentaire,traite_le,vehicle_alert_rules(libelle,gravite)")
+    .order("survenue_le", { ascending: false })
+    .limit(options.limit ?? 300);
+  if (options.vehicleId) q = q.eq("vehicle_id", options.vehicleId);
+  if (!options.includeClosed) q = q.neq("statut", "classee");
+  const { data } = await q;
+  return ((data ?? []) as unknown as (Omit<GpsAlertEvent, "gravite" | "regle"> & { vehicle_alert_rules: { libelle: string; gravite: string } | null })[]).map((e) => ({
+    ...e,
+    valeur: e.valeur === null ? null : Number(e.valeur),
+    gravite: e.vehicle_alert_rules?.gravite ?? "attention",
+    regle: e.vehicle_alert_rules?.libelle ?? e.rule_code,
+  }));
+}
+
+/** Km GPS par jour d'un véhicule (vue vehicle_gps_days). */
+export async function loadGpsDays(vehicleId: string, days = 14) {
+  const supabase = await createClient();
+  const since = new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
+  const { data } = await supabase
+    .from("vehicle_gps_days")
+    .select("jour,km,roulage_s,vitesse_max,trajets")
+    .eq("vehicle_id", vehicleId)
+    .gte("jour", since)
+    .order("jour", { ascending: false });
+  return ((data ?? []) as { jour: string; km: number | null; roulage_s: number; vitesse_max: number | null; trajets: number }[]).map((d) => ({
+    ...d,
+    km: Number(d.km ?? 0),
+  }));
+}
+
+/** Km GPS par véhicule depuis une date (somme des journées FreeTrack). */
+export async function loadGpsKmSince(since: string): Promise<Map<string, number>> {
+  const supabase = await createClient();
+  const { data } = await supabase.from("vehicle_gps_days").select("vehicle_id,km").gte("jour", since);
+  const out = new Map<string, number>();
+  for (const r of (data ?? []) as { vehicle_id: string; km: number | null }[]) out.set(r.vehicle_id, (out.get(r.vehicle_id) ?? 0) + Number(r.km ?? 0));
   return out;
 }

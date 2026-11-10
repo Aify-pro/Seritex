@@ -14,6 +14,11 @@ export interface FuelFill {
   litres: number;
   montant: number;
   km: number;
+  /** Km selon FreeTrack depuis le plein précédent (VEH-9) ; null = pas vérifié. */
+  gpsKm?: number | null;
+  /** Distance du véhicule à la station à l'heure du ticket (m). */
+  distanceStationM?: number | null;
+  stationNom?: string | null;
 }
 
 export interface FuelPrice {
@@ -25,10 +30,22 @@ export interface FuelPrice {
 export interface FuelCheckSettings {
   ecartConsommationPct: number;
   ecartPrixPct: number;
+  /** Écart toléré entre km déclarés et km GPS (VEH-9). */
+  ecartKmGpsPct?: number;
+  /** Distance maximale à la station à l'heure du ticket (VEH-9). */
+  distanceStationMaxM?: number;
 }
 
 export interface FuelAnomaly {
-  code: "compteur_recule" | "plein_sans_rouler" | "litres_reservoir" | "prix_litre" | "consommation";
+  code:
+    | "compteur_recule"
+    | "plein_sans_rouler"
+    | "litres_reservoir"
+    | "prix_litre"
+    | "consommation"
+    | "km_gps"
+    | "sans_rouler_gps"
+    | "hors_station";
   message: string;
 }
 
@@ -111,6 +128,29 @@ export function analyzeFuelFills(
           message: `${consommation} L/100 km pour une consommation habituelle de ${round1(ref)} L/100 km.`,
         });
       }
+    }
+
+    // Rapprochement avec FreeTrack (VEH-9) : km GPS depuis le plein précédent,
+    // position du véhicule à l'heure du ticket.
+    if (fill.gpsKm !== undefined && fill.gpsKm !== null && kmParcourus !== null) {
+      if (fill.gpsKm < KM_MINIMUM_ENTRE_PLEINS && kmParcourus >= KM_MINIMUM_ENTRE_PLEINS) {
+        anomalies.push({ code: "sans_rouler_gps", message: `Le GPS n'a relevé que ${fill.gpsKm} km depuis le plein précédent (compteur : ${kmParcourus} km).` });
+      } else if (fill.gpsKm >= KM_MINIMUM_ENTRE_PLEINS && kmParcourus >= 0) {
+        const ecart = Math.abs(kmParcourus - fill.gpsKm) / fill.gpsKm;
+        if (ecart > (settings.ecartKmGpsPct ?? 15) / 100) {
+          anomalies.push({
+            code: "km_gps",
+            message: `${kmParcourus} km déclarés au compteur pour ${fill.gpsKm} km relevés par le GPS depuis le plein précédent.`,
+          });
+        }
+      }
+    }
+    if (fill.distanceStationM !== undefined && fill.distanceStationM !== null && fill.distanceStationM > (settings.distanceStationMaxM ?? 500)) {
+      const d = fill.distanceStationM >= 1000 ? `${round1(fill.distanceStationM / 1000)} km` : `${fill.distanceStationM} m`;
+      anomalies.push({
+        code: "hors_station",
+        message: `À l'heure du ticket, le véhicule était à ${d} de ${fill.stationNom ? `la station ${fill.stationNom}` : "toute station connue"}.`,
+      });
     }
 
     return { id: fill.id, kmParcourus, consommation, prixLitre, anomalies };
@@ -208,7 +248,7 @@ export function maintenanceDue(types: ServiceType[], services: ServiceRecord[], 
 export interface CostLine {
   date: string;
   montant: number;
-  nature: "carburant" | "entretien" | "documents";
+  nature: "carburant" | "entretien" | "documents" | "sinistres";
 }
 
 export interface MonthlyCost {
@@ -216,6 +256,8 @@ export interface MonthlyCost {
   carburant: number;
   entretien: number;
   documents: number;
+  /** Sinistres (coût moins remboursement) et amendes payées par l'entreprise (VEH-7). */
+  sinistres: number;
   total: number;
 }
 
@@ -225,7 +267,7 @@ export function monthlyCosts(lines: CostLine[]): MonthlyCost[] {
   for (const l of lines) {
     if (!l.date || !(l.montant > 0)) continue;
     const mois = l.date.slice(0, 7);
-    const row = byMonth.get(mois) ?? { mois, carburant: 0, entretien: 0, documents: 0, total: 0 };
+    const row = byMonth.get(mois) ?? { mois, carburant: 0, entretien: 0, documents: 0, sinistres: 0, total: 0 };
     row[l.nature] += l.montant;
     row.total += l.montant;
     byMonth.set(mois, row);
@@ -237,4 +279,61 @@ export function monthlyCosts(lines: CostLine[]): MonthlyCost[] {
 export function formatMois(mois: string): string {
   const d = new Date(Date.UTC(Number(mois.slice(0, 4)), Number(mois.slice(5, 7)) - 1, 1));
   return new Intl.DateTimeFormat("fr-FR", { month: "long", year: "numeric", timeZone: "UTC" }).format(d);
+}
+
+// --- Rapprochement carburant / GPS (VEH-9) ------------------------------------------
+
+export interface FuelGpsInput {
+  datePlein: string;
+  /** Date du plein justifié précédent du même véhicule (null = premier plein). */
+  datePleinPrecedent: string | null;
+  segments: { type: "trajet" | "arret"; debut: string; fin: string | null; distanceKm: number; latitude: number | null; longitude: number | null; latitudeFin: number | null; longitudeFin: number | null }[];
+  station: { nom: string; lat: number; lng: number } | null;
+  stations: { nom: string; lat: number; lng: number }[];
+}
+
+export interface FuelGpsResult {
+  gpsKm: number | null;
+  distanceStationM: number | null;
+  stationNom: string | null;
+  note: string | null;
+}
+
+/**
+ * Km GPS entre deux pleins (trajets commencés dans l'intervalle) et distance
+ * du véhicule à la station à l'heure du ticket : position de l'arrêt en cours
+ * à cette heure, sinon fin du dernier trajet avant elle (tolérance 30 min).
+ */
+export function fuelGpsCheck(input: FuelGpsInput, distance: (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => number): FuelGpsResult {
+  const t = Date.parse(input.datePlein);
+  const gpsKm = input.datePleinPrecedent
+    ? round1(
+        input.segments
+          .filter((s) => s.type === "trajet" && Date.parse(s.debut) >= Date.parse(input.datePleinPrecedent as string) && Date.parse(s.debut) < t)
+          .reduce((sum, s) => sum + s.distanceKm, 0)
+      )
+    : null;
+
+  const TOL = 30 * 60_000;
+  const stop = input.segments.find(
+    (s) => s.type === "arret" && s.latitude !== null && Date.parse(s.debut) - TOL <= t && (s.fin === null || Date.parse(s.fin) + TOL >= t)
+  );
+  const lastTrip = input.segments
+    .filter((s) => s.type === "trajet" && s.latitudeFin !== null && s.fin !== null && Date.parse(s.fin) <= t + TOL && Date.parse(s.fin) >= t - 2 * TOL)
+    .sort((a, b) => Date.parse(b.fin as string) - Date.parse(a.fin as string))[0];
+  const here = stop
+    ? { lat: stop.latitude as number, lng: stop.longitude as number }
+    : lastTrip
+      ? { lat: lastTrip.latitudeFin as number, lng: lastTrip.longitudeFin as number }
+      : null;
+
+  if (!here) {
+    return { gpsKm, distanceStationM: null, stationNom: null, note: "Position GPS introuvable à l'heure du ticket." };
+  }
+  const candidates = input.station ? [input.station] : input.stations;
+  if (candidates.length === 0) {
+    return { gpsKm, distanceStationM: null, stationNom: null, note: "Aucune station géolocalisée pour comparer la position." };
+  }
+  const nearest = candidates.map((s) => ({ s, d: distance(here, s) })).sort((a, b) => a.d - b.d)[0];
+  return { gpsKm, distanceStationM: nearest.d, stationNom: nearest.s.nom, note: null };
 }
