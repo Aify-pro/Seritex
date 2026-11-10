@@ -22,9 +22,24 @@ import {
   formatJours,
   formatKm,
   vehicleLabel,
+  FINE_STATUT_LABELS,
+  INCIDENT_STATUT_LABELS,
 } from "@/lib/vehicules/labels";
 import { averageConsumption, formatMois, monthlyCosts } from "@/lib/vehicules/calculs";
-import { loadAnnuaire, loadCostLines, loadFleet, loadMaintenanceDue, loadServiceTypes, loadVouchers, signedUrls } from "@/lib/vehicules/data";
+import {
+  loadAnnuaire,
+  loadCostLines,
+  loadFleet,
+  loadGpsDays,
+  loadGpsEvents,
+  loadMaintenanceDue,
+  loadServiceTypes,
+  loadVouchers,
+  signedUrls,
+} from "@/lib/vehicules/data";
+import { FleetMap } from "@/components/vehicules/fleet-map";
+import { GpsEventsSection } from "@/components/vehicules/gps-events-section";
+import { FineDialog, FineStatutSelect, IncidentDialog, IncidentFollowUp } from "@/components/vehicules/gps-panels";
 import { EditVehicleButton, NewFuelVoucherButton } from "@/components/vehicules/vehicle-dialogs";
 import {
   DeleteDocumentButton,
@@ -45,10 +60,12 @@ type Params = Record<string, string | string[] | undefined>;
 
 const TABS = [
   { key: "general", label: "Général" },
+  { key: "gps", label: "Position et trajets" },
   { key: "documents", label: "Documents" },
   { key: "carburant", label: "Carburant" },
   { key: "entretien", label: "Entretien et pannes" },
   { key: "chauffeur", label: "Chauffeur" },
+  { key: "sinistres", label: "Sinistres et amendes" },
   { key: "couts", label: "Coûts" },
 ] as const;
 type TabKey = (typeof TABS)[number]["key"];
@@ -187,10 +204,14 @@ export default async function VehiclePage({ params, searchParams }: { params: Pr
                 </div>
               )}
             </Card>
-            <GeneralCompteur id={v.id} kmActuel={v.kmActuel} canModify={canModify} />
+            <GeneralCompteur id={v.id} kmActuel={v.kmActuel} kmReleve={v.kmReleve} kmEstime={v.kmEstime} canModify={canModify} />
           </div>
         </div>
       )}
+
+      {tab === "gps" && <GpsTab vehicle={v} canModify={canModify} />}
+
+      {tab === "sinistres" && <SinistresTab vehicleId={v.id} employes={employes} canModify={canModify} canCreate={await can("vehicules", "create")} />}
 
       {tab === "documents" && <DocumentsTab vehicleId={v.id} compliance={v.compliance} canModify={canModify} canDelete={canDelete} />}
 
@@ -219,7 +240,19 @@ export default async function VehiclePage({ params, searchParams }: { params: Pr
   );
 }
 
-async function GeneralCompteur({ id, kmActuel, canModify }: { id: string; kmActuel: number | null; canModify: boolean }) {
+async function GeneralCompteur({
+  id,
+  kmActuel,
+  kmReleve,
+  kmEstime,
+  canModify,
+}: {
+  id: string;
+  kmActuel: number | null;
+  kmReleve: number | null;
+  kmEstime: boolean;
+  canModify: boolean;
+}) {
   const supabase = await createClient();
   const { data } = await supabase
     .from("vehicle_odometer_readings")
@@ -229,7 +262,17 @@ async function GeneralCompteur({ id, kmActuel, canModify }: { id: string; kmActu
     .limit(6);
   return (
     <Card>
-      <CardHeader title="Compteur" description={kmActuel !== null ? `Dernier relevé : ${formatKm(kmActuel)}` : "Aucun relevé."} action={canModify ? <OdometerForm id={id} /> : undefined} />
+      <CardHeader
+        title="Compteur"
+        description={
+          kmActuel === null
+            ? "Aucun relevé."
+            : kmEstime
+              ? `Estimé à ${formatKm(kmActuel)} : dernier relevé ${formatKm(kmReleve)} + km GPS depuis.`
+              : `Dernier relevé : ${formatKm(kmActuel)}`
+        }
+        action={canModify ? <OdometerForm id={id} /> : undefined}
+      />
       <ul className="divide-y divide-border text-xs">
         {((data ?? []) as { id: string; km: number; releve_le: string; source: string }[]).map((r) => (
           <li key={r.id} className="flex justify-between px-5 py-2">
@@ -379,7 +422,7 @@ async function CarburantTab({ vehicle, voucherButton }: { vehicle: Awaited<Retur
       <div className="grid gap-4 sm:grid-cols-3">
         <StatCard label="Consommation moyenne" value={moyenne !== null ? `${moyenne} L/100 km` : "—"} hint="Plein à plein, sur les bons justifiés" />
         <StatCard label="Dernier plein" value={last ? formatDate(last.date_plein) : "—"} hint={last ? `${last.litres} L · ${formatKm(last.km_plein)}` : undefined} />
-        <StatCard label="Écarts relevés" value={anomalies} tone={anomalies ? "warning" : "neutral"} hint="Compteur, réservoir, prix au litre, consommation" />
+        <StatCard label="Écarts relevés" value={anomalies} tone={anomalies ? "warning" : "neutral"} hint="Compteur, GPS, station, réservoir, prix au litre, consommation" />
       </div>
       <div className="flex justify-end">{voucherButton}</div>
       <Card>
@@ -392,13 +435,14 @@ async function CarburantTab({ vehicle, voucherButton }: { vehicle: Awaited<Retur
               <Th align="right">Litres</Th>
               <Th align="right">Compteur</Th>
               <Th align="right">Km parcourus</Th>
+              <Th align="right">Km GPS</Th>
               <Th align="right">L/100 km</Th>
               <Th>Contrôles</Th>
               <Th>Statut</Th>
             </tr>
           </Thead>
           <Tbody>
-            {vouchers.length === 0 && <EmptyRow colSpan={9}>Aucun bon de carburant pour ce véhicule.</EmptyRow>}
+            {vouchers.length === 0 && <EmptyRow colSpan={10}>Aucun bon de carburant pour ce véhicule.</EmptyRow>}
             {vouchers.map((b) => (
               <ClickableTr key={b.id} href={`/vehicules/bons/${b.id}`}>
                 <Td className="font-mono text-xs">{b.numero ?? "—"}</Td>
@@ -407,6 +451,7 @@ async function CarburantTab({ vehicle, voucherButton }: { vehicle: Awaited<Retur
                 <Td align="right" className="text-xs tabular-nums">{b.litres ?? "—"}</Td>
                 <Td align="right" className="text-xs tabular-nums">{formatKm(b.km_plein)}</Td>
                 <Td align="right" className="text-xs tabular-nums">{b.analysis?.kmParcourus ?? "—"}</Td>
+                <Td align="right" className="text-xs tabular-nums">{b.gps_km ?? (b.statut === "justifie" && vehicle.freetrack_device_id ? "…" : "—")}</Td>
                 <Td align="right" className="text-xs tabular-nums">{b.analysis?.consommation ?? "—"}</Td>
                 <Td className="max-w-64 text-xs">
                   {b.statut !== "justifie"
@@ -692,23 +737,255 @@ async function CoutsTab({ vehicleId }: { vehicleId: string }) {
               <Th align="right">Carburant</Th>
               <Th align="right">Entretien</Th>
               <Th align="right">Documents</Th>
+              <Th align="right">Sinistres et amendes</Th>
               <Th align="right">Total</Th>
             </tr>
           </Thead>
           <Tbody>
-            {months.length === 0 && <EmptyRow colSpan={5}>Aucun coût sur les 12 derniers mois.</EmptyRow>}
+            {months.length === 0 && <EmptyRow colSpan={6}>Aucun coût sur les 12 derniers mois.</EmptyRow>}
             {months.map((m) => (
               <Tr key={m.mois}>
                 <Td className="text-sm capitalize">{formatMois(m.mois)}</Td>
                 <Td align="right" className="text-xs tabular-nums">{formatAmount(m.carburant)}</Td>
                 <Td align="right" className="text-xs tabular-nums">{formatAmount(m.entretien)}</Td>
                 <Td align="right" className="text-xs tabular-nums">{formatAmount(m.documents)}</Td>
+                <Td align="right" className="text-xs tabular-nums">{formatAmount(m.sinistres)}</Td>
                 <Td align="right" className="text-sm font-medium tabular-nums">{formatAmount(m.total)}</Td>
               </Tr>
             ))}
           </Tbody>
         </Table>
       </Card>
+    </div>
+  );
+}
+
+async function GpsTab({ vehicle, canModify }: { vehicle: Awaited<ReturnType<typeof loadFleet>>[number]; canModify: boolean }) {
+  if (!vehicle.freetrack_device_id) {
+    return (
+      <Card className="p-6 text-sm text-foreground-muted">
+        Ce véhicule n&apos;est relié à aucun traceur FreeTrack. Reliez-le dans Paramètres &gt; Logistique &gt; Géolocalisation.
+      </Card>
+    );
+  }
+  const [days, events] = await Promise.all([loadGpsDays(vehicle.id, 14), loadGpsEvents({ vehicleId: vehicle.id, includeClosed: true, limit: 50 })]);
+  const p = vehicle.position;
+  const total = days.reduce((s, d) => s + d.km, 0);
+  return (
+    <div className="space-y-6">
+      <div className="grid gap-6 lg:grid-cols-3">
+        <Card className="lg:col-span-2">
+          {p ? (
+            <FleetMap
+              height={320}
+              points={[
+                {
+                  id: vehicle.id,
+                  lat: p.latitude,
+                  lng: p.longitude,
+                  label: vehicleLabel(vehicle),
+                  detail: p.vitesse > 3 ? `${p.vitesse} km/h` : "à l'arrêt",
+                  etat: vehicle.blocage ? "alerte" : p.vitesse > 3 ? "en_route" : "arret",
+                },
+              ]}
+            />
+          ) : (
+            <CardBody className="text-sm text-foreground-muted">Pas encore de position : la prochaine synchronisation la rapportera.</CardBody>
+          )}
+        </Card>
+        <div className="grid content-start gap-4">
+          <StatCard label="Maintenant" value={p ? (p.vitesse > 3 ? `${p.vitesse} km/h` : "À l'arrêt") : "—"} hint={p?.signal_le ? `Signal du ${formatDateTime(p.signal_le)}` : undefined} />
+          <StatCard label="Km sur 14 jours" value={formatKm(Math.round(total))} hint={days.length ? `${(total / Math.max(days.length, 1)).toFixed(0)} km par jour roulé` : undefined} />
+          {p?.adresse && <p className="text-xs text-foreground-muted">{p.adresse}</p>}
+        </div>
+      </div>
+      <Card>
+        <CardHeader title="Kilomètres par jour (GPS)" />
+        <Table>
+          <Thead>
+            <tr>
+              <Th>Jour</Th>
+              <Th align="right">Km</Th>
+              <Th align="right">Temps de roulage</Th>
+              <Th align="right">Vitesse max</Th>
+              <Th align="right">Trajets</Th>
+            </tr>
+          </Thead>
+          <Tbody>
+            {days.length === 0 && <EmptyRow colSpan={5}>Aucun trajet sur les 14 derniers jours.</EmptyRow>}
+            {days.map((d) => (
+              <Tr key={d.jour}>
+                <Td className="text-sm">{formatDate(d.jour)}</Td>
+                <Td align="right" className="text-sm tabular-nums">{d.km.toFixed(1)}</Td>
+                <Td align="right" className="text-xs tabular-nums">{`${Math.floor(d.roulage_s / 3600)} h ${String(Math.round((d.roulage_s % 3600) / 60)).padStart(2, "0")}`}</Td>
+                <Td align="right" className="text-xs tabular-nums">{d.vitesse_max ?? "—"} km/h</Td>
+                <Td align="right" className="text-xs tabular-nums">{d.trajets}</Td>
+              </Tr>
+            ))}
+          </Tbody>
+        </Table>
+      </Card>
+      {events.length > 0 ? (
+        <GpsEventsSection events={events} fleet={[vehicle]} canModify={canModify} vehicleId={vehicle.id} />
+      ) : (
+        <p className="text-xs text-foreground-muted">Aucune alerte GPS pour ce véhicule.</p>
+      )}
+    </div>
+  );
+}
+
+async function SinistresTab({
+  vehicleId,
+  employes,
+  canModify,
+  canCreate,
+}: {
+  vehicleId: string;
+  employes: { id: string; nom: string; matricule: string }[];
+  canModify: boolean;
+  canCreate: boolean;
+}) {
+  const supabase = await createClient();
+  const [{ data: incidents }, { data: fines }, annuaire] = await Promise.all([
+    supabase
+      .from("vehicle_incidents")
+      .select("id,survenu_le,lieu,description,tiers,responsabilite,assureur_dossier,statut,cout_reel,rembourse,conducteur_id,conducteur_auto,constat_path,photo_path")
+      .eq("vehicle_id", vehicleId)
+      .order("survenu_le", { ascending: false }),
+    supabase
+      .from("vehicle_fines")
+      .select("id,commise_le,lieu,motif,reference,montant,statut,conducteur_id,conducteur_auto,fichier_path,gps_latitude,gps_longitude,gps_vitesse")
+      .eq("vehicle_id", vehicleId)
+      .order("commise_le", { ascending: false }),
+    loadAnnuaire(),
+  ]);
+  const inc = (incidents ?? []) as {
+    id: string;
+    survenu_le: string;
+    lieu: string | null;
+    description: string;
+    tiers: string | null;
+    responsabilite: string | null;
+    assureur_dossier: string | null;
+    statut: string;
+    cout_reel: number | null;
+    rembourse: number | null;
+    conducteur_id: string | null;
+    conducteur_auto: boolean;
+    constat_path: string | null;
+    photo_path: string | null;
+  }[];
+  const fin = (fines ?? []) as {
+    id: string;
+    commise_le: string;
+    lieu: string | null;
+    motif: string;
+    reference: string | null;
+    montant: number;
+    statut: string;
+    conducteur_id: string | null;
+    conducteur_auto: boolean;
+    fichier_path: string | null;
+    gps_latitude: number | null;
+    gps_longitude: number | null;
+    gps_vitesse: number | null;
+  }[];
+  const urls = await signedUrls([...inc.flatMap((i) => [i.constat_path, i.photo_path]), ...fin.map((f) => f.fichier_path)]);
+  const driver = (id: string | null, auto: boolean) =>
+    id ? `${annuaire.get(id)?.nom ?? "—"}${auto ? " (retrouvé par l'affectation)" : ""}` : "Inconnu (aucune affectation à cette date)";
+  const link = (path: string | null, label: string) =>
+    path && urls.get(path) ? (
+      <a href={urls.get(path)} target="_blank" rel="noreferrer" className="text-brand hover:underline">
+        {label}
+      </a>
+    ) : null;
+
+  return (
+    <div className="space-y-6">
+      {canCreate && (
+        <div className="flex flex-wrap justify-end gap-2">
+          <IncidentDialog vehicleId={vehicleId} employes={employes} />
+          <FineDialog vehicleId={vehicleId} employes={employes} />
+        </div>
+      )}
+      <Card>
+        <CardHeader title={`Sinistres (${inc.length})`} />
+        <ul className="divide-y divide-border">
+          {inc.length === 0 && <li className="px-5 py-4 text-sm text-foreground-muted">Aucun sinistre.</li>}
+          {inc.map((i) => (
+            <li key={i.id} className="space-y-1 px-5 py-3 text-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-medium">{formatDateTime(i.survenu_le)}</span>
+                {i.lieu && <span className="text-foreground-muted">· {i.lieu}</span>}
+                <Badge tone={i.statut === "clos" ? "success" : "warning"}>{INCIDENT_STATUT_LABELS[i.statut]}</Badge>
+                <span className="ml-auto text-xs tabular-nums">
+                  Coût {formatAmount(Number(i.cout_reel ?? 0))} · remboursé {formatAmount(Number(i.rembourse ?? 0))}
+                </span>
+                {canModify && <IncidentFollowUp vehicleId={vehicleId} incident={i} />}
+              </div>
+              <p>{i.description}</p>
+              <p className="text-xs text-foreground-muted">
+                Conducteur : {driver(i.conducteur_id, i.conducteur_auto)}
+                {i.tiers ? ` · Tiers : ${i.tiers}` : ""}
+                {i.assureur_dossier ? ` · Dossier ${i.assureur_dossier}` : ""}
+              </p>
+              <p className="flex gap-3 text-xs">
+                {link(i.constat_path, "Constat")}
+                {link(i.photo_path, "Photo")}
+              </p>
+            </li>
+          ))}
+        </ul>
+      </Card>
+      <Card>
+        <CardHeader title={`Amendes (${fin.length})`} />
+        <Table>
+          <Thead>
+            <tr>
+              <Th>Date et heure</Th>
+              <Th>Motif</Th>
+              <Th>Conducteur</Th>
+              <Th>GPS à l&apos;heure dite</Th>
+              <Th align="right">Montant</Th>
+              <Th>Paiement</Th>
+            </tr>
+          </Thead>
+          <Tbody>
+            {fin.length === 0 && <EmptyRow colSpan={6}>Aucune amende.</EmptyRow>}
+            {fin.map((f) => (
+              <Tr key={f.id}>
+                <Td className="text-xs">{formatDateTime(f.commise_le)}</Td>
+                <Td className="text-xs">
+                  {f.motif}
+                  {f.lieu ? <span className="block text-foreground-muted">{f.lieu}</span> : null}
+                  {link(f.fichier_path, "avis")}
+                </Td>
+                <Td className="text-xs">{driver(f.conducteur_id, f.conducteur_auto)}</Td>
+                <Td className="text-xs">
+                  {f.gps_latitude !== null && f.gps_longitude !== null ? (
+                    <a
+                      href={`https://www.openstreetmap.org/?mlat=${f.gps_latitude}&mlon=${f.gps_longitude}#map=16/${f.gps_latitude}/${f.gps_longitude}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-brand hover:underline"
+                    >
+                      voir la position{f.gps_vitesse ? ` (pointe ${f.gps_vitesse} km/h)` : ""}
+                    </a>
+                  ) : (
+                    "—"
+                  )}
+                </Td>
+                <Td align="right" className="text-xs tabular-nums">{formatAmount(Number(f.montant))}</Td>
+                <Td>{canModify ? <FineStatutSelect vehicleId={vehicleId} id={f.id} statut={f.statut} /> : FINE_STATUT_LABELS[f.statut]}</Td>
+              </Tr>
+            ))}
+          </Tbody>
+        </Table>
+      </Card>
+      <p className="text-xs text-foreground-muted">
+        Une amende payée par l&apos;entreprise et le coût net d&apos;un sinistre (coût moins remboursement) comptent dans les coûts du véhicule ; une retenue
+        sur salaire n&apos;y compte pas.
+      </p>
     </div>
   );
 }

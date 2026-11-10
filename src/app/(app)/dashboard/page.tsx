@@ -9,7 +9,7 @@ import { PageHeader } from "@/components/shell/page-header";
 import { redirect } from "next/navigation";
 import { ACTIVE_ODF_STATUSES } from "@/lib/production-orders/active";
 import { can } from "@/lib/auth/permissions";
-import { loadAlerts } from "@/lib/vehicules/data";
+import { loadAlerts, loadGpsEvents } from "@/lib/vehicules/data";
 
 export default async function DashboardPage() {
   const { profile } = await requireUser();
@@ -288,7 +288,9 @@ export default async function DashboardPage() {
   if (profile.role === "responsable_livraison") {
     const { data: shipments } = await supabase.from("shipments").select("statut").not("statut", "in", "(annulee,reception_confirmee)");
     const n = (...statuts: string[]) => (shipments ?? []).filter((x) => statuts.includes(x.statut)).length;
-    const vehicleAlerts = (await can("vehicules", "view")) ? await loadAlerts() : [];
+    const canVehicles = await can("vehicules", "view");
+    const vehicleAlerts = canVehicles ? await loadAlerts() : [];
+    const gpsNouvelles = canVehicles ? (await loadGpsEvents()).filter((e) => e.statut === "nouvelle").length : 0;
     const alertesCritiques = vehicleAlerts.filter((a) => a.gravite === "critique").length;
     const bonsAValider = vehicleAlerts.filter((a) => a.nature === "bon").length;
     return (
@@ -300,11 +302,12 @@ export default async function DashboardPage() {
           <StatCard label="À planifier" value={n("validee_compta")} tone="info" />
           <StatCard label="Échecs et litiges" value={n("echec", "litige")} tone="danger" />
         </div>
-        {vehicleAlerts.length > 0 && (
+        {(vehicleAlerts.length > 0 || gpsNouvelles > 0) && (
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
             <StatCard label="Véhicules : à traiter" value={alertesCritiques} tone={alertesCritiques ? "danger" : "neutral"} hint="Papiers expirés, pannes, entretien en retard" />
             <StatCard label="Véhicules : à anticiper" value={vehicleAlerts.length - alertesCritiques - bonsAValider} tone="warning" />
             <StatCard label="Bons de carburant à valider" value={bonsAValider} tone="info" />
+            <StatCard label="Alertes GPS nouvelles" value={gpsNouvelles} tone={gpsNouvelles ? "warning" : "neutral"} hint="Vitesse, hors heures, arrêts, zone…" />
           </div>
         )}
         <div className="flex flex-wrap gap-4 text-sm">

@@ -140,6 +140,13 @@ export default async function FuelVoucherPage({ params }: { params: Promise<{ id
                       ["Compteur", formatKm(b.km_plein)],
                       ["Depuis le plein précédent", b.analysis?.kmParcourus !== null && b.analysis?.kmParcourus !== undefined ? formatKm(b.analysis.kmParcourus) : "1er plein"],
                       ["Consommation", b.analysis?.consommation ? `${b.analysis.consommation} L/100 km` : "—"],
+                      ["Km GPS depuis le plein précédent", b.gps_km !== null ? formatKm(Math.round(b.gps_km)) : b.gps_verifie_le ? "—" : "en attente du GPS"],
+                      [
+                        "Position à l'heure du ticket",
+                        b.gps_distance_station_m !== null
+                          ? `${b.gps_distance_station_m >= 1000 ? `${(b.gps_distance_station_m / 1000).toFixed(1)} km` : `${b.gps_distance_station_m} m`} de ${b.gps_station_nom ?? "la station"}`
+                          : (b.gps_note ?? "—"),
+                      ],
                     ] as [string, string][]
                   ).map(([k, v]) => (
                     <div key={k}>
@@ -161,7 +168,11 @@ export default async function FuelVoucherPage({ params }: { params: Promise<{ id
                   ) : (
                     <p className="text-success">✓ Compteur, réservoir, prix au litre et consommation cohérents.</p>
                   )}
-                  <p className="mt-2 text-[11px] text-foreground-muted">Le rapprochement avec les trajets GPS (FreeTrack) arrivera avec le lot suivant.</p>
+                  {!b.gps_verifie_le && (
+                    <p className="mt-2 text-[11px] text-foreground-muted">
+                      Le rapprochement avec FreeTrack (km GPS, position à la station) se fait automatiquement une heure après le plein, si le véhicule est relié à un traceur.
+                    </p>
+                  )}
                 </div>
                 {ticket && (
                   <a href={ticket} target="_blank" rel="noreferrer" className="text-xs text-brand hover:underline">

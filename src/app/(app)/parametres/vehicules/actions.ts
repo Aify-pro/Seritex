@@ -99,10 +99,14 @@ export async function saveFuelSettings(fd: FormData): Promise<Result> {
   if (Number.isNaN(plafond) || (plafond !== null && plafond <= 0)) return { error: "Plafond invalide." };
   if (conso === null || Number.isNaN(conso) || conso < 1 || conso > 500) return { error: "Écart de consommation invalide (1 à 500 %)." };
   if (prix === null || Number.isNaN(prix) || prix < 1 || prix > 100) return { error: "Écart de prix invalide (1 à 100 %)." };
+  const ecartKm = int(fd, "ecart_km_gps_pct");
+  const distance = int(fd, "distance_station_max_m");
+  if (ecartKm === null || Number.isNaN(ecartKm) || ecartKm < 1 || ecartKm > 200) return { error: "Écart compteur / GPS invalide (1 à 200 %)." };
+  if (distance === null || Number.isNaN(distance) || distance < 50 || distance > 20000) return { error: "Distance à la station invalide (50 à 20 000 m)." };
   const supabase = await createClient();
   const { error } = await supabase
     .from("vehicules_reglages")
-    .update({ plafond_bon: plafond, ecart_consommation_pct: conso, ecart_prix_pct: prix })
+    .update({ plafond_bon: plafond, ecart_consommation_pct: conso, ecart_prix_pct: prix, ecart_km_gps_pct: ecartKm, distance_station_max_m: distance })
     .eq("id", true);
   if (error) return { error: err(error) };
   done();

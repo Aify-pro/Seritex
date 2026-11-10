@@ -156,6 +156,8 @@ const STAFF_NAV: NavItem[] = [
   { href: "/parametres/dispatching", label: "Dispatching des tailles", icon: navIcon(ChartPie), section: PARAMETRES, module: "dispatching" },
   { href: "/parametres/livraison", label: "Livraison", icon: navIcon(MapPinned), section: PARAMETRES, module: "parametres_livraison" },
   { href: "/parametres/vehicules", label: "Véhicules", icon: navIcon(Car), section: PARAMETRES, module: "parametres_vehicules" },
+  { href: "/parametres/vehicules/geolocalisation", label: "Géolocalisation", icon: navIcon(Car), section: PARAMETRES, module: "parametres_vehicules" },
+  { href: "/parametres/vehicules/alertes", label: "Alertes GPS", icon: navIcon(Car), section: PARAMETRES, module: "parametres_vehicules" },
   { href: "/parametres/prospection", label: "Prospection", icon: navIcon(Briefcase), section: PARAMETRES, module: "parametres_prospection" },
   { href: "/parametres/personnel/fiches", label: "Personnel : fiches", icon: navIcon(Users), section: PARAMETRES, module: "personnel" },
   { href: "/parametres/personnel/departements", label: "Personnel : départements", icon: navIcon(Users), section: PARAMETRES, module: "personnel" },

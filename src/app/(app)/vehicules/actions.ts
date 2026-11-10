@@ -364,3 +364,164 @@ export async function addService(vehicleId: string, fd: FormData): Promise<Resul
   done(vehicleId);
   return {};
 }
+
+// --- Alertes GPS (VEH-8) ------------------------------------------------------------------
+
+export async function treatGpsEvent(id: string, statut: "vue" | "classee", commentaire?: string): Promise<Result> {
+  const { authId } = await requirePermission("vehicules", "modify");
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("vehicle_alert_events")
+    .update({ statut, commentaire: commentaire?.trim().slice(0, 500) || null, traite_par: authId, traite_le: new Date().toISOString() })
+    .eq("id", id);
+  if (error) return { error: dbError(error) };
+  done();
+  return {};
+}
+
+/** Marque comme vues toutes les nouvelles alertes GPS (d'un véhicule, ou de tout le parc). */
+export async function markGpsEventsSeen(vehicleId?: string): Promise<Result> {
+  const { authId } = await requirePermission("vehicules", "modify");
+  const supabase = await createClient();
+  let q = supabase.from("vehicle_alert_events").update({ statut: "vue", traite_par: authId, traite_le: new Date().toISOString() }).eq("statut", "nouvelle");
+  if (vehicleId) q = q.eq("vehicle_id", vehicleId);
+  const { error } = await q;
+  if (error) return { error: dbError(error) };
+  done(vehicleId);
+  return {};
+}
+
+// --- Sinistres et amendes (VEH-7) ----------------------------------------------------------
+
+const dateTime = (fd: FormData, dk: string, hk: string) => {
+  const d = str(fd, dk);
+  const h = str(fd, hk) ?? "12:00";
+  if (!d || !dateRe.test(d) || !/^\d{2}:\d{2}$/.test(h)) return null;
+  return `${d}T${h}:00Z`; // heure d'Abidjan = UTC
+};
+
+export async function createIncident(vehicleId: string, fd: FormData): Promise<Result> {
+  await requirePermission("vehicules", "create");
+  const survenu = dateTime(fd, "date", "heure");
+  const description = str(fd, "description");
+  if (!survenu) return { error: "Date du sinistre manquante." };
+  if (Date.parse(survenu) > Date.now() + 3_600_000) return { error: "La date du sinistre est dans le futur." };
+  if (!description || description.length < 3) return { error: "Décrivez le sinistre." };
+  const cout = num(fd, "cout_reel");
+  if (cout !== undefined && (Number.isNaN(cout) || cout < 0)) return { error: "Coût invalide." };
+  const constat = await uploadVehicleFile(`${vehicleId}/sinistres`, "constat", fd.get("constat"));
+  if (constat && "error" in constat) return { error: constat.error };
+  const photo = await uploadVehicleFile(`${vehicleId}/sinistres`, "photo", fd.get("photo"));
+  if (photo && "error" in photo) {
+    await removeVehicleFile(constat?.path);
+    return { error: photo.error };
+  }
+  const supabase = await createClient();
+  const { error } = await supabase.from("vehicle_incidents").insert({
+    vehicle_id: vehicleId,
+    survenu_le: survenu,
+    lieu: str(fd, "lieu") ?? null,
+    conducteur_id: str(fd, "conducteur_id") ?? null,
+    description,
+    tiers: str(fd, "tiers") ?? null,
+    responsabilite: str(fd, "responsabilite") ?? null,
+    assureur_dossier: str(fd, "assureur_dossier") ?? null,
+    cout_reel: cout ?? null,
+    constat_path: constat?.path ?? null,
+    photo_path: photo?.path ?? null,
+  });
+  if (error) {
+    await removeVehicleFile(constat?.path);
+    await removeVehicleFile(photo?.path);
+    return { error: dbError(error) };
+  }
+  if (fd.get("immobiliser") === "on") {
+    await supabase.from("vehicles").update({ statut: "immobilise" }).eq("id", vehicleId).eq("statut", "en_service");
+  }
+  done(vehicleId);
+  return {};
+}
+
+export async function updateIncident(vehicleId: string, id: string, fd: FormData): Promise<Result> {
+  await requirePermission("vehicules", "modify");
+  const statut = str(fd, "statut");
+  if (!statut || !["declare", "expertise", "en_reparation", "clos"].includes(statut)) return { error: "Statut invalide." };
+  const cout = num(fd, "cout_reel");
+  const rembourse = num(fd, "rembourse");
+  if ((cout !== undefined && (Number.isNaN(cout) || cout < 0)) || (rembourse !== undefined && (Number.isNaN(rembourse) || rembourse < 0))) {
+    return { error: "Montant invalide." };
+  }
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("vehicle_incidents")
+    .update({
+      statut,
+      cout_reel: cout ?? null,
+      rembourse: rembourse ?? null,
+      assureur_dossier: str(fd, "assureur_dossier") ?? null,
+      clos_le: statut === "clos" ? new Date().toISOString().slice(0, 10) : null,
+    })
+    .eq("id", id);
+  if (error) return { error: dbError(error) };
+  done(vehicleId);
+  return {};
+}
+
+export async function createFine(vehicleId: string, fd: FormData): Promise<Result> {
+  await requirePermission("vehicules", "create");
+  const commise = dateTime(fd, "date", "heure");
+  const motif = str(fd, "motif");
+  const montant = num(fd, "montant");
+  if (!commise) return { error: "Date et heure de l'infraction manquantes." };
+  if (Date.parse(commise) > Date.now() + 3_600_000) return { error: "La date de l'infraction est dans le futur." };
+  if (!motif) return { error: "Motif de l'amende manquant." };
+  if (montant === undefined || Number.isNaN(montant) || montant < 0) return { error: "Montant invalide." };
+  const up = await uploadVehicleFile(`${vehicleId}/amendes`, "amende", fd.get("fichier"));
+  if (up && "error" in up) return { error: up.error };
+  const supabase = await createClient();
+  // Position GPS à l'heure de l'infraction : l'arrêt ou le trajet qui la couvre.
+  const t = Date.parse(commise);
+  const { data: segs } = await supabase
+    .from("vehicle_gps_segments")
+    .select("type,debut,fin,latitude,longitude,latitude_fin,longitude_fin,vitesse_max")
+    .eq("vehicle_id", vehicleId)
+    .lte("debut", commise)
+    .gte("debut", new Date(t - 86_400_000).toISOString())
+    .order("debut", { ascending: false })
+    .limit(1);
+  const seg = ((segs ?? []) as { type: string; fin: string | null; latitude: number | null; longitude: number | null; latitude_fin: number | null; longitude_fin: number | null; vitesse_max: number | null }[])[0];
+  const covers = seg && (!seg.fin || Date.parse(seg.fin) >= t - 15 * 60_000);
+  const { error } = await supabase.from("vehicle_fines").insert({
+    vehicle_id: vehicleId,
+    commise_le: commise,
+    lieu: str(fd, "lieu") ?? null,
+    motif: motif.slice(0, 300),
+    reference: str(fd, "reference") ?? null,
+    montant: Math.round(montant),
+    conducteur_id: str(fd, "conducteur_id") ?? null,
+    fichier_path: up?.path ?? null,
+    gps_latitude: covers ? (seg.type === "arret" ? seg.latitude : (seg.latitude_fin ?? seg.latitude)) : null,
+    gps_longitude: covers ? (seg.type === "arret" ? seg.longitude : (seg.longitude_fin ?? seg.longitude)) : null,
+    gps_vitesse: covers && seg.type === "trajet" ? seg.vitesse_max : null,
+    notes: str(fd, "notes") ?? null,
+  });
+  if (error) {
+    await removeVehicleFile(up?.path);
+    return { error: dbError(error) };
+  }
+  done(vehicleId);
+  return {};
+}
+
+export async function setFineStatut(vehicleId: string, id: string, statut: string): Promise<Result> {
+  await requirePermission("vehicules", "modify");
+  if (!["a_payer", "payee", "retenue_salaire", "contestee", "annulee"].includes(statut)) return { error: "Statut invalide." };
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("vehicle_fines")
+    .update({ statut, paye_le: statut === "payee" || statut === "retenue_salaire" ? new Date().toISOString().slice(0, 10) : null })
+    .eq("id", id);
+  if (error) return { error: dbError(error) };
+  done(vehicleId);
+  return {};
+}

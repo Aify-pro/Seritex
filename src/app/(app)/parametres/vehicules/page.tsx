@@ -16,8 +16,8 @@ import {
 
 /**
  * Paramètres > Logistique > Véhicules : ce qui règle le module Véhicules.
- * La connexion FreeTrack et les alertes GPS viendront dans un onglet voisin
- * (lots VEH-5 et VEH-8).
+ * La connexion FreeTrack et les alertes GPS ont leurs onglets voisins
+ * (Géolocalisation, Alertes GPS).
  */
 export default async function VehiculesSettingsPage() {
   await requireModule("parametres_vehicules");
@@ -25,7 +25,7 @@ export default async function VehiculesSettingsPage() {
   const [{ data: docTypes }, { data: serviceTypes }, { data: reglages }, { data: prices }, { data: stations }] = await Promise.all([
     supabase.from("vehicle_document_types").select("id,libelle,bloquant,obligatoire,preavis_jours,urgence_jours,actif").order("ordre").order("libelle"),
     supabase.from("vehicle_service_types").select("id,libelle,intervalle_jours,intervalle_km,actif").order("ordre").order("libelle"),
-    supabase.from("vehicules_reglages").select("plafond_bon,ecart_consommation_pct,ecart_prix_pct").maybeSingle(),
+    supabase.from("vehicules_reglages").select("plafond_bon,ecart_consommation_pct,ecart_prix_pct,ecart_km_gps_pct,distance_station_max_m").maybeSingle(),
     supabase.from("fuel_prices").select("id,energie,prix_litre,depuis").order("depuis", { ascending: false }).limit(12),
     supabase.from("fuel_stations").select("id,nom,adresse,latitude,longitude,actif").order("nom"),
   ]);
@@ -67,12 +67,14 @@ export default async function VehiculesSettingsPage() {
       <Card>
         <CardHeader
           title="Bons de carburant"
-          description="Plafond d'un bon (au-delà, la validation est refusée) et seuils à partir desquels un plein est signalé : consommation éloignée de l'habitude du véhicule, prix au litre éloigné du prix officiel."
+          description="Plafond d'un bon (au-delà, la validation est refusée) et seuils à partir desquels un plein est signalé : consommation éloignée de l'habitude du véhicule, prix au litre éloigné du prix officiel, km au compteur éloignés des km GPS, véhicule loin de la station à l'heure du ticket."
         />
         <FuelSettingsForm
           plafond={reglages?.plafond_bon ? Number(reglages.plafond_bon) : null}
           conso={reglages?.ecart_consommation_pct ?? 25}
           prix={reglages?.ecart_prix_pct ?? 10}
+          ecartKm={reglages?.ecart_km_gps_pct ?? 15}
+          distance={reglages?.distance_station_max_m ?? 500}
         />
       </Card>
 

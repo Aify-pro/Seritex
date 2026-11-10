@@ -26,7 +26,7 @@
     "test:livraison": "tsx scripts/test-livraison.ts",
     "test:separation": "tsx scripts/test-separation.ts",
     "test:personnel": "tsx --require ./scripts/allow-server-only.cjs scripts/test-personnel-import.ts",
-    "test:vehicules": "tsx scripts/test-vehicules.ts"
+    "test:vehicules": "tsx scripts/test-vehicules.ts && tsx scripts/test-vehicules-gps.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",
