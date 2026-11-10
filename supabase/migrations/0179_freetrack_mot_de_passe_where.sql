@@ -1,5 +1,5 @@
 -- ============================================================================
--- 0177 — Correctif : enregistrement du mot de passe FreeTrack
+-- 0179 — Correctif : enregistrement du mot de passe FreeTrack
 -- ============================================================================
 -- 0173 vidait la session FreeTrack en cache par « delete from freetrack_session; ».
 -- Sur Supabase, l'extension pg_safeupdate refuse tout DELETE sans WHERE venant
