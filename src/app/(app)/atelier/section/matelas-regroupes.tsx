@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { AlertTriangle, Layers, Scissors } from "lucide-react";
+import { AlertTriangle, Layers, Printer, Scissors } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
@@ -14,6 +14,8 @@ import type { MatelasRoll } from "./matelas-rolls";
 /** Matelas regroupé à couper (étapes 3b et 3c) : une ou plusieurs pièces (semi-finis), des couches par article d'ODF. */
 export interface MatelasRegroupe {
   traceId: string;
+  /** Ordre de tracé du matelas : sa fiche matelas imprimable (PDF). */
+  ficheId: string;
   reference: string;
   /** Noms des pièces du tracé, pour l'affichage. */
   semiFini: string;
@@ -172,6 +174,14 @@ function MatelasRegroupeDialog({ matelas, onClose }: { matelas: MatelasRegroupe;
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {error}
           </div>
         )}
+        <a
+          href={`/api/patronnage/fiches/${matelas.ficheId}/pdf?trace=${matelas.traceId}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-sm font-medium text-foreground hover:bg-surface-muted"
+        >
+          <Printer className="h-4 w-4" /> Fiche matelas (PDF)
+        </a>
         <p className="text-xs text-foreground-muted">
           Pièces par couche : {pieces0.map((p) => `${p.quantiteParCouche} ${p.semiFini} ${libelleTaille(p.taille)}`).join(", ") || "—"}. Jamais plus que le tracé ; tout manque est justifié.
         </p>

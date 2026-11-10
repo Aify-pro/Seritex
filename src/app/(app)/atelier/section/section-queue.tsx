@@ -13,6 +13,7 @@ import {
   ChevronDown,
   ChevronRight,
   Plus,
+  Printer,
   QrCode,
   Scissors,
   Trash2,
@@ -833,6 +834,15 @@ function MatelasDetailDialog({
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {error}
           </div>
         )}
+
+        <a
+          href={`/api/patronnage/fiches/${matelas.ficheId}/pdf?trace=${matelas.id}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-sm font-medium text-foreground hover:bg-surface-muted"
+        >
+          <Printer className="h-4 w-4" /> Fiche matelas (PDF)
+        </a>
 
         {!matelas.cloture && Object.keys(matelas.surplusSiCoupe).length > 0 && (
           <div className="flex items-start gap-1.5 rounded-md border border-warning/30 bg-warning-soft px-2.5 py-2 text-sm text-foreground">

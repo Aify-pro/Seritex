@@ -274,6 +274,7 @@ export default async function SectionQueuePage({
         .sort((a, b) => a.ordre - b.ordre)
         .map((t) => ({
           id: t.id,
+          ficheId: fiche.id as string,
           reference: t.reference,
           referencePatron: t.reference_patron,
           repartitionParCouche: t.repartition_par_couche ?? {},
@@ -425,7 +426,7 @@ export default async function SectionQueuePage({
     const { data: tracesRegroupes } = await supabase
       .from("traces_placement")
       .select(
-        "id,reference,statut,forme,longueur_matelas_cm,largeur_matelas_cm,fiches_placement!inner(regroupee),trace_rouleaux(textile_rolls(code)),textile_roll_events(type,textile_rolls(code,laize_cm,bain,poids_kg)),trace_semi_finis(semi_fini_id,taille,quantite_par_couche,semi_fini:product_models(name)),trace_couches(production_order_line_id,nb_couches,production_order_lines(description,colors!production_order_lines_couleur_unique_id_fkey(name),production_orders(reference,status)))"
+        "id,fiche_id,reference,statut,forme,longueur_matelas_cm,largeur_matelas_cm,fiches_placement!inner(regroupee),trace_rouleaux(textile_rolls(code)),textile_roll_events(type,textile_rolls(code,laize_cm,bain,poids_kg)),trace_semi_finis(semi_fini_id,taille,quantite_par_couche,semi_fini:product_models(name)),trace_couches(production_order_line_id,nb_couches,production_order_lines(description,colors!production_order_lines_couleur_unique_id_fkey(name),production_orders(reference,status)))"
       )
       .eq("fiches_placement.regroupee", true)
       .in("statut", ["bon_pour_coupe", "en_coupe"])
@@ -448,6 +449,7 @@ export default async function SectionQueuePage({
         }));
         return {
           traceId: t.id as string,
+          ficheId: t.fiche_id as string,
           reference: t.reference as string,
           semiFini: [...new Set(pieces.map((p) => p.semiFini))].join(" + ") || "Pièces",
           statut: t.statut as string,
