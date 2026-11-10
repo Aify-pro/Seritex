@@ -114,3 +114,10 @@ await test("sinistre et amende : conducteur retrouvé par l'affectation à la da
   assert.equal(avant.rows[0].conducteur_auto, false);
   assert.equal((await run(u.commercial, `select * from vehicle_fines`)).rows.length, 0);
 });
+
+await test("aucun DELETE sans WHERE dans les fonctions (Supabase les refuse via l'API : pg_safeupdate)", async () => {
+  const rows = await q(`
+    select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public' and p.prosrc ~* 'delete\\s+from\\s+[a-z_.]+\\s*;'`);
+  assert.deepEqual(rows.map((r) => r.proname), []);
+});
