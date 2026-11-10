@@ -44,8 +44,20 @@ export function SidebarNav({ items }: { items: SidebarEntry[] }) {
 
   return (
     <nav className="flex flex-col gap-0.5 px-3">
-      {items.map((entry) => {
-        if (!("children" in entry)) return <NavLink key={entry.href} item={entry} pathname={pathname} />;
+      {items.map((entry, i) => {
+        if (!("children" in entry)) {
+          // En-tête de groupe métier au premier élément de chaque groupe visible.
+          const precedent = i > 0 ? items[i - 1] : null;
+          const nouveauGroupe = entry.groupe && (!precedent || "children" in precedent || precedent.groupe !== entry.groupe);
+          return (
+            <div key={entry.href}>
+              {nouveauGroupe && (
+                <p className="px-3 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-wide text-foreground-muted/80">{entry.groupe}</p>
+              )}
+              <NavLink item={entry} pathname={pathname} />
+            </div>
+          );
+        }
 
         const containsActive = entry.children.some((child) => isActive(pathname, child));
         const open = toggled[entry.label] ?? containsActive;
