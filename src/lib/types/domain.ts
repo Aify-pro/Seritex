@@ -387,6 +387,10 @@ export interface Quote {
   validated_at?: string | null;
   rejet_motif?: string | null;
   rejet_at?: string | null;
+  /** Modification d'une proforma acceptée (0167) : en cours, et dernière appliquée. */
+  modification_ouverte_le?: string | null;
+  modifie_apres_acceptation_le?: string | null;
+  modifie_apres_acceptation_motif?: string | null;
   created_at: string;
   companies?: Pick<Company, "id" | "name">;
 }

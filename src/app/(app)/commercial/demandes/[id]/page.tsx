@@ -31,7 +31,7 @@ export default async function RequestDetailPage({
   /** `sage` : n° d'un devis Sage à récupérer (préremplit le devis) ; `sage_q` : recherche par numéro (migration 0071). */
   searchParams: Promise<{ sage?: string; sage_q?: string }>;
 }) {
-  const { authId } = await requireAnyModule(["demandes", "demandes_stock"]);
+  const { authId, profile } = await requireAnyModule(["demandes", "demandes_stock"]);
   // Les demandes des clients et du site demandent « Voir » sur Demandes ; la base filtre aussi les lignes.
   const [canViewRequests, canLink, canCreateOdf] = await Promise.all([
     can("demandes", "view"),
@@ -159,9 +159,17 @@ export default async function RequestDetailPage({
     {}
   );
 
+  // Proforma acceptée modifiable par l'administrateur tant que son ODF est en brouillon (0167).
+  const acceptees = (quotes ?? []).filter((q) => q.status === "accepte").map((q) => q.id as string);
+  const { data: odfsAcceptees } =
+    profile.role === "administrateur" && acceptees.length > 0
+      ? await supabase.from("production_orders").select("quote_id,status,reference").in("quote_id", acceptees)
+      : { data: [] as { quote_id: string; status: string; reference: string }[] };
   const corrections = new Map<string, { motif: string | null; correction: QuoteCorrection }>();
   for (const q of quotes ?? []) {
-    if (q.status !== "brouillon") continue;
+    const odf = (odfsAcceptees ?? []).find((o) => o.quote_id === q.id);
+    const modifiable = q.status === "accepte" && profile.role === "administrateur" && (!odf || odf.status === "brouillon");
+    if (q.status !== "brouillon" && !modifiable) continue;
     const lines = (q.quote_lines ?? []) as unknown as {
       id: string;
       product_model_id: string | null;
@@ -177,10 +185,11 @@ export default async function RequestDetailPage({
       quote_line_size_prices: { taille: string; prix: number; source: "client" | "grille" | "saisie" }[] | null;
     }[];
     corrections.set(q.id, {
-      motif: q.rejet_motif ?? null,
+      motif: q.status === "brouillon" ? (q.rejet_motif ?? null) : null,
       correction: {
         quoteId: q.id,
         reference: q.reference,
+        modification: modifiable ? { odfReference: (odf?.reference as string | undefined) ?? null } : undefined,
         lines: lines.map((l) => ({
           id: l.id,
           productModelId: l.product_model_id,

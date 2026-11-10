@@ -359,6 +359,43 @@ export async function createQuote(
 }
 
 /**
+ * Écrit les lignes d'un devis (création des nouvelles, mise à jour des
+ * existantes avec couleurs, impressions, prix et répartition) — partagé par la
+ * resoumission d'un devis renvoyé et la modification d'une proforma acceptée.
+ */
+async function ecrireLignesDevis(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  quoteId: string,
+  lines: z.infer<typeof createQuoteSchema>["lines"]
+): Promise<{ error?: string }> {
+  for (const line of lines) {
+    if (!line.id) {
+      const res = await insertQuoteLine(supabase, quoteId, line);
+      if (res.error) return { error: res.error };
+      continue;
+    }
+    const { error: lineError } = await supabase.from("quote_lines").update(quoteLineFields(line)).eq("id", line.id);
+    if (lineError) return { error: lineError.message };
+    const { error: clearError } = await supabase.from("quote_line_zone_colors").delete().eq("quote_line_id", line.id);
+    if (clearError) return { error: clearError.message };
+    const res = await insertZoneColors(supabase, line.id, line);
+    if (res.error) return { error: res.error };
+    const { error: clearPrintError } = await supabase.from("quote_line_printable_zones").delete().eq("quote_line_id", line.id);
+    if (clearPrintError) return { error: clearPrintError.message };
+    const printRes = await insertPrintableZones(supabase, line.id, line);
+    if (printRes.error) return { error: printRes.error };
+    const pricesRes = await replaceSizePrices(supabase, line.id, line);
+    if (pricesRes.error) return { error: pricesRes.error };
+    // Remplace toute la répartition ; un article devenu « hors catalogue » la perd.
+    const sizesRes = line.product_model_id
+      ? await writeQuoteLineSizes(supabase, line.id, line)
+      : await supabase.rpc("set_quote_line_sizes", { p_quote_line_id: line.id, p_sizes: {} }).then(({ error: e }) => (e ? { error: e.message } : {}));
+    if (sizesRes.error) return { error: sizesRes.error };
+  }
+  return {};
+}
+
+/**
  * Resoumission d'un devis renvoyé par la Direction (migration 0064) : le
  * commercial corrige le brouillon puis le renvoie en validation interne
  * (brouillon → en_validation_interne, transition admise par le trigger de
@@ -402,30 +439,8 @@ export async function resubmitQuote(
     if (error) return { error: error.message };
   }
 
-  for (const line of parsed.data.lines) {
-    if (!line.id) {
-      const res = await insertQuoteLine(supabase, quoteId, line);
-      if (res.error) return { error: res.error };
-      continue;
-    }
-    const { error: lineError } = await supabase.from("quote_lines").update(quoteLineFields(line)).eq("id", line.id);
-    if (lineError) return { error: lineError.message };
-    const { error: clearError } = await supabase.from("quote_line_zone_colors").delete().eq("quote_line_id", line.id);
-    if (clearError) return { error: clearError.message };
-    const res = await insertZoneColors(supabase, line.id, line);
-    if (res.error) return { error: res.error };
-    const { error: clearPrintError } = await supabase.from("quote_line_printable_zones").delete().eq("quote_line_id", line.id);
-    if (clearPrintError) return { error: clearPrintError.message };
-    const printRes = await insertPrintableZones(supabase, line.id, line);
-    if (printRes.error) return { error: printRes.error };
-    const pricesRes = await replaceSizePrices(supabase, line.id, line);
-    if (pricesRes.error) return { error: pricesRes.error };
-    // Remplace toute la répartition ; un article devenu « hors catalogue » la perd.
-    const sizesRes = line.product_model_id
-      ? await writeQuoteLineSizes(supabase, line.id, line)
-      : await supabase.rpc("set_quote_line_sizes", { p_quote_line_id: line.id, p_sizes: {} }).then(({ error: e }) => (e ? { error: e.message } : {}));
-    if (sizesRes.error) return { error: sizesRes.error };
-  }
+  const linesRes = await ecrireLignesDevis(supabase, quoteId, parsed.data.lines);
+  if (linesRes.error) return { error: linesRes.error };
 
   const { error } = await supabase
     .from("quotes")
@@ -444,6 +459,68 @@ export async function resubmitQuote(
   revalidatePath(`/commercial/demandes/${quote.request_id}`);
   revalidateQuote(quoteId);
   revalidatePath("/commercial/devis");
+  return {};
+}
+
+/**
+ * Modification d'une proforma acceptée par l'administrateur (migration 0167),
+ * tant que l'ODF né de son acceptation est en brouillon : même formulaire que
+ * la correction d'un devis renvoyé, motif obligatoire. La base ouvre la
+ * modification, les lignes sont réécrites, puis la modification est contrôlée
+ * (configuration complète, 0166) et reportée sur l'ODF. En cas d'échec en
+ * cours de route, la modification reste ouverte et l'ODF ne peut pas être
+ * soumis : il suffit de renvoyer le formulaire.
+ */
+export async function modifierDevisAccepte(
+  quoteId: string,
+  lines: QuoteLineInput[],
+  dateLivraisonPrevue: string | null,
+  terms: QuoteTermsInput,
+  motif: string
+) {
+  await requirePermission("devis", "modify");
+  if (!motif.trim()) return { error: "Le motif de la modification est obligatoire" };
+  const parsed = createQuoteSchema.safeParse({ lines, date_livraison_prevue: dateLivraisonPrevue, terms });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Devis invalide" };
+
+  const supabase = await createClient();
+  const { data: quote } = await supabase.from("quotes").select("id,status,request_id").eq("id", quoteId).maybeSingle();
+  if (!quote) return { error: "Devis introuvable" };
+  if (quote.status !== "accepte") return { error: "Seule une proforma acceptée se modifie ainsi" };
+
+  const prepared = await prepareQuoteFields(supabase, parsed.data);
+  if ("error" in prepared) return { error: prepared.error };
+
+  const { error: openError } = await supabase.rpc("ouvrir_modification_devis", { p_quote_id: quoteId, p_motif: motif.trim() });
+  if (openError) return { error: openError.message };
+
+  const { data: existing, error: existingError } = await supabase.from("quote_lines").select("id").eq("quote_id", quoteId);
+  if (existingError) return { error: existingError.message };
+  const existingIds = new Set((existing ?? []).map((l) => l.id as string));
+  const keptIds = new Set(parsed.data.lines.map((l) => l.id).filter((id): id is string => !!id));
+  for (const id of keptIds) {
+    if (!existingIds.has(id)) return { error: "Une ligne ne correspond pas à ce devis — rechargez la page" };
+  }
+  // Une ligne retirée emporte l'article d'ODF qui en est né.
+  for (const id of [...existingIds].filter((id) => !keptIds.has(id))) {
+    const { error } = await supabase.rpc("retirer_ligne_devis_modifie", { p_quote_line_id: id });
+    if (error) return { error: error.message };
+  }
+
+  const linesRes = await ecrireLignesDevis(supabase, quoteId, parsed.data.lines);
+  if (linesRes.error) return { error: linesRes.error };
+
+  // Champs du devis (conditions, totaux) sans toucher au statut.
+  const { error: fieldsError } = await supabase.from("quotes").update(prepared.fields).eq("id", quoteId);
+  if (fieldsError) return { error: fieldsError.message };
+
+  const { data: poId, error: applyError } = await supabase.rpc("appliquer_modification_devis", { p_quote_id: quoteId });
+  if (applyError) return { error: applyError.message };
+
+  revalidatePath(`/commercial/demandes/${quote.request_id}`);
+  revalidateQuote(quoteId);
+  revalidatePath("/commercial/devis");
+  if (poId) revalidatePath(`/atelier/production/${poId}`);
   return {};
 }
 

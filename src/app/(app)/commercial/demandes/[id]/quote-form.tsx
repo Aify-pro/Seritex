@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { createQuote, resubmitQuote, type QuoteLineInput } from "../../actions";
+import { createQuote, modifierDevisAccepte, resubmitQuote, type QuoteLineInput } from "../../actions";
 import { useRouter } from "next/navigation";
 import { ZoneColorPicker, EMPTY_ZONE_COLOR_DRAFT, type ZoneColorDraft } from "@/components/product/zone-color-picker";
 import { computeQuoteTotals, lineNet } from "@/lib/quote-totals";
@@ -154,6 +154,11 @@ export type QuoteCorrection = {
   reference: string;
   lines: CorrectionLine[];
   terms: TermsDraft;
+  /**
+   * Présent : proforma acceptée modifiée par l'administrateur (0167), reportée
+   * sur l'ODF en brouillon. Absent : correction d'un devis renvoyé.
+   */
+  modification?: { odfReference: string | null };
 };
 
 function lineFromCorrection(l: CorrectionLine): LineDraft {
@@ -292,6 +297,8 @@ export function QuoteForm({
 }) {
   const [pending, startTransition] = useTransition();
   const [open, setOpen] = useState(!!prefill);
+  const [motif, setMotif] = useState("");
+  const modification = correction?.modification;
   const [lines, setLines] = useState<LineDraft[]>(() => (prefill ? prefill.lines.map(lineFromSage) : [newLine()]));
   const [terms, setTerms] = useState<TermsDraft>(() =>
     prefill ? termsFromSage(newTerms(defaults, paymentTerms), prefill) : newTerms(defaults, paymentTerms)
@@ -339,7 +346,11 @@ export function QuoteForm({
           setOpen(true);
         }}
       >
-        {correction ? `Corriger ${correction.reference} et resoumettre` : "Établir un devis"}
+        {modification
+          ? `Modifier la proforma ${correction?.reference}`
+          : correction
+            ? `Corriger ${correction.reference} et resoumettre`
+            : "Établir un devis"}
       </Button>
     );
   }
@@ -501,12 +512,24 @@ export function QuoteForm({
         notes: terms.notes,
         valid_until: terms.validUntil || null,
       };
-      const res = correction
+      if (modification && !motif.trim()) {
+        toast.error("Indiquez le motif de la modification");
+        return;
+      }
+      const res = modification && correction
+        ? await modifierDevisAccepte(correction.quoteId, payload, dateLivraison, termsInput, motif)
+        : correction
         ? await resubmitQuote(correction.quoteId, payload, dateLivraison, termsInput)
         : await createQuote(requestId, companyId, payload, dateLivraison, termsInput, prefill?.sagePiece ?? null);
       if (res.error) toast.error(res.error);
       else {
-        toast.success(correction ? "Devis corrigé — resoumis à la validation interne" : "Devis créé — en attente de validation interne");
+        toast.success(
+          modification
+            ? `Proforma modifiée${modification.odfReference ? ` — ODF ${modification.odfReference} mis à jour` : ""}`
+            : correction
+              ? "Devis corrigé — resoumis à la validation interne"
+              : "Devis créé — en attente de validation interne"
+        );
         setOpen(false);
         // Un devis récupéré de Sage : on quitte `?sage=` (le devis est désormais lié, il ne se récupère plus).
         if (prefill) router.replace(`/commercial/demandes/${requestId}`);
@@ -932,9 +955,35 @@ export function QuoteForm({
         </dl>
       </div>
 
+      {modification && (
+        <div className="space-y-1.5 rounded-md border border-warning/40 bg-warning-soft/40 p-3">
+          <p className="text-sm font-medium text-foreground">Modification d&apos;une proforma déjà acceptée</p>
+          <p className="text-xs text-foreground-muted">
+            {modification.odfReference
+              ? `Les changements seront reportés sur l'ODF ${modification.odfReference} (encore en brouillon). `
+              : ""}
+            Le devis Sage n&apos;est pas modifié.
+          </p>
+          <label className="block space-y-1 text-xs text-foreground-muted">
+            Motif (obligatoire)
+            <textarea
+              value={motif}
+              onChange={(e) => setMotif(e.target.value)}
+              rows={2}
+              className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground"
+              placeholder="Ex. : le client passe à 300 pièces et ajoute la taille XXL"
+            />
+          </label>
+        </div>
+      )}
+
       <div className="flex gap-2 border-t border-border pt-3">
         <Button type="button" size="sm" loading={pending} onClick={submit}>
-          {correction ? "Resoumettre à la validation interne" : "Soumettre à la validation interne"}
+          {modification
+            ? "Enregistrer la modification"
+            : correction
+              ? "Resoumettre à la validation interne"
+              : "Soumettre à la validation interne"}
         </Button>
         <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(false)}>
           Annuler
