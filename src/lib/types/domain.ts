@@ -391,7 +391,7 @@ export interface Quote {
   modification_ouverte_le?: string | null;
   modifie_apres_acceptation_le?: string | null;
   modifie_apres_acceptation_motif?: string | null;
-  /** Annulation du devis (0174) : l'ODF né du devis est annulé avec lui. */
+  /** Annulation du devis (0178) : l'ODF né du devis est annulé avec lui. */
   annule_le?: string | null;
   annule_motif?: string | null;
   created_at: string;

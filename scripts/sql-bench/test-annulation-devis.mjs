@@ -1,4 +1,4 @@
-// Scénarios SQL de la migration 0174 : annulation d'un devis (même accepté,
+// Scénarios SQL de la migration 0178 : annulation d'un devis (même accepté,
 // ODF en production) par l'administrateur ou la Direction, avec motif ; l'ODF
 // est annulé avec lui, la demande rouverte ; les pièces déjà coupées restent
 // en stock tampon, signalées, et se réorientent vers un autre ODF.

@@ -18,7 +18,7 @@ export interface PaquetRow {
   detenteur: string | null;
   en_transit: boolean;
   verrouille: boolean;
-  /** ODF annulé (0174) : pièces à réattribuer. */
+  /** ODF annulé (0178) : pièces à réattribuer. */
   odf_annule?: boolean;
   /** Liste multi-semi-finis (fiche d'un ODF annulé) : la pièce du paquet. */
   semi_fini_id?: string;

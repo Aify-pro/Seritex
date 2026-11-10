@@ -851,7 +851,7 @@ export async function acceptQuote(quoteId: string) {
 }
 
 /**
- * Annulation d'un devis (migration 0174) : administrateur et Direction, motif
+ * Annulation d'un devis (migration 0178) : administrateur et Direction, motif
  * obligatoire, même accepté et ODF en production. L'ODF né du devis est
  * annulé avec lui et la demande rouverte ; les pièces déjà coupées restent en
  * stock tampon, à réorienter. Tous les contrôles sont dans annuler_devis().
