@@ -60,6 +60,8 @@ export const MODULE_META: Record<string, ModuleMeta> = {
   machines_ecrans: { group: "modules", actions: ["view", "create", "modify", "delete"] },
   livraisons: { group: "modules", actions: ["view", "create", "modify", "validate"] },
   lieux_livraison: { group: "modules", actions: ["create", "modify", "delete"] },
+  vehicules: { group: "modules", actions: ["view", "create", "modify", "delete"] },
+  bons_carburant: { group: "modules", actions: ["view", "create", "modify", "validate"] },
 
   // --- Paramètres --------------------------------------------------------
   couleurs_tailles: { group: "parametres", actions: ["view", "create", "modify", "delete"] },
@@ -69,6 +71,7 @@ export const MODULE_META: Record<string, ModuleMeta> = {
   fabrication: { group: "parametres", actions: VIEW, platformAdminOnly: true },
   dispatching: { group: "parametres", actions: ["view", "create", "modify", "delete"] },
   parametres_livraison: { group: "parametres", actions: ["view", "create", "modify", "delete"] },
+  parametres_vehicules: { group: "parametres", actions: ["view", "create", "modify", "delete"] },
   stock_sage: { group: "parametres", actions: VIEW },
   clients_sage: { group: "parametres", actions: VIEW },
   articles_sage: { group: "parametres", actions: VIEW },

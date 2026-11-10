@@ -3,31 +3,31 @@ import { requireModule, can } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
-import { VEHICLE_TYPE_LABELS, type VehicleType } from "@/lib/types/domain";
+import Link from "next/link";
 import { ActiveSwitch, InlineCreateForm } from "./referential-forms";
 
 const ZONE_TYPE_LABELS = { commune: "Commune", interieur: "Intérieur", international: "International" } as const;
 const INTEGRATION_LABELS = { manuel: "Manuel", yango: "Yango (e-shop)", dhl: "DHL (e-shop)" } as const;
 
 /**
- * Paramètres > Livraison (LIV-0) : zones de livraison, transporteurs et
- * véhicules. Les lieux de livraison, eux, se gèrent sur la fiche client.
+ * Paramètres > Logistique > Livraison (LIV-0) : zones de livraison et
+ * transporteurs. Les lieux de livraison se gèrent sur la fiche client, les
+ * véhicules dans Logistique > Véhicules (0168).
  */
 export default async function LivraisonSettingsPage() {
   await requireModule("parametres_livraison");
   if (!(await can("livraisons", "view"))) redirect("/dashboard?erreur=acces_refuse");
   const supabase = await createClient();
-  const [{ data: zones }, { data: carriers }, { data: vehicles }] = await Promise.all([
+  const [{ data: zones }, { data: carriers }] = await Promise.all([
     supabase.from("delivery_zones").select("*").order("ordre"),
     supabase.from("carriers").select("*").order("nom"),
-    supabase.from("vehicles").select("*").order("libelle"),
   ]);
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Livraison"
-        description="Zones de livraison, transporteurs et véhicules. Les lieux de livraison se gèrent sur la fiche de chaque client."
+        description="Zones de livraison et transporteurs. Les lieux de livraison se gèrent sur la fiche de chaque client."
       />
 
       <Card>
@@ -96,45 +96,13 @@ export default async function LivraisonSettingsPage() {
         </CardBody>
       </Card>
 
-      <Card>
-        <CardHeader title="Véhicules" />
-        <CardBody className="space-y-3">
-          {(vehicles ?? []).length === 0 ? (
-            <p className="text-sm text-foreground-muted">Aucun véhicule enregistré.</p>
-          ) : (
-            <ul className="divide-y divide-border rounded-md border border-border">
-              {(vehicles ?? []).map((v) => (
-                <li key={v.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-                  <span>
-                    {v.libelle}{" "}
-                    <span className="text-xs text-foreground-muted">
-                      {VEHICLE_TYPE_LABELS[v.type as VehicleType]}
-                      {v.immatriculation ? ` · ${v.immatriculation}` : ""}
-                      {v.capacite_note ? ` · ${v.capacite_note}` : ""}
-                    </span>
-                  </span>
-                  <ActiveSwitch kind="vehicle" id={v.id} actif={v.actif} />
-                </li>
-              ))}
-            </ul>
-          )}
-          <InlineCreateForm
-            kind="vehicle"
-            label="Véhicule"
-            fields={[
-              {
-                name: "type",
-                label: "Type",
-                kind: "select",
-                options: Object.entries(VEHICLE_TYPE_LABELS).map(([value, label]) => ({ value, label })),
-              },
-              { name: "libelle", label: "Libellé", kind: "text", required: true, placeholder: "Camion 1" },
-              { name: "immatriculation", label: "Immatriculation", kind: "text", width: "w-32" },
-              { name: "capacite_note", label: "Capacité", kind: "text", placeholder: "ex. 40 cartons" },
-            ]}
-          />
-        </CardBody>
-      </Card>
+      <p className="text-sm text-foreground-muted">
+        Les véhicules (papiers, chauffeur, carburant, entretien) se gèrent dans{" "}
+        <Link href="/vehicules" className="font-medium text-brand hover:underline">
+          Logistique &gt; Véhicules
+        </Link>
+        .
+      </p>
     </div>
   );
 }

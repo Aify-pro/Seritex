@@ -6,7 +6,8 @@ import { createClient } from "@/lib/supabase/server";
 import { requirePermission } from "@/lib/auth/permissions";
 
 /**
- * Référentiels de livraison (LIV-0) : zones, transporteurs, véhicules.
+ * Référentiels de livraison (LIV-0) : zones et transporteurs (les véhicules
+ * ont leur module, 0168).
  * Écriture selon les droits « Paramètres livraison » de la matrice — la RLS
  * (migration 0113) fait foi.
  */
@@ -66,43 +67,6 @@ export async function setCarrierActive(id: string, actif: boolean) {
         : error.message,
     };
   }
-  done();
-  return {};
-}
-
-const vehicleSchema = z.object({
-  type: z.enum(["camion", "fourgonnette", "voiture", "moto", "tricycle"]),
-  libelle: z.string().trim().min(1, "Libellé manquant").max(80),
-  immatriculation: z.string().trim().max(20).optional(),
-  capacite_note: z.string().trim().max(120).optional(),
-});
-
-export async function createVehicle(formData: FormData) {
-  await requirePermission("parametres_livraison", "create");
-  const parsed = vehicleSchema.safeParse({
-    type: formData.get("type"),
-    libelle: formData.get("libelle"),
-    immatriculation: formData.get("immatriculation") || undefined,
-    capacite_note: formData.get("capacite_note") || undefined,
-  });
-  if (!parsed.success) return { error: parsed.error.issues[0]?.message };
-  const supabase = await createClient();
-  const { error } = await supabase.from("vehicles").insert({
-    type: parsed.data.type,
-    libelle: parsed.data.libelle,
-    immatriculation: parsed.data.immatriculation?.toUpperCase() || null,
-    capacite_note: parsed.data.capacite_note || null,
-  });
-  if (error) return { error: error.code === "23505" ? "Cette immatriculation existe déjà." : error.message };
-  done();
-  return {};
-}
-
-export async function setVehicleActive(id: string, actif: boolean) {
-  await requirePermission("parametres_livraison", "modify");
-  const supabase = await createClient();
-  const { error } = await supabase.from("vehicles").update({ actif }).eq("id", id);
-  if (error) return { error: error.message };
   done();
   return {};
 }

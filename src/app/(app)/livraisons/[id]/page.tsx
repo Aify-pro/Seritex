@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { ArrowLeft, Printer, MapPin } from "lucide-react";
 import { requireModule, can } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
+import { loadDeliveryVehicleOptions } from "@/lib/vehicules/options";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { PageHeader } from "@/components/shell/page-header";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
@@ -28,10 +29,10 @@ export default async function ShipmentPage({ params }: { params: Promise<{ id: s
   const s = shipment.statut;
   const editableLines = isManager && (s === "a_preparer" || s === "preparee");
 
-  const [{ data: places }, { data: carriers }, { data: vehicles }, { data: livreurs }, remainingRes, mergeRes, hintRes] = await Promise.all([
+  const [{ data: places }, { data: carriers }, vehicles, { data: livreurs }, remainingRes, mergeRes, hintRes] = await Promise.all([
     supabase.from("delivery_places").select("id,libelle,par_defaut,quartier").eq("company_id", shipment.companyId).eq("actif", true).order("libelle"),
     supabase.from("carriers").select("id,nom").eq("actif", true).order("nom"),
-    supabase.from("vehicles").select("id,libelle,immatriculation").eq("actif", true).order("libelle"),
+    loadDeliveryVehicleOptions(),
     supabase.from("app_users").select("id,full_name").eq("role", "livreur").eq("active", true).order("full_name"),
     shipment.productionOrderId && editableLines
       ? supabase.rpc("odf_remaining_to_ship", { p_production_order_id: shipment.productionOrderId })
@@ -207,7 +208,7 @@ export default async function ShipmentPage({ params }: { params: Promise<{ id: s
         <PlanningForm
           shipment={shipment}
           carriers={(carriers ?? []).map((c) => ({ id: c.id, label: c.nom }))}
-          vehicles={(vehicles ?? []).map((v) => ({ id: v.id, label: [v.libelle, v.immatriculation].filter(Boolean).join(" · ") }))}
+          vehicles={vehicles}
           livreurs={(livreurs ?? []).map((l) => ({ id: l.id, label: l.full_name }))}
         />
       )}

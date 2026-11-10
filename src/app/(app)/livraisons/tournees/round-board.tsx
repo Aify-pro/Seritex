@@ -41,7 +41,7 @@ export function RoundBoard({
   rounds: RoundView[];
   candidates: Candidate[];
   livreurs: { id: string; label: string }[];
-  vehicles: { id: string; label: string }[];
+  vehicles: { id: string; label: string; disabled?: boolean }[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -152,7 +152,7 @@ export function RoundBoard({
           <select value={vehicleId} onChange={(e) => setVehicleId(e.target.value)} className="h-9 rounded-md border border-border bg-surface px-2 text-sm">
             <option value="">Véhicule…</option>
             {vehicles.map((v) => (
-              <option key={v.id} value={v.id}>
+              <option key={v.id} value={v.id} disabled={v.disabled}>
                 {v.label}
               </option>
             ))}

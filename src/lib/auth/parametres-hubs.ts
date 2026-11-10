@@ -75,10 +75,13 @@ const HUBS: HubDefinition[] = [
     ],
   },
   {
-    key: "livraison",
-    label: "Livraison",
+    key: "logistique",
+    label: "Logistique",
     icon: Truck,
-    tabs: [{ href: "/parametres/livraison", label: "Zones, transporteurs et véhicules" }],
+    tabs: [
+      { href: "/parametres/livraison", label: "Livraison" },
+      { href: "/parametres/vehicules", label: "Véhicules" },
+    ],
   },
   {
     key: "commercial",
