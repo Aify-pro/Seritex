@@ -282,7 +282,7 @@ export async function buildQuotePdf(data: QuotePdfData): Promise<Uint8Array> {
   if (quote.status === "brouillon" || quote.status === "en_validation_interne") {
     text("PROJET - EN ATTENTE DE VALIDATION INTERNE - NON ENVOYÉ AU CLIENT", M, y - 6, 8.5, bold, rgb(0.7, 0.1, 0.1));
   }
-  if (quote.status === "refuse" || quote.status === "expire") {
+  if (quote.status === "refuse" || quote.status === "expire" || quote.status === "annule") {
     text(`Statut : ${QUOTE_STATUS_LABELS[quote.status]}`, M, y - 6, 8.5, bold, rgb(0.7, 0.1, 0.1));
   }
   y -= 14;

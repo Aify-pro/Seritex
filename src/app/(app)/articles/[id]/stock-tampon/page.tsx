@@ -8,7 +8,7 @@ import { PaquetsCard, type PaquetRow } from "./paquets-card";
 
 const nf = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 });
 
-type Row = { production_order_id: string; odf: string; line_id: string; article: string; taille: string; coupees: number; assemblees: number; en_attente: number };
+type Row = { production_order_id: string; odf: string; line_id: string; article: string; taille: string; coupees: number; assemblees: number; en_attente: number; odf_annule: boolean };
 
 /**
  * Onglet Stock tampon d'un semi-fini (décisions S25, S37, S42 ; migrations
@@ -38,7 +38,7 @@ export default async function ArticleStockTamponPage({ params }: { params: Promi
     <Card>
       <CardHeader
         title="Stock tampon — pièces coupées en production"
-        description="Par ODF ouvert et par taille : pièces coupées (matelas clôturés), déjà assemblées en t-shirts complets, et en attente d'assemblage. Consultation ; interne à la production, jamais envoyé à Sage."
+        description="Par ODF ouvert et par taille : pièces coupées (matelas clôturés), déjà assemblées en t-shirts complets, et en attente d'assemblage. Les pièces d'un ODF annulé restent ici, signalées, jusqu'à leur réorientation vers un autre ODF. Interne à la production, jamais envoyé à Sage."
       />
       <CardBody className="p-0">
         <Table>
@@ -68,6 +68,9 @@ export default async function ArticleStockTamponPage({ params }: { params: Promi
                         </Link>
                       ) : (
                         <span className="font-medium">{r.odf}</span>
+                      )}
+                      {r.odf_annule && (
+                        <span className="ml-1.5 rounded bg-danger-soft px-1.5 py-0.5 text-[11px] font-medium text-danger">ODF annulé</span>
                       )}
                     </Td>
                     <Td>{r.article}</Td>

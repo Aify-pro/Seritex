@@ -849,3 +849,25 @@ export async function acceptQuote(quoteId: string) {
   revalidatePath("/atelier/production");
   return { productionOrderId: data as string };
 }
+
+/**
+ * Annulation d'un devis (migration 0174) : administrateur et Direction, motif
+ * obligatoire, même accepté et ODF en production. L'ODF né du devis est
+ * annulé avec lui et la demande rouverte ; les pièces déjà coupées restent en
+ * stock tampon, à réorienter. Tous les contrôles sont dans annuler_devis().
+ */
+export async function annulerDevis(
+  quoteId: string,
+  motif: string
+): Promise<{ error?: string; odf?: string[]; demandeRouverte?: boolean }> {
+  await requireUser();
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("annuler_devis", { p_quote_id: quoteId, p_motif: motif.trim() });
+  if (error) return { error: error.message };
+  const r = (data ?? {}) as { odf?: string[]; demande_rouverte?: boolean };
+  revalidatePath(`/commercial/devis/${quoteId}`);
+  revalidatePath("/commercial/devis");
+  revalidatePath("/commercial/demandes", "layout");
+  revalidatePath("/atelier/production", "layout");
+  return { odf: r.odf ?? [], demandeRouverte: !!r.demande_rouverte };
+}

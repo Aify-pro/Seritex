@@ -10,6 +10,7 @@ import { QuoteSimulationCard } from "@/components/quotes/quote-simulation-card";
 import type { AttachableMediaFile } from "@/lib/types/domain";
 import { getSampleQuoteLineOptions } from "@/lib/samples";
 import { ConfigurationIncompleteCard, type AnomalieConfiguration } from "@/components/configuration/configuration-incomplete-card";
+import { CancelQuoteCard, type OdfAAnnuler } from "@/components/quotes/cancel-quote-card";
 
 export default async function CommercialQuoteDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { authId, profile } = await requireModule("devis");
@@ -27,7 +28,7 @@ export default async function CommercialQuoteDetailPage({ params }: { params: Pr
   // toute la médiathèque du client, seulement ce qui est déjà affilié à
   // cette demande — voir src/app/(app)/atelier/production/[id]/page.tsx
   // pour le même principe côté ODF.
-  const [lines, { data: requestMedia }, { data: samples }, sampleQuoteLineOptions, canValidate, validators, validator, { data: anomalies }] =
+  const [lines, { data: requestMedia }, { data: samples }, sampleQuoteLineOptions, canValidate, validators, validator, { data: anomalies }, { data: peutAnnuler }] =
     await Promise.all([
     getQuoteLinesWithColorConfig(id),
     supabase.from("request_media_files").select("media_files(id,file_name,category)").eq("request_id", quote.request_id),
@@ -49,7 +50,12 @@ export default async function CommercialQuoteDetailPage({ params }: { params: Pr
       : Promise.resolve(null),
     // Garde-fou de configuration (0166) : ce qui bloque l'envoi puis l'acceptation.
     supabase.rpc("configuration_devis", { p_quote_id: id }),
+    // Annulation (0174) : administrateur et Direction.
+    quote.status === "annule" ? Promise.resolve({ data: false }) : supabase.rpc("peut_annuler_devis"),
   ]);
+  const { data: odfsAAnnuler } = peutAnnuler
+    ? await supabase.rpc("annulation_devis_apercu", { p_quote_id: id })
+    : { data: [] as OdfAAnnuler[] };
   const sizeOptionsByModel = await getSizeOptionsByModel(lines.map((l) => l.product_model_id));
   // Simulation du prix de revient (lot E) : Direction et administrateur
   // uniquement (base_role administrateur ; la RLS des tables de coût l'impose
@@ -86,6 +92,9 @@ export default async function CommercialQuoteDetailPage({ params }: { params: Pr
       validatedBy={validator}
       sizeOptionsByModel={sizeOptionsByModel}
       />
+      {peutAnnuler === true && (
+        <CancelQuoteCard quoteId={id} reference={quote.reference} odfs={(odfsAAnnuler ?? []) as OdfAAnnuler[]} />
+      )}
     </div>
   );
 }

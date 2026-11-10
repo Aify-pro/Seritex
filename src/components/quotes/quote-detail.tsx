@@ -108,6 +108,15 @@ export function QuoteDetail({
           </CardBody>
         </Card>
       )}
+      {quote.status === "annule" && (
+        <Card className="border-danger/30 bg-danger-soft/40">
+          <CardBody className="text-sm">
+            <p className="font-medium text-foreground">Devis annulé{quote.annule_le ? ` le ${formatDate(quote.annule_le)}` : ""}</p>
+            {/* Motif interne : jamais montré au client. */}
+            {editable && quote.annule_motif && <p className="text-foreground-muted">{quote.annule_motif}</p>}
+          </CardBody>
+        </Card>
+      )}
       {quote.status === "brouillon" && quote.rejet_motif && editable && (
         <Card className="border-danger/30 bg-danger-soft/40">
           <CardBody className="text-sm">
