@@ -1344,8 +1344,18 @@ function TraceDetailBody({
             <Field label="Largeur matelas (cm)">
               <input type="number" name="largeur_matelas_cm" defaultValue={trace.largeurMatelasCm ?? ""} disabled={!champsModifiables} className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground disabled:opacity-60" />
             </Field>
-            <Field label="Nombre de plis">
-              <input type="number" name={fiche.regroupee ? undefined : "nb_plis"} defaultValue={trace.nbPlis ?? ""} disabled={!champsModifiables || fiche.regroupee} title={fiche.regroupee ? "Somme des couches par article" : undefined} className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground disabled:opacity-60" />
+            {/* Tracé regroupé : les plis sont la somme des couches attribuées aux articles d'ODF ;
+                tant qu'aucune couche n'est attribuée (ordre sans ODF), on saisit les plis prévus. */}
+            <Field label={fiche.regroupee && trace.couches.length === 0 ? "Nombre de plis (prévus)" : "Nombre de plis"}>
+              <input
+                type="number"
+                min={0}
+                name={fiche.regroupee && trace.couches.length > 0 ? undefined : "nb_plis"}
+                defaultValue={trace.nbPlis ?? ""}
+                disabled={!champsModifiables || (fiche.regroupee && trace.couches.length > 0)}
+                title={fiche.regroupee && trace.couches.length > 0 ? "Somme des couches par article" : undefined}
+                className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground disabled:opacity-60"
+              />
             </Field>
           </div>
           {!fiche.regroupee && (

@@ -491,7 +491,13 @@ console.log("\n15. DXF marqué (texte au centre des pièces + cartouche QR)");
     check("aucune pièce marquée « NON RECONNUE »", !textes.some((t) => t.text === "NON RECONNUE"));
     check(
       "verdict « toutes reconnues » dans le cartouche",
-      textes.some((t) => t.layer === "SERITEX_CARTOUCHE" && t.text?.includes("TOUTES LES PIÈCES RECONNUES"))
+      textes.some((t) => t.layer === "SERITEX_CARTOUCHE" && t.text?.includes("TOUTES LES PIECES RECONNUES"))
+    );
+    // 2026-11-11 : aucun accent ni caractère spécial dans le marquage (rendu du traceur).
+    check(
+      "marquage sans accent ni caractère spécial",
+      textes.every((t) => /^[A-Za-z0-9 .,:;()/+\-]*$/.test(t.text ?? "")),
+      textes.map((t) => t.text).filter((t) => !/^[A-Za-z0-9 .,:;()/+\-]*$/.test(t ?? "")).join(" | ")
     );
     check(
       "des entités QR (SOLID) sur le calque dédié",
@@ -512,6 +518,18 @@ console.log("\n15. DXF marqué (texte au centre des pièces + cartouche QR)");
     const xs = cadre?.vertices?.map((v) => v.x) ?? [];
     const largeurCadre = xs.length ? Math.max(...xs) - Math.min(...xs) : 0;
     check("cartouche vertical nettement plus étroit que le cartouche horizontal", largeurCadre > 0 && largeurCadre < 1300, `largeur=${largeurCadre}`);
+    // 2026-11-11 : cartouche au bout de la longueur, jamais sous le tracé ni plus large que lui.
+    const ys = cadre?.vertices?.map((v) => v.y) ?? [];
+    const pieces = contours.flatMap((c) => c.points);
+    const maxXTrace = Math.max(...pieces.map((p) => p[0]));
+    const minYTrace = Math.min(...pieces.map((p) => p[1]));
+    const maxYTrace = Math.max(...pieces.map((p) => p[1]));
+    const longueurSurX = maxXTrace - Math.min(...pieces.map((p) => p[0])) >= maxYTrace - minYTrace;
+    check(
+      "cartouche au bout de la longueur, dans la largeur du tracé",
+      longueurSurX ? Math.min(...xs) > maxXTrace && Math.min(...ys) >= minYTrace - 0.01 && Math.max(...ys) <= maxYTrace + 0.01 : Math.min(...ys) > maxYTrace,
+      `x=[${Math.min(...xs)}, ${Math.max(...xs)}] y=[${Math.min(...ys)}, ${Math.max(...ys)}] tracé maxX=${maxXTrace} y=[${minYTrace}, ${maxYTrace}]`
+    );
   }
 
   // Tracé partiellement reconnu : Devant reconnu, pièce étrangère non reconnue.

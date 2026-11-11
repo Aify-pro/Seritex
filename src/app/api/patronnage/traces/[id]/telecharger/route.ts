@@ -27,8 +27,10 @@ const SEUIL_RECONNAISSANCE = 98;
  *   un raccourci).
  *
  * Le DXF marqué SURCHARGE le fichier original (jamais régénéré, cf.
- * dxf-export.ts) ; le PDF, lui, est toujours redessiné sur UNE page, hors
- * échelle, jamais un support de coupe (cf. trace-pdf.ts).
+ * dxf-export.ts). Le PDF sans marquage est un aperçu sur une page, hors
+ * échelle ; le PDF marqué est en taille réelle (1:1), pour l'imprimeur
+ * (2026-11-11, cf. trace-pdf.ts). Dans les deux formats marqués, le cartouche
+ * est au bout de la longueur du tracé, tourné de 90°, sans l'élargir.
  *
  * Aucune vérification de permission dédiée : l'autorisation réelle vit dans
  * la RLS (`traces_placement`/`analyses_trace`/`pattern_pieces`), même
