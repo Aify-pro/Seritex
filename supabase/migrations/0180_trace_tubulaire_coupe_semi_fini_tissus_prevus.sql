@@ -111,7 +111,8 @@ as $$
   select pa.product_model_id
   from analyses_trace a
   cross join lateral jsonb_array_elements(a.patrons_reconnus) e
-  join pattern_pieces pp on pp.id = (e ->> 'patron_id')::uuid
+  -- Comparaison en texte : une ancienne analyse peut porter un identifiant qui n'est pas un uuid.
+  join pattern_pieces pp on pp.id::text = (e ->> 'patron_id')
   join patterns p on p.id = pp.pattern_id
   join pattern_articles pa on pa.id = p.article_id
   where a.trace_id = p_trace_id and pa.product_model_id is not null
