@@ -153,11 +153,12 @@ export function FichesPlacementClient({
                   <Plus className="h-3.5 w-3.5" /> Besoins de coupe
                 </Button>
               </Link>
-              {!coupeEntiereFermee && (
-                <Button size="sm" onClick={() => setShowCreate(true)}>
-                  <Plus className="h-3.5 w-3.5" /> Nouvelle fiche
-                </Button>
-              )}
+              {/* 0156 : l'ancienne fiche d'un article (t-shirt entier) est fermée ;
+                  on crée alors un ordre de tracé par pièces, sans ODF, auquel
+                  les articles d'ODF se rattachent ensuite. */}
+              <Button size="sm" onClick={() => setShowCreate(true)}>
+                <Plus className="h-3.5 w-3.5" /> {coupeEntiereFermee ? "Nouvel ordre de tracé" : "Nouvelle fiche"}
+              </Button>
             </div>
           )}
         </div>
@@ -228,8 +229,13 @@ export function FichesPlacementClient({
           </CardBody>
         </Card>
 
-        <Dialog open={showCreate} onOpenChange={setShowCreate} title="Nouvelle fiche de placement" size="lg">
-          <CreateFicheForm onCreated={() => setShowCreate(false)} productModels={productModels} />
+        <Dialog
+          open={showCreate}
+          onOpenChange={setShowCreate}
+          title={coupeEntiereFermee ? "Nouvel ordre de tracé" : "Nouvelle fiche de placement"}
+          size="lg"
+        >
+          <CreateFicheForm onCreated={() => setShowCreate(false)} productModels={productModels} regroupee={coupeEntiereFermee} />
         </Dialog>
       </div>
     </SizesContext.Provider>
@@ -521,9 +527,12 @@ function ProductModelFields({
 function CreateFicheForm({
   onCreated,
   productModels,
+  regroupee = false,
 }: {
   onCreated: () => void;
   productModels: ProductModelOption[];
+  /** Ordre de tracé par pièces créé avant l'ODF (les articles d'ODF se rattachent ensuite). */
+  regroupee?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -536,8 +545,9 @@ function CreateFicheForm({
     e.preventDefault();
     if (!formRef.current) return;
     const fd = new FormData(formRef.current);
-    if (lineId) fd.set("production_order_line_id", lineId);
+    if (lineId && !regroupee) fd.set("production_order_line_id", lineId);
     if (clientCode) fd.set("client_code", clientCode);
+    if (regroupee) fd.set("regroupee", "1");
     startTransition(async () => {
       const res = await createFiche(fd);
       if ("error" in res && res.error) {
@@ -545,7 +555,9 @@ function CreateFicheForm({
         return;
       }
       onCreated();
-      router.refresh();
+      // Ordre de tracé : on l'ouvre pour y ajouter ses tracés.
+      if (regroupee && "id" in res && res.id) router.push(`/atelier/patronnage/${res.id}`);
+      else router.refresh();
     });
   }
 
@@ -556,10 +568,28 @@ function CreateFicheForm({
           <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> {error}
         </div>
       )}
-      <p className="text-xs text-foreground-muted">
-        Le n° OT est généré automatiquement. Aucun champ n&apos;est obligatoire — une fiche peut être créée vide, en
-        pure demande, et complétée ensuite (par le commercial ou par la PAO).
-      </p>
+      {regroupee ? (
+        <p className="text-xs text-foreground-muted">
+          Ordre de tracé par pièces, créé avant l&apos;ODF : le n° OT est généré automatiquement, aucun champ n&apos;est obligatoire. Vous y
+          déposez et préparez les tracés (pièces, tailles, quantités par couche) ; les articles d&apos;ODF s&apos;y rattachent ensuite, depuis la
+          fiche ou depuis « Besoins de coupe ». Il faut au moins un ODF rattaché pour attribuer les couches et passer un tracé « Bon pour
+          coupe ».
+        </p>
+      ) : (
+        <p className="text-xs text-foreground-muted">
+          Le n° OT est généré automatiquement. Aucun champ n&apos;est obligatoire — une fiche peut être créée vide, en
+          pure demande, et complétée ensuite (par le commercial ou par la PAO).
+        </p>
+      )}
+      {regroupee && (
+        <Field label="Désignation (pièces, article)">
+          <input
+            name="designation_article"
+            placeholder="ex. Manches et cols T-shirt col rond"
+            className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground"
+          />
+        </Field>
+      )}
 
       <div className="grid grid-cols-2 gap-4">
         <Field label="Client">
@@ -571,6 +601,7 @@ function CreateFicheForm({
           />
           <input type="hidden" name="client_libelle" value="" />
         </Field>
+        {!regroupee && (
         <Field label="Lier à un article d'ODF (optionnel)">
           <div className="flex gap-2">
             <div className="flex-1">
@@ -589,16 +620,21 @@ function CreateFicheForm({
             />
           </div>
         </Field>
+        )}
       </div>
 
       <ProductModelFields productModels={productModels} initialModelId={null} onSizesChange={() => {}} />
 
-      <Field label="Quantité totale à produire">
-        <input type="number" min={0} name="quantite_totale" className="w-40 rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground" />
-      </Field>
-      <p className="text-xs text-foreground-muted">
-        Le dispatching des tailles se calcule automatiquement à partir des tracés, une fois la fiche créée.
-      </p>
+      {!regroupee && (
+        <>
+          <Field label="Quantité totale à produire">
+            <input type="number" min={0} name="quantite_totale" className="w-40 rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground" />
+          </Field>
+          <p className="text-xs text-foreground-muted">
+            Le dispatching des tailles se calcule automatiquement à partir des tracés, une fois la fiche créée.
+          </p>
+        </>
+      )}
 
       <Field label="Couleur">
         <input name="couleur" className="w-64 rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground" />
@@ -614,7 +650,7 @@ function CreateFicheForm({
 
       <div className="flex justify-end">
         <Button type="submit" loading={pending}>
-          Créer la fiche
+          {regroupee ? "Créer l'ordre de tracé" : "Créer la fiche"}
         </Button>
       </div>
     </form>
