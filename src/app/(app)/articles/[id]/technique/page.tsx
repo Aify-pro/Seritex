@@ -13,6 +13,7 @@ import { PrintableZoneEditor } from "../_components/printable-zone-editor";
 import { NomenclaturesPanel, FORME_LABELS, type NomenclatureOption } from "../_components/nomenclatures-panel";
 import { AttachPattern } from "../_components/attach-pattern";
 import { MockupEditor, type MockupData } from "../_components/mockup-editor";
+import { CoupeSemiFiniForm } from "../_components/coupe-semi-fini-form";
 
 type PatronRow = { id: string; article_code: string; designation: string; product_model_id: string | null; patterns: { size: string }[] | null };
 
@@ -75,7 +76,11 @@ export default async function ArticleTechniquePage({ params }: { params: Promise
   const { id } = await params;
   const supabase = await createClient();
   const canPatronnage = await can("patronnage", "view");
-  const { data: model } = await supabase.from("product_models").select("nature").eq("id", id).maybeSingle();
+  const { data: model } = await supabase
+    .from("product_models")
+    .select("nature,coupe_ouvert,coupe_tubulaire,pieces_contour_ouvert,pieces_contour_tubulaire")
+    .eq("id", id)
+    .maybeSingle();
 
   const orphansQuery = canModify
     ? supabase.from("pattern_articles").select("id,article_code,designation").is("product_model_id", null).order("article_code")
@@ -121,6 +126,24 @@ export default async function ArticleTechniquePage({ params }: { params: Promise
             <AttachPattern productModelId={id} orphans={(orphans ?? []).map((o) => ({ id: o.id, label: `${o.article_code} — ${o.designation}` }))} />
           )}
           {bibliothequeLink}
+        </CardBody>
+      </Card>
+      <Card>
+        <CardHeader
+          title="Coupe sur tissu ouvert / tubulaire"
+          description="Sur quel tissu ce semi-fini se coupe, et combien de pièces donne un contour du tracé sur chacun. Le décompte des tracés en dépend ; un semi-fini « tubulaire seulement » met le tracé en tubulaire, « ouvert seulement » en ouvert."
+        />
+        <CardBody>
+          <CoupeSemiFiniForm
+            productModelId={id}
+            editable={canModify}
+            initial={{
+              coupeOuvert: (model?.coupe_ouvert as boolean | undefined) ?? true,
+              coupeTubulaire: (model?.coupe_tubulaire as boolean | undefined) ?? true,
+              piecesOuvert: (model?.pieces_contour_ouvert as number | undefined) ?? 1,
+              piecesTubulaire: (model?.pieces_contour_tubulaire as number | undefined) ?? 2,
+            }}
+          />
         </CardBody>
       </Card>
       <Card>

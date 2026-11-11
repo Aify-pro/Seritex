@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, Pencil, Trash2, Wand2 } from "lucide-react";
 import { toast } from "sonner";
@@ -18,7 +18,6 @@ import {
   previewDxfPieces,
   renameReferenceArticle,
   replaceReferencePattern,
-  setPosePiece,
   saveReferencePattern,
   type PreviewedPiece,
 } from "@/app/(app)/atelier/patronnage/actions";
@@ -135,11 +134,7 @@ interface DraftPiece extends PreviewedPiece {
   include: boolean;
   name: string;
   expectedCount: number;
-  /** Pose sur tissu tubulaire (0180) ; une « demi-… » est au pli par défaut. */
-  poseTubulaire: "a_plat" | "au_pli";
 }
-
-const poseParDefaut = (nom: string): "a_plat" | "au_pli" => (/^\s*demi/i.test(nom) ? "au_pli" : "a_plat");
 
 /** Reprend nom et quantité des pièces d'un patron à mettre à jour : la pièce de même taille la plus proche en surface. */
 function prefillFromExisting(pieces: PreviewedPiece[], existing: LibraryPattern["pieces"]): DraftPiece[] {
@@ -156,10 +151,9 @@ function prefillFromExisting(pieces: PreviewedPiece[], existing: LibraryPattern[
     });
     if (best >= 0 && bestGap < 0.35) {
       const [match] = libres.splice(best, 1);
-      return { ...p, include: true, name: match.name, expectedCount: match.expectedCount, poseTubulaire: match.poseTubulaire };
+      return { ...p, include: true, name: match.name, expectedCount: match.expectedCount };
     }
-    const name = p.layer && p.layer !== "0" ? p.layer : `Pièce ${p.index + 1}`;
-    return { ...p, include: true, name, expectedCount: 1, poseTubulaire: poseParDefaut(name) };
+    return { ...p, include: true, name: p.layer && p.layer !== "0" ? p.layer : `Pièce ${p.index + 1}`, expectedCount: 1 };
   });
 }
 
@@ -242,7 +236,6 @@ function BibliothequeTab({
             include: true,
             name: p.layer && p.layer !== "0" ? p.layer : `Pièce ${p.index + 1}`,
             expectedCount: 1,
-            poseTubulaire: poseParDefaut(p.layer && p.layer !== "0" ? p.layer : ""),
           }))
     );
   }
@@ -291,7 +284,7 @@ function BibliothequeTab({
     }
     fd.set(
       "pieces_meta",
-      JSON.stringify(draft.map((d) => ({ index: d.index, include: d.include, name: d.name, expectedCount: d.expectedCount, poseTubulaire: d.poseTubulaire })))
+      JSON.stringify(draft.map((d) => ({ index: d.index, include: d.include, name: d.name, expectedCount: d.expectedCount })))
     );
     const result = editing ? await replaceReferencePattern(fd) : await saveReferencePattern(fd);
     setBusy(false);
@@ -511,19 +504,6 @@ function BibliothequeTab({
                         title="Nombre attendu par taille placée"
                         className="w-20 rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground"
                       />
-                      <select
-                        value={d.poseTubulaire}
-                        onChange={(e) =>
-                          setDraft((prev) =>
-                            prev!.map((row, idx) => (idx === i ? { ...row, poseTubulaire: e.target.value as "a_plat" | "au_pli" } : row))
-                          )
-                        }
-                        title="Pose sur tissu tubulaire : à plat = 2 pièces par couche ; au pli = demi-pièce sur le pli du tube, 1 pièce complète"
-                        className="rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground"
-                      >
-                        <option value="a_plat">À plat</option>
-                        <option value="au_pli">Au pli (tubulaire)</option>
-                      </select>
                     </div>
                   ))}
                 </div>
@@ -640,7 +620,6 @@ function BibliothequeTab({
                           <p className="text-foreground-muted">
                             ×{piece.expectedCount} · {Math.round(piece.area)} u²
                           </p>
-                          <PoseBouton piece={piece} canModify={canModify} />
                         </div>
                       </div>
                     ))}
@@ -729,40 +708,6 @@ function DeleteControl({
       className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-danger hover:bg-danger-soft disabled:cursor-not-allowed disabled:text-foreground-muted disabled:opacity-60 disabled:hover:bg-transparent"
     >
       <Trash2 className="h-3 w-3" /> {label}
-    </button>
-  );
-}
-
-/**
- * Pose d'une pièce sur tissu tubulaire (0180), modifiable d'un clic : « à
- * plat » (2 pièces par couche) ou « au pli » (demi-pièce sur le pli du tube,
- * 1 pièce complète ; un tracé qui la contient devient tubulaire).
- */
-function PoseBouton({ piece, canModify }: { piece: LibraryPattern["pieces"][number]; canModify: boolean }) {
-  const router = useRouter();
-  const [pose, setPose] = useState(piece.poseTubulaire);
-  const [pending, startTransition] = useTransition();
-  const libelle = pose === "au_pli" ? "Au pli (tubulaire)" : "À plat";
-  if (!canModify) return <p className="text-foreground-muted">{libelle}</p>;
-  return (
-    <button
-      type="button"
-      disabled={pending}
-      title="Pose sur tissu tubulaire : cliquer pour changer"
-      onClick={() => {
-        const suivante = pose === "au_pli" ? "a_plat" : "au_pli";
-        startTransition(async () => {
-          const res = await setPosePiece(piece.id, suivante);
-          if (res.error) toast.error(res.error);
-          else {
-            setPose(suivante);
-            router.refresh();
-          }
-        });
-      }}
-      className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${pose === "au_pli" ? "bg-info-soft text-info" : "bg-surface-muted text-foreground-muted"} hover:underline`}
-    >
-      {libelle}
     </button>
   );
 }

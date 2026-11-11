@@ -88,12 +88,8 @@ const pieceMetaSchema = z.array(
     include: z.boolean(),
     name: z.string().trim(),
     expectedCount: z.number().int().min(1).max(50),
-    poseTubulaire: z.enum(["a_plat", "au_pli"]).optional(),
   })
 );
-
-/** Pose par défaut d'une pièce : une « demi-… » se pose au pli du tubulaire. */
-const poseParDefaut = (nom: string): "a_plat" | "au_pli" => (/^\s*demi/i.test(nom) ? "au_pli" : "a_plat");
 
 /**
  * Étape 2 : ré-analyse le même fichier côté serveur (jamais de confiance
@@ -228,7 +224,6 @@ function rowsFromContours(patternId: string, contours: ReturnType<typeof parseDx
         pattern_id: patternId,
         name: meta.name,
         expected_count: meta.expectedCount,
-        pose_tubulaire: meta.poseTubulaire ?? poseParDefaut(meta.name),
         area: geom.area,
         perimeter: geom.perimeter,
         radial_signature: geom.radial,
@@ -522,21 +517,4 @@ export async function migrerAncienPatron(
   revalidatePath("/atelier/patronnage/bibliotheque");
   revalidatePath("/atelier/patronnage/bibliotheque/migration");
   return { crees: Array.isArray(data) ? data.length : 0 };
-}
-
-/**
- * Pose d'une pièce de patron sur tissu tubulaire (0180) : « à plat » (pièce
- * entière dans le tube, 2 pièces par couche) ou « au pli » (demi-pièce sur le
- * pli du tube, 1 pièce complète). Les tracés en préparation qui la contiennent
- * se recontrôlent dans la base (et passent en tubulaire si besoin).
- */
-export async function setPosePiece(pieceId: string, pose: "a_plat" | "au_pli"): Promise<{ error?: string }> {
-  if (pose !== "a_plat" && pose !== "au_pli") return { error: "Pose invalide" };
-  await requirePermission("patronnage", "modify");
-  const supabase = await createClient();
-  const { data, error } = await supabase.from("pattern_pieces").update({ pose_tubulaire: pose }).eq("id", pieceId).select("id");
-  if (error) return { error: error.message };
-  if (!data?.length) return { error: "Modification refusée (droits sur la bibliothèque)." };
-  revalidateBibliotheque();
-  return {};
 }

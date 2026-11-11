@@ -4,8 +4,6 @@ export interface LibraryPiece {
   id: string;
   name: string;
   expectedCount: number;
-  /** Pose sur tissu tubulaire (0180) : à plat (2 pièces par couche) ou au pli (demi-pièce, 1 pièce complète). */
-  poseTubulaire: "a_plat" | "au_pli";
   points: Point[];
   area: number;
   perimeter: number;
