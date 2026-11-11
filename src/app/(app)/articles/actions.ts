@@ -564,3 +564,40 @@ export async function removeModelRouteStep(stepId: string) {
   revalidateArticles();
   return {};
 }
+
+const coupeSchema = z
+  .object({
+    coupeOuvert: z.boolean(),
+    coupeTubulaire: z.boolean(),
+    piecesOuvert: z.number().int().min(1, "Au moins 1 pièce par contour").max(20),
+    piecesTubulaire: z.number().int().min(1, "Au moins 1 pièce par contour").max(20),
+  })
+  .refine((v) => v.coupeOuvert || v.coupeTubulaire, { message: "Cochez au moins une forme de tissu" });
+
+/**
+ * Coupe d'un semi-fini (0180) : sur quel tissu il se coupe (ouvert,
+ * tubulaire, les deux) et combien de pièces donne un contour du tracé sur
+ * chacun. Le décompte des tracés et leur forme en découlent ; les tracés en
+ * préparation qui l'emploient suivent dans la base.
+ */
+export async function updateCoupeSemiFini(productModelId: string, input: z.input<typeof coupeSchema>) {
+  await requirePermission("articles", "modify");
+  const parsed = coupeSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message };
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("product_models")
+    .update({
+      coupe_ouvert: parsed.data.coupeOuvert,
+      coupe_tubulaire: parsed.data.coupeTubulaire,
+      pieces_contour_ouvert: parsed.data.piecesOuvert,
+      pieces_contour_tubulaire: parsed.data.piecesTubulaire,
+    })
+    .eq("id", productModelId)
+    .eq("nature", "semi_fini")
+    .select("id");
+  if (error) return { error: error.message };
+  if (!data?.length) return { error: "Modification refusée." };
+  revalidateArticles();
+  return {};
+}

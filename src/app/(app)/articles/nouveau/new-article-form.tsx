@@ -68,6 +68,11 @@ export function NewArticleForm({
     consumable_family_id: consumableFamilies[0]?.id ?? "",
     etape: "production" as "production" | "finition",
     sage_reference: "",
+    // Semi-fini (0180) : tissu sur lequel il se coupe et pièces par contour du tracé.
+    coupe_ouvert: true,
+    coupe_tubulaire: true,
+    pieces_contour_ouvert: 1,
+    pieces_contour_tubulaire: 2,
   });
   const set = (patch: Partial<typeof v>) => setV((x) => ({ ...x, ...patch }));
   const racines = familles.filter((f) => !f.parentId);
@@ -185,6 +190,39 @@ export function NewArticleForm({
             title="Semi-fini"
             description="Pièce de production (manche, col, corps…) : fabriquée à la pièce, jamais vendue ni envoyée à Sage, sans déclinaison. Le code (ex. SF001) est attribué à la création, puis figé. Son patron se dépose dans la bibliothèque de patronnage ; les produits finis l'emploient par leur nomenclature, avec leur tissu et leur couleur."
           />
+          <CardBody className="space-y-2">
+            <p className="text-xs font-medium text-foreground">Coupe : sur quel tissu, et combien de pièces par contour du tracé</p>
+            {(["ouvert", "tubulaire"] as const).map((f) => {
+              const coche = f === "ouvert" ? v.coupe_ouvert : v.coupe_tubulaire;
+              const pieces = f === "ouvert" ? v.pieces_contour_ouvert : v.pieces_contour_tubulaire;
+              return (
+                <div key={f} className="flex flex-wrap items-center gap-3 rounded-md border border-border p-2">
+                  <label className="flex min-w-36 items-center gap-2 text-sm font-medium">
+                    <input type="checkbox" checked={coche} onChange={(e) => set(f === "ouvert" ? { coupe_ouvert: e.target.checked } : { coupe_tubulaire: e.target.checked })} />
+                    Tissu {f}
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-foreground-muted">
+                    <input
+                      type="number"
+                      min={1}
+                      max={20}
+                      value={pieces}
+                      disabled={!coche}
+                      onChange={(e) => {
+                        const n = Math.max(1, Math.trunc(Number(e.target.value) || 1));
+                        set(f === "ouvert" ? { pieces_contour_ouvert: n } : { pieces_contour_tubulaire: n });
+                      }}
+                      className="h-9 w-20 rounded-md border border-border bg-surface px-2 text-right text-sm disabled:opacity-60"
+                    />
+                    pièce(s) par contour
+                  </label>
+                </div>
+              );
+            })}
+            <p className="text-xs text-foreground-muted">
+              Ouvert : 1 en général. Tubulaire : 2 si la pièce entière est posée dans le tube (deux faces), 1 pour un demi-semi-fini posé sur le pli.
+            </p>
+          </CardBody>
         </Card>
       )}
 

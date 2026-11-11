@@ -45,6 +45,11 @@ const createSchema = classementSchema.extend({
   consumable_family_id: optionalId.optional().default(null),
   etape: z.enum(["production", "finition"]).optional().default("production"),
   sage_reference: z.string().trim().max(18, "18 caractères au plus pour Sage").optional().default(""),
+  // Semi-fini (0180)
+  coupe_ouvert: z.boolean().optional().default(true),
+  coupe_tubulaire: z.boolean().optional().default(true),
+  pieces_contour_ouvert: z.number().int().min(1).max(20).optional().default(1),
+  pieces_contour_tubulaire: z.number().int().min(1).max(20).optional().default(2),
 });
 
 async function assertCanModify() {
@@ -69,6 +74,7 @@ export async function createArticle(input: z.input<typeof createSchema>): Promis
   if (d.nature === "consommable" && !d.consumable_family_id) return { error: "Choisissez le préfixe du code (famille de consommable)." };
   // Un semi-fini est toujours fabriqué, à la pièce (contrainte product_models_semi_fini_interne, 0143).
   if (d.nature === "semi_fini") Object.assign(d, { type_appro: "fabrique", unite: "piece" });
+  if (d.nature === "semi_fini" && !d.coupe_ouvert && !d.coupe_tubulaire) return { error: "Cochez au moins une forme de tissu (ouvert ou tubulaire)." };
 
   const supabase = await createClient();
   const { data: model, error } = await supabase
@@ -82,6 +88,14 @@ export async function createArticle(input: z.input<typeof createSchema>): Promis
       unite: d.unite,
       categorie_id: d.nature === "pf" ? d.categorie_id : null,
       matiere_id: d.nature === "pf" ? d.matiere_id : null,
+      ...(d.nature === "semi_fini"
+        ? {
+            coupe_ouvert: d.coupe_ouvert,
+            coupe_tubulaire: d.coupe_tubulaire,
+            pieces_contour_ouvert: d.pieces_contour_ouvert,
+            pieces_contour_tubulaire: d.pieces_contour_tubulaire,
+          }
+        : {}),
     })
     .select("id")
     .single();

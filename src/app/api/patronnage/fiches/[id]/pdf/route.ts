@@ -38,7 +38,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   // Articles d'ODF : regroupés, ou l'article unique de la fiche.
   const lineIds = fiche.regroupee ? fiche.lignesRegroupees.map((l) => l.lineId) : fiche.lineId ? [fiche.lineId] : [];
   const traceIds = traces.map((t) => t.id);
-  const [{ data: lignesOdf }, { data: modele }, { data: rouleaux }] = await Promise.all([
+  const [{ data: lignesOdf }, { data: modele }, { data: rouleaux }, { data: tissusPrevus }] = await Promise.all([
     lineIds.length > 0
       ? supabase
           .from("production_order_lines")
@@ -51,7 +51,21 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     traceIds.length > 0
       ? supabase.from("trace_rouleaux").select("trace_id,textile_rolls(code,laize_cm,bain,poids_kg)").in("trace_id", traceIds)
       : Promise.resolve({ data: [] }),
+    // Tissus prévus par la PAO sur chaque tracé (0180).
+    traceIds.length > 0
+      ? supabase.from("trace_tissus").select("trace_id,product_variants(code,textiles(nom,grammage),colors(name))").in("trace_id", traceIds)
+      : Promise.resolve({ data: [] }),
   ]);
+  type TissuRow = { trace_id: string; product_variants: { code: string; textiles: { nom: string; grammage: number | null } | null; colors: { name: string } | null } | null };
+  const tissusPrevusDe = (traceId: string) =>
+    ((tissusPrevus ?? []) as unknown as TissuRow[])
+      .filter((r) => r.trace_id === traceId && r.product_variants)
+      .map((r) => {
+        const v = r.product_variants!;
+        const nom = v.textiles?.nom ?? "Tissu";
+        const g = v.textiles?.grammage && !nom.includes(String(v.textiles.grammage)) ? ` ${v.textiles.grammage} g` : "";
+        return `${v.code} - ${nom}${g}${v.colors?.name ? ` · ${v.colors.name}` : ""}`;
+      });
 
   type LigneOdf = {
     id: string;
@@ -147,6 +161,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         longueurCm: t.longueurMatelasCm,
         laizeCm: t.largeurMatelasCm,
         couches: regroupe ? t.couches.reduce((s, c) => s + c.nbCouches, 0) : t.nbPlis,
+        tissusPrevus: tissusPrevusDe(t.id),
         tissus: t.compositionTissus ?? [],
         couchesParArticle,
         piecesParCouche,

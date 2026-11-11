@@ -43,6 +43,8 @@ export type OrdreTracePdfTrace = {
   laizeCm: number | null;
   /** Total des couches (somme des couches par article, ou nombre de plis). */
   couches: number | null;
+  /** Tissus prévus par la PAO sur le tracé (0180) : « JE180BLE - Jersey 180 g · Bleu ». */
+  tissusPrevus: string[];
   /** Couches par tissu (grammage, couleur, référence) et ODF concernés, ordre regroupé. */
   tissus: { libelle: string; couches: number; odfs: string }[];
   /** Couches par article (ordre regroupé). */
@@ -338,7 +340,7 @@ export async function buildOrdreTracePdf(data: OrdreTracePdfData): Promise<Uint8
         `${t.statut}\n${t.forme}`,
         `${n(t.longueurCm)} × ${n(t.laizeCm)} cm`,
         n(t.couches),
-        t.tissus.map((x) => `${x.libelle} : ${n(x.couches)}`).join("\n") || data.tissu || "-",
+        t.tissus.map((x) => `${x.libelle} : ${n(x.couches)}`).join("\n") || t.tissusPrevus.join("\n") || data.tissu || "-",
         t.piecesParCouche.map((p) => `${p.quantite} ${p.piece} ${p.taille}`).join(", ") || "-",
       ])
     );
@@ -366,6 +368,7 @@ export async function buildOrdreTracePdf(data: OrdreTracePdfData): Promise<Uint8
         ["Couches au total", t.couches !== null ? n(t.couches) : null],
         ["Tissu", data.tissu ? `${data.tissu}${data.grammage ? ` - ${n(data.grammage)} g/m²` : ""}` : null],
         ["Patron", t.referencePatron],
+        ["Tissus prévus", t.tissusPrevus.length > 0 ? t.tissusPrevus.join("\n") : null],
       ],
       3
     );
