@@ -247,9 +247,14 @@ export async function createFiche(formData: FormData) {
   const { authId } = await requirePermission("create");
   const supabase = await createClient();
 
-  const lineId = String(formData.get("production_order_line_id") ?? "").trim() || null;
+  // Ordre de tracé créé avant l'ODF : un ordre regroupé par pièces, sans
+  // article d'ODF ; ses tracés se préparent, et il faut rattacher au moins
+  // un article d'ODF pour leur attribuer des couches et les valider.
+  const regroupee = formData.get("regroupee") === "1";
+  const lineId = regroupee ? null : String(formData.get("production_order_line_id") ?? "").trim() || null;
   const productModelId = String(formData.get("product_model_id") ?? "").trim() || null;
   const resolved = await resolveProductModel(productModelId);
+  const designationSaisie = String(formData.get("designation_article") ?? "").trim() || null;
 
   const { data, error } = await supabase
     .from("fiches_placement")
@@ -260,10 +265,13 @@ export async function createFiche(formData: FormData) {
       client_libelle: String(formData.get("client_libelle") ?? "").trim() || null,
       date_retour_souhaitee: String(formData.get("date_retour_souhaitee") ?? "").trim() || null,
       product_model_id: productModelId,
-      designation_article: productModelId
-        ? resolved.designation_article
-        : String(formData.get("designation_article") ?? "").trim() || null,
-      quantite_totale: formData.get("quantite_totale") ? Number(formData.get("quantite_totale")) : null,
+      regroupee,
+      designation_article: regroupee
+        ? (designationSaisie ?? "Ordre de coupe regroupé")
+        : productModelId
+          ? resolved.designation_article
+          : designationSaisie,
+      quantite_totale: !regroupee && formData.get("quantite_totale") ? Number(formData.get("quantite_totale")) : null,
       tissu_type: productModelId ? resolved.tissu_type : String(formData.get("tissu_type") ?? "").trim() || null,
       grammage: productModelId ? resolved.grammage : formData.get("grammage") ? Number(formData.get("grammage")) : null,
       couleur: String(formData.get("couleur") ?? "").trim() || null,
@@ -286,7 +294,7 @@ export async function createFiche(formData: FormData) {
     action: "create_fiche_placement",
     entity_type: "fiche_placement",
     entity_id: data.id,
-    metadata: { numero_ot: data.numero_ot },
+    metadata: { numero_ot: data.numero_ot, regroupee, sans_odf: regroupee },
   });
 
   revalidatePath("/atelier/patronnage");
@@ -1607,4 +1615,22 @@ export async function affecterFamille(
   revalidatePath(`/atelier/patronnage/${ficheId}`);
   revalidatePath("/atelier/patronnage/bibliotheque");
   return { reconnaissanceComplete: apres.reconnaissanceComplete };
+}
+
+/**
+ * Pièces (semi-finis actifs) et tailles proposables sur un tracé regroupé :
+ * un ordre de tracé créé avant l'ODF n'a pas encore d'article qui les
+ * apporterait par sa nomenclature.
+ */
+export async function catalogueTrace(): Promise<{ semiFinis: { id: string; nom: string }[]; tailles: string[] }> {
+  await requirePermission("view");
+  const supabase = await createClient();
+  const [{ data }, sizes] = await Promise.all([
+    supabase.from("product_models").select("id,name").eq("active", true).eq("nature", "semi_fini").order("name"),
+    getSizes(),
+  ]);
+  return {
+    semiFinis: (data ?? []).map((m) => ({ id: m.id as string, nom: m.name as string })),
+    tailles: sizes.map((s) => s.cle),
+  };
 }

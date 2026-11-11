@@ -16,6 +16,7 @@ import {
   enregistrerPiecesTrace,
   preRemplirPiecesTrace,
   derogerControleTrace,
+  catalogueTrace,
   type BesoinCoupeGroupe,
 } from "@/app/(app)/atelier/patronnage/fiches-actions";
 
@@ -110,7 +111,10 @@ export function ArticlesRegroupesCard({ fiche, canModify }: { fiche: FichePlacem
       />
       <CardBody className="space-y-3">
         {fiche.lignesRegroupees.length === 0 ? (
-          <p className="text-sm text-foreground-muted">Aucun article.</p>
+          <p className="rounded-md border border-warning/30 bg-warning-soft/40 px-3 py-2 text-sm text-foreground">
+            Aucun ODF rattaché pour l&apos;instant. Les tracés se déposent et se préparent déjà ; rattachez au moins un article d&apos;ODF (ci-dessous, ou
+            depuis « Besoins de coupe ») pour leur attribuer des couches et les passer « Bon pour coupe ».
+          </p>
         ) : (
           <ul className="divide-y divide-border rounded-md border border-border">
             {fiche.lignesRegroupees.map((l) => {
@@ -223,18 +227,36 @@ export function PiecesTraceEditor({
     setLignes(depuisTrace());
   }
 
+  // Ordre de tracé sans article d'ODF : toutes les pièces et toutes les
+  // tailles sont proposées (aucune nomenclature ne les apporte encore).
+  const sansOdf = fiche.lignesRegroupees.length === 0;
+  const [catalogue, setCatalogue] = useState<{ semiFinis: { id: string; nom: string }[]; tailles: string[] } | null>(null);
+  useEffect(() => {
+    if (!sansOdf || !editable) return;
+    let annule = false;
+    catalogueTrace().then((c) => {
+      if (!annule) setCatalogue(c);
+    });
+    return () => {
+      annule = true;
+    };
+  }, [sansOdf, editable]);
   const semiFinis = useMemo(() => {
     const m = new Map<string, string>();
     for (const l of fiche.lignesRegroupees) for (const sf of l.semiFinis) m.set(sf.id, sf.nom);
+    for (const sf of catalogue?.semiFinis ?? []) m.set(sf.id, sf.nom);
     for (const p of trace.pieces) m.set(p.semiFiniId, p.semiFiniNom);
     return [...m.entries()].sort((a, b) => a[1].localeCompare(b[1]));
-  }, [fiche.lignesRegroupees, trace.pieces]);
+  }, [fiche.lignesRegroupees, trace.pieces, catalogue]);
   const tailles = useMemo(() => {
     const t = new Set<string>();
     for (const l of fiche.lignesRegroupees) for (const x of l.tailles) t.add(x);
+    for (const x of catalogue?.tailles ?? []) t.add(x);
     for (const p of trace.pieces) t.add(p.taille);
-    return [...t].sort();
-  }, [fiche.lignesRegroupees, trace.pieces]);
+    // Ordre du référentiel quand il est connu (XS avant S), sinon alphabétique.
+    const ordre = catalogue?.tailles ?? [];
+    return [...t].sort((a, b) => (ordre.indexOf(a) + 1 || 999) - (ordre.indexOf(b) + 1 || 999) || a.localeCompare(b));
+  }, [fiche.lignesRegroupees, trace.pieces, catalogue]);
 
   function run(action: () => Promise<{ error?: string }>, ok: string) {
     startTransition(async () => {
