@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { AlertTriangle, Layers, Scissors } from "lucide-react";
+import { AlertTriangle, Layers, Printer, Scissors } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
@@ -14,6 +14,8 @@ import type { MatelasRoll } from "./matelas-rolls";
 /** Matelas regroupé à couper (étapes 3b et 3c) : une ou plusieurs pièces (semi-finis), des couches par article d'ODF. */
 export interface MatelasRegroupe {
   traceId: string;
+  /** Ordre de tracé du matelas : sa fiche matelas imprimable (PDF). */
+  ficheId: string;
   reference: string;
   /** Noms des pièces du tracé, pour l'affichage. */
   semiFini: string;
@@ -29,6 +31,8 @@ export interface MatelasRegroupe {
   laizeCm: number | null;
   /** odfAnnule (0178) : article d'un ODF annulé — ses pièces iront en stock tampon, à réorienter. */
   articles: { lineId: string; odf: string; article: string; couleur: string | null; couches: number; odfAnnule?: boolean }[];
+  /** Couches par tissu (grammage, couleur, référence) et ODF concernés. */
+  tissus: { libelle: string; couches: number; odfs: string }[];
 }
 
 const libelleTaille = (cle: string) => cle.split("/").pop() ?? cle;
@@ -170,6 +174,27 @@ function MatelasRegroupeDialog({ matelas, onClose }: { matelas: MatelasRegroupe;
         {error && (
           <div className="flex items-start gap-1.5 rounded-md border border-danger/30 bg-danger-soft px-2.5 py-2 text-sm text-danger">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {error}
+          </div>
+        )}
+        <a
+          href={`/api/patronnage/fiches/${matelas.ficheId}/pdf?trace=${matelas.traceId}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-sm font-medium text-foreground hover:bg-surface-muted"
+        >
+          <Printer className="h-4 w-4" /> Fiche matelas (PDF)
+        </a>
+        {matelas.tissus.length > 0 && (
+          <div className="rounded-md border border-border bg-surface-muted px-3 py-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-foreground-muted">Composition du matelas</p>
+            <ul className="mt-1 space-y-1 text-sm">
+              {matelas.tissus.map((t) => (
+                <li key={t.libelle}>
+                  <span className="font-medium">{t.libelle}</span> : {t.couches} couche{t.couches > 1 ? "s" : ""}
+                  <span className="block text-xs text-foreground-muted">{t.odfs}</span>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
         <p className="text-xs text-foreground-muted">

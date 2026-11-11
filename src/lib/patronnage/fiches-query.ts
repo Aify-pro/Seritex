@@ -1,5 +1,6 @@
 import { nomenclaturesActives } from "@/lib/patronnage/nomenclatures-actives";
 import "server-only";
+import { compositionTissus, libelleTissu } from "@/lib/patronnage/tissus-matelas";
 import { createClient } from "@/lib/supabase/server";
 import type { ControleTrace, FichePlacement, PatronReconnu, PieceNonReconnue, RendementTrace, TracePlacement } from "@/lib/patronnage/types";
 
@@ -327,6 +328,30 @@ export async function getFichePlacementById(id: string): Promise<FichePlacement 
   if (!ficheRaw) return null;
 
   const [mapped] = await mapFiches([ficheRaw as unknown as FicheRow], supabase);
+  if (!mapped) return null;
+  // Tracés regroupés : couches par tissu (grammage, couleur, référence).
+  const odfDe = new Map(mapped.lignesRegroupees.map((l) => [l.lineId, l.odfReference]));
+  const compo = await compositionTissus(
+    supabase,
+    new Map(
+      mapped.traces
+        .filter((t) => t.couches.length > 0)
+        .map((t) => [
+          t.id,
+          t.couches.map((c) => ({ lineId: c.lineId, nbCouches: c.nbCouches, semiFiniIds: t.pieces.map((p) => p.semiFiniId), odf: odfDe.get(c.lineId) ?? null })),
+        ])
+    )
+  );
+  for (const t of mapped.traces) {
+    const tissus = compo.get(t.id);
+    if (tissus) {
+      t.compositionTissus = tissus.map((x) => ({
+        libelle: libelleTissu(x),
+        couches: x.couches,
+        odfs: x.odfs.map((o) => `${o.odf ?? "-"} (${o.couches})`).join(", "),
+      }));
+    }
+  }
   return mapped;
 }
 

@@ -119,7 +119,11 @@ export async function buildWasteBagsSheetPdf(bags: WasteBagLabelData[]): Promise
 }
 
 /** Étiquette générique de la planche A4 : SERITEX, QR, puis trois lignes de texte (grosse, moyenne, petite). */
-export type SheetLabel = { url: string; lines: [string, string, string] };
+/**
+ * `extra` : jusqu'à deux lignes de détail (client, article, couleur, tissu),
+ * en petit sous les trois lignes ; le QR rétrécit pour leur faire place.
+ */
+export type SheetLabel = { url: string; lines: [string, string, string]; extra?: string[] };
 
 /**
  * Planche A4 d'étiquettes 52 × 60 mm à trois lignes de texte, même grille et
@@ -143,11 +147,12 @@ export async function buildLabelSheetPdf(labels: SheetLabel[], title: string): P
       const cx = x + LABEL_W / 2;
       const maxW = LABEL_W - 6 * MM;
       const [big, medium, small] = label.lines;
+      const extra = (label.extra ?? []).filter(Boolean).slice(0, 2);
       drawCutMarks(page, x, y);
 
       let cursor = y + LABEL_H - 2.5 * MM - 5 * MM;
       centerText(page, "SERITEX", cx, cursor, fonts.bold, 14);
-      const qrSize = 32 * MM;
+      const qrSize = (extra.length > 0 ? 24 : 32) * MM;
       cursor -= 2.5 * MM + qrSize;
       drawQr(page, QRCode.create(label.url, { errorCorrectionLevel: "M" }), cx - qrSize / 2, cursor, qrSize);
       cursor -= 5.5 * MM;
@@ -156,6 +161,10 @@ export async function buildLabelSheetPdf(labels: SheetLabel[], title: string): P
       centerText(page, medium, cx, cursor, fonts.bold, fitSize(medium, fonts.bold, 9, maxW));
       cursor -= 4 * MM;
       centerText(page, small, cx, cursor, fonts.regular, fitSize(small, fonts.regular, 8, maxW));
+      for (const ligne of extra) {
+        cursor -= 3.6 * MM;
+        centerText(page, ligne, cx, cursor, fonts.regular, fitSize(ligne, fonts.regular, 7, maxW));
+      }
     });
   }
 

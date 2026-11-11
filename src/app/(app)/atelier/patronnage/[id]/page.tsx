@@ -5,7 +5,7 @@ import { can } from "@/lib/auth/permissions";
 import { getSizes } from "@/lib/sizes";
 import { PageHeader } from "@/components/shell/page-header";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Printer } from "lucide-react";
 import { getFichePlacementById, getPatternReferenceOptions, getProductModelOptions } from "@/lib/patronnage/fiches-query";
 import { FicheDetailContent } from "@/components/atelier/patronnage/fiches-placement-client";
 
@@ -68,11 +68,22 @@ export default async function FichePlacementPage({
         title={`Fiche ${fiche.numeroOt}`}
         description={fiche.clientLibelle ?? undefined}
         action={
-          <Link href="/atelier/patronnage">
-            <Button variant="secondary" size="sm">
-              <ArrowLeft className="h-3.5 w-3.5" /> Retour à la liste
-            </Button>
-          </Link>
+          <div className="flex items-center gap-2">
+            {/* Ordre de tracé imprimable : récapitulatif + une fiche matelas par tracé. */}
+            <a
+              href={`/api/patronnage/fiches/${fiche.id}/pdf`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-xs font-medium text-foreground hover:bg-surface-muted"
+            >
+              <Printer className="h-3.5 w-3.5" /> Imprimer (PDF)
+            </a>
+            <Link href="/atelier/patronnage">
+              <Button variant="secondary" size="sm">
+                <ArrowLeft className="h-3.5 w-3.5" /> Retour à la liste
+              </Button>
+            </Link>
+          </div>
         }
       />
 

@@ -1,4 +1,5 @@
 import { requireModule } from "@/lib/auth/permissions";
+import { compositionTissus, libelleTissu } from "@/lib/patronnage/tissus-matelas";
 import { LotsAtelierCard, type LotAtelierRow } from "./lots-atelier-card";
 import { MatelasRegroupes, type MatelasRegroupe } from "./matelas-regroupes";
 import { groupCouverture, surplusSiCoupe, type CouvertureRow } from "@/lib/production/couverture-coupe";
@@ -274,6 +275,7 @@ export default async function SectionQueuePage({
         .sort((a, b) => a.ordre - b.ordre)
         .map((t) => ({
           id: t.id,
+          ficheId: fiche.id as string,
           reference: t.reference,
           referencePatron: t.reference_patron,
           repartitionParCouche: t.repartition_par_couche ?? {},
@@ -425,7 +427,7 @@ export default async function SectionQueuePage({
     const { data: tracesRegroupes } = await supabase
       .from("traces_placement")
       .select(
-        "id,reference,statut,forme,longueur_matelas_cm,largeur_matelas_cm,fiches_placement!inner(regroupee),trace_rouleaux(textile_rolls(code)),textile_roll_events(type,textile_rolls(code,laize_cm,bain,poids_kg)),trace_semi_finis(semi_fini_id,taille,quantite_par_couche,semi_fini:product_models(name)),trace_couches(production_order_line_id,nb_couches,production_order_lines(description,colors!production_order_lines_couleur_unique_id_fkey(name),production_orders(reference,status)))"
+        "id,fiche_id,reference,statut,forme,longueur_matelas_cm,largeur_matelas_cm,fiches_placement!inner(regroupee),trace_rouleaux(textile_rolls(code)),textile_roll_events(type,textile_rolls(code,laize_cm,bain,poids_kg)),trace_semi_finis(semi_fini_id,taille,quantite_par_couche,semi_fini:product_models(name)),trace_couches(production_order_line_id,nb_couches,production_order_lines(description,colors!production_order_lines_couleur_unique_id_fkey(name),production_orders(reference,status)))"
       )
       .eq("fiches_placement.regroupee", true)
       .in("statut", ["bon_pour_coupe", "en_coupe"])
@@ -448,6 +450,7 @@ export default async function SectionQueuePage({
         }));
         return {
           traceId: t.id as string,
+          ficheId: t.fiche_id as string,
           reference: t.reference as string,
           semiFini: [...new Set(pieces.map((p) => p.semiFini))].join(" + ") || "Pièces",
           statut: t.statut as string,
@@ -475,6 +478,7 @@ export default async function SectionQueuePage({
       .map((m) => ({
         ...m,
         articles: m.articles.map((a) => ({ lineId: a.lineId, odf: a.odf, article: a.article, couleur: a.couleur, couches: a.couches, odfAnnule: a.odfAnnule })),
+        tissus: [] as { libelle: string; couches: number; odfs: string }[],
       }));
     // Couleur des pièces du matelas pour chaque article (0165) : celle imposée
     // par la nomenclature, sinon celle de la zone, sinon la couleur unique.
@@ -484,6 +488,24 @@ export default async function SectionQueuePage({
       const parPiece = new Map(
         ((couleurs ?? []) as { line_id: string; semi_fini_id: string; couleur: string | null }[]).map((c) => [`${c.line_id}|${c.semi_fini_id}`, c.couleur])
       );
+      // Composition du matelas par tissu (grammage, couleur, référence).
+      const compo = await compositionTissus(
+        supabase,
+        new Map(
+          matelasRegroupes.map((m) => [
+            m.traceId,
+            m.articles.map((a) => ({ lineId: a.lineId, nbCouches: a.couches, semiFiniIds: m.pieces.map((p) => p.semiFiniId), odf: a.odf })),
+          ])
+        )
+      );
+      matelasRegroupes = matelasRegroupes.map((m) => ({
+        ...m,
+        tissus: (compo.get(m.traceId) ?? []).map((x) => ({
+          libelle: libelleTissu(x),
+          couches: x.couches,
+          odfs: x.odfs.map((o) => `${o.odf ?? "-"} (${o.couches})`).join(", "),
+        })),
+      }));
       matelasRegroupes = matelasRegroupes.map((m) => {
         const piecesTrace = [...new Set(m.pieces.map((p) => p.semiFiniId))];
         return {

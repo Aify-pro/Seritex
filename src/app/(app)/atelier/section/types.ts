@@ -39,6 +39,8 @@ export type MatelasDechetRow = { id: string; bagCode: string; deltaKg: number; o
  */
 export type MatelasRow = {
   id: string;
+  /** Ordre de tracé du matelas : sa fiche matelas imprimable (PDF). */
+  ficheId: string;
   reference: string;
   referencePatron: string | null;
   repartitionParCouche: RepartitionTailles;
