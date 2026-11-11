@@ -1,16 +1,20 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Cylinder } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   ajouterRouleauTrace,
+  ajouterTissuTrace,
   chargerRouleauxTrace,
   definirFormeTrace,
   retirerRouleauTrace,
+  retirerTissuTrace,
+  tissusTrace,
   type RouleauxTrace,
+  type TissuPrevu,
 } from "@/app/(app)/atelier/patronnage/fiches-actions";
 
 const champ = "h-9 rounded-md border border-border bg-surface px-2 text-base sm:text-sm";
@@ -75,9 +79,13 @@ export function TraceRouleaux({
   const tissus = useMemo(() => [...new Map(candidats.map((r) => [r.textileId, r.tissu])).entries()].sort((a, b) => a[1].localeCompare(b[1])), [candidats]);
   const couleurs = useMemo(() => [...new Set(candidats.map((r) => r.couleur).filter((c): c is string => !!c))].sort(), [candidats]);
   const laizes = useMemo(() => [...new Set(candidats.map((r) => r.laizeCm).filter((l): l is number => l !== null))].sort((a, b) => a - b), [candidats]);
-  const aTissuTrace = (data?.textilesTrace.length ?? 0) > 0;
+  // « Tissus de ce tracé » : les tissus prévus par la PAO (0180) s'il y en a,
+  // sinon les tissus des articles d'ODF du tracé.
+  const variantsTrace = data?.variantsTrace ?? [];
+  const aTissuTrace = variantsTrace.length > 0 || (data?.textilesTrace.length ?? 0) > 0;
   const visibles = candidats.filter((r) => {
-    if (tissu === "trace" && aTissuTrace && !data?.textilesTrace.includes(r.textileId)) return false;
+    if (tissu === "trace" && variantsTrace.length > 0 && !(r.variantId && variantsTrace.includes(r.variantId))) return false;
+    if (tissu === "trace" && variantsTrace.length === 0 && aTissuTrace && !data?.textilesTrace.includes(r.textileId)) return false;
     if (tissu !== "trace" && tissu !== "" && r.textileId !== tissu) return false;
     if (couleur && r.couleur !== couleur) return false;
     if (laize && r.laizeCm !== Number(laize)) return false;
@@ -87,8 +95,12 @@ export function TraceRouleaux({
 
   return (
     <div className="space-y-3">
+      <TissusPrevus traceId={traceId} ficheId={ficheId} modifiable={modifiable} onChanged={() => {
+        if (data) charger();
+        onChanged();
+      }} />
       <div className="flex flex-wrap items-center gap-2">
-        <p className="text-xs font-medium text-foreground-muted">Tissu du tracé</p>
+        <p className="text-xs font-medium text-foreground-muted">Forme du tissu</p>
         {formeModifiable ? (
           <select value={forme} disabled={pending} onChange={(e) => agir(() => definirFormeTrace(traceId, ficheId, e.target.value as "ouvert" | "tubulaire"))} className={champ} aria-label="Forme du tissu">
             <option value="ouvert">Ouvert</option>
@@ -179,6 +191,88 @@ export function TraceRouleaux({
                 </ul>
               )}
             </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Tissus prévus pour le tracé (0180) : la PAO indique le ou les tissus
+ * (référence tissu × couleur, ex. JE180BLE), même avant l'ODF. Les rouleaux
+ * proposés se filtrent ensuite sur ces tissus ; en choisir reste facultatif.
+ */
+function TissusPrevus({ traceId, ficheId, modifiable, onChanged }: { traceId: string; ficheId: string; modifiable: boolean; onChanged: () => void }) {
+  const [pending, startTransition] = useTransition();
+  const [prevus, setPrevus] = useState<TissuPrevu[] | null>(null);
+  const [catalogue, setCatalogue] = useState<TissuPrevu[]>([]);
+  const [ajout, setAjout] = useState("");
+
+  useEffect(() => {
+    let annule = false;
+    tissusTrace(traceId).then((res) => {
+      if (annule || "error" in res) return;
+      setPrevus(res.prevus);
+      setCatalogue(res.catalogue);
+    });
+    return () => {
+      annule = true;
+    };
+  }, [traceId]);
+
+  function agir(action: () => Promise<{ error?: string }>) {
+    startTransition(async () => {
+      const res = await action();
+      if (res.error) {
+        toast.error("Action refusée", { description: res.error });
+        return;
+      }
+      const maj = await tissusTrace(traceId);
+      if (!("error" in maj)) setPrevus(maj.prevus);
+      setAjout("");
+      onChanged();
+    });
+  }
+
+  const dispo = catalogue.filter((c) => !(prevus ?? []).some((p) => p.variantId === c.variantId));
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-medium text-foreground-muted">Tissus prévus</p>
+      {prevus === null ? (
+        <p className="text-xs text-foreground-muted">Chargement…</p>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2">
+          {prevus.length === 0 && <span className="text-sm text-foreground-muted">Aucun tissu indiqué.</span>}
+          {prevus.map((t) => (
+            <span key={t.variantId} className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2 py-1 text-sm">
+              <span className="font-mono text-xs font-medium">{t.code}</span>
+              <span>{t.libelle}</span>
+              {modifiable && (
+                <button type="button" disabled={pending} onClick={() => agir(() => retirerTissuTrace(traceId, ficheId, t.variantId))} className="text-xs text-foreground-muted hover:text-danger" aria-label={`Retirer ${t.code}`}>
+                  ✕
+                </button>
+              )}
+            </span>
+          ))}
+          {modifiable && (
+            <select
+              value={ajout}
+              disabled={pending}
+              onChange={(e) => {
+                setAjout(e.target.value);
+                if (e.target.value) agir(() => ajouterTissuTrace(traceId, ficheId, e.target.value));
+              }}
+              className={`${champ} max-w-xs`}
+              aria-label="Ajouter un tissu prévu"
+            >
+              <option value="">+ Ajouter un tissu…</option>
+              {dispo.map((c) => (
+                <option key={c.variantId} value={c.variantId}>
+                  {c.code} — {c.libelle}
+                </option>
+              ))}
+            </select>
           )}
         </div>
       )}

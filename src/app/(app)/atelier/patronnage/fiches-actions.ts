@@ -10,7 +10,7 @@ import { normalizeShape, appliquerEchelleFichier, FACTEURS_ECHELLE, type Facteur
 import { chargerTraceSource, facteurEnregistreTrace } from "@/lib/patronnage/trace-source";
 import { loadReferenceLibrary } from "@/lib/patronnage/bibliotheque";
 import { reconnaitreTrace } from "@/lib/patronnage/reconnaissance";
-import { construireAnalyseDetaillee, type TraceAnalysisDetail } from "@/lib/patronnage/detail";
+import { construireAnalyseDetaillee, MM_PAR_UNITE, type TraceAnalysisDetail } from "@/lib/patronnage/detail";
 import { readDxfFile } from "@/lib/patronnage/upload";
 import { nomenclaturesActives } from "@/lib/patronnage/nomenclatures-actives";
 import type { StatutFiche, RepartitionTailles } from "@/lib/patronnage/types";
@@ -748,6 +748,8 @@ export interface RouleauTrace {
   code: string;
   forme: string;
   textileId: string;
+  /** Déclinaison tissu × couleur du rouleau (0105), pour le filtre « tissus prévus ». */
+  variantId: string | null;
   tissu: string;
   couleur: string | null;
   laizeCm: number | null;
@@ -761,22 +763,25 @@ export interface RouleauTrace {
 export interface RouleauxTrace {
   rouleaux: RouleauTrace[];
   textilesTrace: string[];
+  /** Tissus prévus sur le tracé (0180) : déclinaisons tissu × couleur. */
+  variantsTrace: string[];
 }
 
 /** Rouleaux en stock et rouleaux déjà choisis pour un tracé (0163). */
 export async function chargerRouleauxTrace(traceId: string): Promise<RouleauxTrace | { error: string }> {
   await requirePermission("view");
   const supabase = await createClient();
-  const colonnes = "id,code,forme,textile_id,laize_cm,poids_kg,bain,colors(name),textiles(nom,grammage)";
-  const [{ data: trace }, { data: choisis }, { data: stock, error }, { data: reservations }, { data: couches }] = await Promise.all([
+  const colonnes = "id,code,forme,textile_id,variant_id,laize_cm,poids_kg,bain,colors(name),textiles(nom,grammage)";
+  const [{ data: trace }, { data: choisis }, { data: stock, error }, { data: reservations }, { data: couches }, { data: prevus }] = await Promise.all([
     supabase.from("traces_placement").select("fiche_id").eq("id", traceId).maybeSingle(),
     supabase.from("trace_rouleaux").select(`roll_id,textile_rolls(${colonnes})`).eq("trace_id", traceId),
     supabase.from("textile_rolls").select(colonnes).eq("statut", "en_stock").gt("poids_kg", 0).order("recu_le", { ascending: false }).limit(500),
     supabase.rpc("reservations_rouleaux"),
     supabase.from("trace_couches").select("production_order_line_id").eq("trace_id", traceId),
+    supabase.from("trace_tissus").select("variant_id").eq("trace_id", traceId),
   ]);
   if (error) return { error: error.message };
-  type Roll = { id: string; code: string; forme: string; textile_id: string; laize_cm: number | null; poids_kg: number; bain: string | null; colors: { name: string } | null; textiles: { nom: string; grammage: number | null } | null };
+  type Roll = { id: string; code: string; forme: string; textile_id: string; variant_id: string | null; laize_cm: number | null; poids_kg: number; bain: string | null; colors: { name: string } | null; textiles: { nom: string; grammage: number | null } | null };
   const dejaChoisis = (choisis ?? []).map((c) => c.textile_rolls as unknown as Roll).filter(Boolean);
   const idsChoisis = new Set(dejaChoisis.map((r) => r.id));
   const reservation = new Map(
@@ -796,6 +801,7 @@ export async function chargerRouleauxTrace(traceId: string): Promise<RouleauxTra
     code: r.code,
     forme: r.forme,
     textileId: r.textile_id,
+    variantId: r.variant_id,
     tissu: `${r.textiles?.nom ?? "—"}${r.textiles?.grammage ? ` ${r.textiles.grammage} g` : ""}`,
     couleur: r.colors?.name ?? null,
     laizeCm: r.laize_cm != null ? Number(r.laize_cm) : null,
@@ -807,7 +813,64 @@ export async function chargerRouleauxTrace(traceId: string): Promise<RouleauxTra
   return {
     rouleaux: [...dejaChoisis.map((r) => versLigne(r, true)), ...((stock ?? []) as unknown as Roll[]).filter((r) => !idsChoisis.has(r.id)).map((r) => versLigne(r, false))],
     textilesTrace,
+    variantsTrace: (prevus ?? []).map((p) => p.variant_id as string),
   };
+}
+
+export interface TissuPrevu {
+  variantId: string;
+  code: string;
+  libelle: string;
+}
+
+/** Tissus prévus d'un tracé (0180) et déclinaisons de tissu proposables (matière × couleur). */
+export async function tissusTrace(traceId: string): Promise<{ prevus: TissuPrevu[]; catalogue: TissuPrevu[] } | { error: string }> {
+  await requirePermission("view");
+  const supabase = await createClient();
+  const colonnes = "id,code,textiles(nom,grammage),colors(name)";
+  const [{ data: prevus, error }, { data: catalogue }] = await Promise.all([
+    supabase.from("trace_tissus").select(`product_variants(${colonnes})`).eq("trace_id", traceId),
+    supabase
+      .from("product_variants")
+      .select(colonnes)
+      .eq("actif", true)
+      .is("size_id", null)
+      .not("textile_id", "is", null)
+      .not("color_id", "is", null)
+      .order("code")
+      .limit(1000),
+  ]);
+  if (error) return { error: error.message };
+  type V = { id: string; code: string; textiles: { nom: string; grammage: number | null } | null; colors: { name: string } | null };
+  const vers = (v: V): TissuPrevu => ({
+    variantId: v.id,
+    code: v.code,
+    libelle: [`${v.textiles?.nom ?? "Tissu"}${v.textiles?.grammage && !(v.textiles?.nom ?? "").includes(String(v.textiles.grammage)) ? ` ${v.textiles.grammage} g` : ""}`, v.colors?.name]
+      .filter(Boolean)
+      .join(" · "),
+  });
+  return {
+    prevus: ((prevus ?? []) as unknown as { product_variants: V | null }[]).flatMap((p) => (p.product_variants ? [vers(p.product_variants)] : [])),
+    catalogue: ((catalogue ?? []) as unknown as V[]).map(vers),
+  };
+}
+
+export async function ajouterTissuTrace(traceId: string, ficheId: string, variantId: string): Promise<{ error?: string }> {
+  await requireTracePermission("modify");
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("trace_ajouter_tissu", { p_trace_id: traceId, p_variant_id: variantId });
+  if (error) return { error: error.message };
+  apresRouleaux(ficheId);
+  return {};
+}
+
+export async function retirerTissuTrace(traceId: string, ficheId: string, variantId: string): Promise<{ error?: string }> {
+  await requireTracePermission("modify");
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("trace_retirer_tissu", { p_trace_id: traceId, p_variant_id: variantId });
+  if (error) return { error: error.message };
+  apresRouleaux(ficheId);
+  return {};
 }
 
 function apresRouleaux(ficheId: string) {
@@ -1267,9 +1330,15 @@ export async function uploadTraceDxf(traceId: string, ficheId: string, formData:
   if ("error" in stored) return { error: `Échec de l'enregistrement du fichier : ${stored.error}` };
   const remotePath = stored.path;
 
+  // Dimensions du tracé lues dans le fichier (encombrement du placement, à
+  // l'échelle retenue par la reconnaissance) : la plus grande est la longueur
+  // du matelas, l'autre sa largeur. Modifiables ensuite à la main.
+  const dims = dimensionsTraceCm(contours.map((c) => c.points), analyse.facteurEchelle);
+
   const { data: traceUpdated, error: traceUpdateError } = await supabase
     .from("traces_placement")
     .update({
+      ...(dims ? { longueur_matelas_cm: dims.longueur, largeur_matelas_cm: dims.largeur } : {}),
       fichier_path: remotePath,
       fichier_nom: read.file.name,
       fichier_taille: read.file.size,
@@ -1347,6 +1416,25 @@ async function persisterAnalyse(
     await supabase.rpc("pre_remplir_pieces_trace", { p_trace_id: traceId });
   }
   return null;
+}
+
+/** Encombrement du placement en centimètres (unité de fichier × échelle × 0,1 mm). */
+function dimensionsTraceCm(pieces: [number, number][][], facteur: number): { longueur: number; largeur: number } | null {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of pieces) {
+    for (const [x, y] of p) {
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+  }
+  if (!Number.isFinite(minX)) return null;
+  const cm = (v: number) => Math.round(((v * facteur * MM_PAR_UNITE) / 10) * 10) / 10;
+  const a = cm(maxX - minX);
+  const b = cm(maxY - minY);
+  if (a <= 0 || b <= 0) return null;
+  return { longueur: Math.max(a, b), largeur: Math.min(a, b) };
 }
 
 function sanitizeFileName(name: string) {
