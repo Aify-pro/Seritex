@@ -1634,3 +1634,11 @@ export async function catalogueTrace(): Promise<{ semiFinis: { id: string; nom: 
     tailles: sizes.map((s) => s.cle),
   };
 }
+
+/** Couleurs du référentiel (Paramètres > Couleurs et tailles), pour la couleur d'une fiche. */
+export async function couleursReferentiel(): Promise<{ id: string; name: string; code: string | null }[]> {
+  await requirePermission("view");
+  const supabase = await createClient();
+  const { data } = await supabase.from("colors").select("id,name,code").eq("active", true).order("name");
+  return (data ?? []).map((c) => ({ id: c.id as string, name: c.name as string, code: (c.code as string | null) ?? null }));
+}

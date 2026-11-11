@@ -41,6 +41,7 @@ import {
   unarchiveFiche,
   deleteFicheDefinitively,
   addTrace,
+  couleursReferentiel,
   updateTrace,
   deleteTrace,
   uploadTraceDxf,
@@ -239,6 +240,53 @@ export function FichesPlacementClient({
         </Dialog>
       </div>
     </SizesContext.Provider>
+  );
+}
+
+/**
+ * Couleur d'une fiche : choisie dans le référentiel des couleurs (jamais en
+ * saisie libre), avec sa pastille. Le nom est enregistré tel quel ; une
+ * ancienne saisie libre absente du référentiel reste affichée, signalée.
+ */
+function CouleurSelect({ defaultValue = null, disabled = false }: { defaultValue?: string | null; disabled?: boolean }) {
+  const [couleurs, setCouleurs] = useState<{ id: string; name: string; code: string | null }[] | null>(null);
+  const [valeur, setValeur] = useState(defaultValue ?? "");
+  useEffect(() => {
+    let annule = false;
+    couleursReferentiel().then((c) => {
+      if (!annule) setCouleurs(c);
+    });
+    return () => {
+      annule = true;
+    };
+  }, []);
+  const choisie = couleurs?.find((c) => c.name === valeur) ?? null;
+  const horsReferentiel = !!valeur && couleurs !== null && !choisie;
+  return (
+    <div className="flex items-center gap-2">
+      <span
+        aria-hidden
+        className="h-5 w-5 shrink-0 rounded-full border border-border"
+        style={{ background: choisie?.code && /^#?[0-9a-f]{3,6}$/i.test(choisie.code) ? (choisie.code.startsWith("#") ? choisie.code : `#${choisie.code}`) : "transparent" }}
+      />
+      <select
+        name="couleur"
+        value={valeur}
+        disabled={disabled}
+        onChange={(e) => setValeur(e.target.value)}
+        className="w-64 rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground disabled:opacity-60"
+      >
+        <option value="">{couleurs === null ? "Chargement…" : "— Aucune —"}</option>
+        {/* Valeur actuelle toujours présente : rien n'est effacé pendant le chargement. */}
+        {valeur && !choisie && <option value={valeur}>{horsReferentiel ? `${valeur} (hors liste)` : valeur}</option>}
+        {(couleurs ?? []).map((c) => (
+          <option key={c.id} value={c.name}>
+            {c.name}
+          </option>
+        ))}
+      </select>
+      {horsReferentiel && <span className="text-xs text-warning">Ancienne saisie, absente de la liste des couleurs</span>}
+    </div>
   );
 }
 
@@ -637,7 +685,7 @@ function CreateFicheForm({
       )}
 
       <Field label="Couleur">
-        <input name="couleur" className="w-64 rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground" />
+        <CouleurSelect />
       </Field>
 
       <Field label="Contraintes particulières">
@@ -927,7 +975,7 @@ export function FicheDetailContent({
               </div>
 
               <Field label="Couleur">
-                <input name="couleur" defaultValue={fiche.couleur ?? ""} disabled={locked || !permissions.canModify} className="w-64 rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground disabled:opacity-60" />
+                <CouleurSelect defaultValue={fiche.couleur} disabled={locked || !permissions.canModify} />
               </Field>
 
               <Field label="Contraintes particulières">
