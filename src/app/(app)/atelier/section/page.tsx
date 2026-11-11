@@ -1,4 +1,5 @@
 import { requireModule } from "@/lib/auth/permissions";
+import { compositionTissus, libelleTissu } from "@/lib/patronnage/tissus-matelas";
 import { LotsAtelierCard, type LotAtelierRow } from "./lots-atelier-card";
 import { MatelasRegroupes, type MatelasRegroupe } from "./matelas-regroupes";
 import { groupCouverture, surplusSiCoupe, type CouvertureRow } from "@/lib/production/couverture-coupe";
@@ -477,6 +478,7 @@ export default async function SectionQueuePage({
       .map((m) => ({
         ...m,
         articles: m.articles.map((a) => ({ lineId: a.lineId, odf: a.odf, article: a.article, couleur: a.couleur, couches: a.couches, odfAnnule: a.odfAnnule })),
+        tissus: [] as { libelle: string; couches: number; odfs: string }[],
       }));
     // Couleur des pièces du matelas pour chaque article (0165) : celle imposée
     // par la nomenclature, sinon celle de la zone, sinon la couleur unique.
@@ -486,6 +488,24 @@ export default async function SectionQueuePage({
       const parPiece = new Map(
         ((couleurs ?? []) as { line_id: string; semi_fini_id: string; couleur: string | null }[]).map((c) => [`${c.line_id}|${c.semi_fini_id}`, c.couleur])
       );
+      // Composition du matelas par tissu (grammage, couleur, référence).
+      const compo = await compositionTissus(
+        supabase,
+        new Map(
+          matelasRegroupes.map((m) => [
+            m.traceId,
+            m.articles.map((a) => ({ lineId: a.lineId, nbCouches: a.couches, semiFiniIds: m.pieces.map((p) => p.semiFiniId), odf: a.odf })),
+          ])
+        )
+      );
+      matelasRegroupes = matelasRegroupes.map((m) => ({
+        ...m,
+        tissus: (compo.get(m.traceId) ?? []).map((x) => ({
+          libelle: libelleTissu(x),
+          couches: x.couches,
+          odfs: x.odfs.map((o) => `${o.odf ?? "-"} (${o.couches})`).join(", "),
+        })),
+      }));
       matelasRegroupes = matelasRegroupes.map((m) => {
         const piecesTrace = [...new Set(m.pieces.map((p) => p.semiFiniId))];
         return {

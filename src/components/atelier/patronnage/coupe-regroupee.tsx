@@ -510,6 +510,19 @@ export function CouchesEditor({
           );
         })}
       </ul>
+      {(trace.compositionTissus ?? []).length > 0 && (
+        <div className="rounded-md bg-surface-muted px-3 py-2">
+          <p className="text-xs font-medium text-foreground">Composition du matelas par tissu</p>
+          <ul className="mt-1 space-y-0.5 text-sm">
+            {(trace.compositionTissus ?? []).map((t) => (
+              <li key={t.libelle}>
+                <span className="font-medium">{t.libelle}</span> : {t.couches} couche{t.couches > 1 ? "s" : ""}
+                <span className="block text-xs text-foreground-muted">{t.odfs}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {editable && (
         <div className="flex justify-end">
           <Button size="sm" variant="secondary" loading={pending} onClick={enregistrer}>

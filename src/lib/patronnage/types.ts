@@ -164,6 +164,11 @@ export interface TracePlacement {
   justification: string | null;
   /** Couches par article d'ODF d'un tracé regroupé (0149) ; vide pour un tracé d'article. */
   couches: { lineId: string; nbCouches: number }[];
+  /**
+   * Composition en tissus d'un tracé regroupé : couches par tissu (grammage,
+   * couleur, référence) et ODF concernés. Renseignée sur la page d'une fiche.
+   */
+  compositionTissus?: { libelle: string; couches: number; odfs: string }[];
   /** Pièces d'un tracé regroupé (0155) : semi-fini, taille et quantité par couche ; vide pour un tracé d'article. */
   pieces: PieceTrace[];
   /** Contrôle de cohérence entre les pièces déclarées et le fichier du tracé (0155, D2). */

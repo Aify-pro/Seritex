@@ -43,6 +43,8 @@ export type OrdreTracePdfTrace = {
   laizeCm: number | null;
   /** Total des couches (somme des couches par article, ou nombre de plis). */
   couches: number | null;
+  /** Couches par tissu (grammage, couleur, référence) et ODF concernés, ordre regroupé. */
+  tissus: { libelle: string; couches: number; odfs: string }[];
   /** Couches par article (ordre regroupé). */
   couchesParArticle: { libelle: string; couleur: string | null; couches: number; odfAnnule: boolean }[];
   /** Pièces posées par couche : pièce × taille × quantité. */
@@ -324,19 +326,19 @@ export async function buildOrdreTracePdf(data: OrdreTracePdfData): Promise<Uint8
     titre("Tracés");
     tableau(
       [
-        { title: "Tracé", width: 18 },
-        { title: "Statut", width: 14 },
-        { title: "Forme", width: 11 },
-        { title: "Longueur × laize", width: 17 },
-        { title: "Couches", width: 9, align: "right" },
-        { title: "Pièces par couche", width: 31 },
+        { title: "Tracé", width: 16 },
+        { title: "Statut / forme", width: 14 },
+        { title: "Long. × laize", width: 13 },
+        { title: "Couches", width: 8, align: "right" },
+        { title: "Tissus (couches)", width: 28 },
+        { title: "Pièces par couche", width: 21 },
       ],
       data.traces.map((t) => [
         { v: t.reference, bold: true },
-        t.statut,
-        t.forme,
+        `${t.statut}\n${t.forme}`,
         `${n(t.longueurCm)} × ${n(t.laizeCm)} cm`,
         n(t.couches),
+        t.tissus.map((x) => `${x.libelle} : ${n(x.couches)}`).join("\n") || data.tissu || "-",
         t.piecesParCouche.map((p) => `${p.quantite} ${p.piece} ${p.taille}`).join(", ") || "-",
       ])
     );
@@ -378,6 +380,18 @@ export async function buildOrdreTracePdf(data: OrdreTracePdfData): Promise<Uint8
           { title: "Poids", width: 22, align: "right" },
         ],
         t.rouleaux.map((r) => [{ v: r.code, bold: true }, r.laizeCm !== null ? `${n(r.laizeCm)} cm` : "-", r.bain ?? "-", r.poidsKg !== null ? `${n(r.poidsKg)} kg` : "-"])
+      );
+    }
+
+    if (t.tissus.length > 0) {
+      titre("Composition du matelas par tissu");
+      tableau(
+        [
+          { title: "Tissu (grammage, couleur, référence)", width: 46 },
+          { title: "Couches", width: 12, align: "right" },
+          { title: "ODF (couches)", width: 42 },
+        ],
+        t.tissus.map((x) => [{ v: x.libelle, bold: true }, { v: n(x.couches), bold: true }, x.odfs])
       );
     }
 

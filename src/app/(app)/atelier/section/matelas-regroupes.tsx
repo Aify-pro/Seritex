@@ -31,6 +31,8 @@ export interface MatelasRegroupe {
   laizeCm: number | null;
   /** odfAnnule (0178) : article d'un ODF annulé — ses pièces iront en stock tampon, à réorienter. */
   articles: { lineId: string; odf: string; article: string; couleur: string | null; couches: number; odfAnnule?: boolean }[];
+  /** Couches par tissu (grammage, couleur, référence) et ODF concernés. */
+  tissus: { libelle: string; couches: number; odfs: string }[];
 }
 
 const libelleTaille = (cle: string) => cle.split("/").pop() ?? cle;
@@ -182,6 +184,19 @@ function MatelasRegroupeDialog({ matelas, onClose }: { matelas: MatelasRegroupe;
         >
           <Printer className="h-4 w-4" /> Fiche matelas (PDF)
         </a>
+        {matelas.tissus.length > 0 && (
+          <div className="rounded-md border border-border bg-surface-muted px-3 py-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-foreground-muted">Composition du matelas</p>
+            <ul className="mt-1 space-y-1 text-sm">
+              {matelas.tissus.map((t) => (
+                <li key={t.libelle}>
+                  <span className="font-medium">{t.libelle}</span> : {t.couches} couche{t.couches > 1 ? "s" : ""}
+                  <span className="block text-xs text-foreground-muted">{t.odfs}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         <p className="text-xs text-foreground-muted">
           Pièces par couche : {pieces0.map((p) => `${p.quantiteParCouche} ${p.semiFini} ${libelleTaille(p.taille)}`).join(", ") || "—"}. Jamais plus que le tracé ; tout manque est justifié.
         </p>

@@ -147,6 +147,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         longueurCm: t.longueurMatelasCm,
         laizeCm: t.largeurMatelasCm,
         couches: regroupe ? t.couches.reduce((s, c) => s + c.nbCouches, 0) : t.nbPlis,
+        tissus: t.compositionTissus ?? [],
         couchesParArticle,
         piecesParCouche,
         rouleaux: ((rouleaux ?? []) as unknown as RouleauRow[])

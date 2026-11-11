@@ -61,6 +61,11 @@ async function main() {
       longueurCm: 640,
       laizeCm: 178,
       couches: 75,
+      tissus: [
+        { libelle: "Jersey 180 g · Bleu roi · réf. JE180BRO", couches: 30, odfs: "OF-20261027-3a42 (30)" },
+        { libelle: "Jersey 180 g · Noir · réf. JE180NOI", couches: 30, odfs: "OF-20261109-9850 (30)" },
+        { libelle: "Jersey 145 g · Rouge", couches: 15, odfs: "OF-20261109-2d15 (15)" },
+      ],
       couchesParArticle: [
         { libelle: "OF-20261027-3a42 · T-shirt col rond Homme", couleur: "Bleu roi", couches: 30, odfAnnule: false },
         { libelle: "OF-20261109-9850 · T-shirt col rond Homme", couleur: "Noir", couches: 30, odfAnnule: false },
