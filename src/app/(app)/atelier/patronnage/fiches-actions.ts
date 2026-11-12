@@ -1730,3 +1730,19 @@ export async function couleursReferentiel(): Promise<{ id: string; name: string;
   const { data } = await supabase.from("colors").select("id,name,code").eq("active", true).order("name");
   return (data ?? []).map((c) => ({ id: c.id as string, name: c.name as string, code: (c.code as string | null) ?? null }));
 }
+
+/**
+ * Produit fini visé par un ordre de tracé sans ODF : sa nomenclature sert au
+ * bilan (t-shirts complets, pièces en trop ou à compléter).
+ */
+export async function definirModeleOrdre(ficheId: string, productModelId: string | null): Promise<{ error?: string }> {
+  await requirePermission("modify");
+  const gate = await assertFicheOuverteAuxTraces(ficheId);
+  if ("error" in gate) return { error: gate.error };
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("fiches_placement").update({ product_model_id: productModelId }).eq("id", ficheId).select("id");
+  if (error) return { error: error.message };
+  if (!data?.length) return { error: "Modification refusée." };
+  revalidatePath(`/atelier/patronnage/${ficheId}`);
+  return {};
+}

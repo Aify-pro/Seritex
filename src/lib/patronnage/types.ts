@@ -213,9 +213,26 @@ export interface FichePlacement {
   traces: TracePlacement[];
   /** Ordre de coupe regroupé (0149, 0155) : ses tracés portent des semi-finis pour plusieurs articles d'ODF ; faux pour une fiche d'article. */
   regroupee: boolean;
+  /**
+   * Nomenclatures des modèles de l'ordre (articles d'ODF, ou modèle de l'ordre
+   * sans ODF), pour le bilan : semi-fini → quantité par vêtement. Renseignées
+   * sur la page d'une fiche.
+   */
+  nomenclaturesBilan?: {
+    id: string;
+    modeleId: string;
+    nom: string;
+    forme: string;
+    principale: boolean;
+    quantites: Record<string, number>;
+    /** Articles d'ODF qui utilisent cette nomenclature (répartition). */
+    activePour: string[];
+  }[];
   /** Articles d'ODF regroupés (ordre regroupé seulement), avec les semi-finis de leur nomenclature et leurs tailles. */
   lignesRegroupees: {
     lineId: string;
+    /** Modèle de l'article d'ODF (nomenclatures du bilan). */
+    modeleId: string | null;
     description: string;
     odfReference: string | null;
     /** ODF annulé (0178) : ses pièces coupées resteront en stock tampon, à réorienter. */
