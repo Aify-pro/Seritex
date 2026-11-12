@@ -1,0 +1,30 @@
+[package]
+name = "seritex-imbrication"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+publish = false
+description = "Moteur d'imbrication (tracé de coupe) de Seritex : contrat JSON seritex.imbrication/v1 autour de sparrow / jagua-rs"
+license = "LicenseRef-Proprietaire-Seritex"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "seritex-imbrication"
+path = "src/main.rs"
+
+[dependencies]
+# sparrow n'est pas publié sur crates.io : dépendance git figée sur le tag v0.3.0 (MIT).
+sparrow = { git = "https://github.com/JeroenGar/sparrow", rev = "c5e64b3b7a0e102de851f44c1f8dd2520a30633b", features = ["only_final_svg"] }
+# Version exigée par sparrow v0.3.0 (MPL-2.0, utilisée sans modification).
+jagua-rs = { version = "=1.0.0", features = ["spp"] }
+rand = "0.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"

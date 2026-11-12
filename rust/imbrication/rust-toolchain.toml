@@ -1,0 +1,6 @@
+# Version figée : le module WebAssembly embarqué dans Seritex doit pouvoir être
+# reconstruit à l'identique (voir scripts/build-imbrication-wasm.mjs).
+[toolchain]
+channel = "1.99.1"
+targets = ["wasm32-wasip1"]
+profile = "minimal"

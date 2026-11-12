@@ -45,3 +45,7 @@ scripts/prospection-reprise/*.sql
 
 # ressources de pdf.js copiées avant dev/build (scripts/copier-pdfjs.mjs)
 /public/pdfjs/
+
+# Moteur d'imbrication : compilation Rust et résultats du banc d'essai
+/rust/*/target/
+/bench-imbrication/
