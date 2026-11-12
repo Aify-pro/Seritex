@@ -223,6 +223,7 @@ async function mapFiches(
       const po = g.production_order_lines?.production_orders;
       return {
         lineId: g.production_order_line_id,
+        modeleId: g.production_order_lines?.product_model_id ?? null,
         description: g.production_order_lines?.description ?? "—",
         odfReference: (Array.isArray(po) ? po[0]?.reference : po?.reference) ?? null,
         odfAnnule: (Array.isArray(po) ? po[0]?.status : po?.status) === "annulee",
@@ -342,6 +343,32 @@ export async function getFichePlacementById(id: string): Promise<FichePlacement 
         ])
     )
   );
+  // Nomenclatures pour le bilan de l'ordre (t-shirts complets, pièces en trop
+  // ou manquantes) : celles des modèles des articles d'ODF, et celle du
+  // modèle de l'ordre quand il n'a pas encore d'ODF.
+  const modeles = [...new Set([...mapped.lignesRegroupees.map((l) => l.modeleId), mapped.productModelId].filter((x): x is string => !!x))];
+  if (modeles.length > 0) {
+    const [{ data: noms }, actives] = await Promise.all([
+      supabase.from("nomenclatures").select("id,product_model_id,nom,forme,principale,nomenclature_lines(semi_fini_id,quantite_par_piece)").in("product_model_id", modeles),
+      nomenclaturesActives(supabase, mapped.lignesRegroupees.map((l) => ({ id: l.lineId, modele: l.modeleId }))),
+    ]);
+    type Nom = { id: string; product_model_id: string; nom: string; forme: string; principale: boolean; nomenclature_lines: { semi_fini_id: string | null; quantite_par_piece: number }[] | null };
+    mapped.nomenclaturesBilan = ((noms ?? []) as unknown as Nom[]).map((n) => {
+      const quantites: Record<string, number> = {};
+      for (const l of n.nomenclature_lines ?? []) {
+        if (l.semi_fini_id) quantites[l.semi_fini_id] = (quantites[l.semi_fini_id] ?? 0) + Number(l.quantite_par_piece);
+      }
+      return {
+        id: n.id,
+        modeleId: n.product_model_id,
+        nom: n.nom,
+        forme: n.forme,
+        principale: n.principale,
+        quantites,
+        activePour: [...actives.entries()].filter(([, ids]) => ids.includes(n.id)).map(([lineId]) => lineId),
+      };
+    });
+  }
   for (const t of mapped.traces) {
     const tissus = compo.get(t.id);
     if (tissus) {

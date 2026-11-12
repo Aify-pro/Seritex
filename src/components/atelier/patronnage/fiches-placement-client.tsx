@@ -31,6 +31,7 @@ import { createContext, useContext } from "react";
 import type { Size } from "@/lib/sizes";
 import { repartitionDepuisTraces, repartitionTotal } from "@/lib/patronnage/dispatching";
 import { ArticlesRegroupesCard, CouchesEditor, PiecesTraceEditor } from "@/components/atelier/patronnage/coupe-regroupee";
+import { BilanOrdreCard } from "@/components/atelier/patronnage/bilan-ordre";
 import { PiecesArticlesCard } from "@/components/atelier/patronnage/pieces-articles-card";
 import {
   createFiche,
@@ -854,6 +855,7 @@ export function FicheDetailContent({
         {fiche.regroupee ? (
           <>
             <ArticlesRegroupesCard fiche={fiche} canModify={permissions.canModify && fiche.statut !== "archive"} />
+            <BilanOrdreCard fiche={fiche} productModels={productModels} canModify={permissions.canModify && fiche.statut !== "archive"} />
             <PiecesArticlesCard lineIds={fiche.lignesRegroupees.map((l) => l.lineId)} refreshKey={fiche.traces.length} />
           </>
         ) : (
