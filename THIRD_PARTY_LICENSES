@@ -1,0 +1,100 @@
+# Licences des composants tiers embarqués dans Seritex
+
+<!-- debut:moteur-imbrication (généré par scripts/build-imbrication-wasm.mjs) -->
+## Moteur d'imbrication (src/lib/imbrication/moteur/seritex-imbrication.wasm)
+
+Dépendances Rust compilées dans le module WebAssembly, avec la licence qu'elles déclarent.
+sparrow (MIT) et jagua-rs (MPL-2.0) sont utilisés sans modification ; le code source
+de jagua-rs 1.0.0 est disponible sur https://github.com/JeroenGar/jagua-rs (tag v1.0.0),
+celui de sparrow 0.3.0 sur https://github.com/JeroenGar/sparrow (tag v0.3.0).
+
+- anstream v1.0.0 — MIT OR Apache-2.0
+- anstyle v1.0.14 — MIT OR Apache-2.0
+- anstyle-parse v1.0.0 — MIT OR Apache-2.0
+- anstyle-query v1.1.5 — MIT OR Apache-2.0
+- anyhow v1.0.104 — MIT OR Apache-2.0
+- approx v0.5.1 — Apache-2.0
+- byteorder v1.5.0 — Unlicense OR MIT
+- cfg-if v1.0.5 — MIT OR Apache-2.0
+- chacha20 v0.10.2 — MIT OR Apache-2.0
+- clap v4.6.7 — MIT OR Apache-2.0
+- clap_builder v4.6.7 — MIT OR Apache-2.0
+- clap_derive v4.6.7 — MIT OR Apache-2.0
+- clap_lex v1.1.1 — MIT OR Apache-2.0
+- colorchoice v1.0.5 — MIT OR Apache-2.0
+- crossbeam-deque v0.8.8 — MIT OR Apache-2.0
+- crossbeam-epoch v0.9.21 — MIT OR Apache-2.0
+- crossbeam-utils v0.8.23 — MIT OR Apache-2.0
+- document-features v0.2.12 — MIT OR Apache-2.0
+- dtoa v1.0.11 — MIT OR Apache-2.0
+- either v1.19.0 — MIT OR Apache-2.0
+- fern v0.7.1 — MIT
+- float_next_after v2.0.0 — MIT
+- float-cmp v0.10.0 — MIT (*)
+- geo v0.33.1 — MIT OR Apache-2.0
+- geo-types v0.7.20 — MIT OR Apache-2.0 (*)
+- geographiclib-rs v0.2.7 — MIT
+- getrandom v0.4.3 — MIT OR Apache-2.0 (*)
+- hash32 v0.3.1 — MIT OR Apache-2.0
+- heapless v0.8.0 — MIT OR Apache-2.0
+- heck v0.5.0 — MIT OR Apache-2.0
+- i_float v1.16.0 — MIT (*)
+- i_key_sort v0.10.3 — MIT
+- i_overlay v4.5.2 — MIT OR Apache-2.0
+- i_shape v1.18.0 — MIT
+- i_tree v0.18.0 — MIT
+- is_terminal_polyfill v1.70.2 — MIT OR Apache-2.0
+- itertools v0.15.0 — MIT OR Apache-2.0 (*)
+- itoa v1.0.19 — MIT OR Apache-2.0
+- jagua-rs v1.0.0 — MPL-2.0 (*)
+- jiff v0.2.43 — Unlicense OR MIT
+- jiff-core v0.1.5 — Unlicense OR MIT
+- jiff-tzdb v0.1.9 — Unlicense OR MIT
+- jiff-tzdb-platform v0.1.3 — Unlicense OR MIT
+- libc v0.2.191 — MIT OR Apache-2.0
+- libm v0.2.16 — MIT
+- litrs v1.0.1 — MIT OR Apache-2.0
+- log v0.4.35 — MIT OR Apache-2.0
+- matrixmultiply v0.3.11 — MIT/Apache-2.0
+- memchr v2.8.3 — Unlicense OR MIT
+- ndarray v0.17.2 — MIT OR Apache-2.0
+- num_cpus v1.17.0 — MIT OR Apache-2.0
+- num-complex v0.4.6 — MIT OR Apache-2.0
+- num-integer v0.1.47 — MIT OR Apache-2.0
+- num-traits v0.2.19 — MIT OR Apache-2.0 (*)
+- numfmt v1.2.0 — MIT
+- ordered-float v5.5.1 — MIT (*)
+- proc-macro2 v1.0.107 — MIT OR Apache-2.0 (*)
+- quote v1.0.47 — MIT OR Apache-2.0 (*)
+- rand v0.10.3 — MIT OR Apache-2.0 (*)
+- rand_core v0.10.1 — MIT OR Apache-2.0
+- rand_distr v0.6.0 — MIT OR Apache-2.0 (*)
+- rand_pcg v0.10.2 — MIT OR Apache-2.0
+- rawpointer v0.2.1 — MIT/Apache-2.0
+- rayon v1.12.0 — MIT OR Apache-2.0 (*)
+- rayon-core v1.13.0 — MIT OR Apache-2.0
+- robust v1.2.0 — MIT OR Apache-2.0
+- rstar v0.12.2 — MIT OR Apache-2.0 (*)
+- serde v1.0.229 — MIT OR Apache-2.0 (*)
+- serde_core v1.0.229 — MIT OR Apache-2.0
+- serde_derive v1.0.229 — MIT OR Apache-2.0
+- serde_json v1.0.154 — MIT OR Apache-2.0 (*)
+- sif-itree v0.4.1 — MIT OR Apache-2.0
+- slotmap v1.1.1 — Zlib
+- smallvec v1.16.5 — MIT OR Apache-2.0
+- sparrow v0.3.0 — MIT
+- stable_deref_trait v1.2.1 — MIT OR Apache-2.0
+- strsim v0.11.1 — MIT
+- svg v0.18.0 — Apache-2.0 OR MIT
+- syn v3.0.10 — MIT OR Apache-2.0 (*)
+- tap v1.0.1 — MIT
+- test-case v3.4.1 — MIT
+- test-case-core v3.4.1 — MIT
+- test-case-macros v3.4.1 — MIT
+- thiserror v2.0.21 — MIT OR Apache-2.0 (*)
+- thiserror-impl v2.0.21 — MIT OR Apache-2.0
+- unicode-ident v1.0.27 — (MIT OR Apache-2.0) AND Unicode-3.0
+- utf8parse v0.2.2 — Apache-2.0 OR MIT
+- web-time v1.1.0 — MIT OR Apache-2.0
+- zmij v1.0.23 — MIT
+<!-- fin:moteur-imbrication -->
