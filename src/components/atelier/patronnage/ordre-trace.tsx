@@ -1,0 +1,653 @@
+"use client";
+
+import { useEffect, useMemo, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { AlertTriangle, CheckCircle2, Plus, Trash2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardBody, CardHeader } from "@/components/ui/card";
+import { Dialog } from "@/components/ui/dialog";
+import type { FichePlacement, TracePlacement } from "@/lib/patronnage/types";
+import {
+  articlesOrdre,
+  calculerDispatching,
+  couleursDuTrace,
+  libelleTaille,
+  repartirPlis,
+  type ArticleOrdre,
+} from "@/lib/patronnage/dispatching-ordre";
+import {
+  ajouterArticleOrdre,
+  ajouterLigneRegroupee,
+  besoinsCoupe,
+  couleursArticleOrdre,
+  enregistrerCouchesOrdre,
+  lignesOdfDuModele,
+  modeleArticleOrdre,
+  remplacerArticleOrdre,
+  retirerArticleOrdre,
+  retirerLigneRegroupee,
+  type BesoinCoupeGroupe,
+  type ModeleArticleOrdre,
+} from "@/app/(app)/atelier/patronnage/fiches-actions";
+
+const champ = "h-9 rounded-md border border-border bg-surface px-2 text-sm disabled:opacity-60";
+
+function useAction() {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const run = (action: () => Promise<{ error?: string }>, ok: string, apres?: () => void) =>
+    startTransition(async () => {
+      const res = await action();
+      if (res.error) toast.error(res.error);
+      else {
+        toast.success(ok);
+        apres?.();
+        router.refresh();
+      }
+    });
+  return { pending, run };
+}
+
+const taillesTexte = (t: Record<string, number>) =>
+  Object.entries(t)
+    .filter(([, n]) => n > 0)
+    .map(([k, n]) => `${libelleTaille(k)} ${n}`)
+    .join(" · ");
+
+/* ============================================================
+   Articles à produire (demande de l'ordre)
+============================================================ */
+
+/**
+ * Articles à produire (refonte du 2026-11-12) : la demande de l'ordre. Les
+ * articles d'ODF arrivent avec leurs quantités et leurs couleurs ; sans ODF,
+ * on saisit les articles (modèle, couleur unique ou par zone, quantités par
+ * taille). Un ordre ne mélange pas les types de tissu (grammage et couleur
+ * libres). Quand l'ODF arrive, l'article saisi est remplacé par l'article
+ * d'ODF.
+ */
+export function ArticlesOrdreCard({
+  fiche,
+  canModify,
+  productModels,
+}: {
+  fiche: FichePlacement;
+  canModify: boolean;
+  productModels: { id: string; name: string }[];
+}) {
+  const { pending, run } = useAction();
+  const [groupes, setGroupes] = useState<BesoinCoupeGroupe[] | null>(null);
+  const [ajoutOdf, setAjoutOdf] = useState("");
+  const [saisie, setSaisie] = useState(false);
+  const articles = articlesOrdre(fiche);
+  const dansOrdre = useMemo(() => new Set(fiche.lignesRegroupees.map((l) => l.lineId)), [fiche.lignesRegroupees]);
+
+  useEffect(() => {
+    if (!canModify) return;
+    let annule = false;
+    besoinsCoupe().then((res) => {
+      if (!annule && !("error" in res)) setGroupes(res);
+    });
+    return () => {
+      annule = true;
+    };
+  }, [canModify, fiche.lignesRegroupees.length]);
+
+  // Articles d'ODF qui ont encore des pièces à couper et ne sont pas dans l'ordre.
+  const candidats = useMemo(() => {
+    const m = new Map<string, { lineId: string; libelle: string }>();
+    for (const g of groupes ?? []) {
+      for (const l of g.lignes) {
+        if (dansOrdre.has(l.lineId) || l.dejaEntier || l.reste <= 0) continue;
+        m.set(l.lineId, { lineId: l.lineId, libelle: `${l.odf} · ${l.article}` });
+      }
+    }
+    return [...m.values()].sort((a, b) => a.libelle.localeCompare(b.libelle));
+  }, [groupes, dansOrdre]);
+
+  return (
+    <Card>
+      <CardHeader
+        title="Articles à produire"
+        description="La demande de l'ordre : articles d'ODF (quantités et couleurs de l'ODF) ou saisis sans ODF. Un seul type de tissu par ordre ; le grammage et la couleur restent libres."
+        action={fiche.tissuOrdre ? <span className="rounded-md bg-surface-muted px-2 py-1 text-xs font-medium text-foreground">Tissu : {fiche.tissuOrdre}</span> : undefined}
+      />
+      <CardBody className="space-y-3">
+        {articles.length === 0 ? (
+          <p className="rounded-md border border-warning/30 bg-warning-soft/40 px-3 py-2 text-sm text-foreground">
+            Aucun article. Ajoutez un article d&apos;ODF, ou saisissez les articles à produire si l&apos;ODF n&apos;existe pas encore.
+          </p>
+        ) : (
+          <ul className="divide-y divide-border rounded-md border border-border">
+            {articles.map((a) => (
+              <LigneArticle key={a.cle} fiche={fiche} article={a} canModify={canModify} pending={pending} run={run} />
+            ))}
+          </ul>
+        )}
+        {canModify && (
+          <div className="flex flex-wrap items-center gap-2">
+            {candidats.length > 0 && (
+              <>
+                <select value={ajoutOdf} onChange={(e) => setAjoutOdf(e.target.value)} className={`${champ} min-w-64`}>
+                  <option value="">Ajouter un article d&apos;ODF…</option>
+                  {candidats.map((c) => (
+                    <option key={c.lineId} value={c.lineId}>
+                      {c.libelle}
+                    </option>
+                  ))}
+                </select>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={!ajoutOdf}
+                  loading={pending}
+                  onClick={() => run(() => ajouterLigneRegroupee(fiche.id, ajoutOdf), "Article d'ODF ajouté", () => setAjoutOdf(""))}
+                >
+                  <Plus className="h-3.5 w-3.5" /> Ajouter
+                </Button>
+              </>
+            )}
+            <Button size="sm" variant="secondary" onClick={() => setSaisie(true)}>
+              <Plus className="h-3.5 w-3.5" /> Saisir un article (sans ODF)
+            </Button>
+          </div>
+        )}
+      </CardBody>
+      {saisie && <SaisieArticleDialog ficheId={fiche.id} productModels={productModels} onClose={() => setSaisie(false)} />}
+    </Card>
+  );
+}
+
+function LigneArticle({
+  fiche,
+  article: a,
+  canModify,
+  pending,
+  run,
+}: {
+  fiche: FichePlacement;
+  article: ArticleOrdre;
+  canModify: boolean;
+  pending: boolean;
+  run: (action: () => Promise<{ error?: string }>, ok: string, apres?: () => void) => void;
+}) {
+  const [remplacement, setRemplacement] = useState<{ lineId: string; libelle: string }[] | null>(null);
+  const [choix, setChoix] = useState("");
+  const pieces = [...a.pieces.values()].filter((p) => p.quantite > 0);
+  return (
+    <li className="space-y-1.5 px-3 py-2.5 text-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p>
+            <span className={`mr-1.5 rounded px-1.5 py-0.5 text-[11px] font-medium ${a.type === "odf" ? "bg-brand-soft text-brand" : "bg-surface-muted text-foreground-muted"}`}>
+              {a.origine}
+            </span>
+            <span className="font-medium">{a.libelle}</span>
+            {a.odfAnnule && <span className="ml-1.5 rounded bg-danger-soft px-1.5 py-0.5 text-[11px] font-medium text-danger">ODF annulé</span>}
+          </p>
+          <p className="text-xs text-foreground-muted">
+            {Object.values(a.tailles).reduce((s, n) => s + n, 0)} vêtements : {taillesTexte(a.tailles) || "—"}
+          </p>
+          <p className="text-xs text-foreground-muted">
+            {pieces.length === 0 ? (
+              <span className="text-danger">Aucune pièce : la nomenclature de ce modèle n&apos;a pas de semi-finis.</span>
+            ) : (
+              pieces.map((p) => `${p.nom}${p.quantite !== 1 ? ` ×${p.quantite}` : ""} (${p.couleur ?? "sans couleur"})`).join(" · ")
+            )}
+          </p>
+        </div>
+        {canModify && (
+          <button
+            disabled={pending}
+            onClick={() =>
+              run(
+                () => (a.type === "odf" ? retirerLigneRegroupee(fiche.id, a.id) : retirerArticleOrdre(fiche.id, a.id)),
+                "Article retiré"
+              )
+            }
+            className="text-foreground-muted hover:text-danger disabled:opacity-40"
+            aria-label={`Retirer ${a.libelle}`}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
+      {canModify && a.type === "saisi" && a.modeleId && (
+        <div className="flex flex-wrap items-center gap-2">
+          {remplacement === null ? (
+            <button
+              type="button"
+              className="text-xs font-medium text-brand hover:underline"
+              onClick={() => lignesOdfDuModele(a.modeleId!).then(setRemplacement)}
+            >
+              L&apos;ODF est arrivé : remplacer par l&apos;article d&apos;ODF…
+            </button>
+          ) : remplacement.length === 0 ? (
+            <span className="text-xs text-foreground-muted">Aucun ODF ouvert pour ce modèle.</span>
+          ) : (
+            <>
+              <select value={choix} onChange={(e) => setChoix(e.target.value)} className={`${champ} min-w-64`}>
+                <option value="">Article d&apos;ODF…</option>
+                {remplacement.map((l) => (
+                  <option key={l.lineId} value={l.lineId}>
+                    {l.libelle}
+                  </option>
+                ))}
+              </select>
+              <Button size="sm" disabled={!choix} loading={pending} onClick={() => run(() => remplacerArticleOrdre(fiche.id, a.id, choix), "Article remplacé par l'ODF")}>
+                Remplacer
+              </Button>
+            </>
+          )}
+        </div>
+      )}
+    </li>
+  );
+}
+
+function SaisieArticleDialog({ ficheId, productModels, onClose }: { ficheId: string; productModels: { id: string; name: string }[]; onClose: () => void }) {
+  const { pending, run } = useAction();
+  const [modeleId, setModeleId] = useState("");
+  const [infos, setInfos] = useState<ModeleArticleOrdre | null>(null);
+  const [couleurs, setCouleurs] = useState<{ id: string; name: string; code: string | null }[]>([]);
+  const [nomenclatureId, setNomenclatureId] = useState("");
+  const [textileId, setTextileId] = useState("");
+  const [parZone, setParZone] = useState(false);
+  const [couleurUnique, setCouleurUnique] = useState("");
+  const [zoneColors, setZoneColors] = useState<Record<string, string>>({});
+  const [tailles, setTailles] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    couleursArticleOrdre().then(setCouleurs);
+  }, []);
+  useEffect(() => {
+    if (!modeleId) return;
+    let annule = false;
+    modeleArticleOrdre(modeleId).then((res) => {
+      if (annule) return;
+      if ("error" in res) toast.error(res.error);
+      else {
+        setInfos(res);
+        setNomenclatureId(res.nomenclatures[0]?.id ?? "");
+        setTextileId("");
+        setZoneColors({});
+        setTailles({});
+      }
+    });
+    return () => {
+      annule = true;
+    };
+  }, [modeleId]);
+
+  function enregistrer() {
+    run(
+      () =>
+        ajouterArticleOrdre(ficheId, {
+          productModelId: modeleId,
+          nomenclatureId: nomenclatureId || null,
+          textileId: textileId || null,
+          couleurUniqueId: parZone ? null : couleurUnique || null,
+          zoneColors: parZone ? Object.fromEntries(Object.entries(zoneColors).filter(([, v]) => v)) : {},
+          tailles: Object.fromEntries(Object.entries(tailles).map(([k, v]) => [k, Math.max(0, Math.trunc(Number(v) || 0))])),
+        }),
+      "Article ajouté",
+      onClose
+    );
+  }
+
+  const total = Object.values(tailles).reduce((s, v) => s + (Number(v) || 0), 0);
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()} title="Saisir un article (sans ODF)" size="lg">
+      <div className="space-y-3 text-sm">
+        <label className="block space-y-1 text-xs font-medium text-foreground">
+          Modèle
+          <select value={modeleId} onChange={(e) => setModeleId(e.target.value)} className={`${champ} w-full`}>
+            <option value="">— Choisir —</option>
+            {productModels.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        {infos && (
+          <>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {infos.nomenclatures.length > 1 && (
+                <label className="block space-y-1 text-xs font-medium text-foreground">
+                  Nomenclature
+                  <select value={nomenclatureId} onChange={(e) => setNomenclatureId(e.target.value)} className={`${champ} w-full`}>
+                    {infos.nomenclatures.map((n) => (
+                      <option key={n.id} value={n.id}>
+                        {n.nom} ({n.forme})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              {infos.grammages.length > 0 && (
+                <label className="block space-y-1 text-xs font-medium text-foreground">
+                  Grammage
+                  <select value={textileId} onChange={(e) => setTextileId(e.target.value)} className={`${champ} w-full`}>
+                    <option value="">Celui du modèle</option>
+                    {infos.grammages.map((g) => (
+                      <option key={g.id} value={g.id}>
+                        {g.libelle}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+            </div>
+            <div className="space-y-2 rounded-md border border-border p-3">
+              <div className="flex gap-3 text-xs font-medium">
+                <label className="flex items-center gap-1.5">
+                  <input type="radio" checked={!parZone} onChange={() => setParZone(false)} /> Couleur unique
+                </label>
+                <label className="flex items-center gap-1.5">
+                  <input type="radio" checked={parZone} disabled={infos.zones.length === 0} onChange={() => setParZone(true)} /> Couleur par zone
+                  {infos.zones.length === 0 && <span className="font-normal text-foreground-muted">(le modèle n&apos;a pas de zones)</span>}
+                </label>
+              </div>
+              {!parZone ? (
+                <CouleurChoix couleurs={couleurs} valeur={couleurUnique} onChange={setCouleurUnique} />
+              ) : (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {infos.zones.map((z) => (
+                    <label key={z.key} className="space-y-1 text-xs text-foreground-muted">
+                      {z.label}
+                      <CouleurChoix couleurs={couleurs} valeur={zoneColors[z.key] ?? ""} onChange={(v) => setZoneColors((x) => ({ ...x, [z.key]: v }))} />
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs font-medium text-foreground">Quantités par taille (total {total})</p>
+              <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+                {infos.tailles.map((t) => (
+                  <label key={t.cle} className="space-y-1 text-xs text-foreground-muted">
+                    {t.libelle}
+                    <input
+                      inputMode="numeric"
+                      value={tailles[t.cle] ?? ""}
+                      onChange={(e) => setTailles((x) => ({ ...x, [t.cle]: e.target.value }))}
+                      className={`${champ} w-full text-right`}
+                    />
+                  </label>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>
+            Annuler
+          </Button>
+          <Button disabled={!modeleId || total <= 0} loading={pending} onClick={enregistrer}>
+            Ajouter l&apos;article
+          </Button>
+        </div>
+      </div>
+    </Dialog>
+  );
+}
+
+function CouleurChoix({ couleurs, valeur, onChange }: { couleurs: { id: string; name: string; code: string | null }[]; valeur: string; onChange: (v: string) => void }) {
+  const c = couleurs.find((x) => x.id === valeur);
+  const hex = c?.code && /^#?[0-9a-f]{3,6}$/i.test(c.code) ? (c.code.startsWith("#") ? c.code : `#${c.code}`) : "transparent";
+  return (
+    <div className="flex items-center gap-2">
+      <span aria-hidden className="h-5 w-5 shrink-0 rounded-full border border-border" style={{ background: hex }} />
+      <select value={valeur} onChange={(e) => onChange(e.target.value)} className={`${champ} w-full`}>
+        <option value="">— Couleur —</option>
+        {couleurs.map((x) => (
+          <option key={x.id} value={x.id}>
+            {x.name}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+/* ============================================================
+   Plis du tracé, par couleur
+============================================================ */
+
+/**
+ * Plis d'un tracé regroupé, saisis par couleur (« 50 plis blanc, 50 bleu ») :
+ * la plateforme les répartit entre les articles de cette couleur selon leur
+ * besoin restant (demande moins ce que donnent les autres tracés). Les plis
+ * du tracé sont la somme.
+ */
+export function PlisParCouleurEditor({
+  fiche,
+  trace,
+  editable,
+  onChanged,
+}: {
+  fiche: FichePlacement;
+  trace: TracePlacement;
+  editable: boolean;
+  onChanged: () => void;
+}) {
+  const [pending, startTransition] = useTransition();
+  const { groupes, nonEligibles } = useMemo(() => couleursDuTrace(fiche, trace), [fiche, trace]);
+  const [valeurs, setValeurs] = useState<Record<string, string>>(Object.fromEntries(groupes.map((g) => [g.couleur, g.plis ? String(g.plis) : ""])));
+  const total = Object.values(valeurs).reduce((s, v) => s + (Number(v) || 0), 0);
+
+  // Aperçu de la répartition pour chaque couleur.
+  const repartition = useMemo(() => {
+    const res = new Map<string, number>();
+    for (const g of groupes) {
+      const n = Math.max(0, Math.trunc(Number(valeurs[g.couleur]) || 0));
+      for (const [cle, c] of repartirPlis(fiche, trace, g.articles, n)) res.set(cle, c);
+    }
+    return res;
+  }, [groupes, valeurs, fiche, trace]);
+
+  function enregistrer() {
+    const lignes: Record<string, number> = {};
+    const articles: Record<string, number> = {};
+    for (const g of groupes) {
+      for (const a of g.articles) {
+        const n = repartition.get(a.cle) ?? 0;
+        if (a.type === "odf") lignes[a.id] = n;
+        else articles[a.id] = n;
+      }
+    }
+    startTransition(async () => {
+      const res = await enregistrerCouchesOrdre(trace.id, fiche.id, { lignes, articles });
+      if (res.error) toast.error(res.error);
+      else {
+        toast.success("Plis enregistrés");
+        onChanged();
+      }
+    });
+  }
+
+  if (trace.pieces.length === 0) {
+    return <p className="rounded-md border border-border p-3 text-xs text-foreground-muted">Indiquez d&apos;abord les pièces du tracé : les couleurs proposées en dépendent.</p>;
+  }
+  return (
+    <div className="space-y-2 rounded-md border border-border p-3">
+      <p className="text-xs font-medium text-foreground">Plis par couleur (total {total} plis)</p>
+      {groupes.length === 0 ? (
+        <p className="text-xs text-warning">Aucun article de l&apos;ordre n&apos;a toutes les pièces de ce tracé : ajoutez les articles à produire.</p>
+      ) : (
+        <ul className="space-y-2">
+          {groupes.map((g) => (
+            <li key={g.couleur} className="space-y-1">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm font-medium">{g.couleur}</span>
+                <span className="flex items-center gap-1.5 text-xs text-foreground-muted">
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    value={valeurs[g.couleur] ?? ""}
+                    disabled={!editable}
+                    onChange={(e) => setValeurs((v) => ({ ...v, [g.couleur]: e.target.value }))}
+                    className="h-8 w-24 rounded-md border border-border bg-surface px-2 text-right text-sm disabled:opacity-60"
+                    aria-label={`Plis ${g.couleur}`}
+                  />
+                  plis
+                </span>
+              </div>
+              <ul className="space-y-0.5 pl-3 text-xs text-foreground-muted">
+                {g.articles.map((a) => (
+                  <li key={a.cle}>
+                    {a.origine} · {a.libelle} : <span className="font-medium text-foreground">{repartition.get(a.cle) ?? 0} plis</span>
+                  </li>
+                ))}
+              </ul>
+            </li>
+          ))}
+        </ul>
+      )}
+      {nonEligibles.length > 0 && (
+        <p className="text-xs text-foreground-muted">
+          Hors de ce tracé : {nonEligibles.map((n) => `${n.article.libelle} (${n.raison})`).join(" ; ")}.
+        </p>
+      )}
+      {editable && groupes.length > 0 && (
+        <div className="flex justify-end">
+          <Button size="sm" variant="secondary" loading={pending} onClick={enregistrer}>
+            Enregistrer les plis
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   Dispatching et bilan des pièces
+============================================================ */
+
+/**
+ * Dispatching de l'ordre : la somme de tous les tracés (hors annulés)
+ * comparée à la demande, par article et par taille. En dessous, le lien
+ * « Bilan des pièces » (détail : demandé, obtenu, manquant ou en trop) et un
+ * signal rouge dès qu'il manque des pièces, qu'il y en a en trop ou qui ne
+ * correspondent à aucune demande.
+ */
+export function DispatchingCard({ fiche }: { fiche: FichePlacement }) {
+  const [bilan, setBilan] = useState(false);
+  const d = useMemo(() => calculerDispatching(fiche), [fiche]);
+  if (d.lignes.length === 0) return null;
+  const problemes = [
+    d.manquants > 0 ? `${d.manquants} vêtement(s) manquant(s)` : null,
+    d.piecesEnTrop > 0 ? `${d.piecesEnTrop} pièce(s) en trop` : null,
+    d.horsDemande.length > 0 ? `${d.horsDemande.reduce((s, h) => s + h.pieces, 0)} pièce(s) hors demande` : null,
+  ].filter(Boolean);
+
+  return (
+    <Card>
+      <CardHeader title="Dispatching" description="Somme de tous les tracés de l'ordre (hors annulés), comparée à la demande : vêtements complets obtenus par article et par taille." />
+      <CardBody className="space-y-3 p-0">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-surface-muted text-xs text-foreground-muted">
+              <tr>
+                <th className="px-4 py-2 text-left font-medium">Article</th>
+                <th className="px-3 py-2 text-left font-medium">Taille</th>
+                <th className="px-3 py-2 text-right font-medium">Demandé</th>
+                <th className="px-3 py-2 text-right font-medium">Obtenu</th>
+                <th className="px-4 py-2 text-right font-medium">Écart</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {d.lignes.map((l) => {
+                const ecart = l.obtenus - l.demandes;
+                return (
+                  <tr key={`${l.article.cle}|${l.taille}`}>
+                    <td className="px-4 py-1.5">
+                      <span className="text-xs text-foreground-muted">{l.article.origine}</span> {l.article.libelle}
+                    </td>
+                    <td className="px-3 py-1.5">{libelleTaille(l.taille)}</td>
+                    <td className="px-3 py-1.5 text-right">{l.demandes}</td>
+                    <td className="px-3 py-1.5 text-right font-medium">{l.obtenus}</td>
+                    <td className={`px-4 py-1.5 text-right font-semibold ${ecart < 0 ? "text-danger" : ecart > 0 ? "text-warning" : "text-success"}`}>
+                      {ecart > 0 ? `+${ecart}` : ecart}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <div className="flex flex-wrap items-center gap-3 px-4 pb-3">
+          <button type="button" onClick={() => setBilan(true)} className="text-sm font-medium text-brand hover:underline">
+            Bilan des pièces
+          </button>
+          {d.ok ? (
+            <span className="inline-flex items-center gap-1 text-xs font-medium text-success">
+              <CheckCircle2 className="h-3.5 w-3.5" /> Quantités atteintes
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 rounded bg-danger-soft px-2 py-0.5 text-xs font-medium text-danger">
+              <AlertTriangle className="h-3.5 w-3.5" /> Erreur : {problemes.join(" · ") || "quantités non atteintes"}
+            </span>
+          )}
+        </div>
+      </CardBody>
+      {bilan && (
+        <Dialog open onOpenChange={(o) => !o && setBilan(false)} title="Bilan des pièces" size="lg">
+          <div className="space-y-4 text-sm">
+            <div className="overflow-x-auto rounded-md border border-border">
+              <table className="w-full text-sm">
+                <thead className="bg-surface-muted text-xs text-foreground-muted">
+                  <tr>
+                    <th className="px-3 py-1.5 text-left font-medium">Article</th>
+                    <th className="px-3 py-1.5 text-left font-medium">Pièce</th>
+                    <th className="px-3 py-1.5 text-left font-medium">Taille</th>
+                    <th className="px-3 py-1.5 text-right font-medium">Demandé</th>
+                    <th className="px-3 py-1.5 text-right font-medium">Obtenu</th>
+                    <th className="px-3 py-1.5 text-right font-medium">Manquant / en trop</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {d.pieces.map((p) => {
+                    const e = p.obtenues - p.demandees;
+                    return (
+                      <tr key={`${p.article.cle}|${p.semiFiniId}|${p.taille}`}>
+                        <td className="px-3 py-1.5 text-xs">
+                          {p.article.origine} · {p.article.libelle}
+                        </td>
+                        <td className="px-3 py-1.5">
+                          {p.piece}
+                          {p.couleur ? <span className="text-xs text-foreground-muted"> ({p.couleur})</span> : null}
+                        </td>
+                        <td className="px-3 py-1.5">{libelleTaille(p.taille)}</td>
+                        <td className="px-3 py-1.5 text-right">{p.demandees}</td>
+                        <td className="px-3 py-1.5 text-right">{p.obtenues}</td>
+                        <td className={`px-3 py-1.5 text-right font-medium ${e < 0 ? "text-danger" : e > 0 ? "text-warning" : "text-success"}`}>
+                          {e < 0 ? `${-e} manquante(s)` : e > 0 ? `+${e} en trop` : "OK"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            {d.horsDemande.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-danger">Pièces qui ne correspondent à aucune demande</p>
+                <ul className="space-y-0.5 text-xs">
+                  {d.horsDemande.map((h, i) => (
+                    <li key={i}>
+                      {h.libelle} : <span className="font-medium">{h.pieces}</span> <span className="text-foreground-muted">({h.raison})</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        </Dialog>
+      )}
+    </Card>
+  );
+}

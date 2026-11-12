@@ -78,8 +78,21 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const clientDe = (lineId: string) => parLigne.get(lineId)?.production_orders?.companies?.name ?? (parLigne.get(lineId)?.production_orders ? "Stock" : null);
   const odfDe = (lineId: string) => parLigne.get(lineId)?.production_orders?.reference ?? null;
 
+  // Articles saisis sans ODF (0181), à la suite des articles d'ODF.
+  const articlesSaisis: OrdreTracePdfArticle[] = (fiche.articlesSaisis ?? []).map((a) => ({
+    odf: "Sans ODF",
+    client: fiche.clientLibelle,
+    article: a.modele,
+    couleur: a.couleur,
+    quantite: Object.values(a.tailles).reduce((s, n) => s + Number(n), 0),
+    tailles: Object.entries(a.tailles).filter(([, q]) => Number(q) > 0).map(([t, q]) => [libelleTaille(t), Number(q)] as [string, number]),
+    pieces: a.pieces.map((p) => ({ nom: p.nom, couleur: p.couleur })),
+    odfAnnule: false,
+  }));
+  const articlesSaisisParId = new Map((fiche.articlesSaisis ?? []).map((a) => [a.id, a]));
+
   const articles: OrdreTracePdfArticle[] = fiche.regroupee
-    ? fiche.lignesRegroupees.map((l) => ({
+    ? [...fiche.lignesRegroupees.map((l) => ({
         odf: l.odfReference,
         client: clientDe(l.lineId),
         article: l.description,
@@ -88,7 +101,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         tailles: Object.entries(l.repartition).map(([t, q]) => [libelleTaille(t), q] as [string, number]),
         pieces: l.semiFinis.map((p) => ({ nom: p.nom, couleur: p.couleur })),
         odfAnnule: l.odfAnnule,
-      }))
+      })), ...articlesSaisis]
     : fiche.lineId
       ? [
           {
@@ -121,8 +134,14 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 
   const tracesPdf: OrdreTracePdfTrace[] = await Promise.all(
     traces.map(async (t) => {
-      const regroupe = t.couches.length > 0;
+      // Tracé d'ordre regroupé : ses pièces sont des semi-finis (trace_semi_finis).
+      const regroupe = fiche.regroupee;
       const idsPieces = new Set(t.pieces.map((p) => p.semiFiniId));
+      const couchesSaisies = (t.couchesArticles ?? []).map((c) => {
+        const a = articlesSaisisParId.get(c.articleId);
+        const couleurs = [...new Set((a?.pieces ?? []).filter((p) => idsPieces.has(p.id)).map((p) => p.couleur ?? "à préciser"))];
+        return { libelle: `Sans ODF · ${a?.modele ?? "-"}`, couleur: couleurs.join(", ") || a?.couleur || null, couches: c.nbCouches, odfAnnule: false };
+      });
       const couchesParArticle = t.couches.map((c) => {
         const l = ligneRegroupee.get(c.lineId);
         const couleurs = [...new Set((l?.semiFinis ?? []).filter((p) => idsPieces.has(p.id)).map((p) => p.couleur ?? "à préciser"))];
@@ -160,10 +179,10 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         referencePatron: t.referencePatron,
         longueurCm: t.longueurMatelasCm,
         laizeCm: t.largeurMatelasCm,
-        couches: regroupe ? t.couches.reduce((s, c) => s + c.nbCouches, 0) : t.nbPlis,
+        couches: t.nbPlis,
         tissusPrevus: tissusPrevusDe(t.id),
         tissus: t.compositionTissus ?? [],
-        couchesParArticle,
+        couchesParArticle: [...couchesParArticle, ...couchesSaisies],
         piecesParCouche,
         rouleaux: ((rouleaux ?? []) as unknown as RouleauRow[])
           .filter((r) => r.trace_id === t.id && r.textile_rolls)
@@ -186,9 +205,9 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     regroupee: fiche.regroupee,
     designation: fiche.designationArticle ?? (fiche.regroupee ? "Pièces" : "-"),
     modele: (modele as { name: string } | null)?.name ?? fiche.referenceModele,
-    tissu: fiche.tissuType,
-    grammage: fiche.grammage,
-    laizeUtileCm: fiche.laizeUtileCm,
+    tissu: fiche.regroupee ? (fiche.tissuOrdre ?? fiche.tissuType) : fiche.tissuType,
+    grammage: fiche.regroupee ? null : fiche.grammage,
+    laizeUtileCm: fiche.regroupee ? null : fiche.laizeUtileCm,
     couleur: fiche.regroupee ? null : fiche.couleur,
     client: clients.length > 0 ? clients.join(", ") : fiche.clientLibelle,
     dateEmission: fiche.dateEmission ? formatFr(fiche.dateEmission) : null,
