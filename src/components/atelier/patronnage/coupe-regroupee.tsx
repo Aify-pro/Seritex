@@ -1,23 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { AlertTriangle, CheckCircle2, FileSearch, Plus, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import type { FichePlacement, TracePlacement } from "@/lib/patronnage/types";
 import {
-  besoinsCoupe,
-  ajouterLigneRegroupee,
-  retirerLigneRegroupee,
-  enregistrerCouches,
   enregistrerPiecesTrace,
   preRemplirPiecesTrace,
   derogerControleTrace,
   catalogueTrace,
-  type BesoinCoupeGroupe,
 } from "@/app/(app)/atelier/patronnage/fiches-actions";
 
 /**
@@ -30,168 +23,6 @@ import {
  */
 
 const libelleTaille = (cle: string) => cle.split("/").pop() ?? cle;
-
-/** Reste à couper par article d'ODF et par semi-fini, déduit du tableau des besoins agrégés. */
-function restesParLigne(groupes: BesoinCoupeGroupe[]) {
-  const lignes = new Map<
-    string,
-    {
-      lineId: string;
-      odf: string;
-      client: string;
-      article: string;
-      couleurs: Set<string>;
-      dejaEntier: boolean;
-      parSemiFini: Map<string, number>;
-      parPiece: Map<string, number>;
-    }
-  >();
-  for (const g of groupes) {
-    for (const l of g.lignes) {
-      const e =
-        lignes.get(l.lineId) ??
-        { lineId: l.lineId, odf: l.odf, client: l.client, article: l.article, couleurs: new Set<string>(), dejaEntier: l.dejaEntier, parSemiFini: new Map<string, number>(), parPiece: new Map<string, number>() };
-      // Couleur de la pièce (0165) : chaque pièce peut avoir la sienne.
-      if (g.couleur) e.couleurs.add(g.couleur);
-      e.parSemiFini.set(g.semiFiniNom, (e.parSemiFini.get(g.semiFiniNom) ?? 0) + Math.max(l.reste, 0));
-      e.parPiece.set(g.semiFiniId, (e.parPiece.get(g.semiFiniId) ?? 0) + Math.max(l.reste, 0));
-      lignes.set(l.lineId, e);
-    }
-  }
-  return lignes;
-}
-
-function resteTexte(parSemiFini: Map<string, number> | undefined) {
-  if (!parSemiFini) return "";
-  return [...parSemiFini.entries()]
-    .filter(([, n]) => n > 0)
-    .map(([nom, n]) => `${nom} ${n}`)
-    .join(" · ");
-}
-
-/** Articles d'un ordre regroupé : reste à couper par semi-fini, ajout et retrait. */
-export function ArticlesRegroupesCard({ fiche, canModify }: { fiche: FichePlacement; canModify: boolean }) {
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
-  const [groupes, setGroupes] = useState<BesoinCoupeGroupe[] | null>(null);
-  const [ajout, setAjout] = useState("");
-  const regroupees = new Set(fiche.lignesRegroupees.map((l) => l.lineId));
-
-  useEffect(() => {
-    let annule = false;
-    besoinsCoupe().then((res) => {
-      if (!annule && !("error" in res)) setGroupes(res);
-    });
-    return () => {
-      annule = true;
-    };
-  }, [fiche.lignesRegroupees.length, fiche.traces.length]);
-
-  const lignes = useMemo(() => restesParLigne(groupes ?? []), [groupes]);
-
-  function run(action: () => Promise<{ error?: string }>, ok: string) {
-    startTransition(async () => {
-      const res = await action();
-      if (res.error) toast.error(res.error);
-      else {
-        toast.success(ok);
-        setAjout("");
-        router.refresh();
-      }
-    });
-  }
-
-  const candidats = [...lignes.values()].filter((l) => !regroupees.has(l.lineId) && !l.dejaEntier && [...l.parSemiFini.values()].some((n) => n > 0));
-
-  return (
-    <Card>
-      <CardHeader
-        title="Produits finis de l'ordre de coupe"
-        description="Rempli depuis l'ODF et la nomenclature : vêtements par taille, puis les pièces (semi-finis) qui les composent avec leur couleur. Chaque article reçoit les pièces des couches qui lui sont attribuées dans les tracés. Reste = demandé × quantité de la nomenclature − coupé − prévu (tracés validés). Un article doit avoir tous les semi-finis d'un tracé pour y recevoir des couches."
-      />
-      <CardBody className="space-y-3">
-        {fiche.lignesRegroupees.length === 0 ? (
-          <p className="rounded-md border border-warning/30 bg-warning-soft/40 px-3 py-2 text-sm text-foreground">
-            Aucun ODF rattaché pour l&apos;instant. Les tracés se déposent et se préparent déjà ; rattachez au moins un article d&apos;ODF (ci-dessous, ou
-            depuis « Besoins de coupe ») pour leur attribuer des couches et les passer « Bon pour coupe ».
-          </p>
-        ) : (
-          <ul className="divide-y divide-border rounded-md border border-border">
-            {fiche.lignesRegroupees.map((l) => {
-              const b = lignes.get(l.lineId);
-              const tailles = Object.entries(l.repartition).filter(([, n]) => n > 0);
-              return (
-                <li key={l.lineId} className="space-y-2 px-3 py-3 text-sm">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p>
-                        <span className="font-medium">{l.odfReference ?? "—"}</span> · {l.description}
-                        {l.couleur ? ` · ${l.couleur}` : ""}
-                        {l.odfAnnule && <span className="ml-1.5 rounded bg-danger-soft px-1.5 py-0.5 text-[11px] font-medium text-danger">ODF annulé</span>}
-                      </p>
-                      <p className="text-xs text-foreground-muted">
-                        {l.quantite != null ? `${l.quantite} vêtement${l.quantite > 1 ? "s" : ""}` : "Quantité —"}
-                        {tailles.length > 0 && ` : ${tailles.map(([t, n]) => `${libelleTaille(t)} ${n}`).join(" · ")}`}
-                      </p>
-                    </div>
-                    {canModify && (
-                      <button
-                        disabled={pending}
-                        onClick={() => run(() => retirerLigneRegroupee(fiche.id, l.lineId), "Article retiré")}
-                        className="text-foreground-muted hover:text-danger disabled:opacity-40"
-                        aria-label={`Retirer ${l.description}`}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    )}
-                  </div>
-                  {l.semiFinis.length === 0 ? (
-                    <p className="text-xs text-danger">Aucune pièce : la nomenclature de cet article n&apos;a pas de semi-finis.</p>
-                  ) : (
-                    <table className="w-full text-xs">
-                      <thead className="text-foreground-muted">
-                        <tr>
-                          <th className="py-1 text-left font-medium">Pièce (semi-fini)</th>
-                          <th className="py-1 text-left font-medium">Couleur</th>
-                          <th className="py-1 text-right font-medium">Reste à couper</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {l.semiFinis.map((p) => (
-                          <tr key={p.id} className="border-t border-border">
-                            <td className="py-1">{p.nom}</td>
-                            <td className="py-1">{p.couleur ?? <span className="text-warning">sans couleur</span>}</td>
-                            <td className="py-1 text-right">{b ? (b.parPiece.get(p.id) ?? 0) : "—"}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        )}
-        {canModify && candidats.length > 0 && (
-          <div className="flex flex-wrap items-center gap-2">
-            <select value={ajout} onChange={(e) => setAjout(e.target.value)} className="h-9 min-w-64 rounded-md border border-border bg-surface px-2 text-sm">
-              <option value="">Ajouter un article d&apos;ODF…</option>
-              {candidats.map((l) => (
-                <option key={l.lineId} value={l.lineId}>
-                  {l.odf} · {l.article}
-                  {l.couleurs.size > 0 ? ` · ${[...l.couleurs].join(", ")}` : ""} — reste {resteTexte(l.parSemiFini)}
-                </option>
-              ))}
-            </select>
-            <Button size="sm" variant="secondary" disabled={!ajout} loading={pending} onClick={() => run(() => ajouterLigneRegroupee(fiche.id, ajout), "Article ajouté")}>
-              <Plus className="h-3.5 w-3.5" /> Ajouter
-            </Button>
-          </div>
-        )}
-      </CardBody>
-    </Card>
-  );
-}
 
 type LignePiece = { semiFiniId: string; taille: string; quantite: string };
 
@@ -459,102 +290,6 @@ export function PiecesTraceEditor({
             onClick={() => run(() => derogerControleTrace(trace.id, fiche.id, motif.trim()), "Dérogation enregistrée")}
           >
             Accepter l&apos;écart
-          </Button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/** Couches d'un tracé regroupé par article (plis = somme), modifiables en préparation. */
-export function CouchesEditor({
-  fiche,
-  trace,
-  editable,
-  onChanged,
-}: {
-  fiche: FichePlacement;
-  trace: TracePlacement;
-  editable: boolean;
-  onChanged: () => void;
-}) {
-  const [pending, startTransition] = useTransition();
-  const [valeurs, setValeurs] = useState<Record<string, string>>(
-    Object.fromEntries(fiche.lignesRegroupees.map((l) => [l.lineId, String(trace.couches.find((c) => c.lineId === l.lineId)?.nbCouches ?? "")]))
-  );
-  const total = Object.values(valeurs).reduce((s, v) => s + (Number(v) || 0), 0);
-  const semiFinisTrace = [...new Map(trace.pieces.map((p) => [p.semiFiniId, p.semiFiniNom])).entries()];
-  // D1 : un article sans toutes les pièces du tracé ne reçoit pas de couches.
-  const manquants = (l: FichePlacement["lignesRegroupees"][number]) =>
-    semiFinisTrace.filter(([id]) => !l.semiFinis.some((x) => x.id === id)).map(([, nom]) => nom);
-
-  function enregistrer() {
-    startTransition(async () => {
-      const res = await enregistrerCouches(
-        trace.id,
-        fiche.id,
-        Object.fromEntries(Object.entries(valeurs).map(([k, v]) => [k, Math.trunc(Number(v) || 0)]))
-      );
-      if (res.error) toast.error(res.error);
-      else {
-        toast.success("Couches enregistrées");
-        onChanged();
-      }
-    });
-  }
-
-  return (
-    <div className="space-y-2 rounded-md border border-border p-3">
-      <p className="text-xs font-medium text-foreground">Couches par article (total {total} = nombre de plis du tracé)</p>
-      <ul className="space-y-1.5">
-        {fiche.lignesRegroupees.map((l) => {
-          const manque = manquants(l);
-          return (
-            <li key={l.lineId} className="flex items-center justify-between gap-3 text-sm">
-              <span className="min-w-0">
-                <span className="block truncate">
-                  {l.odfAnnule && <span className="mr-1.5 rounded bg-danger-soft px-1.5 py-0.5 text-[11px] font-medium text-danger">ODF annulé</span>}
-                  {l.odfReference ?? "—"} · {l.description}
-                  {(() => {
-                    const c = [...new Set(l.semiFinis.filter((p) => semiFinisTrace.some(([id]) => id === p.id)).map((p) => p.couleur ?? "sans couleur"))];
-                    return c.length > 0 ? ` · ${c.join(", ")}` : l.couleur ? ` · ${l.couleur}` : "";
-                  })()}
-                </span>
-                {manque.length > 0 && (
-                  <span className="block text-xs text-danger">Pas de couches possibles : sa nomenclature n&apos;a pas {manque.join(", ")}.</span>
-                )}
-              </span>
-              <input
-                type="number"
-                min={0}
-                step={1}
-                value={valeurs[l.lineId] ?? ""}
-                disabled={!editable || manque.length > 0}
-                onChange={(e) => setValeurs((v) => ({ ...v, [l.lineId]: e.target.value }))}
-                className="h-8 w-24 rounded-md border border-border bg-surface px-2 text-right text-sm disabled:opacity-60"
-                aria-label={`Couches pour ${l.description}`}
-              />
-            </li>
-          );
-        })}
-      </ul>
-      {(trace.compositionTissus ?? []).length > 0 && (
-        <div className="rounded-md bg-surface-muted px-3 py-2">
-          <p className="text-xs font-medium text-foreground">Composition du matelas par tissu</p>
-          <ul className="mt-1 space-y-0.5 text-sm">
-            {(trace.compositionTissus ?? []).map((t) => (
-              <li key={t.libelle}>
-                <span className="font-medium">{t.libelle}</span> : {t.couches} couche{t.couches > 1 ? "s" : ""}
-                <span className="block text-xs text-foreground-muted">{t.odfs}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {editable && (
-        <div className="flex justify-end">
-          <Button size="sm" variant="secondary" loading={pending} onClick={enregistrer}>
-            Enregistrer les couches
           </Button>
         </div>
       )}

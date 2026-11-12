@@ -30,8 +30,8 @@ import { STATUT_TRACE_LABELS, STATUT_TRACE_TONES, type FichePlacement, type Repa
 import { createContext, useContext } from "react";
 import type { Size } from "@/lib/sizes";
 import { repartitionDepuisTraces, repartitionTotal } from "@/lib/patronnage/dispatching";
-import { ArticlesRegroupesCard, CouchesEditor, PiecesTraceEditor } from "@/components/atelier/patronnage/coupe-regroupee";
-import { BilanOrdreCard } from "@/components/atelier/patronnage/bilan-ordre";
+import { PiecesTraceEditor } from "@/components/atelier/patronnage/coupe-regroupee";
+import { ArticlesOrdreCard, DispatchingCard, PlisParCouleurEditor } from "@/components/atelier/patronnage/ordre-trace";
 import { PiecesArticlesCard } from "@/components/atelier/patronnage/pieces-articles-card";
 import {
   createFiche,
@@ -672,7 +672,9 @@ function CreateFicheForm({
         )}
       </div>
 
-      <ProductModelFields productModels={productModels} initialModelId={null} onSizesChange={() => {}} />
+      {/* Ordre de tracé (refonte du 2026-11-12) : ni modèle, ni couleur, ni grammage
+          sur l'ordre — ils sont portés par les articles à produire, ajoutés ensuite. */}
+      {!regroupee && <ProductModelFields productModels={productModels} initialModelId={null} onSizesChange={() => {}} />}
 
       {!regroupee && (
         <>
@@ -685,9 +687,11 @@ function CreateFicheForm({
         </>
       )}
 
-      <Field label="Couleur">
-        <CouleurSelect />
-      </Field>
+      {!regroupee && (
+        <Field label="Couleur">
+          <CouleurSelect />
+        </Field>
+      )}
 
       <Field label="Contraintes particulières">
         <input name="contraintes" className="w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground" />
@@ -854,9 +858,7 @@ export function FicheDetailContent({
 
         {fiche.regroupee ? (
           <>
-            <ArticlesRegroupesCard fiche={fiche} canModify={permissions.canModify && fiche.statut !== "archive"} />
-            <BilanOrdreCard fiche={fiche} productModels={productModels} canModify={permissions.canModify && fiche.statut !== "archive"} />
-            <PiecesArticlesCard lineIds={fiche.lignesRegroupees.map((l) => l.lineId)} refreshKey={fiche.traces.length} />
+            <ArticlesOrdreCard fiche={fiche} productModels={productModels} canModify={permissions.canModify && fiche.statut !== "archive"} />
           </>
         ) : (
           <>
@@ -1043,6 +1045,8 @@ export function FicheDetailContent({
               </Table>
             </CardBody>
           </Card>
+          {/* Ordre regroupé : ce que donne la somme des tracés, comparé à la demande. */}
+          {fiche.regroupee && <DispatchingCard fiche={fiche} />}
         </div>
       </div>
 
@@ -1084,7 +1088,8 @@ function TraceRow({
   highlighted?: boolean;
   onOpen: () => void;
 }) {
-  const totalCouche = repartitionTotal(trace.repartitionParCouche);
+  // Tracé regroupé : pièces posées par couche (toutes pièces et tailles) ; sinon la répartition par couche.
+  const totalCouche = trace.pieces.length > 0 ? trace.pieces.reduce((s, p) => s + p.quantiteParCouche, 0) : repartitionTotal(trace.repartitionParCouche);
   const totalTrace = trace.nbPlis ? totalCouche * trace.nbPlis : null;
   const a = trace.analyse;
 
@@ -1394,7 +1399,7 @@ function TraceDetailBody({
         {fiche.regroupee && (
           <>
             <PiecesTraceEditor fiche={fiche} trace={trace} editable={!effectiveLocked && canModify} canUnlock={canUnlock} archived={archived} onChanged={onChanged} />
-            <CouchesEditor fiche={fiche} trace={trace} editable={!effectiveLocked && canModify} onChanged={onChanged} />
+            <PlisParCouleurEditor fiche={fiche} trace={trace} editable={!effectiveLocked && canModify} onChanged={onChanged} />
           </>
         )}
 

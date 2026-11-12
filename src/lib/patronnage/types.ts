@@ -162,6 +162,8 @@ export interface TracePlacement {
   // TR-1a, un tracé ordinaire en préparation, sans approbation.
   estCorrectif: boolean;
   justification: string | null;
+  /** Couches attribuées aux articles saisis sans ODF (0181). Renseignées sur la page d'une fiche. */
+  couchesArticles?: { articleId: string; nbCouches: number }[];
   /** Couches par article d'ODF d'un tracé regroupé (0149) ; vide pour un tracé d'article. */
   couches: { lineId: string; nbCouches: number }[];
   /**
@@ -228,6 +230,21 @@ export interface FichePlacement {
     /** Articles d'ODF qui utilisent cette nomenclature (répartition). */
     activePour: string[];
   }[];
+  /**
+   * Articles saisis sans ODF (0181) : modèle, couleur, quantités par taille,
+   * pièces de leur nomenclature avec quantité par vêtement et couleur.
+   * Renseignés sur la page d'une fiche.
+   */
+  articlesSaisis?: {
+    id: string;
+    modeleId: string;
+    modele: string;
+    couleur: string | null;
+    tailles: Record<string, number>;
+    pieces: { id: string; nom: string; quantite: number; couleur: string | null }[];
+  }[];
+  /** Tissu de l'ordre : type et grammages présents (« Jersey (160 g, 180 g) »). */
+  tissuOrdre?: string | null;
   /** Articles d'ODF regroupés (ordre regroupé seulement), avec les semi-finis de leur nomenclature et leurs tailles. */
   lignesRegroupees: {
     lineId: string;

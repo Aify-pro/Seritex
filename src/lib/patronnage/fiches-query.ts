@@ -369,6 +369,63 @@ export async function getFichePlacementById(id: string): Promise<FichePlacement 
       };
     });
   }
+  // Articles saisis sans ODF (0181), leurs couches de tracé, et le tissu de l'ordre.
+  if (mapped.regroupee) {
+    const traceIds = mapped.traces.map((t) => t.id);
+    const [{ data: saisis }, { data: couchesSaisies }] = await Promise.all([
+      supabase
+        .from("ordre_trace_articles")
+        .select("id,product_model_id,textile_id,tailles,product_models(name,textile_id),couleur:couleur_unique_id(name),ordre_trace_article_zone_colors(zone_key,colors(name))")
+        .eq("fiche_id", mapped.id)
+        .order("created_at"),
+      traceIds.length > 0 ? supabase.from("trace_couches_articles").select("trace_id,article_id,nb_couches").in("trace_id", traceIds) : Promise.resolve({ data: [] }),
+    ]);
+    type Saisi = {
+      id: string;
+      product_model_id: string;
+      textile_id: string | null;
+      tailles: Record<string, number> | null;
+      product_models: { name: string; textile_id: string | null } | null;
+      couleur: { name: string } | null;
+      ordre_trace_article_zone_colors: { zone_key: string; colors: { name: string } | null }[] | null;
+    };
+    const lignesSaisies = (saisis ?? []) as unknown as Saisi[];
+    const { data: piecesSaisies } = lignesSaisies.length
+      ? await supabase.rpc("couleurs_pieces_articles", { p_article_ids: lignesSaisies.map((a) => a.id) })
+      : { data: [] };
+    const pieces = (piecesSaisies ?? []) as { article_id: string; semi_fini_id: string; semi_fini_nom: string; quantite: number; couleur: string | null }[];
+    mapped.articlesSaisis = lignesSaisies.map((a) => ({
+      id: a.id,
+      modeleId: a.product_model_id,
+      modele: a.product_models?.name ?? "—",
+      couleur:
+        a.couleur?.name ??
+        ([...new Set((a.ordre_trace_article_zone_colors ?? []).map((z) => z.colors?.name).filter(Boolean))].join(" / ") || null),
+      tailles: a.tailles ?? {},
+      pieces: pieces.filter((p) => p.article_id === a.id).map((p) => ({ id: p.semi_fini_id, nom: p.semi_fini_nom, quantite: Number(p.quantite), couleur: p.couleur })),
+    }));
+    for (const t of mapped.traces) {
+      t.couchesArticles = ((couchesSaisies ?? []) as { trace_id: string; article_id: string; nb_couches: number }[])
+        .filter((c) => c.trace_id === t.id)
+        .map((c) => ({ articleId: c.article_id, nbCouches: c.nb_couches }));
+    }
+
+    // Tissu de l'ordre : type (article tissu) et grammages présents.
+    const { data: lignesTextile } = mapped.lignesRegroupees.length
+      ? await supabase.from("production_order_lines").select("textile_id,product_models(textile_id)").in("id", mapped.lignesRegroupees.map((l) => l.lineId))
+      : { data: [] };
+    const textileIds = [
+      ...((lignesTextile ?? []) as unknown as { textile_id: string | null; product_models: { textile_id: string | null } | null }[]).map((l) => l.textile_id ?? l.product_models?.textile_id ?? null),
+      ...lignesSaisies.map((a) => a.textile_id ?? a.product_models?.textile_id ?? null),
+    ].filter((x): x is string => !!x);
+    if (textileIds.length > 0) {
+      const { data: textiles } = await supabase.from("textiles").select("nom,grammage,product_models(name)").in("id", [...new Set(textileIds)]);
+      const liste = (textiles ?? []) as unknown as { nom: string; grammage: number | null; product_models: { name: string } | null }[];
+      const types = [...new Set(liste.map((t) => t.product_models?.name ?? t.nom))];
+      const grammages = [...new Set(liste.map((t) => t.grammage).filter((g): g is number => g != null))].sort((a, b) => a - b);
+      mapped.tissuOrdre = `${types.join(" + ")}${grammages.length ? ` (${grammages.map((g) => `${g} g`).join(", ")})` : ""}`;
+    }
+  }
   for (const t of mapped.traces) {
     const tissus = compo.get(t.id);
     if (tissus) {

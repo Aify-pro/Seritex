@@ -1731,18 +1731,166 @@ export async function couleursReferentiel(): Promise<{ id: string; name: string;
   return (data ?? []).map((c) => ({ id: c.id as string, name: c.name as string, code: (c.code as string | null) ?? null }));
 }
 
+
+// ------------------------------------------------------------
+// Refonte de l'ordre de tracé (0181) : articles saisis sans ODF, couches
+// par article (plis saisis par couleur), remplacement par l'ODF.
+// ------------------------------------------------------------
+
 /**
- * Produit fini visé par un ordre de tracé sans ODF : sa nomenclature sert au
- * bilan (t-shirts complets, pièces en trop ou à compléter).
+ * Couches d'un tracé regroupé, par article d'ODF et par article saisi
+ * (remplace toutes les couches du tracé). Les plis du tracé en sont la somme.
  */
-export async function definirModeleOrdre(ficheId: string, productModelId: string | null): Promise<{ error?: string }> {
-  await requirePermission("modify");
-  const gate = await assertFicheOuverteAuxTraces(ficheId);
+export async function enregistrerCouchesOrdre(
+  traceId: string,
+  ficheId: string,
+  couches: { lignes: Record<string, number>; articles: Record<string, number> }
+): Promise<{ error?: string }> {
+  await requireTracePermission("modify");
+  const gate = await assertTraceEditable(traceId, ficheId);
   if ("error" in gate) return { error: gate.error };
   const supabase = await createClient();
-  const { data, error } = await supabase.from("fiches_placement").update({ product_model_id: productModelId }).eq("id", ficheId).select("id");
-  if (error) return { error: error.message };
-  if (!data?.length) return { error: "Modification refusée." };
+  const garder = (o: Record<string, number>) => Object.entries(o).filter(([, n]) => Number.isInteger(n) && n > 0);
+  const [{ error: e1 }, { error: e2 }] = await Promise.all([
+    supabase.from("trace_couches").delete().eq("trace_id", traceId),
+    supabase.from("trace_couches_articles").delete().eq("trace_id", traceId),
+  ]);
+  if (e1 || e2) return { error: (e1 ?? e2)!.message };
+  const lignes = garder(couches.lignes);
+  const articles = garder(couches.articles);
+  if (lignes.length) {
+    const { error } = await supabase.from("trace_couches").insert(lignes.map(([production_order_line_id, nb_couches]) => ({ trace_id: traceId, production_order_line_id, nb_couches })));
+    if (error) return { error: error.message };
+  }
+  if (articles.length) {
+    const { error } = await supabase.from("trace_couches_articles").insert(articles.map(([article_id, nb_couches]) => ({ trace_id: traceId, article_id, nb_couches })));
+    if (error) return { error: error.message };
+  }
   revalidatePath(`/atelier/patronnage/${ficheId}`);
   return {};
+}
+
+export interface ModeleArticleOrdre {
+  nomenclatures: { id: string; nom: string; forme: string; principale: boolean }[];
+  zones: { key: string; label: string }[];
+  grammages: { id: string; libelle: string }[];
+  tailles: { cle: string; libelle: string }[];
+}
+
+/** Ce qu'il faut pour saisir un article sans ODF : nomenclatures, zones de couleur, grammages du même tissu, tailles. */
+export async function modeleArticleOrdre(productModelId: string): Promise<ModeleArticleOrdre | { error: string }> {
+  await requirePermission("view");
+  const supabase = await createClient();
+  const [{ data: modele }, { data: noms }, { data: zones }, tailles] = await Promise.all([
+    supabase.from("product_models").select("textile_id,textiles!product_models_textile_id_fkey(product_model_id)").eq("id", productModelId).maybeSingle(),
+    supabase.from("nomenclatures").select("id,nom,forme,principale").eq("product_model_id", productModelId).order("principale", { ascending: false }),
+    supabase.from("product_zone_templates").select("zone_key,zone_label,display_order").eq("product_model_id", productModelId).order("display_order"),
+    getSizesForProductModel(productModelId),
+  ]);
+  if (!modele) return { error: "Modèle introuvable" };
+  // Grammages proposés : ceux de l'article tissu du modèle (le grammage reste libre).
+  const articleTissu = (modele.textiles as unknown as { product_model_id: string | null } | null)?.product_model_id ?? null;
+  const { data: textiles } = articleTissu
+    ? await supabase.from("textiles").select("id,nom,grammage").eq("product_model_id", articleTissu).order("grammage")
+    : modele.textile_id
+      ? await supabase.from("textiles").select("id,nom,grammage").eq("id", modele.textile_id)
+      : { data: [] };
+  return {
+    nomenclatures: (noms ?? []).map((n) => ({ id: n.id as string, nom: n.nom as string, forme: n.forme as string, principale: !!n.principale })),
+    zones: (zones ?? []).map((z) => ({ key: z.zone_key as string, label: z.zone_label as string })),
+    grammages: (textiles ?? []).map((t) => ({ id: t.id as string, libelle: `${t.nom}${t.grammage && !String(t.nom).includes(String(t.grammage)) ? ` ${t.grammage} g` : ""}` })),
+    tailles: tailles.map((t) => ({ cle: t.cle, libelle: t.libelle })),
+  };
+}
+
+const articleOrdreSchema = z.object({
+  productModelId: z.string().uuid(),
+  nomenclatureId: z.string().uuid().nullable(),
+  textileId: z.string().uuid().nullable(),
+  couleurUniqueId: z.string().uuid().nullable(),
+  zoneColors: z.record(z.string(), z.string().uuid()),
+  tailles: z.record(z.string(), z.number().int().min(0)),
+});
+
+/** Ajoute un article saisi sans ODF à l'ordre : modèle, couleur unique ou par zone, quantités par taille. */
+export async function ajouterArticleOrdre(ficheId: string, input: z.input<typeof articleOrdreSchema>): Promise<{ error?: string }> {
+  await requirePermission("modify");
+  const parsed = articleOrdreSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Saisie invalide" };
+  const d = parsed.data;
+  const tailles = Object.fromEntries(Object.entries(d.tailles).filter(([, n]) => n > 0));
+  if (Object.keys(tailles).length === 0) return { error: "Indiquez au moins une quantité par taille." };
+  if (!d.couleurUniqueId && Object.keys(d.zoneColors).length === 0) return { error: "Indiquez la couleur (unique ou par zone)." };
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("ordre_trace_articles")
+    .insert({
+      fiche_id: ficheId,
+      product_model_id: d.productModelId,
+      nomenclature_id: d.nomenclatureId,
+      textile_id: d.textileId,
+      couleur_unique_id: d.couleurUniqueId,
+      tailles,
+    })
+    .select("id")
+    .single();
+  if (error) return { error: error.message };
+  if (!d.couleurUniqueId) {
+    const { error: e } = await supabase
+      .from("ordre_trace_article_zone_colors")
+      .insert(Object.entries(d.zoneColors).map(([zone_key, color_id]) => ({ article_id: data.id, zone_key, color_id })));
+    if (e) {
+      await supabase.from("ordre_trace_articles").delete().eq("id", data.id);
+      return { error: e.message };
+    }
+  }
+  revalidatePath(`/atelier/patronnage/${ficheId}`);
+  return {};
+}
+
+export async function retirerArticleOrdre(ficheId: string, articleId: string): Promise<{ error?: string }> {
+  await requirePermission("modify");
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("ordre_trace_articles").delete().eq("id", articleId).select("id");
+  if (error) return { error: error.message };
+  if (!data?.length) return { error: "Suppression refusée." };
+  revalidatePath(`/atelier/patronnage/${ficheId}`);
+  return {};
+}
+
+/** L'ODF arrive : l'article saisi est remplacé par l'article d'ODF (couches reportées, quantités de l'ODF). */
+export async function remplacerArticleOrdre(ficheId: string, articleId: string, lineId: string): Promise<{ error?: string }> {
+  await requirePermission("modify");
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("remplacer_article_ordre", { p_article_id: articleId, p_line_id: lineId });
+  if (error) return { error: error.message };
+  revalidatePath(`/atelier/patronnage/${ficheId}`);
+  revalidatePath("/atelier/patronnage/besoins");
+  return {};
+}
+
+/** Couleurs du référentiel (pour les articles saisis), avec leur code pour la pastille. */
+export async function couleursArticleOrdre(): Promise<{ id: string; name: string; code: string | null }[]> {
+  await requirePermission("view");
+  const supabase = await createClient();
+  const { data } = await supabase.from("colors").select("id,name,code").eq("active", true).order("name");
+  return (data ?? []).map((c) => ({ id: c.id as string, name: c.name as string, code: (c.code as string | null) ?? null }));
+}
+
+/** Articles d'ODF ouverts d'un modèle, pour remplacer un article saisi sans ODF. */
+export async function lignesOdfDuModele(productModelId: string): Promise<{ lineId: string; libelle: string }[]> {
+  await requirePermission("view");
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("production_order_lines")
+    .select("id,description,quantity,production_orders!inner(reference,status)")
+    .eq("product_model_id", productModelId)
+    .in("production_orders.status", ["brouillon", "en_attente_validation", "refuse", "en_production"])
+    .order("created_at", { ascending: false })
+    .limit(100);
+  type L = { id: string; description: string; quantity: number | null; production_orders: { reference: string } | null };
+  return ((data ?? []) as unknown as L[]).map((l) => ({
+    lineId: l.id,
+    libelle: `${l.production_orders?.reference ?? "ODF"} · ${l.description}${l.quantity ? ` · ${l.quantity} pcs` : ""}`,
+  }));
 }
