@@ -1217,7 +1217,8 @@ export async function updateTrace(traceId: string, ficheId: string, formData: Fo
   const { data: updated, error } = await supabase
     .from("traces_placement")
     .update({
-      reference_patron: String(formData.get("reference_patron") ?? "").trim() || null,
+      // Ordre regroupé : pas de référence patron dans le formulaire, on n'y touche pas.
+      ...(formData.has("reference_patron") ? { reference_patron: String(formData.get("reference_patron") ?? "").trim() || null } : {}),
       longueur_matelas_cm: formData.get("longueur_matelas_cm") ? Number(formData.get("longueur_matelas_cm")) : null,
       largeur_matelas_cm: formData.get("largeur_matelas_cm") ? Number(formData.get("largeur_matelas_cm")) : null,
       // Tracé regroupé (0149) : les plis sont la somme des couches par article, le champ n'est pas envoyé.

@@ -65,8 +65,19 @@ export default async function FichePlacementPage({
   return (
     <div className="space-y-6">
       <PageHeader
-        title={`Fiche ${fiche.numeroOt}`}
-        description={fiche.clientLibelle ?? undefined}
+        title={fiche.regroupee ? `Ordre de tracé ${fiche.numeroOt}` : `Fiche ${fiche.numeroOt}`}
+        description={
+          fiche.regroupee
+            ? // Ce qu'est l'ordre en une ligne : tissu, nombre d'articles, clients.
+              [
+                fiche.tissuOrdre,
+                `${fiche.lignesRegroupees.length + (fiche.articlesSaisis?.length ?? 0)} article(s) à produire`,
+                fiche.clientLibelle,
+              ]
+                .filter(Boolean)
+                .join(" · ")
+            : (fiche.clientLibelle ?? undefined)
+        }
         action={
           <div className="flex items-center gap-2">
             {/* Ordre de tracé imprimable : récapitulatif + une fiche matelas par tracé. */}
