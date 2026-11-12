@@ -17,8 +17,8 @@ et valident.
 
 | Phase | Contenu | État |
 |---|---|---|
-| 1 | Moteur Rust intégré, contrat JSON, validation indépendante, banc d'essai | **fait** |
-| 2 | Import DXF des patrons, modèle de données (rotations, quantités), calculs asynchrones, stockage | à faire |
+| 1 | Moteur Rust intégré, contrat JSON, validation indépendante, banc d'essai | **fait** (PR #239) |
+| 2 | Pièces lues depuis la bibliothèque, modèle de données (rotations, paires), calculs en arrière-plan par tranches, stockage | **fait** |
 | 3 | Aperçu SVG, exports DXF/PDF, interface | à faire |
 | 4 | Outils pour agents IA, journal, validation humaine, droits | à faire |
 | 5 | Tests complets, documentation finale, rapport | à faire |
@@ -58,6 +58,108 @@ Le WebAssembly n'utilise qu'un cœur de processeur. Sur le même budget de
 temps, il obtient environ 0,3 point d'utilisation de moins que le moteur
 natif multi-cœur (exemple : 86,13 % contre 86,40 % en 20 s). Sur un serveur
 Seritex, le même code Rust pourra être compilé en natif si ce gain compte.
+
+## Phase 2 : des patrons au calcul en arrière-plan
+
+```
+creerCalculImbrication(parametres)        src/lib/imbrication/calculs.ts
+  │  demandes : semi-fini × taille × nombre de pièces par couche ; tissu ; temps
+  ├─ chargerPatrons + construireEntree     src/lib/imbrication/patrons.ts
+  │     relit le DXF de référence de chaque patron, y retrouve la pièce,
+  │     convertit en mm, applique rotations et paires
+  ├─ insert imbrication_calculs (« en attente », entrée figée)
+  └─ after() → GET /api/imbrication/traiter ──┐   (+ pg_cron chaque minute)
+                                               ▼
+traiterCalculs → prendre_calcul_imbrication()  src/lib/imbrication/execution.ts
+  └─ executerTranche : moteur (worker) ≤ 240 s, signe de vie + annulation,
+     contrôle indépendant ; reste du temps → « en attente » (reprise du
+     meilleur tracé à la tranche suivante), sinon « terminé »
+```
+
+### Pièces : relues dans le DXF de référence
+
+La bibliothèque garde les contours **recentrés et tournés** sur leur axe
+principal, pour la reconnaissance : l'orientation d'origine, et donc le
+droit-fil, n'y est plus. Le calcul relit donc le DXF de référence du patron
+et y retrouve la pièce, au point près une fois normalisée de la même façon.
+Constaté sur les gabarits Modaris réels (AAMA/ASTM, AC1009) :
+
+- une pièce = un bloc ; ligne de coupe sur le calque 1 en morceaux ouverts
+  (réassemblés), couture sur le calque 14, crans sur le calque 11 ;
+- pas de ligne de droit-fil exportée, mais **droit-fil selon X** (corps
+  742 mm en X, manche 222 mm en X = sa longueur) : d'où les rotations
+  {0, 180} par défaut ;
+- courbes déjà découpées en segments ; unité 0,1 mm.
+
+Nettoyage avant calcul : points en double (moins de 0,05 mm) et points
+alignés (moins de 0,01 mm) retirés. Constaté sur le corps arrière XL réel,
+dessiné en deux moitiés : à la jonction, un point à 0,018 mm du premier
+formait un « nœud papillon » que le contrôle refusait.
+
+Refus explicites, jamais d'approximation silencieuse : fichier contenant des
+arcs (« bulges »), semi-fini tubulaire seulement (pièce au pli), pièce
+introuvable dans son fichier (fichier remplacé), taille sans patron, paire
+en nombre impair.
+
+### Modèle de données (migration 0182)
+
+- `pattern_pieces.rotations_autorisees` (défaut `{0,180}`) et
+  `pattern_pieces.symetrie` (`aucune` | `paire` : moitié des exemplaires
+  posée retournée). Rien à saisir par défaut.
+- `imbrication_calculs` : paramètres demandés, **entrée figée** (le calcul ne
+  dépend plus de la bibliothèque ensuite), correspondance des pièces, statut
+  (`en_attente`, `en_cours`, `termine`, `echec`, `annule`), meilleur tracé,
+  contrôle, longueur, taux, temps consommé, tranches, auteur (et agent,
+  phase 4). Contrainte : **« terminé » exige un tracé validé**.
+- Écriture : création par la personne (RLS, droit
+  `patronnage_traces.create`, en son nom, sans résultat) ; annulation par
+  `annuler_calcul_imbrication` ; résultats par le serveur seulement.
+- `prendre_calcul_imbrication` (serveur) : réserve le plus ancien calcul ;
+  reprend un calcul resté muet (serveur arrêté en route) depuis son meilleur
+  tracé ; après 3 reprises, échec explicite.
+- Tâche pg_cron `imbrication-traiter` (chaque minute s'il y a du travail),
+  même secret que les notifications (`CRON_SECRET` / Vault
+  `notifications_secret`).
+
+### Tranches et durée
+
+Une fonction Vercel dure 300 s au plus : chaque passage exécute une tranche
+de 240 s au plus (`IMBRICATION_TRANCHE_S`), qui **repart du meilleur tracé**
+de la précédente (champ `reprise` du contrat, ajout compatible en v1). Un
+calcul de 10 minutes fait donc 3 tranches. Sur un serveur Seritex sans limite
+de durée, régler `IMBRICATION_TRANCHE_S` au temps maximal : une tranche suffit.
+Un calcul à budget d'effort (reproductible) tient toujours en une tranche.
+
+Une tranche ratée ne fait jamais perdre le tracé valide déjà trouvé. Un
+tracé refusé par le contrôle n'est jamais retenu.
+
+### Moteur natif sur un serveur Seritex
+
+Avec `IMBRICATION_BINAIRE=/chemin/seritex-imbrication`, Seritex lance le
+même moteur compilé pour la machine (`cargo build --release` dans
+`rust/imbrication`) au lieu du WebAssembly : même contrat, même contrôle,
+même tracé à graine et effort égaux (vérifié), mais plusieurs cœurs. Sur
+Vercel, ne rien régler : le WebAssembly est utilisé.
+
+### Face-à-face sur un cas réel (2026-11-12)
+
+Ordre OT-2026-0010-T1 : 48 pièces (t-shirt TSM01, corps avant, corps
+arrière, manches, tailles L, XL, XXL), tissu ouvert, laize 167 cm, sans
+espacement. Diamino : 854,6 cm (longueur déclarée dans Seritex).
+
+| Moteur Seritex | Temps | Longueur | Utilisation | Écart vs Diamino |
+|---|---:|---:|---:|---:|
+| WebAssembly (1 cœur, comme sur Vercel) | 30 s | 878,4 cm | 83,7 % | +2,8 % |
+| WebAssembly | 2 min | 872,4 cm | 84,3 % | +2,1 % |
+| WebAssembly | 10 min | 865,5 cm | 85,0 % | +1,3 % |
+| **Natif (multi-cœur, Mac de développement)** | **10 min** | **849,3 cm** | **86,6 %** | **−0,6 %** |
+
+Tous ces tracés passent le contrôle indépendant. Un seul cas réel ne suffit
+pas à trancher : le banc d'essai sur 10 à 20 tracés Diamino reste l'arbitre.
+
+### Préréglages
+
+`PREREGLAGES_TEMPS` : rapide 30 s, normal 2 min, approfondi 10 min.
 
 ## Contrat JSON `seritex.imbrication/v1`
 
@@ -113,6 +215,7 @@ document. Un changement incompatible impose `seritex.imbrication/v2`.
 | `pieces[].quantite` | Nombre d'exemplaires à poser. |
 | `pieces[].rotations` | Angles autorisés. `[0, 180]` = la pièce suit le sens du rouleau ; `[0]` = sens unique ; `[0, 90, 180, 270]` = cas particuliers. |
 | `pieces[].miroir` | Pièce **posée retournée** (symétrie y → -y, droit-fil conservé), par exemple la manche droite d'une paire dont le patron est la gauche. |
+| `reprise` | Facultatif : `{ "placements": [...] }`, placements d'une sortie précédente. Le moteur repart de ce tracé au lieu d'en construire un (enchaînement des tranches). |
 
 ### Sortie
 
@@ -154,7 +257,10 @@ document. Un changement incompatible impose `seritex.imbrication/v2`.
 | `contour_invalide` | Contour à moins de 3 points, sans surface, ou qui se croise (le message nomme la pièce). |
 | `piece_trop_large` | Dans aucun des sens autorisés, la pièce ne tient dans la largeur (marges et espacement compris). |
 | `marge_invalide`, `largeur_invalide`, `espacement_invalide`, `temps_invalide`, `effort_invalide` | Paramètre hors limites. |
+| `reprise_invalide` | Placements de reprise incohérents avec les pièces. |
 | `moteur_absent`, `moteur_plante`, `moteur_delai`, `moteur_sortie_illisible` | Problème d'exécution du moteur. |
+| `trace_invalide` | Tracé refusé par le contrôle indépendant de Seritex (calcul en échec). |
+| `moteur_interrompu` | Serveur arrêté en route trois fois de suite (calcul en échec). |
 
 ## Contrôle indépendant du tracé
 
@@ -245,6 +351,8 @@ des bouts, zones de défaut du tissu (jagua-rs gère des zones de qualité).
 - **Trous intérieurs ignorés** : sparrow refuse les pièces trouées. Seul le
   contour extérieur compte. C'est sans risque, on perd seulement la
   possibilité de poser une petite pièce dans un trou.
+- **Arcs dans les DXF** : refusés (aucun gabarit Modaris examiné n'en a).
+  À traiter le jour où un fichier réel en contient.
 - **Pièces au pli sur tissu tubulaire** : non gérées (une pièce au pli doit
   toucher le bord du tube, contrainte inconnue du moteur). En v1, le calcul
   automatique s'applique au tissu ouvert.

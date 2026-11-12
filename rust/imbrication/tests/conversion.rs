@@ -3,7 +3,7 @@
 //! Lancer : cargo test --release (le mode debug active les nombreuses
 //! vérifications internes de sparrow et devient très lent).
 
-use seritex_imbrication::contrat::{Calcul, Entree, Piece, Statut, Tissu, VERSION_CONTRAT};
+use seritex_imbrication::contrat::{Calcul, Entree, Piece, Reprise, Statut, Tissu, VERSION_CONTRAT};
 use seritex_imbrication::{imbriquer, transformer};
 
 fn entree(pieces: Vec<Piece>, largeur: f64, marge: f64) -> Entree {
@@ -13,6 +13,7 @@ fn entree(pieces: Vec<Piece>, largeur: f64, marge: f64) -> Entree {
         espacement: 1.0,
         calcul: Calcul { temps_max_s: 30.0, graine: 3, effort: Some(40), fichier_annulation: None },
         pieces,
+        reprise: None,
     }
 }
 
@@ -84,4 +85,30 @@ fn version_de_contrat_inconnue() {
     e.version = "seritex.imbrication/v0".into();
     let s = imbriquer(&e);
     assert_eq!(s.erreur.unwrap().code, "version_contrat");
+}
+
+#[test]
+fn reprise_d_une_tranche_precedente() {
+    let pieces = vec![
+        Piece { id: "t".into(), contour: triangle_loin(), quantite: 6, rotations: vec![0.0, 180.0], miroir: false },
+        Piece { id: "t-miroir".into(), contour: triangle_loin(), quantite: 6, rotations: vec![0.0, 180.0], miroir: true },
+    ];
+    let mut e = entree(pieces, 400.0, 10.0);
+    let premiere = imbriquer(&e);
+    assert_eq!(premiere.statut, Statut::Termine, "{:?}", premiere.erreur);
+    e.reprise = Some(Reprise { placements: premiere.placements.clone() });
+    let seconde = imbriquer(&e);
+    assert_eq!(seconde.statut, Statut::Termine, "{:?}", seconde.erreur);
+    assert_eq!(seconde.placements.len(), 12);
+    assert!(seconde.longueur <= premiere.longueur + 0.01, "{} > {}", seconde.longueur, premiere.longueur);
+    for p in &seconde.placements {
+        let piece = e.pieces.iter().find(|q| q.id == p.piece_id).unwrap();
+        assert_eq!(p.miroir, piece.miroir);
+    }
+
+    // Reprise incohérente (pièce inconnue) : erreur claire, jamais de plantage.
+    let mut faux = premiere.placements.clone();
+    faux[0].piece_id = "inconnue".into();
+    e.reprise = Some(Reprise { placements: faux });
+    assert_eq!(imbriquer(&e).erreur.unwrap().code, "reprise_invalide");
 }

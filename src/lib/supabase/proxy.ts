@@ -18,6 +18,8 @@ const PUBLIC_PATHS = [
   "/api/media/importer-site",
   // Synchronisation FreeTrack (module Véhicules, 0173) : même principe (CRON_SECRET).
   "/api/vehicules/freetrack/synchro",
+  // Calculs d'imbrication (tracés de coupe, 0182) : même principe (CRON_SECRET).
+  "/api/imbrication/traiter",
   // Téléchargement d'un fichier de la médiathèque par un compte client DU SITE (www.seritex.ci) :
   // pas de cookie de la plateforme, la route exige le jeton du client (Authorization: Bearer).
   "/api/site/media",

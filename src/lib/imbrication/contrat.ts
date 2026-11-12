@@ -62,6 +62,12 @@ export const entreeSchema = z
       })
       .strict(),
     pieces: z.array(pieceSchema).min(1),
+    /**
+     * Reprise : le moteur repart de ces placements (meilleur tracé d'une
+     * tranche précédente). Permet d'enchaîner des tranches de calcul plus
+     * courtes que la durée maximale d'une fonction serveur. Absent = départ de zéro.
+     */
+    reprise: z.object({ placements: z.array(z.lazy(() => placementSchema)) }).strict().nullable().default(null),
   })
   .strict();
 

@@ -92,3 +92,46 @@ export function entreeTshirt(options: {
     pieces,
   };
 }
+
+/**
+ * DXF au format des gabarits Modaris examinés (AAMA/ASTM, AC1009) : une
+ * pièce = un BLOC posé par INSERT à l'origine ; ligne de coupe sur le calque
+ * 1 en DEUX polylignes ouvertes bout à bout ; ligne de couture fermée sur le
+ * calque 14 (en retrait) ; crans sur le calque 11. Unité 0,1 mm.
+ * `bulge` : ajoute un arc dans la ligne de coupe (cas refusé).
+ */
+export function dxfModaris(pieces: { contourMm: Point[] }[], options: { bulge?: boolean } = {}): string {
+  const l: string[] = [];
+  const p = (...kv: (string | number)[]) => {
+    for (let i = 0; i < kv.length; i += 2) l.push(String(kv[i]).padStart(3), String(kv[i + 1]));
+  };
+  const polyligne = (calque: number, pts: Point[], arc = false) => {
+    p(0, "POLYLINE", 8, calque, 66, 1);
+    pts.forEach(([x, y], i) => {
+      p(0, "VERTEX", 8, calque, 10, (x * 10).toFixed(6), 20, (y * 10).toFixed(6));
+      if (arc && i === 1) p(42, "0.4");
+    });
+    p(0, "SEQEND", 8, calque);
+  };
+  p(0, "SECTION", 2, "HEADER", 9, "$ACADVER", 1, "AC1009", 0, "ENDSEC", 0, "SECTION", 2, "BLOCKS");
+  pieces.forEach((piece, i) => {
+    const nom = `PCE_${String(i + 1).padStart(3, "0")}`;
+    p(0, "BLOCK", 8, 0, 2, nom, 70, 0, 10, 0, 20, 0);
+    // Comme dans les gabarits réels, chaque pièce a sa place sur la feuille
+    // (coordonnées absolues dans le bloc, INSERT à l'origine).
+    const c = piece.contourMm.map(([x, y]) => [x + i * 1500, y + 300] as Point);
+    const m = Math.floor(c.length / 2);
+    polyligne(1, c.slice(0, m + 1), options.bulge);
+    polyligne(1, [...c.slice(m), c[0]]);
+    // Couture : contour réduit de 5 % autour de son centre, fermé.
+    const cx = c.reduce((s, q) => s + q[0], 0) / c.length;
+    const cy = c.reduce((s, q) => s + q[1], 0) / c.length;
+    polyligne(14, [...c, c[0]].map(([x, y]) => [cx + (x - cx) * 0.95, cy + (y - cy) * 0.95] as Point));
+    polyligne(11, [c[0], [c[0][0] + 0.4, c[0][1]]]);
+    p(0, "ENDBLK", 8, 0);
+  });
+  p(0, "ENDSEC", 0, "SECTION", 2, "ENTITIES");
+  pieces.forEach((_, i) => p(0, "INSERT", 8, 0, 2, `PCE_${String(i + 1).padStart(3, "0")}`, 10, 0, 20, 0, 50, 0));
+  p(0, "ENDSEC", 0, "EOF");
+  return l.join("\r\n") + "\r\n";
+}

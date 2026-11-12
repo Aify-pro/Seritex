@@ -2,6 +2,8 @@ import "server-only";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { spawn, type ChildProcess } from "node:child_process";
+import { openSync, closeSync } from "node:fs";
 import { Worker } from "node:worker_threads";
 import { entreeSchema, sortieSchema, type EntreeImbrication, type EntreeImbricationNormalisee, type SortieImbrication } from "./contrat";
 import { controlerContours, validerTrace, type ResultatValidation } from "./validation";
@@ -91,7 +93,13 @@ parentPort.postMessage({ code: wasi.start(instance) });
 `;
 
 /** Lance un calcul ; voir `imbriquer` pour la version simple. */
-export function lancerImbrication(entreeBrute: EntreeImbrication, options: { cheminWasm?: string } = {}): CalculImbrication {
+export interface OptionsMoteur {
+  cheminWasm?: string;
+  /** Binaire natif à utiliser à la place du WebAssembly (défaut : IMBRICATION_BINAIRE ; null = WebAssembly). */
+  binaireNatif?: string | null;
+}
+
+export function lancerImbrication(entreeBrute: EntreeImbrication, options: OptionsMoteur = {}): CalculImbrication {
   let dossier: string | null = null;
   let annulationDemandee = false;
 
@@ -111,18 +119,25 @@ export function lancerImbrication(entreeBrute: EntreeImbrication, options: { che
       return { ok: false, code: "contour_invalide", message: contours[0].message, pieceId: contours[0].pieceId };
     }
 
-    const moduleCompile = await moduleWasm(options.cheminWasm ?? process.env.IMBRICATION_WASM ?? CHEMIN_WASM_DEFAUT).catch(() => null);
-    if (!moduleCompile) {
+    // Serveur Seritex : le même moteur compilé en natif (plusieurs cœurs,
+    // nettement meilleur à temps égal) s'il est installé ; sinon WebAssembly.
+    const binaire = options.binaireNatif === undefined ? process.env.IMBRICATION_BINAIRE || null : options.binaireNatif;
+    const moduleCompile = binaire
+      ? null
+      : await moduleWasm(options.cheminWasm ?? process.env.IMBRICATION_WASM ?? CHEMIN_WASM_DEFAUT).catch(() => null);
+    if (!binaire && !moduleCompile) {
       return { ok: false, code: "moteur_absent", message: "Le moteur d'imbrication est introuvable sur ce serveur." };
     }
 
     dossier = await mkdtemp(path.join(tmpdir(), "seritex-imbrication-"));
     try {
-      const pourMoteur = { ...entree, calcul: { ...entree.calcul, fichier_annulation: `${DOSSIER_MOTEUR}/annuler` } };
+      const annulation = binaire ? path.join(dossier, "annuler") : `${DOSSIER_MOTEUR}/annuler`;
+      const pourMoteur = { ...entree, calcul: { ...entree.calcul, fichier_annulation: annulation } };
       await writeFile(path.join(dossier, "entree.json"), JSON.stringify(pourMoteur));
       if (annulationDemandee) await writeFile(path.join(dossier, "annuler"), "");
 
-      const fin = await executer(moduleCompile, dossier, entree.calcul.temps_max_s * 1000 + MARGE_ARRET_FORCE_MS);
+      const delai = entree.calcul.temps_max_s * 1000 + MARGE_ARRET_FORCE_MS;
+      const fin = binaire ? await executerNatif(binaire, dossier, delai) : await executer(moduleCompile!, dossier, delai);
       if (fin.type === "delai") {
         return { ok: false, code: "moteur_delai", message: "Le calcul a dépassé son temps maximal et a été interrompu sans résultat." };
       }
@@ -190,7 +205,34 @@ function executer(moduleCompile: WebAssembly.Module, dossier: string, delaiMs: n
   });
 }
 
+/** Même échange de fichiers, avec le binaire natif dans un processus séparé. */
+function executerNatif(binaire: string, dossier: string, delaiMs: number): Promise<FinThread> {
+  return new Promise((resolve) => {
+    const fds = [
+      openSync(path.join(dossier, "entree.json"), "r"),
+      openSync(path.join(dossier, "sortie.json"), "w"),
+      openSync(path.join(dossier, "journal.txt"), "w"),
+    ];
+    let fini = false;
+    const terminer = (f: FinThread) => {
+      if (fini) return;
+      fini = true;
+      clearTimeout(minuterie);
+      fds.forEach((fd) => closeSync(fd));
+      resolve(f);
+    };
+    // Aucune variable d'environnement transmise : le moteur n'a besoin d'aucun secret.
+    const enfant: ChildProcess = spawn(binaire, [], { stdio: [fds[0], fds[1], fds[2]], env: {} as NodeJS.ProcessEnv });
+    const minuterie = setTimeout(() => {
+      enfant.kill("SIGKILL");
+      terminer({ type: "delai" });
+    }, delaiMs);
+    enfant.on("error", (e) => terminer({ type: "plantage", erreur: e.message }));
+    enfant.on("exit", (code, signal) => terminer(code === 0 ? { type: "fin", code: 0 } : { type: "plantage", erreur: `sortie ${code ?? signal}` }));
+  });
+}
+
 /** Calcule un tracé et le contrôle. */
-export function imbriquer(entree: EntreeImbrication, options: { cheminWasm?: string } = {}): Promise<ResultatMoteur> {
+export function imbriquer(entree: EntreeImbrication, options: OptionsMoteur = {}): Promise<ResultatMoteur> {
   return lancerImbrication(entree, options).resultat;
 }
