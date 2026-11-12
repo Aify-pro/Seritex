@@ -3,14 +3,23 @@ import QRCode from "qrcode";
 import { centroid, type Point } from "@/lib/patronnage/geometry";
 import type { DxfContour } from "@/lib/patronnage/dxf";
 import { MM_PAR_UNITE, type LignePieceDetail } from "@/lib/patronnage/detail";
-import { construireContenuCartouche, type CartoucheInfo, type LigneCartouche, type OrientationCartouche } from "@/lib/patronnage/cartouche";
+import {
+  construireContenuCartouche,
+  libellePieceMarquee,
+  mettreEnPageCartouche,
+  placerCartouche,
+  type CartoucheInfo,
+  type LigneCartouche,
+  type OrientationCartouche,
+} from "@/lib/patronnage/cartouche";
 
 export type { CartoucheInfo, OrientationCartouche };
 
 /**
  * Génère le DXF « marqué » d'un tracé déjà déposé : texte au centre de chaque
- * patron reconnu (article, taille, pièce) et cartouche (QR + infos) sous le
- * tracé, pour un document téléchargeable qui dit de lui-même à quoi il
+ * patron reconnu (article, taille, pièce) et cartouche (QR + infos) au bout
+ * de la longueur du tracé, tourné de 90° (jamais sous le tracé : la largeur,
+ * c'est la laize), pour un document téléchargeable qui dit de lui-même à quoi il
  * correspond — sans attendre que quelqu'un rouvre la fiche sur la plateforme.
  *
  * Principe directeur : SURCHARGE, jamais régénération. On repart du texte
@@ -43,21 +52,15 @@ const COUCHE_MARQUAGE = "SERITEX_MARQUAGE";
 const COUCHE_CARTOUCHE = "SERITEX_CARTOUCHE";
 const COUCHE_QR = "SERITEX_QR";
 
-const HAUTEUR_TEXTE_PIECE_MM = 12;
+// Retour utilisateur du 2026-11-11 : police des pièces trop grande (12 mm).
+const HAUTEUR_TEXTE_PIECE_MM = 5;
 const DEMI_CROIX_MM = 4;
 
-const CARTOUCHE_HAUTEUR_MM = 55;
-const CARTOUCHE_LARGEUR_MIN_MM = 180;
-const CARTOUCHE_MARGE_MM = 15; // entre le bas du tracé et le haut du cartouche
-const CARTOUCHE_PADDING_MM = 6;
-const QR_TAILLE_MM = 32;
+const CARTOUCHE_MARGE_MM = 15; // entre le bout du tracé et le cartouche
 
 const COULEUR_VERT = 3; // ACI — vert : tout reconnu
 const COULEUR_ROUGE = 1; // ACI — rouge : au moins une pièce non reconnue
 
-// Cartouche vertical : largeur FIXE (pas liée à la largeur du tracé, à
-// l'inverse de l'horizontal) — une colonne étroite, pas un bandeau.
-const CARTOUCHE_V_LARGEUR_MM = 120;
 
 export function genererDxfMarque(
   dxfOriginal: string,
@@ -73,8 +76,7 @@ export function genererDxfMarque(
   const mm = (n: number) => n * UNITES_PAR_MM;
 
   // Boîte englobante du tracé ENTIER, sur les contours BRUTS (coordonnées
-  // natives du fichier — cf. en-tête) : sert à placer le cartouche sous le
-  // dessin, sans jamais l'avoir à redimensionner.
+  // natives du fichier — cf. en-tête).
   let minX = Infinity,
     minY = Infinity,
     maxX = -Infinity,
@@ -91,69 +93,49 @@ export function genererDxfMarque(
 
   let entites = "";
 
-  // --- Marquage de chaque pièce, au centroïde de son contour BRUT ---
+  // --- Marquage de chaque pièce, au centroïde de son contour BRUT. Texte
+  // sans accent ni caractère spécial (rendu du traceur), police réduite.
   for (const ligne of lignes) {
     const points = contours[ligne.index]?.points;
     if (!points || points.length < 3) continue;
     const point = centroid(points);
-    const texte =
-      ligne.reconnue && ligne.patron
-        ? `${ligne.patron.articleCode} · ${ligne.patron.size} · ${ligne.patron.pieceName}${ligne.enMiroir ? " (miroir)" : ""}`
-        : "NON RECONNUE";
-    entites += entiteTexteCentre(point, mm(HAUTEUR_TEXTE_PIECE_MM), texte, COUCHE_MARQUAGE);
-    // Petite croix au centroïde exact : montre où le moteur a mesuré, utile
-    // à la vérification humaine qui est tout le sens de ce module (cf.
-    // reconnaissance.ts — « nous servait de vérification des tracés »).
+    entites += entiteTexteCentre(point, mm(HAUTEUR_TEXTE_PIECE_MM), libellePieceMarquee(ligne), COUCHE_MARQUAGE);
+    // Petite croix au centroïde exact : montre où le moteur a mesuré.
     entites += entiteCroix(point, mm(DEMI_CROIX_MM), COUCHE_MARQUAGE);
   }
 
-  // --- Cartouche : sous le tracé. En horizontal, un bandeau pleine largeur
-  // (jamais plus étroit que la laize déjà respectée par la PAO) avec le QR à
-  // gauche et le texte à droite ; en vertical, une colonne étroite de
-  // largeur fixe avec le QR en haut et le texte empilé dessous.
+  // --- Cartouche : au bout de la longueur du tracé, tourné de 90° le long de
+  // la largeur, sans jamais l'élargir (cf. cartouche.ts).
   const contenu = construireContenuCartouche(lignes, info);
-  const pad = mm(CARTOUCHE_PADDING_MM);
-  const qrTaille = mm(QR_TAILLE_MM);
-  const hauteurLigne = (l: LigneCartouche) => (l.accent === "titre" ? 6.5 : l.accent ? 5 : 4.5);
-  const hauteurTexteTotal = contenu.lignes.reduce((s, l) => s + hauteurLigne(l) + 1.5, 0);
+  const boiteMm = { minX: minX / UNITES_PAR_MM, minY: minY / UNITES_PAR_MM, maxX: maxX / UNITES_PAR_MM, maxY: maxY / UNITES_PAR_MM };
+  const largeurTraceMm = Math.min(boiteMm.maxX - boiteMm.minX, boiteMm.maxY - boiteMm.minY);
+  const miseEnPage = mettreEnPageCartouche(contenu, orientation, largeurTraceMm);
+  const place = placerCartouche(boiteMm, miseEnPage, CARTOUCHE_MARGE_MM);
+  const versFichier = (u: number, v: number): Point => {
+    const [x, y] = place.versTrace(u, v);
+    return [x * UNITES_PAR_MM, y * UNITES_PAR_MM];
+  };
+  const rectangleLocal = (u0: number, v0: number, u1: number, v1: number) => {
+    const a = versFichier(u0, v0);
+    const b = versFichier(u1, v1);
+    return [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])] as const;
+  };
+  const couleurAccent = (accent?: LigneCartouche["accent"]) =>
+    accent === "verdict_ok" ? COULEUR_VERT : accent === "verdict_ko" ? COULEUR_ROUGE : undefined;
 
-  const x0 = minX;
-  const largeurCartouche =
-    orientation === "horizontal" ? Math.max(maxX - minX, mm(CARTOUCHE_LARGEUR_MIN_MM)) : mm(CARTOUCHE_V_LARGEUR_MM);
-  const hauteurCartouche =
-    orientation === "horizontal" ? mm(CARTOUCHE_HAUTEUR_MM) : pad * 3 + qrTaille + mm(hauteurTexteTotal);
-  const x1 = x0 + largeurCartouche;
-  const y1 = minY - mm(CARTOUCHE_MARGE_MM);
-  const y0 = y1 - hauteurCartouche;
-
-  entites += entiteRectangle(x0, y0, x1, y1, COUCHE_CARTOUCHE);
-
-  const couleurAccent = (l: LigneCartouche) =>
-    l.accent === "verdict_ok" ? COULEUR_VERT : l.accent === "verdict_ko" ? COULEUR_ROUGE : undefined;
-
-  if (orientation === "horizontal") {
-    entites += dessinerQr(contenu.qrUrl, x0 + pad, y0 + pad, qrTaille, COUCHE_QR);
-    // Repli lisible à l'œil sous le QR, si le scan ne passe pas — même
-    // convention que les étiquettes de sacs de déchets (waste-bag-label.ts).
-    entites += entiteTexteCentre([x0 + pad + qrTaille / 2, y0 + pad / 2], mm(3.5), contenu.qrLegende, COUCHE_CARTOUCHE);
-
-    const xTexte = x0 + pad + qrTaille + pad;
-    let curY = y1 - pad;
-    for (const l of contenu.lignes) {
-      curY -= mm(hauteurLigne(l));
-      entites += entiteTexteGauche([xTexte, curY], mm(hauteurLigne(l)), l.texte, COUCHE_CARTOUCHE, couleurAccent(l));
-      curY -= mm(1.5);
-    }
-  } else {
-    const xCentre = x0 + largeurCartouche / 2;
-    entites += dessinerQr(contenu.qrUrl, xCentre - qrTaille / 2, y1 - pad - qrTaille, qrTaille, COUCHE_QR);
-    entites += entiteTexteCentre([xCentre, y1 - pad - qrTaille - mm(4)], mm(3.5), contenu.qrLegende, COUCHE_CARTOUCHE);
-
-    let curY = y1 - pad - qrTaille - mm(4) - mm(5.5);
-    for (const l of contenu.lignes) {
-      curY -= mm(hauteurLigne(l));
-      entites += entiteTexteGauche([x0 + pad, curY], mm(hauteurLigne(l)), l.texte, COUCHE_CARTOUCHE, couleurAccent(l));
-      curY -= mm(1.5);
+  for (const el of miseEnPage.elements) {
+    if (el.type === "cadre") {
+      const [x0, y0, x1, y1] = rectangleLocal(el.u0, el.v0, el.u1, el.v1);
+      entites += entiteRectangle(x0, y0, x1, y1, COUCHE_CARTOUCHE);
+    } else if (el.type === "qr") {
+      entites += dessinerQr(el.url, el.taille, (u0, v0, u1, v1) => {
+        const [x0, y0, x1, y1] = rectangleLocal(el.u0 + u0, el.v0 + v0, el.u0 + u1, el.v0 + v1);
+        return entiteSolide(x0, y0, x1, y1, COUCHE_QR);
+      });
+    } else if (el.centre) {
+      entites += entiteTexteCentre(versFichier(el.u, el.v), mm(el.hauteur), el.texte, COUCHE_CARTOUCHE, couleurAccent(el.accent), place.rotation);
+    } else {
+      entites += entiteTexteGauche(versFichier(el.u, el.v), mm(el.hauteur), el.texte, COUCHE_CARTOUCHE, couleurAccent(el.accent), place.rotation);
     }
   }
 
@@ -170,7 +152,7 @@ function g(code: number, valeur: string | number): string {
 }
 
 /** TEXTE centré horizontalement ET verticalement sur `point` (convention DXF : 72=1/73=2, point d'alignement 11/21 dupliqué sur 10/20). */
-function entiteTexteCentre(point: Point, hauteur: number, texte: string, calque: string, couleur?: number): string {
+function entiteTexteCentre(point: Point, hauteur: number, texte: string, calque: string, couleur?: number, rotation = 0): string {
   const px = point[0].toFixed(2);
   const py = point[1].toFixed(2);
   return (
@@ -181,6 +163,7 @@ function entiteTexteCentre(point: Point, hauteur: number, texte: string, calque:
     g(20, py) +
     g(40, hauteur.toFixed(2)) +
     g(1, dxfSafe(texte)) +
+    (rotation ? g(50, rotation) : "") +
     g(72, 1) +
     g(73, 2) +
     g(11, px) +
@@ -189,7 +172,7 @@ function entiteTexteCentre(point: Point, hauteur: number, texte: string, calque:
 }
 
 /** TEXTE justifié à gauche (justification par défaut : le point 10/20 est le coin bas-gauche du texte). */
-function entiteTexteGauche(point: Point, hauteur: number, texte: string, calque: string, couleur?: number): string {
+function entiteTexteGauche(point: Point, hauteur: number, texte: string, calque: string, couleur?: number, rotation = 0): string {
   return (
     g(0, "TEXT") +
     g(8, calque) +
@@ -197,7 +180,8 @@ function entiteTexteGauche(point: Point, hauteur: number, texte: string, calque:
     g(10, point[0].toFixed(2)) +
     g(20, point[1].toFixed(2)) +
     g(40, hauteur.toFixed(2)) +
-    g(1, dxfSafe(texte))
+    g(1, dxfSafe(texte)) +
+    (rotation ? g(50, rotation) : "")
   );
 }
 
@@ -254,7 +238,7 @@ function entiteRectangle(x0: number, y0: number, x1: number, y1: number, calque:
  * consécutifs d'une même rangée sont fusionnés en un seul rectangle
  * (moins d'entités, pas de liseré de jointure).
  */
-function dessinerQr(url: string, x0: number, y0: number, taille: number, calque: string): string {
+function dessinerQr(url: string, taille: number, rectangle: (u0: number, v0: number, u1: number, v1: number) => string): string {
   const qr = QRCode.create(url, { errorCorrectionLevel: "M" });
   const count = qr.modules.size;
   const tailleModule = taille / count;
@@ -268,11 +252,11 @@ function dessinerQr(url: string, x0: number, y0: number, taille: number, calque:
       }
       const debut = col;
       while (col < count && qr.modules.get(row, col)) col++;
-      // Rangée 0 = haut du symbole (lecture normale) : l'axe Y du DXF
-      // pointant vers le haut, contrairement à une image, la rangée 0 se
-      // place donc près du HAUT du carré, pas du bas.
-      const yHaut = y0 + taille - row * tailleModule;
-      out += entiteSolide(x0 + debut * tailleModule, yHaut - tailleModule, x0 + col * tailleModule, yHaut, calque);
+      // Rangée 0 = haut du symbole (lecture normale), dans le repère local
+      // du cartouche (v vers le haut) ; la projection sur le tracé (rotation
+      // éventuelle) est faite par l'appelant.
+      const vHaut = taille - row * tailleModule;
+      out += rectangle(debut * tailleModule, vHaut - tailleModule, col * tailleModule, vHaut);
     }
   }
   return out;

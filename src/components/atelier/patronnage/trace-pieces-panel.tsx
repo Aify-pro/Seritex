@@ -539,11 +539,11 @@ function TableauPieces({ lignes }: { lignes: LignePieceDetail[] }) {
 
 const OPTIONS_TELECHARGEMENT: { format: "dxf" | "pdf"; marquage: "aucun" | "horizontal" | "vertical"; label: string }[] = [
   { format: "dxf", marquage: "aucun", label: "Sans marquage (DXF)" },
-  { format: "pdf", marquage: "aucun", label: "Sans marquage (PDF)" },
+  { format: "pdf", marquage: "aucun", label: "Aperçu sur une page (PDF)" },
   { format: "dxf", marquage: "horizontal", label: "Marquage H (DXF)" },
-  { format: "pdf", marquage: "horizontal", label: "Marquage H (PDF)" },
+  { format: "pdf", marquage: "horizontal", label: "Marquage H (PDF, taille réelle)" },
   { format: "dxf", marquage: "vertical", label: "Marquage V (DXF)" },
-  { format: "pdf", marquage: "vertical", label: "Marquage V (PDF)" },
+  { format: "pdf", marquage: "vertical", label: "Marquage V (PDF, taille réelle)" },
 ];
 
 /**

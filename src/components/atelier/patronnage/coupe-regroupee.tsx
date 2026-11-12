@@ -338,6 +338,12 @@ export function PiecesTraceEditor({
                   className="h-8 w-20 rounded-md border border-border bg-surface px-2 text-right text-sm disabled:opacity-60"
                   aria-label="Quantité par couche"
                 />
+                {/* Total du tracé : quantité par couche × plis (couches attribuées, ou plis prévus). */}
+                {trace.nbPlis != null && Number(l.quantite) > 0 && (
+                  <span className="text-xs font-medium text-foreground">
+                    × {trace.nbPlis} plis = {Number(l.quantite) * trace.nbPlis} pièces
+                  </span>
+                )}
                 {source && <span className="text-xs text-foreground-muted">{source === "dxf" ? "lu dans le fichier" : "saisi"}</span>}
                 {editable && (
                   <button
