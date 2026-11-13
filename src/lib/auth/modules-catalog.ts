@@ -53,7 +53,8 @@ export const MODULE_META: Record<string, ModuleMeta> = {
   validation_comptable: { group: "modules", actions: ["validate"] },
   validation_visuels: { group: "modules", actions: ["validate"] },
   ordres_travail: { group: "modules", actions: ["view", "modify"] },
-  gammes_operatoires: { group: "modules", actions: VIEW },
+  confection: { group: "modules", actions: ["view", "create", "modify", "validate"] },
+  confection_ravitaillement: { group: "modules", actions: ["view", "create", "modify"] },
   patronnage: { group: "modules", actions: ["view", "create", "modify", "archive", "delete", "validate", "unlock"] },
   patronnage_traces: { group: "modules", actions: ["create", "modify"] },
   stock_atelier: { group: "modules", actions: ["view", "create", "modify", "delete"] },
@@ -87,6 +88,7 @@ export const MODULE_META: Record<string, ModuleMeta> = {
   notifications: { group: "parametres", actions: VIEW, platformAdminOnly: true },
   site_web: { group: "parametres", actions: ["view", "modify"] },
   personnel: { group: "parametres", actions: ["view", "create", "modify", "delete", "validate"] },
+  parametres_confection: { group: "parametres", actions: ["view", "create", "modify", "delete"] },
   parametres_prospection: { group: "parametres", actions: ["view", "create", "modify", "delete"] },
 };
 
