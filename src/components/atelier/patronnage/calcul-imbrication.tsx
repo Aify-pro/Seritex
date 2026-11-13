@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { Cpu, Eye, Play, Square, CheckCircle2, Trophy } from "lucide-react";
+import { Bot, Cpu, Eye, Play, Square, CheckCircle2, Trophy } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -329,6 +329,11 @@ export function CalculImbrication({
                               <span className="inline-block h-1.5 w-16 overflow-hidden rounded bg-border">
                                 <span className="block h-full bg-brand" style={{ width: `${progression}%` }} />
                               </span>
+                            )}
+                            {c.agent && (
+                              <Badge tone="accent">
+                                <Bot className="h-3 w-3" /> Proposé par {c.agent}
+                              </Badge>
                             )}
                             {meilleurId === c.id && (
                               <Badge tone="brand">

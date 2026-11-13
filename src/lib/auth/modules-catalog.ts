@@ -88,6 +88,7 @@ export const MODULE_META: Record<string, ModuleMeta> = {
   site_web: { group: "parametres", actions: ["view", "modify"] },
   personnel: { group: "parametres", actions: ["view", "create", "modify", "delete", "validate"] },
   parametres_prospection: { group: "parametres", actions: ["view", "create", "modify", "delete"] },
+  agents_ia: { group: "parametres", actions: VIEW, platformAdminOnly: true },
 };
 
 const FALLBACK_META: ModuleMeta = { group: "modules", actions: VIEW };

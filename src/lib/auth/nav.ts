@@ -40,6 +40,7 @@ import {
   Briefcase,
   Activity,
   Car,
+  Bot,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { createElement, type ReactNode } from "react";
@@ -175,6 +176,7 @@ const STAFF_NAV: NavItem[] = [
   { href: "/parametres/utilisateurs", label: "Utilisateurs", icon: navIcon(Users), section: PARAMETRES, module: "utilisateurs" },
   { href: "/parametres/roles", label: "Rôles & permissions", icon: navIcon(ShieldCheck), section: PARAMETRES, module: "roles" },
   { href: "/parametres/audit", label: "Journal d'audit", icon: navIcon(ScrollText), section: PARAMETRES, module: "audit" },
+  { href: "/parametres/agents-ia", label: "Agents IA", icon: navIcon(Bot), section: PARAMETRES, module: "agents_ia" },
   { href: "/parametres/societe", label: "Informations société", icon: navIcon(Landmark), section: PARAMETRES, module: "societe" },
   { href: "/parametres/stockage", label: "Stockage médiathèque", icon: navIcon(Database), section: PARAMETRES, module: "stockage_cibles" },
   { href: "/parametres/notifications", label: "Notifications", icon: navIcon(Mail), section: PARAMETRES, module: "notifications" },

@@ -30,7 +30,8 @@
     "test:vehicules": "tsx scripts/test-vehicules.ts && tsx scripts/test-vehicules-gps.ts",
     "build:imbrication": "node scripts/build-imbrication-wasm.mjs",
     "test:imbrication": "tsx --require ./scripts/allow-server-only.cjs scripts/test-imbrication.ts",
-    "bench:imbrication": "tsx --require ./scripts/allow-server-only.cjs scripts/bench-imbrication.ts"
+    "bench:imbrication": "tsx --require ./scripts/allow-server-only.cjs scripts/bench-imbrication.ts",
+    "test:planification": "tsx --require ./scripts/allow-server-only.cjs scripts/test-planification.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",

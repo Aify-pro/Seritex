@@ -7,6 +7,8 @@ import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { BesoinsCoupe } from "@/components/atelier/patronnage/besoins-coupe";
 import { besoinsCoupe } from "../fiches-actions";
+import { PlanCoupe } from "@/components/atelier/patronnage/plan-coupe";
+import { tissusDesBesoins, type LigneBesoin } from "@/lib/imbrication/plan-coupe";
 
 /**
  * Besoins de coupe (étape 3c, migration 0155) : tout ce qu'il reste à couper,
@@ -37,6 +39,25 @@ export default async function BesoinsCoupePage() {
           <Link href="/atelier/patronnage" className="inline-flex items-center gap-1.5 text-sm text-brand hover:underline">
             <ArrowLeft className="h-3.5 w-3.5" /> Fiches de placement
           </Link>
+        }
+      />
+      <PlanCoupe
+        tissus={
+          "error" in res
+            ? []
+            : tissusDesBesoins(
+                res.map((g): LigneBesoin => ({
+                  semi_fini_id: g.semiFiniId,
+                  semi_fini_nom: g.semiFiniNom,
+                  taille: g.taille,
+                  textile_id: g.textileId,
+                  tissu: g.tissu,
+                  grammage: g.grammage,
+                  couleur: g.couleur,
+                  reste: g.reste,
+                  formes: g.formes,
+                }))
+              )
         }
       />
       <BesoinsCoupe
