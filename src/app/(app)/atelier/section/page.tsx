@@ -1,5 +1,4 @@
 import { requireModule } from "@/lib/auth/permissions";
-import { compositionTissus, libelleTissu } from "@/lib/patronnage/tissus-matelas";
 import { LotsAtelierCard, type LotAtelierRow } from "./lots-atelier-card";
 import { MatelasRegroupes, type MatelasRegroupe } from "./matelas-regroupes";
 import { groupCouverture, surplusSiCoupe, type CouvertureRow } from "@/lib/production/couverture-coupe";
@@ -479,6 +478,8 @@ export default async function SectionQueuePage({
         ...m,
         articles: m.articles.map((a) => ({ lineId: a.lineId, odf: a.odf, article: a.article, couleur: a.couleur, couches: a.couches, odfAnnule: a.odfAnnule })),
         tissus: [] as { libelle: string; couches: number; odfs: string }[],
+        plis: [] as { cle: string; libelle: string; nbPlis: number }[],
+        couchesPieces: [] as { lineId: string; semiFiniId: string; cle: string; nbCouches: number }[],
       }));
     // Couleur des pièces du matelas pour chaque article (0165) : celle imposée
     // par la nomenclature, sinon celle de la zone, sinon la couleur unique.
@@ -488,24 +489,34 @@ export default async function SectionQueuePage({
       const parPiece = new Map(
         ((couleurs ?? []) as { line_id: string; semi_fini_id: string; couleur: string | null }[]).map((c) => [`${c.line_id}|${c.semi_fini_id}`, c.couleur])
       );
-      // Composition du matelas par tissu (grammage, couleur, référence).
-      const compo = await compositionTissus(
-        supabase,
-        new Map(
-          matelasRegroupes.map((m) => [
-            m.traceId,
-            m.articles.map((a) => ({ lineId: a.lineId, nbCouches: a.couches, semiFiniIds: m.pieces.map((p) => p.semiFiniId), odf: a.odf })),
-          ])
-        )
-      );
-      matelasRegroupes = matelasRegroupes.map((m) => ({
-        ...m,
-        tissus: (compo.get(m.traceId) ?? []).map((x) => ({
-          libelle: libelleTissu(x),
-          couches: x.couches,
-          odfs: x.odfs.map((o) => `${o.odf ?? "-"} (${o.couches})`).join(", "),
-        })),
-      }));
+      // Plis par couleur et grammage, et couches par article et par pièce (0183).
+      const traceIds = matelasRegroupes.map((m) => m.traceId);
+      const [{ data: plis }, { data: couchesPieces }] = await Promise.all([
+        supabase.from("trace_plis_couleur").select("trace_id,cle,nb_plis").in("trace_id", traceIds),
+        supabase.from("trace_couches_pieces").select("trace_id,production_order_line_id,semi_fini_id,cle,nb_couches").in("trace_id", traceIds),
+      ]);
+      const listePlis = (plis ?? []) as { trace_id: string; cle: string; nb_plis: number }[];
+      const listeCouches = (couchesPieces ?? []) as { trace_id: string; production_order_line_id: string | null; semi_fini_id: string; cle: string; nb_couches: number }[];
+      const { data: libelles } = listePlis.length
+        ? await supabase.rpc("libelles_cles_couches", { p_cles: [...new Set(listePlis.map((p) => p.cle))] })
+        : { data: [] };
+      const libelleDe = new Map(((libelles ?? []) as { cle: string; libelle: string | null }[]).map((l) => [l.cle, l.libelle || "Sans couleur"]));
+      matelasRegroupes = matelasRegroupes.map((m) => {
+        const plisTrace = listePlis.filter((p) => p.trace_id === m.traceId).map((p) => ({ cle: p.cle, libelle: libelleDe.get(p.cle) ?? "Sans couleur", nbPlis: p.nb_plis }));
+        const couchesTrace = listeCouches
+          .filter((c) => c.trace_id === m.traceId && c.production_order_line_id)
+          .map((c) => ({ lineId: c.production_order_line_id as string, semiFiniId: c.semi_fini_id, cle: c.cle, nbCouches: c.nb_couches }));
+        return {
+          ...m,
+          plis: plisTrace,
+          couchesPieces: couchesTrace,
+          tissus: plisTrace.map((p) => ({
+            libelle: p.libelle,
+            couches: p.nbPlis,
+            odfs: [...new Set(couchesTrace.filter((c) => c.cle === p.cle).map((c) => m.articles.find((a) => a.lineId === c.lineId)?.odf ?? "-"))].join(", "),
+          })),
+        };
+      });
       matelasRegroupes = matelasRegroupes.map((m) => {
         const piecesTrace = [...new Set(m.pieces.map((p) => p.semiFiniId))];
         return {

@@ -25,7 +25,7 @@ await test("ordre sans ODF : création, tracé et pièces", async () => {
 });
 
 await test("sans ODF rattaché : le tracé ne passe pas « Bon pour coupe »", async () => {
-  await expectFail(() => q(`select valider_trace($1,'x')`, [trace.id]), /attribuez les couches de ce tracé regroupé aux articles d'ODF/);
+  await expectFail(() => q(`select valider_trace($1,'x')`, [trace.id]), /saisissez les plis par couleur de ce tracé/);
   assert.notEqual((await one(`select statut from traces_placement where id=$1`, [trace.id])).statut, "bon_pour_coupe");
 });
 

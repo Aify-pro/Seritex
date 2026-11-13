@@ -48,7 +48,8 @@ export type OrdreTracePdfTrace = {
   /** Couches par tissu (grammage, couleur, référence) et ODF concernés, ordre regroupé. */
   tissus: { libelle: string; couches: number; odfs: string }[];
   /** Couches par article (ordre regroupé). */
-  couchesParArticle: { libelle: string; couleur: string | null; couches: number; odfAnnule: boolean }[];
+  /** Couches par article (ou par article et par pièce, 0183 : `piece` renseignée). */
+  couchesParArticle: { libelle: string; couleur: string | null; couches: number; odfAnnule: boolean; piece?: string }[];
   /** Pièces posées par couche : pièce × taille × quantité. */
   piecesParCouche: { piece: string; taille: string; quantite: number }[];
   rouleaux: { code: string; laizeCm: number | null; bain: string | null; poidsKg: number | null }[];
@@ -399,7 +400,8 @@ export async function buildOrdreTracePdf(data: OrdreTracePdfData): Promise<Uint8
     }
 
     if (t.couchesParArticle.length > 0) {
-      titre("Couches par article");
+      const parPiece = t.couchesParArticle.some((c) => c.piece);
+      titre(parPiece ? "Couches par article et par pièce" : "Couches par article");
       tableau(
         [
           { title: "Article", width: 50 },
@@ -412,7 +414,7 @@ export async function buildOrdreTracePdf(data: OrdreTracePdfData): Promise<Uint8
             c.couleur ?? "-",
             { v: n(c.couches), bold: true },
           ]),
-          [{ v: "Total", bold: true }, "", { v: n(t.couches), bold: true }],
+          ...(parPiece ? [] : [[{ v: "Total", bold: true }, "", { v: n(t.couches), bold: true }]]),
         ]
       );
     }
@@ -433,7 +435,14 @@ export async function buildOrdreTracePdf(data: OrdreTracePdfData): Promise<Uint8
           p.piece,
           p.taille,
           n(p.quantite),
-          ...(parArticle ? [t.couchesParArticle.map((c) => `${c.libelle.split(" · ")[0]} ${p.quantite * c.couches}`).join(" · ")] : []),
+          ...(parArticle
+            ? [
+                t.couchesParArticle
+                  .filter((c) => !c.piece || c.piece === p.piece)
+                  .map((c) => `${c.libelle.split(" · ")[0]} ${p.quantite * c.couches}`)
+                  .join(" · ") || "aucun article",
+              ]
+            : []),
           { v: n(p.quantite * totalCouches), bold: true },
         ])
       );

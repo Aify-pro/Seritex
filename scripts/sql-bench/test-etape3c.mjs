@@ -74,27 +74,25 @@ await test("un tracé porte plusieurs semi-finis : corps + manches sur le même 
   assert.equal((await one(`select controle_statut from traces_placement where id=$1`, [t1.id])).controle_statut, "non_verifie");
 });
 
-await test("D1 : un article sans toutes les pièces du tracé est refusé (couche, pièce ajoutée, validation)", async () => {
+// 0183 : fin de la règle « toutes les pièces du tracé » (D1) ; un article ne
+// reçoit que les pièces de sa nomenclature, pièce par pièce.
+await test("pièce par pièce : un article ne reçoit que les pièces de sa nomenclature", async () => {
   const f2 = await ordre("OT-3C-2");
   await q(`insert into coupe_groupee_lignes(fiche_id, production_order_line_id) values ($1,$2)`, [f2.id, E.line.id]);
   const t = await trace(f2, 1, "OT-3C-2-T1");
   await pieces(t, [[manche, M, 4]]);
   await q(`insert into trace_couches(trace_id, production_order_line_id, nb_couches) values ($1,$2,2)`, [t.id, E.line.id]);
-  // Ajouter le corps au tracé alors que E n'en a pas : refusé.
-  await expectFail(() => pieces(t, [[corps, M, 2]]), /n'a pas ce semi-fini dans sa nomenclature/);
-  // Une couche pour E sur le tracé de A/B (manche + corps) est refusée.
-  await q(`insert into coupe_groupee_lignes(fiche_id, production_order_line_id) values ($1,$2)`, [fiche.id, E.line.id]);
-  await expectFail(() => q(`insert into trace_couches(trace_id, production_order_line_id, nb_couches) values ($1,$2,1)`, [t1.id, E.line.id]), /n'a pas dans sa nomenclature : Corps/);
-  await q(`delete from coupe_groupee_lignes where fiche_id=$1 and production_order_line_id=$2`, [fiche.id, E.line.id]);
-  // Nomenclature modifiée après coup : la validation refuse l'article incomplet.
-  const f3 = await ordre("OT-3C-3");
-  await q(`insert into coupe_groupee_lignes(fiche_id, production_order_line_id) values ($1,$2)`, [f3.id, D.line.id]);
-  const t3 = await trace(f3, 1, "OT-3C-3-T1");
-  await pieces(t3, [[manche, M, 4], [corps, M, 2]]);
-  await q(`insert into trace_couches(trace_id, production_order_line_id, nb_couches) values ($1,$2,5)`, [t3.id, D.line.id]);
-  await q(`delete from nomenclature_lines where product_model_id=$1 and semi_fini_id=$2`, [D.model.id, corps.id]);
-  await expectFail(() => q(`select valider_trace($1)`, [t3.id]), /n'a pas dans sa nomenclature : Corps/);
-  await q(`insert into nomenclature_lines(product_model_id, designation, quantite_par_piece, unite, semi_fini_id) values ($1,'',1,'',$2)`, [D.model.id, corps.id]);
+  // Ajouter le corps au tracé alors que E n'en a pas : permis (d'autres articles le prendront).
+  await pieces(t, [[corps, M, 2]]);
+  // Des corps pour E : refusés, il n'en a pas.
+  await expectFail(
+    () => q(`insert into trace_couches_pieces(trace_id, production_order_line_id, semi_fini_id, cle, nb_couches) values ($1,$2,$3,'x',1)`, [t.id, E.line.id, corps.id]),
+    /n'a pas cette pièce dans sa nomenclature/
+  );
+  // Tracé saisi à l'ancienne : à la conversion, E ne reçoit que ses manches.
+  await q(`select couches_vers_pieces($1)`, [t.id]);
+  const recues = await q(`select semi_fini_id from trace_couches_pieces where trace_id=$1 and production_order_line_id=$2`, [t.id, E.line.id]);
+  assert.deepEqual(recues.map((r) => r.semi_fini_id), [manche.id]);
 });
 
 // Bibliothèque de patrons (un patron par semi-fini, une taille) et analyses de DXF.

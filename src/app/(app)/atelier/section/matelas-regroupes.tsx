@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
 import { LotCodeInput } from "@/components/atelier/lot-code-input";
-import { attachRollToMatelasRegroupe, cloturerMatelasRegroupe, demarrerMatelas } from "./actions";
+import { attachRollToMatelasRegroupe, cloturerMatelasCouleurs, demarrerMatelas } from "./actions";
 import type { MatelasRoll } from "./matelas-rolls";
 
 /** Matelas regroupé à couper (étapes 3b et 3c) : une ou plusieurs pièces (semi-finis), des couches par article d'ODF. */
@@ -33,6 +33,10 @@ export interface MatelasRegroupe {
   articles: { lineId: string; odf: string; article: string; couleur: string | null; couches: number; odfAnnule?: boolean }[];
   /** Couches par tissu (grammage, couleur, référence) et ODF concernés. */
   tissus: { libelle: string; couches: number; odfs: string }[];
+  /** Plis par couleur et grammage (0183). */
+  plis: { cle: string; libelle: string; nbPlis: number }[];
+  /** Couches attribuées par article et par pièce (0183). */
+  couchesPieces: { lineId: string; semiFiniId: string; cle: string; nbCouches: number }[];
 }
 
 const libelleTaille = (cle: string) => cle.split("/").pop() ?? cle;
@@ -94,13 +98,29 @@ function MatelasRegroupeDialog({ matelas, onClose }: { matelas: MatelasRegroupe;
   const [error, setError] = useState<string | null>(null);
   const [demarre, setDemarre] = useState(matelas.statut === "en_coupe");
   const pieces0 = matelas.pieces.filter((p) => p.quantiteParCouche > 0);
-  const cle = (p: { semiFiniId: string; taille: string }) => `${p.semiFiniId}|${p.taille}`;
-  const theorique = (couchesReelles: number) => Object.fromEntries(pieces0.map((p) => [cle(p), String(p.quantiteParCouche * couchesReelles)]));
-  // Par article : couches réelles et pièces obtenues par semi-fini et par taille, préremplies au théorique.
-  const [couches, setCouches] = useState<Record<string, string>>(Object.fromEntries(matelas.articles.map((a) => [a.lineId, String(a.couches)])));
-  const [pieces, setPieces] = useState<Record<string, Record<string, string>>>(
-    Object.fromEntries(matelas.articles.map((a) => [a.lineId, theorique(a.couches)]))
+  // 0183 : plis réels par couleur ; pièces obtenues par article × pièce × taille,
+  // préremplies au prévu (quantité par couche × couches de l'article sur cette
+  // pièce), à l'échelle des plis réels de chaque couleur.
+  const [plisReels, setPlisReels] = useState<Record<string, string>>(Object.fromEntries(matelas.plis.map((p) => [p.cle, String(p.nbPlis)])));
+  const prevu = (lineId: string, semiFiniId: string, taille: string, reels?: Record<string, string>) => {
+    const qpc = pieces0.find((p) => p.semiFiniId === semiFiniId && p.taille === taille)?.quantiteParCouche ?? 0;
+    return matelas.couchesPieces
+      .filter((c) => c.lineId === lineId && c.semiFiniId === semiFiniId)
+      .reduce((s, c) => {
+        const plis = matelas.plis.find((p) => p.cle === c.cle)?.nbPlis ?? 0;
+        const ratio = reels && plis > 0 ? Math.min(1, Math.max(0, num(reels[c.cle] ?? "") || 0) / plis) : 1;
+        return s + Math.floor(qpc * c.nbCouches * ratio);
+      }, 0);
+  };
+  // Lignes de saisie : article × pièce × taille effectivement attribués.
+  const lignesSaisie = matelas.articles.flatMap((a) =>
+    pieces0
+      .filter((p) => matelas.couchesPieces.some((c) => c.lineId === a.lineId && c.semiFiniId === p.semiFiniId))
+      .map((p) => ({ article: a, semiFiniId: p.semiFiniId, piece: p.semiFini, taille: p.taille }))
   );
+  const cleSaisie = (l: { article: { lineId: string }; semiFiniId: string; taille: string }) => `${l.article.lineId}|${l.semiFiniId}|${l.taille}`;
+  const preremplir = (reels?: Record<string, string>) => Object.fromEntries(lignesSaisie.map((l) => [cleSaisie(l), String(prevu(l.article.lineId, l.semiFiniId, l.taille, reels))]));
+  const [obtenus, setObtenus] = useState<Record<string, string>>(preremplir());
   const [longueur, setLongueur] = useState(matelas.longueurCm ? String(matelas.longueurCm) : "");
   const [laize, setLaize] = useState(matelas.laizeCm ? String(matelas.laizeCm) : "");
   const [poids, setPoids] = useState("");
@@ -127,31 +147,25 @@ function MatelasRegroupeDialog({ matelas, onClose }: { matelas: MatelasRegroupe;
     });
   }
 
-  const manque = matelas.articles.some(
-    (a) => num(couches[a.lineId] ?? "") < a.couches || pieces0.some((p) => num(pieces[a.lineId]?.[cle(p)] ?? "") < p.quantiteParCouche * a.couches)
-  );
+  const manque =
+    matelas.plis.some((p) => num(plisReels[p.cle] ?? "") < p.nbPlis) ||
+    lignesSaisie.some((l) => num(obtenus[cleSaisie(l)] ?? "") < prevu(l.article.lineId, l.semiFiniId, l.taille));
   const mesuresOk = num(longueur) > 0 && num(laize) > 0 && num(poids) > 0 && num(dechets) >= 0;
 
-  function setCouchesArticle(lineId: string, v: string) {
-    setCouches((c) => ({ ...c, [lineId]: v }));
-    // Les pièces suivent les couches réelles (répartition × couches).
-    const n = Math.trunc(num(v));
-    if (n > 0) setPieces((p) => ({ ...p, [lineId]: theorique(n) }));
+  function setPlisCouleur(cleCouleur: string, v: string) {
+    const nouveaux = { ...plisReels, [cleCouleur]: v };
+    setPlisReels(nouveaux);
+    // Les pièces suivent les plis réels de chaque couleur.
+    setObtenus(preremplir(nouveaux));
   }
 
   function cloturer() {
     setError(null);
     startTransition(async () => {
-      const res = await cloturerMatelasRegroupe(
+      const res = await cloturerMatelasCouleurs(
         matelas.traceId,
-        matelas.articles.map((a) => ({
-          lineId: a.lineId,
-          couchesReelles: Math.trunc(num(couches[a.lineId] ?? "")),
-          obtenus: pieces0.reduce<Record<string, Record<string, number>>>((acc, p) => {
-            (acc[p.semiFiniId] ??= {})[p.taille] = Math.trunc(num(pieces[a.lineId]?.[cle(p)] ?? "0")) || 0;
-            return acc;
-          }, {}),
-        })),
+        Object.fromEntries(matelas.plis.map((p) => [p.cle, Math.trunc(num(plisReels[p.cle] ?? "")) || 0])),
+        lignesSaisie.map((l) => ({ lineId: l.article.lineId, semiFiniId: l.semiFiniId, taille: l.taille, obtenus: Math.trunc(num(obtenus[cleSaisie(l)] ?? "0")) || 0 })),
         { longueurCm: num(longueur), laizeCm: num(laize), poidsTissuKg: num(poids), dechetsKg: num(dechets) },
         justification
       );
@@ -201,36 +215,54 @@ function MatelasRegroupeDialog({ matelas, onClose }: { matelas: MatelasRegroupe;
           Pièces par couche : {pieces0.map((p) => `${p.quantiteParCouche} ${p.semiFini} ${libelleTaille(p.taille)}`).join(", ") || "—"}. Jamais plus que le tracé ; tout manque est justifié.
         </p>
 
-        {matelas.articles.map((a) => (
-          <section key={a.lineId} className="space-y-2 rounded-md border border-border p-3">
-            <p className="text-sm font-medium">
-              {a.odf} · {a.article}
-              {a.couleur ? ` · ${a.couleur}` : ""} <span className="text-xs text-foreground-muted">({a.couches} couches prévues)</span>
-            </p>
-            {a.odfAnnule && (
-              <p className="rounded bg-danger-soft px-2 py-1 text-xs text-danger">
-                ODF annulé : les pièces coupées pour cet article restent en stock tampon, à réorienter vers un autre ODF.
-              </p>
-            )}
+        {/* Plis réels par couleur (et grammage) : une couche = un tissu d'une couleur. */}
+        <section className="space-y-2 rounded-md border border-border p-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-foreground-muted">Plis réels par couleur</p>
+          {matelas.plis.length === 0 ? (
+            <p className="text-xs text-warning">Ce matelas n&apos;a pas de plis par couleur : la PAO doit les saisir sur le tracé.</p>
+          ) : (
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              <label className="space-y-1 text-xs text-foreground-muted">
-                Couches réelles
-                <input inputMode="numeric" value={couches[a.lineId] ?? ""} onChange={(e) => setCouchesArticle(a.lineId, e.target.value)} className={inputClass} />
-              </label>
-              {pieces0.map((p) => (
-                <label key={cle(p)} className="space-y-1 text-xs text-foreground-muted">
-                  {p.semiFini} {libelleTaille(p.taille)}
-                  <input
-                    inputMode="numeric"
-                    value={pieces[a.lineId]?.[cle(p)] ?? ""}
-                    onChange={(e) => setPieces((prev) => ({ ...prev, [a.lineId]: { ...prev[a.lineId], [cle(p)]: e.target.value } }))}
-                    className={inputClass}
-                  />
+              {matelas.plis.map((p) => (
+                <label key={p.cle} className="space-y-1 text-xs text-foreground-muted">
+                  {p.libelle} <span className="text-foreground-muted">({p.nbPlis} prévus)</span>
+                  <input inputMode="numeric" value={plisReels[p.cle] ?? ""} onChange={(e) => setPlisCouleur(p.cle, e.target.value)} className={inputClass} />
                 </label>
               ))}
             </div>
-          </section>
-        ))}
+          )}
+        </section>
+
+        {/* Pièces obtenues par article, pièce et taille. */}
+        {matelas.articles.map((a) => {
+          const lignes = lignesSaisie.filter((l) => l.article.lineId === a.lineId);
+          if (lignes.length === 0) return null;
+          return (
+            <section key={a.lineId} className="space-y-2 rounded-md border border-border p-3">
+              <p className="text-sm font-medium">
+                {a.odf} · {a.article}
+                {a.couleur ? ` · ${a.couleur}` : ""}
+              </p>
+              {a.odfAnnule && (
+                <p className="rounded bg-danger-soft px-2 py-1 text-xs text-danger">
+                  ODF annulé : les pièces coupées pour cet article restent en stock tampon, à réorienter vers un autre ODF.
+                </p>
+              )}
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {lignes.map((l) => (
+                  <label key={cleSaisie(l)} className="space-y-1 text-xs text-foreground-muted">
+                    {l.piece} {libelleTaille(l.taille)} <span>(prévu {prevu(l.article.lineId, l.semiFiniId, l.taille)})</span>
+                    <input
+                      inputMode="numeric"
+                      value={obtenus[cleSaisie(l)] ?? ""}
+                      onChange={(e) => setObtenus((o) => ({ ...o, [cleSaisie(l)]: e.target.value }))}
+                      className={inputClass}
+                    />
+                  </label>
+                ))}
+              </div>
+            </section>
+          );
+        })}
 
         <section className="space-y-2 rounded-md border border-border p-3">
           <p className="text-xs text-foreground-muted">
@@ -277,7 +309,7 @@ function MatelasRegroupeDialog({ matelas, onClose }: { matelas: MatelasRegroupe;
             <input inputMode="decimal" value={dechets} onChange={(e) => setDechets(e.target.value)} className={inputClass} />
           </label>
         </section>
-        <p className="text-[11px] text-foreground-muted">Tissu et déchets sont répartis entre les articles au prorata de leurs couches.</p>
+        <p className="text-[11px] text-foreground-muted">Tissu et déchets sont répartis entre les articles au prorata des pièces obtenues.</p>
 
         {manque && (
           <label className="block space-y-1 text-xs text-foreground-muted">

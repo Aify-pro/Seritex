@@ -162,6 +162,10 @@ export interface TracePlacement {
   // TR-1a, un tracé ordinaire en préparation, sans approbation.
   estCorrectif: boolean;
   justification: string | null;
+  /** Plis par couleur et grammage (0183) : clé, plis prévus, plis réels à la clôture. Renseignés sur la page d'une fiche. */
+  plisCouleur?: { cle: string; nbPlis: number; nbPlisReels: number | null }[];
+  /** Couches attribuées par article et par pièce (0183). Renseignées sur la page d'une fiche. */
+  couchesPieces?: { lineId: string | null; articleId: string | null; semiFiniId: string; cle: string; nbCouches: number }[];
   /** Couches attribuées aux articles saisis sans ODF (0181). Renseignées sur la page d'une fiche. */
   couchesArticles?: { articleId: string; nbCouches: number }[];
   /** Couches par article d'ODF d'un tracé regroupé (0149) ; vide pour un tracé d'article. */
@@ -243,6 +247,12 @@ export interface FichePlacement {
     tailles: Record<string, number>;
     pieces: { id: string; nom: string; quantite: number; couleur: string | null }[];
   }[];
+  /**
+   * Clé de couche de chaque pièce de chaque article (0183) : couleur de la
+   * pièce chez l'article × tissu de l'article, et son libellé (« Blanc ·
+   * Jersey 180 g »). Renseignées sur la page d'une fiche.
+   */
+  clesCouches?: { lineId: string | null; articleId: string | null; semiFiniId: string; cle: string; libelle: string }[];
   /** Tissu de l'ordre : type et grammages présents (« Jersey (160 g, 180 g) »). */
   tissuOrdre?: string | null;
   /** Articles d'ODF regroupés (ordre regroupé seulement), avec les semi-finis de leur nomenclature et leurs tailles. */

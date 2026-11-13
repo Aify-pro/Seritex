@@ -50,9 +50,12 @@ await test("articles regroupés : pièces du tracé exigées sur chaque article 
   t1 = await one(`insert into traces_placement(fiche_id, ordre, reference) values ($1,1,'OT-RG-1-T1') returning id`, [fiche.id]);
   await expectFail(() => q(`insert into trace_semi_finis(trace_id, semi_fini_id, taille, quantite_par_couche) values ($1,$2,$3,4)`, [t1.id, A.model.id, M]), /nature semi-fini/);
   await q(`insert into trace_semi_finis(trace_id, semi_fini_id, taille, quantite_par_couche) values ($1,$2,$3,4)`, [t1.id, manche.id, M]);
-  // C n'a que le col : il rejoint l'ordre, mais aucune couche ne lui est attribuée (D1).
+  // C n'a que le col : il rejoint l'ordre, mais ne reçoit pas de manches (0183 : pièce par pièce).
   await q(`insert into coupe_groupee_lignes(fiche_id, production_order_line_id) values ($1,$2)`, [fiche.id, C.line.id]);
-  await expectFail(() => q(`insert into trace_couches(trace_id, production_order_line_id, nb_couches) values ($1,$2,1)`, [t1.id, C.line.id]), /n'a pas dans sa nomenclature/);
+  await expectFail(
+    () => q(`insert into trace_couches_pieces(trace_id, production_order_line_id, semi_fini_id, cle, nb_couches) values ($1,$2,$3,'x',1)`, [t1.id, C.line.id, manche.id]),
+    /n'a pas cette pièce dans sa nomenclature/
+  );
   await q(`delete from coupe_groupee_lignes where fiche_id=$1 and production_order_line_id=$2`, [fiche.id, C.line.id]);
   await q(`insert into trace_couches(trace_id, production_order_line_id, nb_couches) values ($1,$2,15),($1,$3,10)`, [t1.id, A.line.id, B.line.id]);
   assert.equal((await one(`select nb_plis from traces_placement where id=$1`, [t1.id])).nb_plis, 25);
@@ -67,7 +70,7 @@ await test("validation : surplus en pièces par article → motif obligatoire ; 
   const t2 = await one(`insert into traces_placement(fiche_id, ordre, reference) values ($1,2,'OT-RG-1-T2') returning id`, [fiche.id]);
   await expectFail(() => q(`select valider_trace($1)`, [t2.id]), /indiquez les pièces de ce tracé/);
   await q(`insert into trace_semi_finis(trace_id, semi_fini_id, taille, quantite_par_couche) values ($1,$2,$3,2)`, [t2.id, manche.id, M]);
-  await expectFail(() => q(`select valider_trace($1)`, [t2.id]), /attribuez les couches/);
+  await expectFail(() => q(`select valider_trace($1)`, [t2.id]), /saisissez les plis par couleur/);
   await q(`insert into trace_couches(trace_id, production_order_line_id, nb_couches) values ($1,$2,1)`, [t2.id, A.line.id]);
   await expectFail(() => q(`select valider_trace($1)`, [t2.id]), /surplus .* motif est obligatoire/);
   const s = (await one(`select valider_trace($1,'recoupe défauts') s`, [t2.id])).s;

@@ -61,14 +61,15 @@ await test("ODF d'un autre tissu : refusé dans l'ordre", async () => {
   await expectFail(() => q(`insert into coupe_groupee_lignes(fiche_id, production_order_line_id) values ($1,$2)`, [fiche.id, o.line.id]), /cet ordre de tracé est en Jersey OA/);
 });
 
-await test("l'ODF arrive : l'article saisi est remplacé, ses couches passent sur l'article d'ODF", async () => {
+// 0183 : les couches de l'article saisi ne sont pas reportées (la couleur ou
+// le grammage de l'ODF peut différer) : les plis par couleur se réenregistrent.
+await test("l'ODF arrive : l'article saisi est remplacé par l'article d'ODF", async () => {
   const o = await makeOdf(ctx, { admin, company, sections: ["Coupe"], sizes: { [M]: 10 } });
   await q(`update production_order_lines set product_model_id=$1, textile_id=$2 where id=$3`, [tshirt.id, j180.id, o.line.id]);
   await q(`select remplacer_article_ordre($1,$2)`, [blancArt.id, o.line.id]);
   assert.equal((await one(`select count(*)::int n from coupe_groupee_lignes where fiche_id=$1 and production_order_line_id=$2`, [fiche.id, o.line.id])).n, 1);
-  assert.equal((await one(`select nb_couches from trace_couches where trace_id=$1 and production_order_line_id=$2`, [trace.id, o.line.id])).nb_couches, 10);
   assert.equal((await one(`select count(*)::int n from ordre_trace_articles where id=$1`, [blancArt.id])).n, 0);
-  assert.equal((await one(`select nb_plis from traces_placement where id=$1`, [trace.id])).nb_plis, 16);
+  assert.equal((await one(`select count(*)::int n from trace_couches_articles where article_id=$1`, [blancArt.id])).n, 0);
   // Un autre modèle ne remplace pas l'article saisi.
   const p = await makeOdf(ctx, { admin, company, sections: ["Coupe"], sizes: { [M]: 6 } });
   await expectFail(() => q(`select remplacer_article_ordre($1,$2)`, [bleuArt.id, p.line.id]), /pas du même modèle/);
