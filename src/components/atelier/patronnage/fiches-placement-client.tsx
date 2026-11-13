@@ -42,6 +42,7 @@ import {
   unarchiveFiche,
   deleteFicheDefinitively,
   addTrace,
+  modifierInfosOrdre,
   couleursReferentiel,
   updateTrace,
   deleteTrace,
@@ -847,24 +848,6 @@ export function FicheDetailContent({
           </div>
         </div>
 
-        {/* Contraintes et observations de l'ordre, quand il y en a. */}
-        {fiche.regroupee && (fiche.contraintes || fiche.observations) && (
-          <div className="space-y-0.5 rounded-md border border-border px-4 py-2 text-sm">
-            {fiche.contraintes && (
-              <p>
-                <span className="text-xs font-medium text-foreground-muted">Contraintes : </span>
-                {fiche.contraintes}
-              </p>
-            )}
-            {fiche.observations && (
-              <p>
-                <span className="text-xs font-medium text-foreground-muted">Observations : </span>
-                {fiche.observations}
-              </p>
-            )}
-          </div>
-        )}
-
         {/* Ordre regroupé : pas de cadres à figer, chaque tracé se valide un par un ; seul l'archivage se signale. */}
         {locked && (!fiche.regroupee || fiche.statut === "archive") && (
           <div className="flex items-center gap-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-xs text-foreground">
@@ -940,6 +923,12 @@ export function FicheDetailContent({
           </>
         )}
 
+        {/* Ordre regroupé : ni modèle, ni tissu, ni couleur, ni répartition sur l'ordre
+            (portés par les articles à produire) ; restent ses informations. */}
+        {fiche.regroupee ? (
+          <InfosOrdre fiche={fiche} editable={permissions.canModify && fiche.statut !== "archive"} onSaved={refresh} />
+        ) : (
+          <>
         {/* Cadres 1-4 */}
         <Card>
           <CardHeader title="Demande" description="Cadres 1 à 4 — aucun champ n'est obligatoire" />
@@ -1018,6 +1007,8 @@ export function FicheDetailContent({
             </form>
           </CardBody>
         </Card>
+          </>
+        )}
 
         {/* Tracés — liste, détail en fenêtre interne au clic sur la ligne */}
         <div className="space-y-3">
@@ -1074,7 +1065,7 @@ export function FicheDetailContent({
         open={!!openTrace}
         onOpenChange={(v) => !v && setOpenTraceId(null)}
         title={openTrace?.reference}
-        size="lg"
+        size={fiche.regroupee ? "xl" : "lg"}
       >
         {openTrace && (
           <TraceDetailBody
@@ -1097,6 +1088,69 @@ export function FicheDetailContent({
 /* ============================================================
    Tracés — ligne de tableau (liste), détail en fenêtre interne
 ============================================================ */
+
+/** Informations d'un ordre de tracé : désignation, client, date de retour, contraintes, observations (repliées). */
+function InfosOrdre({ fiche, editable, onSaved }: { fiche: FichePlacement; editable: boolean; onSaved: () => void }) {
+  const [pending, startTransition] = useTransition();
+  const champ = "w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground disabled:opacity-60";
+  function enregistrer(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    startTransition(async () => {
+      const res = await modifierInfosOrdre(fiche.id, {
+        designation: String(fd.get("designation") ?? ""),
+        client: String(fd.get("client") ?? ""),
+        dateRetour: String(fd.get("date_retour") ?? ""),
+        contraintes: String(fd.get("contraintes") ?? ""),
+        observations: String(fd.get("observations") ?? ""),
+      });
+      if (res.error) toast.error(res.error);
+      else {
+        toast.success("Informations enregistrées");
+        onSaved();
+      }
+    });
+  }
+  return (
+    <details className="rounded-md border border-border bg-surface px-4 py-2">
+      <summary className="cursor-pointer text-sm font-medium text-foreground">
+        Informations de l&apos;ordre
+        <span className="ml-2 text-xs font-normal text-foreground-muted">
+          {[fiche.designationArticle, fiche.clientLibelle, fiche.dateRetourSouhaitee ? `retour ${formatDate(fiche.dateRetourSouhaitee)}` : null].filter(Boolean).join(" · ") ||
+            "désignation, client, date de retour, contraintes, observations"}
+        </span>
+      </summary>
+      <form onSubmit={enregistrer} className="mt-3 grid gap-3 pb-2 sm:grid-cols-3">
+        <Field label="Désignation">
+          <input name="designation" defaultValue={fiche.designationArticle ?? ""} disabled={!editable} className={champ} />
+        </Field>
+        <Field label="Client">
+          <input name="client" defaultValue={fiche.clientLibelle ?? ""} disabled={!editable} className={champ} />
+        </Field>
+        <Field label="Retour souhaité">
+          <input type="date" name="date_retour" defaultValue={fiche.dateRetourSouhaitee ?? ""} disabled={!editable} className={champ} />
+        </Field>
+        <div className="sm:col-span-3">
+          <Field label="Contraintes particulières">
+            <input name="contraintes" defaultValue={fiche.contraintes ?? ""} disabled={!editable} className={champ} />
+          </Field>
+        </div>
+        <div className="sm:col-span-3">
+          <Field label="Observations">
+            <textarea name="observations" rows={2} defaultValue={fiche.observations ?? ""} disabled={!editable} className={champ} />
+          </Field>
+        </div>
+        {editable && (
+          <div className="flex justify-end sm:col-span-3">
+            <Button type="submit" size="sm" variant="secondary" loading={pending}>
+              Enregistrer
+            </Button>
+          </div>
+        )}
+      </form>
+    </details>
+  );
+}
 
 /** Étape numérotée de la fenêtre d'un tracé regroupé. */
 function EtapeTrace({ numero, titre, children }: { numero: number; titre: string; children: React.ReactNode }) {
