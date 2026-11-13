@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, CheckCircle2, FileSearch, Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, FileSearch, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { FichePlacement, TracePlacement } from "@/lib/patronnage/types";
@@ -101,13 +101,37 @@ export function PiecesTraceEditor({
   }
 
   const modifie = JSON.stringify(lignes) !== JSON.stringify(depuisTrace());
+
+  // Vue en tableau : pièces (lignes) × tailles (colonnes), y compris celles que
+  // le fichier contient sans qu'elles soient déclarées.
+  const [rangeesAjoutees, setRangeesAjoutees] = useState<string[]>([]);
+  const [colonnesAjoutees, setColonnesAjoutees] = useState<string[]>([]);
+  const ecartsParCle = useMemo(
+    () => new Map((trace.controle.statut === "ecart" && !trace.controle.derogationMotif ? (trace.controle.detail?.ecarts ?? []) : []).map((e) => [`${e.semi_fini_id}|${e.taille}`, e])),
+    [trace.controle]
+  );
+  const rangees = useMemo(
+    () => [...new Set([...lignes.map((l) => l.semiFiniId), ...[...ecartsParCle.keys()].map((k) => k.split("|")[0]), ...rangeesAjoutees].filter(Boolean))],
+    [lignes, ecartsParCle, rangeesAjoutees]
+  );
+  const colonnes = useMemo(() => {
+    const c = new Set([...lignes.map((l) => l.taille), ...[...ecartsParCle.keys()].map((k) => k.split("|")[1]), ...colonnesAjoutees].filter(Boolean));
+    return tailles.filter((t) => c.has(t)).concat([...c].filter((t) => !tailles.includes(t)));
+  }, [lignes, ecartsParCle, colonnesAjoutees, tailles]);
+  const nomSemiFini = (id: string) => semiFinis.find(([x]) => x === id)?.[1] ?? trace.pieces.find((p) => p.semiFiniId === id)?.semiFiniNom ?? "?";
+  const valeur = (sf: string, t: string) => lignes.find((l) => l.semiFiniId === sf && l.taille === t)?.quantite ?? "";
+  const definir = (sf: string, t: string, v: string) =>
+    setLignes((ls) => {
+      const sans = ls.filter((l) => !(l.semiFiniId === sf && l.taille === t));
+      return v.trim() === "" || Number(v) <= 0 ? sans : [...sans, { semiFiniId: sf, taille: t, quantite: v }];
+    });
   const c = trace.controle;
   const peutDeroger = canUnlock && !archived && c.statut === "ecart" && !c.derogationMotif && ["previsionnel", "en_preparation", "bon_pour_coupe"].includes(trace.statut);
 
   return (
     <div className="space-y-3 rounded-md border border-border p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs font-medium text-foreground">Pièces du tracé (quantité posée par couche)</p>
+        <p className="text-xs font-medium text-foreground-muted">Quantité posée par couche, par pièce et par taille</p>
         {c.statut === "conforme" && (
           <Badge tone="success" dot>
             Conforme au fichier du tracé
@@ -121,97 +145,116 @@ export function PiecesTraceEditor({
         {c.statut === "non_verifie" && <Badge tone="neutral">Sans contrôle du tracé</Badge>}
       </div>
 
-      {lignes.length === 0 ? (
+      {lignes.length === 0 && ecartsParCle.size === 0 ? (
         <p className="text-sm text-foreground-muted">
-          Aucune pièce. {trace.analyse ? "Pré-remplissez-les depuis le fichier du tracé ou ajoutez-les à la main." : "Déposez le fichier du tracé pour les pré-remplir, ou ajoutez-les à la main."}
+          Aucune pièce. {trace.analyse ? "Reprenez-les depuis le fichier du tracé ou ajoutez-les à la main." : "Déposez le fichier du tracé pour les pré-remplir, ou ajoutez-les à la main."}
         </p>
       ) : (
-        <ul className="space-y-1.5">
-          {lignes.map((l, i) => {
-            const source = trace.pieces.find((p) => p.semiFiniId === l.semiFiniId && p.taille === l.taille)?.source;
-            return (
-              <li key={i} className="flex flex-wrap items-center gap-2 text-sm">
-                <select
-                  value={l.semiFiniId}
-                  disabled={!editable}
-                  onChange={(e) => setLignes((v) => v.map((x, j) => (j === i ? { ...x, semiFiniId: e.target.value } : x)))}
-                  className="h-8 min-w-40 rounded-md border border-border bg-surface px-2 text-sm disabled:opacity-60"
-                  aria-label="Semi-fini"
-                >
-                  <option value="">— Semi-fini —</option>
-                  {semiFinis.map(([id, nom]) => (
-                    <option key={id} value={id}>
-                      {nom}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  value={l.taille}
-                  disabled={!editable}
-                  onChange={(e) => setLignes((v) => v.map((x, j) => (j === i ? { ...x, taille: e.target.value } : x)))}
-                  className="h-8 w-28 rounded-md border border-border bg-surface px-2 text-sm disabled:opacity-60"
-                  aria-label="Taille"
-                >
-                  <option value="">— Taille —</option>
-                  {tailles.map((t) => (
-                    <option key={t} value={t}>
-                      {libelleTaille(t)}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  type="number"
-                  min={1}
-                  step={1}
-                  value={l.quantite}
-                  disabled={!editable}
-                  onChange={(e) => setLignes((v) => v.map((x, j) => (j === i ? { ...x, quantite: e.target.value } : x)))}
-                  className="h-8 w-20 rounded-md border border-border bg-surface px-2 text-right text-sm disabled:opacity-60"
-                  aria-label="Quantité par couche"
-                />
-                {/* Total du tracé : quantité par couche × plis (couches attribuées, ou plis prévus). */}
-                {trace.nbPlis != null && Number(l.quantite) > 0 && (
-                  <span className="text-xs font-medium text-foreground">
-                    × {trace.nbPlis} plis = {Number(l.quantite) * trace.nbPlis} pièces
-                  </span>
-                )}
-                {source && <span className="text-xs text-foreground-muted">{source === "dxf" ? "lu dans le fichier" : "saisi"}</span>}
-                {editable && (
-                  <button
-                    type="button"
-                    onClick={() => setLignes((v) => v.filter((_, j) => j !== i))}
-                    className="text-foreground-muted hover:text-danger"
-                    aria-label="Retirer cette pièce"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                )}
-              </li>
-            );
-          })}
-        </ul>
+        // Une ligne par pièce (semi-fini), une colonne par taille : quantité posée par couche.
+        // Un écart avec le fichier s'affiche dans la case (« fichier : 4 »).
+        <div className="overflow-x-auto rounded-md border border-border">
+          <table className="w-full text-sm">
+            <thead className="bg-surface-muted text-xs text-foreground-muted">
+              <tr>
+                <th className="px-3 py-1.5 text-left font-medium">Pièce</th>
+                {colonnes.map((t) => (
+                  <th key={t} className="px-2 py-1.5 text-center font-medium">
+                    {libelleTaille(t)}
+                  </th>
+                ))}
+                <th className="px-3 py-1.5 text-right font-medium">Par couche{trace.nbPlis ? ` · × ${trace.nbPlis} plis` : ""}</th>
+                {editable && <th className="w-8" />}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {rangees.map((sf) => {
+                const parCouche = colonnes.reduce((s, t) => s + (Number(valeur(sf, t)) || 0), 0);
+                return (
+                  <tr key={sf}>
+                    <td className="px-3 py-1.5 font-medium">{nomSemiFini(sf)}</td>
+                    {colonnes.map((t) => {
+                      const ecart = ecartsParCle.get(`${sf}|${t}`);
+                      return (
+                        <td key={t} className="px-2 py-1 text-center align-top">
+                          <input
+                            inputMode="numeric"
+                            value={valeur(sf, t)}
+                            disabled={!editable}
+                            onChange={(e) => definir(sf, t, e.target.value)}
+                            className={`h-8 w-16 rounded-md border bg-surface px-2 text-right text-sm disabled:opacity-60 ${ecart ? "border-danger" : "border-border"}`}
+                            aria-label={`${nomSemiFini(sf)} ${libelleTaille(t)}`}
+                          />
+                          {ecart && <span className="block text-[11px] text-danger">fichier : {ecart.reconnu}</span>}
+                        </td>
+                      );
+                    })}
+                    <td className="px-3 py-1.5 text-right tabular-nums">
+                      {parCouche}
+                      {trace.nbPlis ? <span className="text-xs text-foreground-muted"> → {parCouche * trace.nbPlis}</span> : null}
+                    </td>
+                    {editable && (
+                      <td className="pr-2 text-center">
+                        <button
+                          type="button"
+                          onClick={() => setLignes((v) => v.filter((l) => l.semiFiniId !== sf))}
+                          className="text-foreground-muted hover:text-danger"
+                          aria-label={`Retirer ${nomSemiFini(sf)}`}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
 
       {editable && (
         <div className="flex flex-wrap justify-between gap-2">
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="ghost" type="button" onClick={() => setLignes((v) => [...v, { semiFiniId: "", taille: "", quantite: "1" }])}>
-              <Plus className="h-3.5 w-3.5" /> Ajouter une pièce
-            </Button>
+            <select
+              value=""
+              onChange={(e) => e.target.value && setRangeesAjoutees((v) => [...v, e.target.value])}
+              className="h-8 rounded-md border border-border bg-surface px-2 text-sm"
+              aria-label="Ajouter une pièce"
+            >
+              <option value="">+ Pièce…</option>
+              {semiFinis.filter(([id]) => !rangees.includes(id)).map(([id, nom]) => (
+                <option key={id} value={id}>
+                  {nom}
+                </option>
+              ))}
+            </select>
+            <select
+              value=""
+              onChange={(e) => e.target.value && setColonnesAjoutees((v) => [...v, e.target.value])}
+              className="h-8 rounded-md border border-border bg-surface px-2 text-sm"
+              aria-label="Ajouter une taille"
+            >
+              <option value="">+ Taille…</option>
+              {tailles.filter((t) => !colonnes.includes(t)).map((t) => (
+                <option key={t} value={t}>
+                  {libelleTaille(t)}
+                </option>
+              ))}
+            </select>
             {trace.analyse && (
               <Button
                 size="sm"
-                variant="secondary"
+                variant={c.statut === "ecart" && !c.derogationMotif ? "primary" : "secondary"}
                 type="button"
                 loading={pending}
                 onClick={() =>
                   run(async () => {
                     const res = await preRemplirPiecesTrace(trace.id, fiche.id);
                     return res.error ? { error: res.error } : {};
-                  }, "Pièces pré-remplies depuis le fichier du tracé")
+                  }, "Pièces reprises du fichier du tracé")
                 }
               >
-                <FileSearch className="h-3.5 w-3.5" /> Pré-remplir depuis le fichier
+                <FileSearch className="h-3.5 w-3.5" /> Reprendre les pièces du fichier
               </Button>
             )}
           </div>
@@ -244,11 +287,7 @@ export function PiecesTraceEditor({
             <AlertTriangle className="h-3.5 w-3.5" /> Ce que le fichier contient ne correspond pas aux pièces déclarées
           </p>
           <ul className="list-disc space-y-0.5 pl-5">
-            {c.detail.ecarts.map((e, i) => (
-              <li key={i}>
-                {e.semi_fini} {libelleTaille(e.taille)} : déclaré {e.declare}, dans le fichier {e.reconnu}
-              </li>
-            ))}
+            {c.detail.ecarts.length > 0 && <li>{c.detail.ecarts.length} case(s) du tableau diffèrent du fichier (en rouge, avec la quantité du fichier).</li>}
             {c.detail.hors_semi_fini.map((e, i) => (
               <li key={`h${i}`}>
                 {e.semi_fini} {libelleTaille(e.taille)} : pièce d&apos;un ancien patron de produit fini (à migrer vers ses semi-finis)

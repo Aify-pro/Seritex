@@ -42,6 +42,7 @@ import {
   unarchiveFiche,
   deleteFicheDefinitively,
   addTrace,
+  modifierInfosOrdre,
   couleursReferentiel,
   updateTrace,
   deleteTrace,
@@ -821,7 +822,7 @@ export function FicheDetailContent({
               {STATUT_LABELS[fiche.statut]}
             </Badge>
             <span className="text-xs text-foreground-muted">Émise le {formatDate(fiche.dateEmission)}</span>
-            <span className="text-xs text-foreground-muted">· Statut calculé d&apos;après les tracés : chacun se valide un par un.</span>
+            {fiche.dateRetourSouhaitee && <span className="text-xs text-foreground-muted">· retour souhaité le {formatDate(fiche.dateRetourSouhaitee)}</span>}
           </div>
           <div className="flex flex-wrap gap-2">
             {fiche.statut !== "archive" && permissions.canArchive && (
@@ -847,7 +848,8 @@ export function FicheDetailContent({
           </div>
         </div>
 
-        {locked && (
+        {/* Ordre regroupé : pas de cadres à figer, chaque tracé se valide un par un ; seul l'archivage se signale. */}
+        {locked && (!fiche.regroupee || fiche.statut === "archive") && (
           <div className="flex items-center gap-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-xs text-foreground">
             <Lock className="h-3.5 w-3.5 shrink-0" />
             {fiche.statut === "archive"
@@ -921,6 +923,12 @@ export function FicheDetailContent({
           </>
         )}
 
+        {/* Ordre regroupé : ni modèle, ni tissu, ni couleur, ni répartition sur l'ordre
+            (portés par les articles à produire) ; restent ses informations. */}
+        {fiche.regroupee ? (
+          <InfosOrdre fiche={fiche} editable={permissions.canModify && fiche.statut !== "archive"} onSaved={refresh} />
+        ) : (
+          <>
         {/* Cadres 1-4 */}
         <Card>
           <CardHeader title="Demande" description="Cadres 1 à 4 — aucun champ n'est obligatoire" />
@@ -999,6 +1007,8 @@ export function FicheDetailContent({
             </form>
           </CardBody>
         </Card>
+          </>
+        )}
 
         {/* Tracés — liste, détail en fenêtre interne au clic sur la ligne */}
         <div className="space-y-3">
@@ -1025,16 +1035,17 @@ export function FicheDetailContent({
                   <Tr>
                     <Th>Référence</Th>
                     <Th>Statut</Th>
+                    {fiche.regroupee ? <Th>Pièces par couche</Th> : <Th>Fichier</Th>}
                     <Th align="center">Plis</Th>
                     <Th align="center">Total pièces</Th>
-                    <Th>Fichier</Th>
-                    <Th align="right">Actions</Th>
+                    <Th align="right"> </Th>
                   </Tr>
                 </Thead>
                 <Tbody>
                   {fiche.traces.map((trace) => (
                     <TraceRow
                       key={trace.id}
+                      regroupee={fiche.regroupee}
                       trace={trace}
                       highlighted={trace.id === highlightTraceId}
                       onOpen={() => setOpenTraceId(trace.id)}
@@ -1054,7 +1065,7 @@ export function FicheDetailContent({
         open={!!openTrace}
         onOpenChange={(v) => !v && setOpenTraceId(null)}
         title={openTrace?.reference}
-        size="lg"
+        size={fiche.regroupee ? "xl" : "lg"}
       >
         {openTrace && (
           <TraceDetailBody
@@ -1078,13 +1089,103 @@ export function FicheDetailContent({
    Tracés — ligne de tableau (liste), détail en fenêtre interne
 ============================================================ */
 
+/** Informations d'un ordre de tracé : désignation, client, date de retour, contraintes, observations (repliées). */
+function InfosOrdre({ fiche, editable, onSaved }: { fiche: FichePlacement; editable: boolean; onSaved: () => void }) {
+  const [pending, startTransition] = useTransition();
+  const champ = "w-full rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-foreground disabled:opacity-60";
+  function enregistrer(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    startTransition(async () => {
+      const res = await modifierInfosOrdre(fiche.id, {
+        designation: String(fd.get("designation") ?? ""),
+        client: String(fd.get("client") ?? ""),
+        dateRetour: String(fd.get("date_retour") ?? ""),
+        contraintes: String(fd.get("contraintes") ?? ""),
+        observations: String(fd.get("observations") ?? ""),
+      });
+      if (res.error) toast.error(res.error);
+      else {
+        toast.success("Informations enregistrées");
+        onSaved();
+      }
+    });
+  }
+  return (
+    <details className="rounded-md border border-border bg-surface px-4 py-2">
+      <summary className="cursor-pointer text-sm font-medium text-foreground">
+        Informations de l&apos;ordre
+        <span className="ml-2 text-xs font-normal text-foreground-muted">
+          {[fiche.designationArticle, fiche.clientLibelle, fiche.dateRetourSouhaitee ? `retour ${formatDate(fiche.dateRetourSouhaitee)}` : null].filter(Boolean).join(" · ") ||
+            "désignation, client, date de retour, contraintes, observations"}
+        </span>
+      </summary>
+      <form onSubmit={enregistrer} className="mt-3 grid gap-3 pb-2 sm:grid-cols-3">
+        <Field label="Désignation">
+          <input name="designation" defaultValue={fiche.designationArticle ?? ""} disabled={!editable} className={champ} />
+        </Field>
+        <Field label="Client">
+          <input name="client" defaultValue={fiche.clientLibelle ?? ""} disabled={!editable} className={champ} />
+        </Field>
+        <Field label="Retour souhaité">
+          <input type="date" name="date_retour" defaultValue={fiche.dateRetourSouhaitee ?? ""} disabled={!editable} className={champ} />
+        </Field>
+        <div className="sm:col-span-3">
+          <Field label="Contraintes particulières">
+            <input name="contraintes" defaultValue={fiche.contraintes ?? ""} disabled={!editable} className={champ} />
+          </Field>
+        </div>
+        <div className="sm:col-span-3">
+          <Field label="Observations">
+            <textarea name="observations" rows={2} defaultValue={fiche.observations ?? ""} disabled={!editable} className={champ} />
+          </Field>
+        </div>
+        {editable && (
+          <div className="flex justify-end sm:col-span-3">
+            <Button type="submit" size="sm" variant="secondary" loading={pending}>
+              Enregistrer
+            </Button>
+          </div>
+        )}
+      </form>
+    </details>
+  );
+}
+
+/** Étape numérotée de la fenêtre d'un tracé regroupé. */
+function EtapeTrace({ numero, titre, children }: { numero: number; titre: string; children: React.ReactNode }) {
+  return (
+    <section className="space-y-2">
+      <h4 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-brand-soft text-[11px] font-bold text-brand">{numero}</span>
+        {titre}
+      </h4>
+      {children}
+    </section>
+  );
+}
+
+/** « Manche 4 (S 2, M 2) · Corps 2 » : pièces posées par couche, regroupées par semi-fini. */
+function resumePieces(trace: TracePlacement): string {
+  const parPiece = new Map<string, { total: number; tailles: string[] }>();
+  for (const p of trace.pieces) {
+    const e = parPiece.get(p.semiFiniNom) ?? { total: 0, tailles: [] };
+    e.total += p.quantiteParCouche;
+    e.tailles.push(`${p.taille.split("/").pop()} ${p.quantiteParCouche}`);
+    parPiece.set(p.semiFiniNom, e);
+  }
+  return [...parPiece.entries()].map(([nom, e]) => `${nom} ${e.total} (${e.tailles.join(", ")})`).join(" · ");
+}
+
 /** Résumé d'une ligne — l'essentiel visible sans ouvrir le détail. */
 function TraceRow({
   trace,
+  regroupee = false,
   highlighted,
   onOpen,
 }: {
   trace: TracePlacement;
+  regroupee?: boolean;
   highlighted?: boolean;
   onOpen: () => void;
 }) {
@@ -1118,11 +1219,29 @@ function TraceRow({
             ) : (
               <span className="text-xs text-foreground-muted">{trace.fichierNom ? "déposé" : "en attente de dépôt"}</span>
             ))}
+          {/* Pièces déclarées ≠ fichier du tracé, sans dérogation : à corriger avant validation. */}
+          {regroupee && trace.controle.statut === "ecart" && !trace.controle.derogationMotif && trace.statut !== "annule" && (
+            <span className="text-xs font-medium text-danger">pièces ≠ fichier</span>
+          )}
         </span>
       </Td>
+      {regroupee ? (
+        // Ce que porte le tracé, et sur quel tissu : l'essentiel pour comparer les tracés d'un ordre.
+        <Td className="text-xs">
+          {trace.pieces.length === 0 ? (
+            <span className="text-foreground-muted">{trace.fichierNom ? "pièces à indiquer" : "fichier à déposer"}</span>
+          ) : (
+            <>
+              {resumePieces(trace)}
+              <span className="block text-foreground-muted">{trace.forme === "tubulaire" ? "Tubulaire" : "Ouvert"}</span>
+            </>
+          )}
+        </Td>
+      ) : (
+        <Td>{trace.fichierNom ?? <span className="text-foreground-muted">—</span>}</Td>
+      )}
       <Td align="center">{trace.nbPlis ?? "—"}</Td>
       <Td align="center">{totalTrace ?? "—"}</Td>
-      <Td>{trace.fichierNom ?? <span className="text-foreground-muted">—</span>}</Td>
       <Td align="right">
         <Eye className="ml-auto h-3.5 w-3.5 text-foreground-muted" />
       </Td>
@@ -1220,8 +1339,10 @@ function TraceDetailBody({
   const totalTrace = trace.nbPlis ? totalCouche * trace.nbPlis : null;
   const a = trace.analyse;
 
-  return (
-    <div className="space-y-4">
+  // Blocs de la fenêtre d'un tracé, assemblés dans l'ordre du travail :
+  // pour un ordre regroupé, 1. fichier et reconnaissance, 2. pièces, 3. tissu,
+  // rouleaux et dimensions, 4. plis par couleur, 5. validation.
+  const blocEnTete = (
       <div className="flex items-start justify-between gap-3">
         <div className="space-y-1 text-sm">
           <span className="flex flex-wrap items-center gap-1.5">
@@ -1264,7 +1385,9 @@ function TraceDetailBody({
           )}
         </div>
       </div>
-
+  );
+  const blocActions = (
+    <>
       {/* Actions de statut */}
       {!archived && (enPreparation ? canValidate || peutAnnuler : trace.statut === "bon_pour_coupe" && canUnlock) && (
         <div className="space-y-2 rounded-md border border-border bg-surface-muted p-3">
@@ -1333,37 +1456,45 @@ function TraceDetailBody({
           )}
         </div>
       )}
-
+    </>
+  );
+  const blocErreur = (
+    <>
         {error && (
           <div className="flex items-center gap-2 rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger">
             <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> {error}
           </div>
         )}
-
+    </>
+  );
+  const blocMatelas = (
         <form ref={matelasFormRef} onSubmit={handleSaveMatelas} className="space-y-3">
-          <div className="grid grid-cols-4 gap-3">
-            <Field label="Référence patron">
-              <input name="reference_patron" defaultValue={trace.referencePatron ?? ""} disabled={effectiveLocked || !canModify} className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground disabled:opacity-60" />
-            </Field>
+          {/* Ordre regroupé : les pièces sont reconnues dans la bibliothèque (pas de référence
+              patron) et les plis viennent des plis par couleur ; restent les dimensions, lues dans le DXF. */}
+          <div className={cn("grid gap-3", fiche.regroupee ? "grid-cols-2 sm:grid-cols-3" : "grid-cols-4")}>
+            {!fiche.regroupee && (
+              <Field label="Référence patron">
+                <input name="reference_patron" defaultValue={trace.referencePatron ?? ""} disabled={effectiveLocked || !canModify} className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground disabled:opacity-60" />
+              </Field>
+            )}
             <Field label="Longueur matelas (cm)">
               <input type="number" step="0.1" name="longueur_matelas_cm" defaultValue={trace.longueurMatelasCm ?? ""} disabled={!champsModifiables} className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground disabled:opacity-60" />
             </Field>
             <Field label="Largeur matelas (cm)">
               <input type="number" name="largeur_matelas_cm" defaultValue={trace.largeurMatelasCm ?? ""} disabled={!champsModifiables} className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground disabled:opacity-60" />
             </Field>
-            {/* Tracé regroupé : les plis sont la somme des couches attribuées aux articles d'ODF ;
-                tant qu'aucune couche n'est attribuée (ordre sans ODF), on saisit les plis prévus. */}
-            <Field label={fiche.regroupee && trace.couches.length === 0 ? "Nombre de plis (prévus)" : "Nombre de plis"}>
-              <input
-                type="number"
-                min={0}
-                name={fiche.regroupee && trace.couches.length > 0 ? undefined : "nb_plis"}
-                defaultValue={trace.nbPlis ?? ""}
-                disabled={!champsModifiables || (fiche.regroupee && trace.couches.length > 0)}
-                title={fiche.regroupee && trace.couches.length > 0 ? "Somme des couches par article" : undefined}
-                className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground disabled:opacity-60"
-              />
-            </Field>
+            {!fiche.regroupee && (
+              <Field label="Nombre de plis">
+                <input
+                  type="number"
+                  min={0}
+                  name="nb_plis"
+                  defaultValue={trace.nbPlis ?? ""}
+                  disabled={!champsModifiables}
+                  className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground disabled:opacity-60"
+                />
+              </Field>
+            )}
           </div>
           {!fiche.regroupee && (
             <Field label={`Répartition par couche (total/couche ${totalCouche}${totalTrace !== null ? ` · théorique tracé ${totalTrace}` : ""})`}>
@@ -1395,14 +1526,8 @@ function TraceDetailBody({
             </div>
           )}
         </form>
-
-        {fiche.regroupee && (
-          <>
-            <PiecesTraceEditor fiche={fiche} trace={trace} editable={!effectiveLocked && canModify} canUnlock={canUnlock} archived={archived} onChanged={onChanged} />
-            <PlisParCouleurEditor fiche={fiche} trace={trace} editable={!effectiveLocked && canModify} onChanged={onChanged} />
-          </>
-        )}
-
+  );
+  const blocFichier = (
         <div className="rounded-md border border-dashed border-border bg-surface-muted p-3">
           <input ref={fileInputRef} type="file" accept=".dxf" onChange={handleUpload} className="hidden" />
           {trace.fichierNom ? (
@@ -1436,7 +1561,9 @@ function TraceDetailBody({
             <p className="text-sm text-foreground-muted">Aucun fichier déposé.</p>
           )}
         </div>
-
+  );
+  const blocAnalyse = (
+    <>
         {a && (
           <div className="space-y-2">
             <div
@@ -1483,11 +1610,17 @@ function TraceDetailBody({
             />
           </div>
         )}
-
+    </>
+  );
+  const blocRouleaux = (
+    <>
         {!archived && (
           <TraceRouleaux traceId={trace.id} ficheId={fiche.id} forme={trace.forme} nbRouleaux={trace.nbRouleaux} statut={trace.statut} canModify={canModify} onChanged={onChanged} />
         )}
-
+    </>
+  );
+  const blocRendement = (
+    <>
         {trace.rendement && (
           <div className="space-y-2">
             <p className="text-xs font-medium text-foreground-muted">
@@ -1517,6 +1650,51 @@ function TraceDetailBody({
             </div>
           </div>
         )}
+    </>
+  );
+
+  if (fiche.regroupee) {
+    return (
+      <div className="space-y-5">
+        {blocEnTete}
+        {blocErreur}
+        <EtapeTrace numero={1} titre="Fichier du tracé">
+          {blocFichier}
+          {a && (
+            <details className="group" open={!a.reconnaissanceComplete}>
+              <summary className="cursor-pointer text-xs font-medium text-brand hover:underline">
+                Reconnaissance : {a.nbPiecesDetectees} pièce(s), {a.reconnaissanceComplete ? "toutes reconnues" : `${a.piecesNonReconnues.length} non reconnue(s)`} — détail
+              </summary>
+              <div className="mt-2">{blocAnalyse}</div>
+            </details>
+          )}
+        </EtapeTrace>
+        <EtapeTrace numero={2} titre="Pièces du tracé">
+          <PiecesTraceEditor fiche={fiche} trace={trace} editable={!effectiveLocked && canModify} canUnlock={canUnlock} archived={archived} onChanged={onChanged} />
+        </EtapeTrace>
+        <EtapeTrace numero={3} titre="Tissu, rouleaux et dimensions">
+          {blocRouleaux}
+          {blocMatelas}
+        </EtapeTrace>
+        <EtapeTrace numero={4} titre="Plis par couleur">
+          <PlisParCouleurEditor fiche={fiche} trace={trace} editable={!effectiveLocked && canModify} onChanged={onChanged} />
+        </EtapeTrace>
+        {blocActions}
+        {blocRendement}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {blocEnTete}
+      {blocActions}
+      {blocErreur}
+      {blocMatelas}
+      {blocFichier}
+      {blocAnalyse}
+      {blocRouleaux}
+      {blocRendement}
 
     </div>
   );

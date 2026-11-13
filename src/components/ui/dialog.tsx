@@ -33,7 +33,7 @@ export function Dialog({
   children: ReactNode;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
-  size?: "sm" | "md" | "lg";
+  size?: "sm" | "md" | "lg" | "xl";
 }) {
   const [internalOpen, setInternalOpen] = useState(false);
   const controlled = openProp !== undefined;
@@ -64,6 +64,7 @@ export function Dialog({
     sm: "max-w-md",
     md: "max-w-xl",
     lg: "max-w-3xl",
+    xl: "max-w-5xl",
   } as const;
 
   return (

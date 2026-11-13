@@ -120,7 +120,7 @@ export interface PieceTrace {
 export interface ControleTrace {
   statut: "non_verifie" | "conforme" | "ecart";
   detail: {
-    ecarts: { semi_fini: string; taille: string; declare: number; reconnu: number }[];
+    ecarts: { semi_fini_id?: string; semi_fini: string; taille: string; declare: number; reconnu: number }[];
     hors_semi_fini: { semi_fini: string; taille: string }[];
     quantites_non_entieres: { semi_fini: string; taille: string }[];
     pieces_non_reconnues: number;

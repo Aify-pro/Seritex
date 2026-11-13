@@ -1217,7 +1217,8 @@ export async function updateTrace(traceId: string, ficheId: string, formData: Fo
   const { data: updated, error } = await supabase
     .from("traces_placement")
     .update({
-      reference_patron: String(formData.get("reference_patron") ?? "").trim() || null,
+      // Ordre regroupé : pas de référence patron dans le formulaire, on n'y touche pas.
+      ...(formData.has("reference_patron") ? { reference_patron: String(formData.get("reference_patron") ?? "").trim() || null } : {}),
       longueur_matelas_cm: formData.get("longueur_matelas_cm") ? Number(formData.get("longueur_matelas_cm")) : null,
       largeur_matelas_cm: formData.get("largeur_matelas_cm") ? Number(formData.get("largeur_matelas_cm")) : null,
       // Tracé regroupé (0149) : les plis sont la somme des couches par article, le champ n'est pas envoyé.
@@ -1893,4 +1894,37 @@ export async function lignesOdfDuModele(productModelId: string): Promise<{ lineI
     lineId: l.id,
     libelle: `${l.production_orders?.reference ?? "ODF"} · ${l.description}${l.quantity ? ` · ${l.quantity} pcs` : ""}`,
   }));
+}
+
+/**
+ * Informations d'un ordre de tracé regroupé (désignation, client, date de
+ * retour, contraintes, observations), modifiables à tout moment hors archive :
+ * aucun cadre de coupe ne dépend d'elles.
+ */
+export async function modifierInfosOrdre(
+  ficheId: string,
+  input: { designation: string; client: string; dateRetour: string; contraintes: string; observations: string }
+): Promise<{ error?: string }> {
+  await requirePermission("modify");
+  const gate = await assertFicheOuverteAuxTraces(ficheId);
+  if ("error" in gate) return { error: gate.error };
+  const supabase = await createClient();
+  const vide = (v: string) => v.trim() || null;
+  const { data, error } = await supabase
+    .from("fiches_placement")
+    .update({
+      designation_article: vide(input.designation) ?? "Ordre de coupe regroupé",
+      client_libelle: vide(input.client),
+      date_retour_souhaitee: vide(input.dateRetour),
+      contraintes: vide(input.contraintes),
+      observations: vide(input.observations),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", ficheId)
+    .eq("regroupee", true)
+    .select("id");
+  if (error) return { error: error.message };
+  if (!data?.length) return { error: "Modification refusée." };
+  revalidatePath(`/atelier/patronnage/${ficheId}`);
+  return {};
 }

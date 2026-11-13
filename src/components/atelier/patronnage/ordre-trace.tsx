@@ -508,9 +508,16 @@ export function PlisParCouleurEditor({
         </ul>
       )}
       {nonEligibles.length > 0 && (
-        <p className="text-xs text-foreground-muted">
-          Hors de ce tracé : {nonEligibles.map((n) => `${n.article.libelle} (${n.raison})`).join(" ; ")}.
-        </p>
+        <details className="text-xs text-foreground-muted">
+          <summary className="cursor-pointer">{nonEligibles.length} article(s) ne peuvent pas aller sur ce tracé — pourquoi</summary>
+          <ul className="mt-1 space-y-0.5 pl-3">
+            {nonEligibles.map((n) => (
+              <li key={n.article.cle}>
+                {n.article.origine} · {n.article.libelle} : {n.raison}
+              </li>
+            ))}
+          </ul>
+        </details>
       )}
       {editable && groupes.length > 0 && (
         <div className="flex justify-end">
@@ -527,6 +534,20 @@ export function PlisParCouleurEditor({
    Dispatching et bilan des pièces
 ============================================================ */
 
+const ORDRE_TAILLES = ["XXS", "XS", "S", "M", "L", "XL", "XXL", "2XL", "3XL", "4XL", "5XL", "6XL", "7XL"];
+/** Tri des tailles : groupe (Homme, Femme…), puis l'ordre habituel (XS avant S), puis alphabétique. */
+function ordreTaille(a: string, b: string) {
+  const [ga, ta] = a.includes("/") ? a.split("/") : ["", a];
+  const [gb, tb] = b.includes("/") ? b.split("/") : ["", b];
+  if (ga !== gb) return ga.localeCompare(gb);
+  const ia = ORDRE_TAILLES.indexOf(ta);
+  const ib = ORDRE_TAILLES.indexOf(tb);
+  if (ia >= 0 && ib >= 0) return ia - ib;
+  if (ia >= 0 || ib >= 0) return ia >= 0 ? -1 : 1;
+  return ta.localeCompare(tb, "fr", { numeric: true });
+}
+const couleurEcart = (e: number) => (e < 0 ? "text-danger" : e > 0 ? "text-warning" : "text-success");
+
 /**
  * Dispatching de l'ordre : la somme de tous les tracés (hors annulés)
  * comparée à la demande, par article et par taille. En dessous, le lien
@@ -537,6 +558,17 @@ export function PlisParCouleurEditor({
 export function DispatchingCard({ fiche }: { fiche: FichePlacement }) {
   const [bilan, setBilan] = useState(false);
   const d = useMemo(() => calculerDispatching(fiche), [fiche]);
+  // Tailles dans l'ordre habituel, puis articles avec leurs cellules par taille.
+  const tailles = useMemo(() => [...new Set(d.lignes.map((l) => l.taille))].sort(ordreTaille), [d]);
+  const parArticle = useMemo(() => {
+    const m = new Map<string, { article: ArticleOrdre; cellules: Map<string, { demandes: number; obtenus: number }> }>();
+    for (const l of d.lignes) {
+      const e = m.get(l.article.cle) ?? { article: l.article, cellules: new Map() };
+      e.cellules.set(l.taille, { demandes: l.demandes, obtenus: l.obtenus });
+      m.set(l.article.cle, e);
+    }
+    return [...m.values()];
+  }, [d]);
   if (d.lignes.length === 0) return null;
   const problemes = [
     d.manquants > 0 ? `${d.manquants} vêtement(s) manquant(s)` : null,
@@ -548,30 +580,40 @@ export function DispatchingCard({ fiche }: { fiche: FichePlacement }) {
     <Card>
       <CardHeader title="Dispatching" description="Somme de tous les tracés de l'ordre (hors annulés), comparée à la demande : vêtements complets obtenus par article et par taille." />
       <CardBody className="space-y-3 p-0">
+        {/* Une ligne par article, une colonne par taille : « obtenu / demandé ». */}
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-surface-muted text-xs text-foreground-muted">
               <tr>
                 <th className="px-4 py-2 text-left font-medium">Article</th>
-                <th className="px-3 py-2 text-left font-medium">Taille</th>
-                <th className="px-3 py-2 text-right font-medium">Demandé</th>
-                <th className="px-3 py-2 text-right font-medium">Obtenu</th>
-                <th className="px-4 py-2 text-right font-medium">Écart</th>
+                {tailles.map((t) => (
+                  <th key={t} className="px-3 py-2 text-center font-medium">
+                    {libelleTaille(t)}
+                  </th>
+                ))}
+                <th className="px-4 py-2 text-right font-medium">Total</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {d.lignes.map((l) => {
-                const ecart = l.obtenus - l.demandes;
+              {parArticle.map(({ article, cellules }) => {
+                const dem = [...cellules.values()].reduce((s, c) => s + c.demandes, 0);
+                const obt = [...cellules.values()].reduce((s, c) => s + c.obtenus, 0);
                 return (
-                  <tr key={`${l.article.cle}|${l.taille}`}>
+                  <tr key={article.cle}>
                     <td className="px-4 py-1.5">
-                      <span className="text-xs text-foreground-muted">{l.article.origine}</span> {l.article.libelle}
+                      <span className="text-xs text-foreground-muted">{article.origine}</span> {article.libelle}
                     </td>
-                    <td className="px-3 py-1.5">{libelleTaille(l.taille)}</td>
-                    <td className="px-3 py-1.5 text-right">{l.demandes}</td>
-                    <td className="px-3 py-1.5 text-right font-medium">{l.obtenus}</td>
-                    <td className={`px-4 py-1.5 text-right font-semibold ${ecart < 0 ? "text-danger" : ecart > 0 ? "text-warning" : "text-success"}`}>
-                      {ecart > 0 ? `+${ecart}` : ecart}
+                    {tailles.map((t) => {
+                      const c = cellules.get(t);
+                      if (!c) return <td key={t} className="px-3 py-1.5 text-center text-foreground-muted">—</td>;
+                      return (
+                        <td key={t} className={`px-3 py-1.5 text-center tabular-nums ${couleurEcart(c.obtenus - c.demandes)}`}>
+                          {c.obtenus} <span className="text-xs text-foreground-muted">/ {c.demandes}</span>
+                        </td>
+                      );
+                    })}
+                    <td className={`px-4 py-1.5 text-right font-semibold tabular-nums ${couleurEcart(obt - dem)}`}>
+                      {obt} <span className="text-xs font-normal text-foreground-muted">/ {dem}</span>
                     </td>
                   </tr>
                 );
