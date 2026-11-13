@@ -20,6 +20,8 @@ const PUBLIC_PATHS = [
   "/api/vehicules/freetrack/synchro",
   // Calculs d'imbrication (tracés de coupe, 0182) : même principe (CRON_SECRET).
   "/api/imbrication/traiter",
+  // Outils des agents IA (0187) : pas de session, la route exige le jeton de l'agent (Authorization: Bearer).
+  "/api/agents/",
   // Téléchargement d'un fichier de la médiathèque par un compte client DU SITE (www.seritex.ci) :
   // pas de cookie de la plateforme, la route exige le jeton du client (Authorization: Bearer).
   "/api/site/media",

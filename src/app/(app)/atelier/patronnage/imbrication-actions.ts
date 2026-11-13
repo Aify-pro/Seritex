@@ -11,12 +11,15 @@ import {
   creerCalculImbrication,
   declencherTraitement,
   lireCalculImbrication,
-  PREREGLAGES_TEMPS,
 } from "@/lib/imbrication/calculs";
 import { entreeSchema, LIBELLES_ARRET } from "@/lib/imbrication/contrat";
 import { genererDxfImbrication } from "@/lib/imbrication/export-dxf";
 import { validerTrace } from "@/lib/imbrication/validation";
 import { chargerRouleauxTrace } from "./fiches-actions";
+import { laizesDuTissu, planPourTissu, tissusDesBesoins, type LaizeStock, type LigneBesoin, type ResultatPlan, type TissuAPlanifier } from "@/lib/imbrication/plan-coupe";
+import { contexteTrace, lireTrace, STATUTS_MODIFIABLES, type ContexteCalculTrace } from "@/lib/imbrication/contexte-trace";
+
+export type { ContexteCalculTrace, LaizeCandidate, PieceParCouche } from "@/lib/imbrication/contexte-trace";
 
 /**
  * Calcul automatique d'un tracé (imbrication Seritex), depuis la fenêtre
@@ -30,113 +33,15 @@ import { chargerRouleauxTrace } from "./fiches-actions";
  * fichier du tracé que lorsqu'une personne choisit « Utiliser ce tracé ».
  */
 
-const STATUTS_MODIFIABLES = ["previsionnel", "en_preparation"];
-
-export interface LaizeCandidate {
-  laizeCm: number;
-  /** D'où vient cette laize : rouleaux choisis, rouleaux en stock, saisie. */
-  origine: "rouleaux_choisis" | "stock" | "trace" | "fiche";
-  nbRouleaux: number;
-  poidsKg: number;
-}
-
-export interface PieceParCouche {
-  semiFiniId: string;
-  semiFiniNom: string;
-  taille: string;
-  quantite: number;
-}
-
-export interface ContexteCalculTrace {
-  pieces: PieceParCouche[];
-  laizes: LaizeCandidate[];
-  forme: "ouvert" | "tubulaire";
-  /** Raison pour laquelle le calcul ne peut pas être lancé, sinon null. */
-  blocage: string | null;
-  modifiable: boolean;
-  imbricationCalculId: string | null;
-  prereglages: typeof PREREGLAGES_TEMPS;
-}
-
-async function lireTrace(traceId: string) {
+async function lireTraceSession(traceId: string) {
   const supabase = await createClient();
-  const { data } = await supabase
-    .from("traces_placement")
-    .select("id,fiche_id,statut,forme,largeur_matelas_cm,imbrication_calcul_id,fiches_placement(statut,laize_utile_cm)")
-    .eq("id", traceId)
-    .maybeSingle();
-  return { supabase, trace: data };
+  return { supabase, trace: await lireTrace(supabase, traceId) };
 }
 
 export async function contexteCalculTrace(traceId: string): Promise<ContexteCalculTrace | { error: string }> {
   await requirePermission("patronnage", "view");
-  const { supabase, trace } = await lireTrace(traceId);
-  if (!trace) return { error: "Tracé introuvable." };
-  const fiche = (Array.isArray(trace.fiches_placement) ? trace.fiches_placement[0] : trace.fiches_placement) as {
-    statut: string;
-    laize_utile_cm: number | null;
-  } | null;
-
-  const { data: lignes } = await supabase
-    .from("trace_semi_finis")
-    .select("semi_fini_id,taille,quantite_par_couche,product_models(name)")
-    .eq("trace_id", traceId);
-  const pieces: PieceParCouche[] = ((lignes ?? []) as unknown as { semi_fini_id: string; taille: string; quantite_par_couche: number; product_models: { name: string } | null }[])
-    .filter((l) => l.quantite_par_couche > 0)
-    .map((l) => ({ semiFiniId: l.semi_fini_id, semiFiniNom: l.product_models?.name ?? "Semi-fini", taille: l.taille, quantite: l.quantite_par_couche }))
-    .sort((a, b) => a.semiFiniNom.localeCompare(b.semiFiniNom) || a.taille.localeCompare(b.taille));
-
-  // Laizes : rouleaux choisis pour le tracé, sinon rouleaux en stock du tissu
-  // du tracé ; plus la laize saisie sur le tracé ou la fiche.
-  const parLaize = new Map<number, LaizeCandidate>();
-  const ajouter = (laizeCm: number | null | undefined, origine: LaizeCandidate["origine"], poidsKg = 0, rouleau = false) => {
-    const l = Number(laizeCm);
-    if (!Number.isFinite(l) || l <= 0) return;
-    const cle = Math.round(l * 10) / 10;
-    const e = parLaize.get(cle);
-    if (e) {
-      if (rouleau) {
-        e.nbRouleaux += 1;
-        e.poidsKg += poidsKg;
-      }
-      return;
-    }
-    parLaize.set(cle, { laizeCm: cle, origine, nbRouleaux: rouleau ? 1 : 0, poidsKg: rouleau ? poidsKg : 0 });
-  };
-  const rouleaux = await chargerRouleauxTrace(traceId);
-  if (!("error" in rouleaux)) {
-    const choisis = rouleaux.rouleaux.filter((r) => r.choisi);
-    for (const r of choisis) ajouter(r.laizeCm, "rouleaux_choisis", r.poidsKg, true);
-    if (choisis.length === 0) {
-      const textiles = new Set(rouleaux.textilesTrace);
-      const variants = new Set(rouleaux.variantsTrace);
-      for (const r of rouleaux.rouleaux) {
-        if (r.forme !== trace.forme || r.reservation) continue;
-        if (!(variants.has(r.variantId ?? "") || textiles.has(r.textileId))) continue;
-        ajouter(r.laizeCm, "stock", r.poidsKg, true);
-      }
-    }
-  }
-  ajouter(trace.largeur_matelas_cm, "trace");
-  ajouter(fiche?.laize_utile_cm, "fiche");
-  const laizes = [...parLaize.values()].sort((a, b) => b.nbRouleaux - a.nbRouleaux || b.laizeCm - a.laizeCm);
-
-  let blocage: string | null = null;
-  if (trace.forme === "tubulaire") {
-    blocage = "Le calcul automatique ne traite pour l'instant que le tissu ouvert : ce tracé est en tubulaire. Déposez un fichier Modaris.";
-  } else if (pieces.length === 0) {
-    blocage = "Indiquez d'abord les pièces du tracé (pièces par couche) : le calcul part de cette liste.";
-  }
-
-  return {
-    pieces,
-    laizes,
-    forme: trace.forme as "ouvert" | "tubulaire",
-    blocage,
-    modifiable: STATUTS_MODIFIABLES.includes(trace.statut as string) && fiche?.statut !== "archive",
-    imbricationCalculId: (trace.imbrication_calcul_id as string | null) ?? null,
-    prereglages: PREREGLAGES_TEMPS,
-  };
+  const supabase = await createClient();
+  return contexteTrace(supabase, traceId, await chargerRouleauxTrace(traceId));
 }
 
 const lancementSchema = z
@@ -206,6 +111,8 @@ export interface CalculTraceResume {
   annulationDemandee: boolean;
   createdAt: string;
   arret: string | null;
+  /** Nom de l'agent IA qui a lancé le calcul (proposition), sinon null. */
+  agent: string | null;
 }
 
 /** Calculs lancés pour ce tracé, du plus récent au plus ancien (sans les géométries). */
@@ -215,7 +122,7 @@ export async function calculsDuTrace(traceId: string): Promise<CalculTraceResume
   const { data, error } = await supabase
     .from("imbrication_calculs")
     .select(
-      "id,libelle,groupe,statut,temps_total_s,temps_consomme_s,longueur_mm,taux_utilisation,erreur_message,annulation_demandee_le,created_at,laize:entree->tissu->largeur_utile,arret:meilleur->arret"
+      "id,libelle,groupe,statut,temps_total_s,temps_consomme_s,longueur_mm,taux_utilisation,erreur_message,annulation_demandee_le,created_at,demande_par_agent,laize:entree->tissu->largeur_utile,arret:meilleur->arret"
     )
     .eq("trace_id", traceId)
     .order("created_at", { ascending: false })
@@ -239,6 +146,7 @@ export async function calculsDuTrace(traceId: string): Promise<CalculTraceResume
       annulationDemandee: !!c.annulation_demandee_le,
       createdAt: c.created_at as string,
       arret: c.arret ? (LIBELLES_ARRET[c.arret as keyof typeof LIBELLES_ARRET] ?? null) : null,
+      agent: (c.demande_par_agent as string | null) ?? null,
     };
   });
 }
@@ -280,7 +188,7 @@ export async function annulerCalculTrace(calculId: string): Promise<{ error?: st
  */
 export async function utiliserCalculPourTrace(calculId: string, traceId: string, ficheId: string): Promise<{ reconnaissanceComplete: boolean } | { error: string }> {
   const { authId } = await requirePermission("patronnage_traces", "create");
-  const { supabase, trace } = await lireTrace(traceId);
+  const { supabase, trace } = await lireTraceSession(traceId);
   if (!trace || trace.fiche_id !== ficheId) return { error: "Tracé introuvable." };
   const fiche = (Array.isArray(trace.fiches_placement) ? trace.fiches_placement[0] : trace.fiches_placement) as { statut: string } | null;
   if (!STATUTS_MODIFIABLES.includes(trace.statut as string)) {
@@ -333,4 +241,48 @@ export async function utiliserCalculPourTrace(calculId: string, traceId: string,
   revalidatePath("/atelier/patronnage");
   revalidatePath(`/atelier/patronnage/${ficheId}`);
   return depot;
+}
+
+// ---------------------------------------------------------------------------
+// Plan de coupe (phase 4) : quelles pièces par couche, combien de plis par couleur
+// ---------------------------------------------------------------------------
+
+async function lignesBesoins(supabase: Awaited<ReturnType<typeof createClient>>): Promise<LigneBesoin[] | { error: string }> {
+  const { data, error } = await supabase.rpc("besoins_coupe_agreges");
+  if (error) return { error: `Lecture des besoins de coupe impossible : ${error.message}` };
+  return (data ?? []) as LigneBesoin[];
+}
+
+/** Tissus qui ont des pièces à couper (pour choisir le plan à calculer). */
+export async function tissusAPlanifier(): Promise<TissuAPlanifier[] | { error: string }> {
+  await requirePermission("patronnage", "view");
+  const lignes = await lignesBesoins(await createClient());
+  return "error" in lignes ? lignes : tissusDesBesoins(lignes);
+}
+
+export async function laizesTissu(textileId: string): Promise<LaizeStock[]> {
+  await requirePermission("patronnage", "view");
+  return laizesDuTissu(await createClient(), textileId);
+}
+
+const planSchema = z
+  .object({
+    textileId: z.string().uuid(),
+    laizeCm: z.number().positive().max(1000),
+    lisiereMm: z.number().min(0).max(100).optional(),
+    longueurTableCm: z.number().positive().max(10_000),
+    maxPlis: z.number().int().min(1).max(1000),
+    efficiencePct: z.number().min(50).max(95).optional(),
+    couleurs: z.array(z.string()).optional(),
+  })
+  .strict();
+
+export async function proposerPlanCoupe(input: z.input<typeof planSchema>): Promise<ResultatPlan | { error: string }> {
+  await requirePermission("patronnage", "view");
+  const p = planSchema.safeParse(input);
+  if (!p.success) return { error: "Paramètres du plan invalides." };
+  const supabase = await createClient();
+  const lignes = await lignesBesoins(supabase);
+  if ("error" in lignes) return lignes;
+  return planPourTissu(supabase, lignes, p.data);
 }

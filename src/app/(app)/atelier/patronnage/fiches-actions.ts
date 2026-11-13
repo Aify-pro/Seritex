@@ -12,6 +12,7 @@ import { reconnaitreTrace } from "@/lib/patronnage/reconnaissance";
 import { construireAnalyseDetaillee, type TraceAnalysisDetail } from "@/lib/patronnage/detail";
 import { readDxfFile } from "@/lib/patronnage/upload";
 import { deposerFichierTrace, persisterAnalyse, SEUIL_RECONNAISSANCE } from "@/lib/patronnage/depot-trace";
+import { rouleauxDuTrace } from "@/lib/patronnage/rouleaux-trace";
 import { nomenclaturesActives } from "@/lib/patronnage/nomenclatures-actives";
 import type { StatutFiche, RepartitionTailles } from "@/lib/patronnage/types";
 import { repartitionDepuisTraces, repartitionTotal, sameRepartition } from "@/lib/patronnage/dispatching";
@@ -769,50 +770,7 @@ export interface RouleauxTrace {
 export async function chargerRouleauxTrace(traceId: string): Promise<RouleauxTrace | { error: string }> {
   await requirePermission("view");
   const supabase = await createClient();
-  const colonnes = "id,code,forme,textile_id,variant_id,laize_cm,poids_kg,bain,colors(name),textiles(nom,grammage)";
-  const [{ data: trace }, { data: choisis }, { data: stock, error }, { data: reservations }, { data: couches }, { data: prevus }] = await Promise.all([
-    supabase.from("traces_placement").select("fiche_id").eq("id", traceId).maybeSingle(),
-    supabase.from("trace_rouleaux").select(`roll_id,textile_rolls(${colonnes})`).eq("trace_id", traceId),
-    supabase.from("textile_rolls").select(colonnes).eq("statut", "en_stock").gt("poids_kg", 0).order("recu_le", { ascending: false }).limit(500),
-    supabase.rpc("reservations_rouleaux"),
-    supabase.from("trace_couches").select("production_order_line_id").eq("trace_id", traceId),
-    supabase.from("trace_tissus").select("variant_id").eq("trace_id", traceId),
-  ]);
-  if (error) return { error: error.message };
-  type Roll = { id: string; code: string; forme: string; textile_id: string; variant_id: string | null; laize_cm: number | null; poids_kg: number; bain: string | null; colors: { name: string } | null; textiles: { nom: string; grammage: number | null } | null };
-  const dejaChoisis = (choisis ?? []).map((c) => c.textile_rolls as unknown as Roll).filter(Boolean);
-  const idsChoisis = new Set(dejaChoisis.map((r) => r.id));
-  const reservation = new Map(
-    ((reservations ?? []) as { roll_id: string; trace_id: string; odfs: string[] }[]).filter((r) => r.trace_id !== traceId).map((r) => [r.roll_id, r.odfs.join(", ")])
-  );
-  const { data: groupe } = trace ? await supabase.from("coupe_groupee_lignes").select("production_order_line_id").eq("fiche_id", trace.fiche_id) : { data: [] };
-  const lineIds = [...new Set([...(couches ?? []), ...(groupe ?? [])].map((l) => l.production_order_line_id as string))];
-  const { data: lignes } = lineIds.length ? await supabase.from("production_order_lines").select("textile_id,product_models(textile_id)").in("id", lineIds) : { data: [] };
-  const textilesTrace = [
-    ...new Set(
-      ((lignes ?? []) as unknown as { textile_id: string | null; product_models: { textile_id: string | null } | null }[])
-        .map((l) => l.textile_id ?? l.product_models?.textile_id ?? null)
-        .filter((t): t is string => !!t)
-    ),
-  ];
-  const versLigne = (r: Roll, choisi: boolean): RouleauTrace => ({
-    code: r.code,
-    forme: r.forme,
-    textileId: r.textile_id,
-    variantId: r.variant_id,
-    tissu: `${r.textiles?.nom ?? "—"}${r.textiles?.grammage ? ` ${r.textiles.grammage} g` : ""}`,
-    couleur: r.colors?.name ?? null,
-    laizeCm: r.laize_cm != null ? Number(r.laize_cm) : null,
-    poidsKg: Number(r.poids_kg),
-    bain: r.bain,
-    choisi,
-    reservation: reservation.get(r.id) ?? null,
-  });
-  return {
-    rouleaux: [...dejaChoisis.map((r) => versLigne(r, true)), ...((stock ?? []) as unknown as Roll[]).filter((r) => !idsChoisis.has(r.id)).map((r) => versLigne(r, false))],
-    textilesTrace,
-    variantsTrace: (prevus ?? []).map((p) => p.variant_id as string),
-  };
+  return rouleauxDuTrace(supabase, traceId, async () => (await supabase.rpc("reservations_rouleaux")).data ?? []);
 }
 
 export interface TissuPrevu {

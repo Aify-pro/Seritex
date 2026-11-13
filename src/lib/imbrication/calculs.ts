@@ -1,6 +1,7 @@
 import "server-only";
 import { after } from "next/server";
 import { z } from "zod";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { requirePermission } from "@/lib/auth/permissions";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -61,6 +62,22 @@ export async function creerCalculImbrication(
   options: { declencher?: boolean } = {}
 ): Promise<{ id: string } | { error: string }> {
   const { authId } = await requirePermission("patronnage_traces", "create");
+  const supabase = await createClient();
+  return insererCalcul(supabase, parametres, { demandePar: authId, agent: null }, options);
+}
+
+/**
+ * Prépare les pièces et enregistre un calcul « en attente ». Le client est
+ * celui de l'appelant : session de la personne (la RLS s'applique), ou
+ * serveur pour un agent IA (droits déjà vérifiés au nom de son propriétaire ;
+ * le calcul est alors une proposition de l'agent).
+ */
+export async function insererCalcul(
+  supabase: SupabaseClient,
+  parametres: ParametresCalcul,
+  auteur: { demandePar: string; agent: { id: string; nom: string } | null },
+  options: { declencher?: boolean } = {}
+): Promise<{ id: string } | { error: string }> {
   const lecture = parametresCalculSchema.safeParse(parametres);
   if (!lecture.success) return { error: `Paramètres invalides : ${lecture.error.issues[0]?.message ?? "valeur refusée"}` };
   const p = lecture.data;
@@ -68,7 +85,6 @@ export async function creerCalculImbrication(
     return { error: `Un calcul reproductible (budget d'effort) doit tenir en une tranche : ${dureeTrancheS()} s au plus.` };
   }
 
-  const supabase = await createClient();
   const patrons = await chargerPatrons(supabase, p.demandes);
   if ("error" in patrons) return { error: patrons.error };
   const graine = p.graine ?? Math.floor(Math.random() * 2 ** 31);
@@ -88,7 +104,8 @@ export async function creerCalculImbrication(
       entree: entree.data,
       pieces: prep.pieces,
       temps_total_s: p.tempsS,
-      demande_par: authId,
+      demande_par: auteur.demandePar,
+      ...(auteur.agent ? { demande_par_agent: auteur.agent.nom, agent_id: auteur.agent.id } : {}),
     })
     .select("id")
     .single();

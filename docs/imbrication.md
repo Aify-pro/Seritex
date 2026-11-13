@@ -19,8 +19,8 @@ et valident.
 |---|---|---|
 | 1 | Moteur Rust intégré, contrat JSON, validation indépendante, banc d'essai | **fait** (PR #239) |
 | 2 | Pièces lues depuis la bibliothèque, modèle de données (rotations, paires), calculs en arrière-plan par tranches, stockage | **fait** (PR #241) |
-| 3 | Calcul depuis la fenêtre d'un tracé, comparaison des laizes, aperçu, fichier DXF du tracé (puis PDF et marquage existants) | **fait** |
-| 4 | Outils pour agents IA, journal, validation humaine, droits | à faire |
+| 3 | Calcul depuis la fenêtre d'un tracé, comparaison des laizes, aperçu, fichier DXF du tracé (puis PDF et marquage existants) | **fait** (PR #245) |
+| 4 | Plan de coupe déterministe, agents IA (jetons, outils MCP/JSON, journal), propositions validées par une personne | **fait** |
 | 5 | Tests complets, documentation finale, rapport | à faire |
 
 ## Architecture
@@ -216,6 +216,64 @@ et finalement déposer un fichier Modaris quand même.
 
 Lancer, arrêter, utiliser un calcul : droit « Patronnage — tracés : créer »
 (celui du dépôt d'un fichier). Voir les calculs : « Patronnage : voir ».
+
+## Phase 4 : plan de coupe et agents IA
+
+Principe retenu avec l'utilisateur (2026-11-13) : **« le mieux sera le moteur
+de calcul, le moins on aura besoin d'intelligence »**. Tout ce qui optimise
+est un calcul déterministe de Seritex ; l'IA ne fait que le piloter.
+
+### Plan de coupe (`lib/imbrication/planification.ts`)
+
+Pour un tissu, à partir de ce qui reste à couper (fonction
+`besoins_coupe_agreges`, celle de l'écran « Besoins de coupe ») :
+quelles pièces mettre sur une couche et combien de plis de chaque couleur.
+
+- **Jamais de surplus** : coupé = demandé, couleur par couleur (vérifié par
+  les tests sur 300 cas tirés au hasard).
+- Une couche tient dans la **longueur de table** (longueur estimée = surface
+  des pièces / (laize utile × efficience estimée, 85 % par défaut)).
+- Un matelas ne dépasse pas le **nombre de plis maximal** (toutes couleurs).
+- Méthode : à chaque tour, la composition qui couvre la plus grande surface
+  de pièces (moins de matelas) ; les restes finissent en matelas de
+  reliquat, coupés exactement, un pli par couleur.
+- Même entrée = même plan. La longueur est une **estimation** : la vraie
+  vient du moteur, tracé par tracé. Pour comparer des laizes, on calcule un
+  plan par laize (bouton « Comparer les laizes en stock »).
+- Écran : Patronnage → Besoins de coupe → « Proposer un plan ». Rien n'est
+  créé : la personne compose ensuite ses tracés.
+- Hors plan, avec la raison : taille sans patron, pièce tubulaire, pièce
+  plus grande qu'une couche.
+
+### Agents IA (migration 0187)
+
+- **Paramètres → Agents IA** (administrateur de la plateforme) : un agent =
+  un jeton `stx_agent_…` montré une seule fois (la base n'en garde que
+  l'empreinte SHA-256), des droits (`lecture`, `calcul`) et un
+  **propriétaire** : l'agent agit au nom de cet utilisateur et jamais
+  au-delà de ses droits, vérifiés par la base à chaque appel
+  (`agent_a_le_droit`). On révoque, on ne supprime pas ; un agent révoqué ne
+  revit pas.
+- **Outils** (`lib/agents/outils-imbrication.ts`) : `besoins_de_coupe`,
+  `laizes_disponibles`, `planifier_coupe`, `lister_traces`,
+  `contexte_trace`, `etat_calculs_trace` (lecture) ; `lancer_calcul_trace`,
+  `arreter_calcul` (calcul ; 8 calculs en cours au plus par agent).
+  **Aucun outil** ne fait d'un calcul le fichier d'un tracé ni ne valide une
+  coupe : ces gestes restent humains, dans Seritex.
+- **Accès** : `POST /api/agents/mcp` (serveur MCP sans état, pour Claude) et
+  `GET|POST /api/agents/imbrication` (JSON simple, pour n8n). En-tête
+  `Authorization: Bearer stx_agent_…`.
+- **Journal** : chaque appel (outil, arguments, résultat résumé, durée,
+  refus) dans `agents_ia_journal`, visible dans Paramètres → Agents IA.
+- **Propositions** : un calcul lancé par un agent porte `agent_id` et
+  s'affiche « Proposé par … » dans la fenêtre du tracé.
+
+Brancher Claude Code :
+
+```bash
+claude mcp add --transport http seritex https://app.seritex.ci/api/agents/mcp \
+  --header "Authorization: Bearer stx_agent_…"
+```
 
 ## Contrat JSON `seritex.imbrication/v1`
 
@@ -414,9 +472,9 @@ des bouts, zones de défaut du tissu (jagua-rs gère des zones de qualité).
   automatique s'applique au tissu ouvert.
 - **Tracé tubulaire** : le calcul automatique est refusé sur un tracé en
   tubulaire (message clair) ; déposer un fichier Modaris.
-- **Répartition des tailles entre tracés** : le calcul place les pièces
-  d'UN tracé. Choisir quelles tailles mettre ensemble et sur combien de
-  plis (pour toute une commande) est l'étape suivante (phase 4).
+- **Plan de coupe** : longueurs estimées (efficience moyenne) ; il ne crée
+  pas les tracés (la personne les compose). Un plan qui tienne compte du
+  poids réel des rouleaux par couleur est à venir.
 - **Calculs en parallèle sur Vercel** : une même instance peut recevoir
   plusieurs appels ; les calculs restent justes, mais se partagent alors le
   processeur. Sur un serveur Seritex, prévoir un cœur par calcul.
