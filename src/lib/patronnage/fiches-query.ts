@@ -404,6 +404,31 @@ export async function getFichePlacementById(id: string): Promise<FichePlacement 
       tailles: a.tailles ?? {},
       pieces: pieces.filter((p) => p.article_id === a.id).map((p) => ({ id: p.semi_fini_id, nom: p.semi_fini_nom, quantite: Number(p.quantite), couleur: p.couleur })),
     }));
+    // Plis par couleur, couches par pièce et clés de couche des pièces (0183).
+    const [{ data: plis }, { data: couchesPieces }, { data: cles }] = await Promise.all([
+      traceIds.length > 0 ? supabase.from("trace_plis_couleur").select("trace_id,cle,nb_plis,nb_plis_reels").in("trace_id", traceIds) : Promise.resolve({ data: [] }),
+      traceIds.length > 0
+        ? supabase.from("trace_couches_pieces").select("trace_id,production_order_line_id,article_id,semi_fini_id,cle,nb_couches").in("trace_id", traceIds)
+        : Promise.resolve({ data: [] }),
+      supabase.rpc("cles_couches_ordre", { p_fiche_id: mapped.id }),
+    ]);
+    mapped.clesCouches = ((cles ?? []) as { line_id: string | null; article_id: string | null; semi_fini_id: string; cle: string; libelle: string | null }[]).map((c) => ({
+      lineId: c.line_id,
+      articleId: c.article_id,
+      semiFiniId: c.semi_fini_id,
+      cle: c.cle,
+      libelle: c.libelle || "Sans couleur",
+    }));
+    for (const t of mapped.traces) {
+      t.plisCouleur = ((plis ?? []) as { trace_id: string; cle: string; nb_plis: number; nb_plis_reels: number | null }[])
+        .filter((p) => p.trace_id === t.id)
+        .map((p) => ({ cle: p.cle, nbPlis: p.nb_plis, nbPlisReels: p.nb_plis_reels }));
+      t.couchesPieces = (
+        (couchesPieces ?? []) as { trace_id: string; production_order_line_id: string | null; article_id: string | null; semi_fini_id: string; cle: string; nb_couches: number }[]
+      )
+        .filter((c) => c.trace_id === t.id)
+        .map((c) => ({ lineId: c.production_order_line_id, articleId: c.article_id, semiFiniId: c.semi_fini_id, cle: c.cle, nbCouches: c.nb_couches }));
+    }
     for (const t of mapped.traces) {
       t.couchesArticles = ((couchesSaisies ?? []) as { trace_id: string; article_id: string; nb_couches: number }[])
         .filter((c) => c.trace_id === t.id)
@@ -433,6 +458,17 @@ export async function getFichePlacementById(id: string): Promise<FichePlacement 
         libelle: libelleTissu(x),
         couches: x.couches,
         odfs: x.odfs.map((o) => `${o.odf ?? "-"} (${o.couches})`).join(", "),
+      }));
+    }
+    // 0183 : composition par les plis saisis par couleur et grammage, et les
+    // articles qui en reçoivent des pièces.
+    if ((t.plisCouleur ?? []).length > 0) {
+      const odfDe = (lineId: string | null) =>
+        lineId ? (mapped.lignesRegroupees.find((l) => l.lineId === lineId)?.odfReference ?? "-") : "Sans ODF";
+      t.compositionTissus = (t.plisCouleur ?? []).map((p) => ({
+        libelle: (mapped.clesCouches ?? []).find((c) => c.cle === p.cle)?.libelle ?? "Sans couleur",
+        couches: p.nbPlis,
+        odfs: [...new Set((t.couchesPieces ?? []).filter((c) => c.cle === p.cle).map((c) => odfDe(c.lineId)))].join(", "),
       }));
     }
   }

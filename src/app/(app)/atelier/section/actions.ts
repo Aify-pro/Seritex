@@ -164,6 +164,37 @@ export async function cloturerMatelasRegroupe(
   return { kits: ((data as { kits_assembles?: Record<string, number> } | null)?.kits_assembles ?? {}) };
 }
 
+/**
+ * Clôture d'un matelas regroupé par couleur (0183) : plis réels par couleur
+ * et grammage, pièces obtenues par article × pièce × taille. Tout manque se
+ * justifie ; contrôles dans cloturer_matelas_couleurs().
+ */
+export async function cloturerMatelasCouleurs(
+  traceId: string,
+  plisReels: Record<string, number>,
+  obtenus: { lineId: string; semiFiniId: string; taille: string; obtenus: number }[],
+  mesures: { longueurCm: number; laizeCm: number; poidsTissuKg: number; dechetsKg: number },
+  justification?: string
+): Promise<{ error?: string; kits?: Record<string, number> }> {
+  await requireUser();
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("cloturer_matelas_couleurs", {
+    p_trace_id: traceId,
+    p_plis: plisReels,
+    p_obtenus: obtenus.map((o) => ({ line_id: o.lineId, semi_fini_id: o.semiFiniId, taille: o.taille, obtenus: o.obtenus })),
+    p_longueur_cm: mesures.longueurCm,
+    p_laize_cm: mesures.laizeCm,
+    p_poids_tissu_kg: mesures.poidsTissuKg,
+    p_dechets_kg: mesures.dechetsKg,
+    p_justification: justification?.trim() || null,
+  });
+  if (error) return { error: error.message };
+  revalidatePath("/atelier/section");
+  revalidatePath("/atelier/production");
+  revalidatePath("/atelier/patronnage");
+  return { kits: ((data as { kits_assembles?: Record<string, number> } | null)?.kits_assembles ?? {}) };
+}
+
 export type CreateLotResult = { error: string } | { code: string };
 
 /**

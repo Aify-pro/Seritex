@@ -21,7 +21,7 @@ import {
   ajouterLigneRegroupee,
   besoinsCoupe,
   couleursArticleOrdre,
-  enregistrerCouchesOrdre,
+  enregistrerPlisCouleur,
   lignesOdfDuModele,
   modeleArticleOrdre,
   remplacerArticleOrdre,
@@ -413,14 +413,16 @@ function CouleurChoix({ couleurs, valeur, onChange }: { couleurs: { id: string; 
 }
 
 /* ============================================================
-   Plis du tracé, par couleur
+   Plis du tracé, par couleur (et grammage) — pièce par pièce
 ============================================================ */
 
 /**
- * Plis d'un tracé regroupé, saisis par couleur (« 50 plis blanc, 50 bleu ») :
- * la plateforme les répartit entre les articles de cette couleur selon leur
- * besoin restant (demande moins ce que donnent les autres tracés). Les plis
- * du tracé sont la somme.
+ * Plis d'un tracé regroupé, saisis par couleur et grammage (« 50 plis Blanc ·
+ * Jersey 180 g ») : une couche donne toutes les pièces du tracé dans cette
+ * couleur, et chaque pièce va aux articles qui l'ont dans cette couleur (les
+ * corps blancs aux uns, les manches blanches aux autres), selon leur besoin
+ * restant. Une pièce dont aucun article n'a besoin dans cette couleur reste
+ * « hors demande » (signalée dans le bilan, sans bloquer).
  */
 export function PlisParCouleurEditor({
   fiche,
@@ -434,32 +436,34 @@ export function PlisParCouleurEditor({
   onChanged: () => void;
 }) {
   const [pending, startTransition] = useTransition();
-  const { groupes, nonEligibles } = useMemo(() => couleursDuTrace(fiche, trace), [fiche, trace]);
-  const [valeurs, setValeurs] = useState<Record<string, string>>(Object.fromEntries(groupes.map((g) => [g.couleur, g.plis ? String(g.plis) : ""])));
+  const groupes = useMemo(() => couleursDuTrace(fiche, trace), [fiche, trace]);
+  const [valeurs, setValeurs] = useState<Record<string, string>>(Object.fromEntries(groupes.map((g) => [g.cle, g.plis ? String(g.plis) : ""])));
   const total = Object.values(valeurs).reduce((s, v) => s + (Number(v) || 0), 0);
 
-  // Aperçu de la répartition pour chaque couleur.
-  const repartition = useMemo(() => {
-    const res = new Map<string, number>();
-    for (const g of groupes) {
-      const n = Math.max(0, Math.trunc(Number(valeurs[g.couleur]) || 0));
-      for (const [cle, c] of repartirPlis(fiche, trace, g.articles, n)) res.set(cle, c);
-    }
-    return res;
-  }, [groupes, valeurs, fiche, trace]);
+  // Aperçu : pour chaque couleur, la répartition pièce par pièce.
+  const repartition = useMemo(
+    () => new Map(groupes.map((g) => [g.cle, repartirPlis(fiche, trace, g, Math.max(0, Math.trunc(Number(valeurs[g.cle]) || 0)))])),
+    [groupes, valeurs, fiche, trace]
+  );
 
   function enregistrer() {
-    const lignes: Record<string, number> = {};
-    const articles: Record<string, number> = {};
+    const plis: Record<string, number> = {};
+    const couches: { lineId: string | null; articleId: string | null; semiFiniId: string; cle: string; nbCouches: number }[] = [];
     for (const g of groupes) {
-      for (const a of g.articles) {
-        const n = repartition.get(a.cle) ?? 0;
-        if (a.type === "odf") lignes[a.id] = n;
-        else articles[a.id] = n;
+      const n = Math.max(0, Math.trunc(Number(valeurs[g.cle]) || 0));
+      if (n > 0) plis[g.cle] = n;
+      for (const c of repartition.get(g.cle) ?? []) {
+        couches.push({
+          lineId: c.article.type === "odf" ? c.article.id : null,
+          articleId: c.article.type === "saisi" ? c.article.id : null,
+          semiFiniId: c.semiFiniId,
+          cle: c.cle,
+          nbCouches: c.nbCouches,
+        });
       }
     }
     startTransition(async () => {
-      const res = await enregistrerCouchesOrdre(trace.id, fiche.id, { lignes, articles });
+      const res = await enregistrerPlisCouleur(trace.id, fiche.id, plis, couches);
       if (res.error) toast.error(res.error);
       else {
         toast.success("Plis enregistrés");
@@ -473,51 +477,56 @@ export function PlisParCouleurEditor({
   }
   return (
     <div className="space-y-2 rounded-md border border-border p-3">
-      <p className="text-xs font-medium text-foreground">Plis par couleur (total {total} plis)</p>
+      <p className="text-xs text-foreground-muted">
+        Plis par couleur et grammage (total <span className="font-medium text-foreground">{total} plis</span>). Chaque pièce d&apos;une couleur va aux articles qui
+        l&apos;ont dans cette couleur.
+      </p>
       {groupes.length === 0 ? (
-        <p className="text-xs text-warning">Aucun article de l&apos;ordre n&apos;a toutes les pièces de ce tracé : ajoutez les articles à produire.</p>
+        <p className="text-xs text-warning">Aucun article de l&apos;ordre n&apos;a les pièces de ce tracé : ajoutez les articles à produire.</p>
       ) : (
-        <ul className="space-y-2">
-          {groupes.map((g) => (
-            <li key={g.couleur} className="space-y-1">
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-sm font-medium">{g.couleur}</span>
-                <span className="flex items-center gap-1.5 text-xs text-foreground-muted">
-                  <input
-                    type="number"
-                    min={0}
-                    step={1}
-                    value={valeurs[g.couleur] ?? ""}
-                    disabled={!editable}
-                    onChange={(e) => setValeurs((v) => ({ ...v, [g.couleur]: e.target.value }))}
-                    className="h-8 w-24 rounded-md border border-border bg-surface px-2 text-right text-sm disabled:opacity-60"
-                    aria-label={`Plis ${g.couleur}`}
-                  />
-                  plis
-                </span>
-              </div>
-              <ul className="space-y-0.5 pl-3 text-xs text-foreground-muted">
-                {g.articles.map((a) => (
-                  <li key={a.cle}>
-                    {a.origine} · {a.libelle} : <span className="font-medium text-foreground">{repartition.get(a.cle) ?? 0} plis</span>
-                  </li>
-                ))}
-              </ul>
-            </li>
-          ))}
-        </ul>
-      )}
-      {nonEligibles.length > 0 && (
-        <details className="text-xs text-foreground-muted">
-          <summary className="cursor-pointer">{nonEligibles.length} article(s) ne peuvent pas aller sur ce tracé — pourquoi</summary>
-          <ul className="mt-1 space-y-0.5 pl-3">
-            {nonEligibles.map((n) => (
-              <li key={n.article.cle}>
-                {n.article.origine} · {n.article.libelle} : {n.raison}
+        <ul className="divide-y divide-border rounded-md border border-border">
+          {groupes.map((g) => {
+            const rep = repartition.get(g.cle) ?? [];
+            const n = Math.max(0, Math.trunc(Number(valeurs[g.cle]) || 0));
+            return (
+              <li key={g.cle} className="space-y-1 px-3 py-2">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-sm font-medium">{g.libelle}</span>
+                  <span className="flex items-center gap-1.5 text-xs text-foreground-muted">
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={valeurs[g.cle] ?? ""}
+                      disabled={!editable}
+                      onChange={(e) => setValeurs((v) => ({ ...v, [g.cle]: e.target.value }))}
+                      className="h-8 w-24 rounded-md border border-border bg-surface px-2 text-right text-sm disabled:opacity-60"
+                      aria-label={`Plis ${g.libelle}`}
+                    />
+                    plis
+                  </span>
+                </div>
+                <ul className="grid gap-x-4 gap-y-0.5 pl-3 text-xs text-foreground-muted sm:grid-cols-2">
+                  {g.pieces.map((p) => {
+                    const lignes = rep.filter((c) => c.semiFiniId === p.semiFiniId);
+                    return (
+                      <li key={p.semiFiniId}>
+                        <span className="font-medium text-foreground">{p.nom}</span> :{" "}
+                        {p.articles.length === 0 ? (
+                          <span className={n > 0 ? "text-danger" : ""}>aucun article dans cette couleur{n > 0 ? " (hors demande)" : ""}</span>
+                        ) : lignes.length === 0 ? (
+                          p.articles.map((a) => a.origine).join(", ")
+                        ) : (
+                          lignes.map((c) => `${c.article.origine} ${c.nbCouches}`).join(" · ")
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
               </li>
-            ))}
-          </ul>
-        </details>
+            );
+          })}
+        </ul>
       )}
       {editable && groupes.length > 0 && (
         <div className="flex justify-end">

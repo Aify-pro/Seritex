@@ -1739,32 +1739,42 @@ export async function couleursReferentiel(): Promise<{ id: string; name: string;
 // ------------------------------------------------------------
 
 /**
- * Couches d'un tracé regroupé, par article d'ODF et par article saisi
- * (remplace toutes les couches du tracé). Les plis du tracé en sont la somme.
+ * Plis d'un tracé regroupé par couleur et grammage, et couches attribuées par
+ * article et par pièce (0183). Remplace tout ce qui était saisi sur ce tracé ;
+ * les plis du tracé en sont la somme.
  */
-export async function enregistrerCouchesOrdre(
+export async function enregistrerPlisCouleur(
   traceId: string,
   ficheId: string,
-  couches: { lignes: Record<string, number>; articles: Record<string, number> }
+  plis: Record<string, number>,
+  couches: { lineId: string | null; articleId: string | null; semiFiniId: string; cle: string; nbCouches: number }[]
 ): Promise<{ error?: string }> {
   await requireTracePermission("modify");
   const gate = await assertTraceEditable(traceId, ficheId);
   if ("error" in gate) return { error: gate.error };
   const supabase = await createClient();
-  const garder = (o: Record<string, number>) => Object.entries(o).filter(([, n]) => Number.isInteger(n) && n > 0);
   const [{ error: e1 }, { error: e2 }] = await Promise.all([
-    supabase.from("trace_couches").delete().eq("trace_id", traceId),
-    supabase.from("trace_couches_articles").delete().eq("trace_id", traceId),
+    supabase.from("trace_couches_pieces").delete().eq("trace_id", traceId),
+    supabase.from("trace_plis_couleur").delete().eq("trace_id", traceId),
   ]);
   if (e1 || e2) return { error: (e1 ?? e2)!.message };
-  const lignes = garder(couches.lignes);
-  const articles = garder(couches.articles);
-  if (lignes.length) {
-    const { error } = await supabase.from("trace_couches").insert(lignes.map(([production_order_line_id, nb_couches]) => ({ trace_id: traceId, production_order_line_id, nb_couches })));
+  const lignesPlis = Object.entries(plis).filter(([, n]) => Number.isInteger(n) && n > 0);
+  if (lignesPlis.length) {
+    const { error } = await supabase.from("trace_plis_couleur").insert(lignesPlis.map(([cle, nb_plis]) => ({ trace_id: traceId, cle, nb_plis })));
     if (error) return { error: error.message };
   }
-  if (articles.length) {
-    const { error } = await supabase.from("trace_couches_articles").insert(articles.map(([article_id, nb_couches]) => ({ trace_id: traceId, article_id, nb_couches })));
+  const lignesCouches = couches.filter((c) => Number.isInteger(c.nbCouches) && c.nbCouches > 0);
+  if (lignesCouches.length) {
+    const { error } = await supabase.from("trace_couches_pieces").insert(
+      lignesCouches.map((c) => ({
+        trace_id: traceId,
+        production_order_line_id: c.lineId,
+        article_id: c.articleId,
+        semi_fini_id: c.semiFiniId,
+        cle: c.cle,
+        nb_couches: c.nbCouches,
+      }))
+    );
     if (error) return { error: error.message };
   }
   revalidatePath(`/atelier/patronnage/${ficheId}`);

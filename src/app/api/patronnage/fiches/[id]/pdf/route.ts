@@ -152,6 +152,22 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
           odfAnnule: l?.odfAnnule ?? false,
         };
       });
+      // 0183 : couches attribuées par article ET par pièce (« OF-… · T-shirt — Manche », couleur, couches).
+      const libelleCle = (cle: string) => (fiche.clesCouches ?? []).find((c) => c.cle === cle)?.libelle ?? null;
+      const couchesParPiece = (t.couchesPieces ?? []).map((c) => {
+        const l = c.lineId ? ligneRegroupee.get(c.lineId) : undefined;
+        const a = c.articleId ? articlesSaisisParId.get(c.articleId) : undefined;
+        const piece = t.pieces.find((p) => p.semiFiniId === c.semiFiniId)?.semiFiniNom ?? "-";
+        return {
+          libelle: c.lineId
+            ? `${l?.odfReference ?? odfDe(c.lineId) ?? "-"} · ${l?.description ?? parLigne.get(c.lineId)?.description ?? "-"} — ${piece}`
+            : `Sans ODF · ${a?.modele ?? "-"} — ${piece}`,
+          couleur: libelleCle(c.cle),
+          couches: c.nbCouches,
+          odfAnnule: l?.odfAnnule ?? false,
+          piece,
+        };
+      });
       const piecesParCouche = regroupe
         ? t.pieces.map((p) => ({ piece: p.semiFiniNom, taille: libelleTaille(p.taille), quantite: p.quantiteParCouche }))
         : Object.entries(t.repartitionParCouche)
@@ -182,7 +198,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         couches: t.nbPlis,
         tissusPrevus: tissusPrevusDe(t.id),
         tissus: t.compositionTissus ?? [],
-        couchesParArticle: [...couchesParArticle, ...couchesSaisies],
+        couchesParArticle: couchesParPiece.length > 0 ? couchesParPiece : [...couchesParArticle, ...couchesSaisies],
         piecesParCouche,
         rouleaux: ((rouleaux ?? []) as unknown as RouleauRow[])
           .filter((r) => r.trace_id === t.id && r.textile_rolls)

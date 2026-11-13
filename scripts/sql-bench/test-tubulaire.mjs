@@ -86,12 +86,14 @@ const kits = async () => (await one(`select coalesce(sum(e.quantity),0)::int n f
   where w.production_order_line_id=$1 and e.event_type='matelas_cloture' and e.trace_id is null`, [A.line.id])).n;
 let tManche, tTub, tCorps;
 
-await test("D1 : un tracé mêle des pièces d'une seule nomenclature", async () => {
+// 0183 : les couches s'attribuent pièce par pièce ; un article peut recevoir
+// les pièces de plusieurs de ses nomenclatures sur un même tracé.
+await test("pièce par pièce : un tracé peut mêler les pièces de plusieurs nomenclatures", async () => {
   const f = await one(`insert into fiches_placement(numero_ot, regroupee, designation_article) values ('OT-MIX',true,'pièce') returning id`);
   await q(`insert into coupe_groupee_lignes(fiche_id, production_order_line_id) values ($1,$2)`, [f.id, A.line.id]);
   const t = await one(`insert into traces_placement(fiche_id, ordre, reference) values ($1,1,'OT-MIX-T1') returning id`, [f.id]);
   await q(`insert into trace_semi_finis(trace_id, semi_fini_id, taille, quantite_par_couche) values ($1,$2,$3,1),($1,$4,$3,1)`, [t.id, tub.id, M, av.id]);
-  await expectFail(() => q(`insert into trace_couches(trace_id, production_order_line_id, nb_couches) values ($1,$2,1)`, [t.id, A.line.id]), /n'a pas dans sa nomenclature/);
+  await q(`insert into trace_couches(trace_id, production_order_line_id, nb_couches) values ($1,$2,1)`, [t.id, A.line.id]);
   await q(`delete from fiches_placement where id=$1`, [f.id]);
 });
 
