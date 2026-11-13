@@ -1,5 +1,5 @@
 -- ============================================================
--- 0184 — Imbrication, phase 3 : calculs rattachés à un tracé
+-- 0185 — Imbrication, phase 3 : calculs rattachés à un tracé
 -- ============================================================
 -- Le calcul automatique se lance depuis la fenêtre d'un tracé (module
 -- patronnage), à côté du dépôt d'un fichier Modaris, qui reste possible.

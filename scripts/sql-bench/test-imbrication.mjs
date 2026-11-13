@@ -149,8 +149,8 @@ await test("annulation : immédiate si en attente, demandée si en cours, refus�
   await expectFail(() => asRole("authenticated", uidAutre, `select annuler_calcul_imbrication($1)`, [c5.id]));
 });
 
-// ---- 0184 : calculs rattachés à un tracé ----
-await test("0184 : calcul lancé pour un tracé (groupe de comparaison) ; le tracé garde la trace du calcul retenu", async () => {
+// ---- 0185 : calculs rattachés à un tracé ----
+await test("0185 : calcul lancé pour un tracé (groupe de comparaison) ; le tracé garde la trace du calcul retenu", async () => {
   const f = await one(`insert into fiches_placement(numero_ot, regroupee, designation_article) values ('OT-IMB',true,'Imbrication') returning id`);
   const t = await one(`insert into traces_placement(fiche_id, ordre, reference) values ($1,1,'OT-IMB-T1') returning id`, [f.id]);
   const groupe = "11111111-2222-3333-4444-555555555555";
