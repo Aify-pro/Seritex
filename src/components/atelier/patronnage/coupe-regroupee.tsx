@@ -118,7 +118,12 @@ export function PiecesTraceEditor({
     const c = new Set([...lignes.map((l) => l.taille), ...[...ecartsParCle.keys()].map((k) => k.split("|")[1]), ...colonnesAjoutees].filter(Boolean));
     return tailles.filter((t) => c.has(t)).concat([...c].filter((t) => !tailles.includes(t)));
   }, [lignes, ecartsParCle, colonnesAjoutees, tailles]);
-  const nomSemiFini = (id: string) => semiFinis.find(([x]) => x === id)?.[1] ?? trace.pieces.find((p) => p.semiFiniId === id)?.semiFiniNom ?? "?";
+  // Une pièce présente seulement dans le fichier prend le nom donné par le contrôle.
+  const nomSemiFini = (id: string) =>
+    semiFinis.find(([x]) => x === id)?.[1] ??
+    trace.pieces.find((p) => p.semiFiniId === id)?.semiFiniNom ??
+    [...ecartsParCle.values()].find((e) => e.semi_fini_id === id)?.semi_fini ??
+    "?";
   const valeur = (sf: string, t: string) => lignes.find((l) => l.semiFiniId === sf && l.taille === t)?.quantite ?? "";
   const definir = (sf: string, t: string, v: string) =>
     setLignes((ls) => {
