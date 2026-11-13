@@ -6,6 +6,7 @@ import { MM_PAR_UNITE } from "@/lib/patronnage/detail";
 import { normalizeShape, polygonArea, polygonPerimeter, type Point } from "@/lib/patronnage/geometry";
 import { readTraceFile } from "@/lib/storage/patronnage-files";
 import { VERSION_CONTRAT, type EntreeImbrication } from "./contrat";
+import { traitsDeLaPiece, type Trait } from "./dessin-pieces";
 
 /**
  * Préparation des pièces d'un calcul d'imbrication à partir de la
@@ -74,6 +75,14 @@ export interface PieceCalcul {
   nomPiece: string;
   miroir: boolean;
   quantite: number;
+  /** Calque de la ligne de coupe dans le gabarit (repris dans le tracé). */
+  calqueCoupe?: string;
+  /**
+   * Autres traits de la pièce (crans, couture…), en mm, dans le repère du
+   * contour envoyé au moteur : le tracé exporté les porte comme un tracé
+   * Modaris. Une seule fois par pièce distincte, pas par exemplaire.
+   */
+  traits?: Trait[];
 }
 
 export type ResultatPreparation =
@@ -143,14 +152,17 @@ const egal = (a: number, b: number) => Math.abs(a - b) <= 1e-6 * Math.max(1, Mat
  * normalisé (la bibliothèque a été construite par ce même parseur). Rend le
  * contour tel que dessiné (unités du DXF), ou null.
  */
-export function retrouverContour(dxf: string, piece: Pick<PatronCharge["pieces"][number], "points" | "area" | "perimeter">): Point[] | null {
+export function retrouverContour(
+  dxf: string,
+  piece: Pick<PatronCharge["pieces"][number], "points" | "area" | "perimeter">
+): { calque: string; points: Point[] } | null {
   for (const c of parseDxfContours(dxf)) {
     if (c.points.length !== piece.points.length) continue;
     if (!egal(polygonArea(c.points), Number(piece.area)) || !egal(polygonPerimeter(c.points), Number(piece.perimeter))) continue;
     const norm = normalizeShape(c.points).points;
     const echelle = Math.max(...piece.points.map(([x, y]) => Math.max(Math.abs(x), Math.abs(y))), 1);
     const identique = norm.every(([x, y], i) => Math.abs(x - piece.points[i][0]) <= 1e-6 * echelle && Math.abs(y - piece.points[i][1]) <= 1e-6 * echelle);
-    if (identique) return c.points;
+    if (identique) return { calque: c.layer, points: c.points };
   }
   return null;
 }
@@ -218,7 +230,9 @@ export function construireEntree(
           message: `La pièce « ${piece.nom} » du patron ${libelle} est introuvable dans son fichier « ${fichier} » : le fichier a peut-être été remplacé. Réenregistrez le patron.`,
         };
       }
-      const contour = nettoyerContour(contourDxf.map(([x, y]) => [x * MM_PAR_UNITE, y * MM_PAR_UNITE] as Point));
+      const enMm = ([x, y]: Point) => [x * MM_PAR_UNITE, y * MM_PAR_UNITE] as Point;
+      const contour = nettoyerContour(contourDxf.points.map(enMm));
+      const traits = traitsDeLaPiece(patron.dxf, contourDxf).map((t) => ({ ...t, points: t.points.map(enMm) }));
       const total = d.quantite * piece.expectedCount;
       const base = patron.pieces.length > 1 ? `${patron.articleCode} · ${patron.taille} · ${piece.nom}` : `${patron.articleCode} · ${patron.taille}`;
       const variantes: { id: string; miroir: boolean; quantite: number }[] =
@@ -247,6 +261,8 @@ export function construireEntree(
           nomPiece: piece.nom,
           miroir: v.miroir,
           quantite: v.quantite,
+          calqueCoupe: contourDxf.calque,
+          traits,
         });
         entreePieces.push({ id: v.id, contour, quantite: v.quantite, rotations: piece.rotations.map(Number), miroir: v.miroir });
       }

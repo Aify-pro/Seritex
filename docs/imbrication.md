@@ -18,8 +18,8 @@ et valident.
 | Phase | Contenu | État |
 |---|---|---|
 | 1 | Moteur Rust intégré, contrat JSON, validation indépendante, banc d'essai | **fait** (PR #239) |
-| 2 | Pièces lues depuis la bibliothèque, modèle de données (rotations, paires), calculs en arrière-plan par tranches, stockage | **fait** |
-| 3 | Aperçu SVG, exports DXF/PDF, interface | à faire |
+| 2 | Pièces lues depuis la bibliothèque, modèle de données (rotations, paires), calculs en arrière-plan par tranches, stockage | **fait** (PR #241) |
+| 3 | Calcul depuis la fenêtre d'un tracé, comparaison des laizes, aperçu, fichier DXF du tracé (puis PDF et marquage existants) | **fait** |
 | 4 | Outils pour agents IA, journal, validation humaine, droits | à faire |
 | 5 | Tests complets, documentation finale, rapport | à faire |
 
@@ -160,6 +160,62 @@ pas à trancher : le banc d'essai sur 10 à 20 tracés Diamino reste l'arbitre.
 ### Préréglages
 
 `PREREGLAGES_TEMPS` : rapide 30 s, normal 2 min, approfondi 10 min.
+
+## Phase 3 : le calcul dans le module patronnage
+
+Le calcul se lance depuis la **fenêtre d'un tracé** (Patronnage → fiche →
+tracé → « Fichier du tracé »), juste sous le dépôt du fichier Modaris, qui
+reste possible à tout moment. Rien n'est imposé : on peut calculer, regarder,
+et finalement déposer un fichier Modaris quand même.
+
+1. **Pièces** : celles du tracé (« pièces par couche », `trace_semi_finis`).
+   Sans pièces, le calcul est bloqué avec un message qui dit quoi faire.
+2. **Laizes** : celles des rouleaux choisis pour le tracé, sinon celles des
+   rouleaux en stock du tissu du tracé (même forme, non réservés), plus la
+   laize saisie sur le tracé ou la fiche, plus toute laize tapée à la main.
+   On peut en cocher jusqu'à 4 : **un calcul par laize**, lancés ensemble
+   (même `groupe`), qui tournent en parallèle (un appel de la route de
+   traitement par calcul).
+3. **Comparaison** : longueur, efficience et **tissu par couche (m²)** ;
+   le calcul du groupe qui consomme le moins de tissu est signalé. C'est la
+   surface, pas la longueur, qui départage deux laizes.
+4. **Aperçu** : dessin du tracé (une couleur par taille, nom de la pièce
+   au survol), longueur selon X, laize selon Y, comme le fichier.
+5. **« Utiliser ce tracé »** (décision humaine, confirmée) : Seritex
+   recontrôle le tracé, écrit le **fichier DXF** et le dépose sur le tracé
+   par le **même chemin** qu'un fichier Modaris (`lib/patronnage/depot-trace.ts`) :
+   reconnaissance des pièces, dimensions (largeur = laize du calcul),
+   analyse, fiche en « Tracés déposés », journal (`trace_calcule_seritex`).
+   Tout ce qui suit est inchangé : **DXF marqué, PDF** (aperçu ou taille
+   réelle), rouleaux, plis, validation « Bon pour coupe ».
+
+### Le fichier DXF (`lib/imbrication/export-dxf.ts`)
+
+- Format des gabarits : **DXF R12 (AC1009, AAMA)**, unité **0,1 mm**,
+  longueur du matelas selon X, laize selon Y.
+- Chaque exemplaire est écrit à plat (pas de bloc) : **ligne de coupe**
+  fermée sur le calque de coupe du gabarit (« 1 »), puis **couture (14) et
+  crans (11)** repris du gabarit (`dessin-pieces.ts` retrouve le bloc de la
+  pièce par l'emprise de sa ligne de coupe) et transformés comme la pièce.
+- **Lisières** : lignes sur le calque `SERITEX_REPERE_LISIERE`, ignoré par
+  la reconnaissance.
+- Vérifié sur le cas réel OT-2026-0010-T1 (48 pièces, tracé natif de
+  849,3 cm) : fichier relu par le module, **48 pièces, 100 % reconnues**,
+  échelle 1, sans alerte miroir. Les tests (section G) refont cette
+  vérification à chaque passage.
+
+### Modèle de données (migration 0184)
+
+| Colonne | Rôle |
+|---|---|
+| `imbrication_calculs.trace_id` | tracé pour lequel le calcul a été lancé (le supprimer garde l'historique) |
+| `imbrication_calculs.groupe` | calculs lancés ensemble pour être comparés |
+| `traces_placement.imbrication_calcul_id` | le fichier du tracé vient de ce calcul (null = fichier déposé) |
+
+### Droits
+
+Lancer, arrêter, utiliser un calcul : droit « Patronnage — tracés : créer »
+(celui du dépôt d'un fichier). Voir les calculs : « Patronnage : voir ».
 
 ## Contrat JSON `seritex.imbrication/v1`
 
@@ -356,6 +412,14 @@ des bouts, zones de défaut du tissu (jagua-rs gère des zones de qualité).
 - **Pièces au pli sur tissu tubulaire** : non gérées (une pièce au pli doit
   toucher le bord du tube, contrainte inconnue du moteur). En v1, le calcul
   automatique s'applique au tissu ouvert.
+- **Tracé tubulaire** : le calcul automatique est refusé sur un tracé en
+  tubulaire (message clair) ; déposer un fichier Modaris.
+- **Répartition des tailles entre tracés** : le calcul place les pièces
+  d'UN tracé. Choisir quelles tailles mettre ensemble et sur combien de
+  plis (pour toute une commande) est l'étape suivante (phase 4).
+- **Calculs en parallèle sur Vercel** : une même instance peut recevoir
+  plusieurs appels ; les calculs restent justes, mais se partagent alors le
+  processeur. Sur un serveur Seritex, prévoir un cœur par calcul.
 - **Longueur de table** : signalée, pas imposée. Le découpage en plusieurs
   tracés est à prévoir.
 - **Précision** : flottants 32 bits dans le moteur. Les contours sont

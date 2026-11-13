@@ -1,5 +1,5 @@
 /**
- * Tests du moteur d'imbrication (Phase 1).
+ * Tests du moteur d'imbrication (phases 1 à 3).
  *
  *  A. Contrat : l'entrée est validée strictement (champ inconnu, mauvaise version).
  *  B. Contours : un contour qui se croise est refusé avec le nom de la pièce.
@@ -12,6 +12,9 @@
  *     tracé complet et valide, reproductibilité (même entrée + même graine +
  *     même effort = même tracé), pièce plus large que le tissu, contour
  *     invalide, annulation en cours de calcul.
+ *  E. Préparation des pièces depuis la bibliothèque (gabarits Modaris).
+ *  F. Exécution par tranches.
+ *  G. Fichier DXF du tracé calculé : relu et reconnu à 100 % par le module.
  *
  * Lancer : npm run test:imbrication
  */
@@ -24,6 +27,8 @@ import { construireEntree, dxfContientDesArcs, nettoyerContour, retrouverContour
 import { executerTranche, traiterCalculs, type CalculReserve, type MiseAJourCalcul, type StoreCalculs } from "../src/lib/imbrication/execution";
 import type { CalculImbrication, ResultatMoteur } from "../src/lib/imbrication/moteur";
 import { corps, dxfModaris, entreeTshirt, manche } from "./imbrication-fixtures";
+import { CALQUE_LISIERE, genererDxfImbrication } from "../src/lib/imbrication/export-dxf";
+import { reconnaitreTrace } from "../src/lib/patronnage/reconnaissance";
 
 let echecs = 0;
 let total = 0;
@@ -226,7 +231,7 @@ async function sectionPreparation() {
     ...extra,
   });
   const contourCorps = retrouverContour(dxf, patron("sf-corps", 0).pieces[0]);
-  verifier("pièce retrouvée dans son DXF, orientation d'origine (droit-fil selon X)", !!contourCorps && contourCorps.length === contours[0].points.length);
+  verifier("pièce retrouvée dans son DXF, orientation d'origine (droit-fil selon X)", !!contourCorps && contourCorps.points.length === contours[0].points.length);
 
   const tissu = { largeurUtileMm: 1600, margeLisiereMm: 5, espacementMm: 2 };
   const calcul = { tempsS: 20, graine: 3 };
@@ -276,6 +281,37 @@ async function sectionPreparation() {
 
   const r = await imbriquer(p.entree);
   verifier("calcul de bout en bout sur les pièces préparées : tracé valide", r.ok && r.validation.valide, r.ok ? r.validation.problemes : r);
+  if (!r.ok) return;
+
+  console.log("G. Fichier DXF du tracé calculé");
+  verifier("crans et couture de chaque pièce retrouvés dans le gabarit", p.pieces.every((x) => x.calqueCoupe === "1" && (x.traits ?? []).some((t) => t.calque === "14") && (x.traits ?? []).some((t) => t.calque === "11")), p.pieces.map((x) => x.traits?.length));
+  const texte = genererDxfImbrication(r.entree, r.sortie, p.pieces);
+  const relus = parseDxfContours(texte);
+  verifier("une pièce relue par exemplaire posé (couture et crans écartés)", relus.length === r.sortie.placements.length, [relus.length, r.sortie.placements.length]);
+  const polylignes = (calque: string) => (texte.match(new RegExp(`POLYLINE\\r\\n  8\\r\\n${calque}\\r\\n`, "g")) ?? []).length;
+  const traitsAttendus = (calque: string) => r.sortie.placements.reduce((n, pl) => n + (p.pieces.find((x) => x.id === pl.piece_id)?.traits ?? []).filter((t) => t.calque === calque).length, 0);
+  verifier("couture (14) et crans (11) écrits pour chaque exemplaire", polylignes("14") === traitsAttendus("14") && polylignes("11") === traitsAttendus("11") && polylignes("1") === r.sortie.placements.length, [polylignes("1"), polylignes("14"), polylignes("11")]);
+  const tous = relus.flatMap((c) => c.points);
+  const largeur = r.entree.tissu.largeur_utile * 10;
+  const longueur = r.sortie.longueur * 10;
+  verifier(
+    "tout le tracé dans le tissu, à l'unité des gabarits (0,1 mm)",
+    tous.every(([x, y]) => x >= -1e-3 && x <= longueur + 1e-3 && y >= 50 - 1e-3 && y <= largeur - 50 + 1e-3)
+  );
+  verifier("lisières tracées en lignes sur un calque de repère", texte.includes(CALQUE_LISIERE) && texte.includes("AC1009"));
+  const references = enBibliotheque.map((g, i) => ({
+    id: `ref-${i}`,
+    article: i === 0 ? "TSM01-CAV" : "TSM01-MC",
+    taille: "Homme/M",
+    piece: i === 0 ? "Corps" : "Manche",
+    geom: { points: g.points, area: g.area, perimeter: g.perimeter, radial: g.radial },
+  }));
+  const reco = reconnaitreTrace(relus, references, 98);
+  verifier(
+    "fichier relu par la reconnaissance du module : 100 % reconnu, échelle 1, sans alerte miroir",
+    reco.reconnaissanceComplete && reco.facteurEchelle === 1 && !reco.alerteMiroir && reco.nbPiecesDetectees === r.sortie.placements.length,
+    reco
+  );
 }
 
 // ---------------------------------------------------------------------------

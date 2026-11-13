@@ -148,3 +148,32 @@ await test("annulation : immédiate si en attente, demandée si en cours, refus�
   await expectFail(() => asRole("authenticated", uidPao, `select annuler_calcul_imbrication($1)`, [c1.id]));
   await expectFail(() => asRole("authenticated", uidAutre, `select annuler_calcul_imbrication($1)`, [c5.id]));
 });
+
+// ---- 0184 : calculs rattachés à un tracé ----
+await test("0184 : calcul lancé pour un tracé (groupe de comparaison) ; le tracé garde la trace du calcul retenu", async () => {
+  const f = await one(`insert into fiches_placement(numero_ot, regroupee, designation_article) values ('OT-IMB',true,'Imbrication') returning id`);
+  const t = await one(`insert into traces_placement(fiche_id, ordre, reference) values ($1,1,'OT-IMB-T1') returning id`, [f.id]);
+  const groupe = "11111111-2222-3333-4444-555555555555";
+  const [c] = await asRole(
+    "authenticated",
+    uidPao,
+    `insert into imbrication_calculs(parametres, entree, pieces, temps_total_s, demande_par, trace_id, groupe)
+     values ('{}','{}','[]',30,$1,$2,$3) returning id, trace_id, groupe`,
+    [uidPao, t.id, groupe]
+  );
+  assert.equal(c.trace_id, t.id);
+  assert.equal(c.groupe, groupe);
+  await q(`update traces_placement set imbrication_calcul_id=$2 where id=$1`, [t.id, c.id]);
+  // Le calcul supprimé (purge) ne supprime pas le tracé : le lien tombe.
+  await q(`delete from imbrication_calculs where id=$1`, [c.id]);
+  assert.equal((await one(`select imbrication_calcul_id from traces_placement where id=$1`, [t.id])).imbrication_calcul_id, null);
+  // Le tracé supprimé ne supprime pas l'historique des calculs.
+  const [c2] = await asRole(
+    "authenticated",
+    uidPao,
+    `insert into imbrication_calculs(parametres, entree, pieces, temps_total_s, demande_par, trace_id) values ('{}','{}','[]',30,$1,$2) returning id`,
+    [uidPao, t.id]
+  );
+  await q(`delete from traces_placement where id=$1`, [t.id]);
+  assert.equal((await one(`select trace_id from imbrication_calculs where id=$1`, [c2.id])).trace_id, null);
+});

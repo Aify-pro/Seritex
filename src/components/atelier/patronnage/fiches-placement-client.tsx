@@ -1,6 +1,7 @@
 "use client";
 
 import { TraceRouleaux } from "@/components/atelier/patronnage/trace-rouleaux";
+import { CalculImbrication } from "@/components/atelier/patronnage/calcul-imbrication";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -1527,7 +1528,7 @@ function TraceDetailBody({
           )}
         </form>
   );
-  const blocFichier = (
+  const blocDepot = (
         <div className="rounded-md border border-dashed border-border bg-surface-muted p-3">
           <input ref={fileInputRef} type="file" accept=".dxf" onChange={handleUpload} className="hidden" />
           {trace.fichierNom ? (
@@ -1561,6 +1562,13 @@ function TraceDetailBody({
             <p className="text-sm text-foreground-muted">Aucun fichier déposé.</p>
           )}
         </div>
+  );
+  // Calcul automatique Seritex : facultatif, à côté du dépôt Modaris.
+  const blocFichier = (
+    <div className="space-y-2">
+      {blocDepot}
+      {!effectiveLocked && canModify && <CalculImbrication traceId={trace.id} ficheId={fiche.id} canModify={canModify} onChanged={onChanged} />}
+    </div>
   );
   const blocAnalyse = (
     <>
