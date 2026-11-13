@@ -1,6 +1,12 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Moteur d'imbrication (WebAssembly) : lu sur disque à l'exécution, donc
+  // invisible pour le traçage automatique des fichiers. On l'embarque dans
+  // les fonctions qui calculent des tracés.
+  outputFileTracingIncludes: {
+    "/api/imbrication/traiter": ["./src/lib/imbrication/moteur/*.wasm"],
+  },
   experimental: {
     serverActions: {
       // Next.js limite par défaut le corps d'une action serveur à 1 Mo. Un tracé

@@ -27,6 +27,18 @@ pub struct Entree {
     pub espacement: f64,
     pub calcul: Calcul,
     pub pieces: Vec<Piece>,
+    /// Reprise d'un calcul : le moteur repart de ces placements (meilleur
+    /// tracé d'une tranche précédente) au lieu de construire un premier
+    /// tracé. Sert à dépasser la durée maximale d'une fonction serveur en
+    /// enchaînant des tranches. Ajout compatible : absent = départ de zéro.
+    #[serde(default)]
+    pub reprise: Option<Reprise>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Reprise {
+    pub placements: Vec<Placement>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

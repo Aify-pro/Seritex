@@ -11,10 +11,11 @@
 pub mod contrat;
 pub mod terminateur;
 
-use contrat::{Arret, Entree, Erreur, Placement, Sortie, Statut, VERSION_CONTRAT};
+use contrat::{Arret, Entree, Erreur, Placement, Reprise, Sortie, Statut, VERSION_CONTRAT};
 use jagua_rs::io::import::Importer;
 use jagua_rs::probs::spp::entities::SPSolution;
-use jagua_rs::probs::spp::io::ext_repr::ExtSPInstance;
+use jagua_rs::probs::spp::entities::SPInstance;
+use jagua_rs::probs::spp::io::ext_repr::{ExtSPInstance, ExtSPSolution};
 use rand::SeedableRng;
 use rand::rngs::Xoshiro256PlusPlus;
 use serde_json::json;
@@ -261,6 +262,11 @@ fn imbriquer_interne(entree: &Entree) -> Result<Sortie, Erreur> {
         )
     })?;
 
+    let solution_initiale = match &entree.reprise {
+        None => None,
+        Some(reprise) => Some(solution_de_reprise(entree, &preparees, &instance, reprise)?),
+    };
+
     let mut terminateur = Terminateur::new(
         temps_max,
         entree.calcul.effort,
@@ -273,7 +279,7 @@ fn imbriquer_interne(entree: &Entree) -> Result<Sortie, Erreur> {
         &mut terminateur,
         &config.expl_cfg,
         &config.cmpr_cfg,
-        None,
+        solution_initiale.as_ref(),
     )
     .map_err(|e| Erreur::new("moteur", format!("Le moteur d'imbrication a échoué : {e}")))?;
 
@@ -325,4 +331,46 @@ fn imbriquer_interne(entree: &Entree) -> Result<Sortie, Erreur> {
 fn normaliser_angle(a: f64) -> f64 {
     let r = a.rem_euclid(360.0);
     if (r - 360.0).abs() < 1e-6 { 0.0 } else { r }
+}
+
+/// Reconstruit la solution du moteur à partir des placements d'une tranche
+/// précédente (transformation inverse de celle appliquée en sortie).
+fn solution_de_reprise(
+    entree: &Entree,
+    preparees: &[PiecePreparee],
+    instance: &SPInstance,
+    reprise: &Reprise,
+) -> Result<SPSolution, Erreur> {
+    let invalide = |m: String| Erreur::new("reprise_invalide", format!("Reprise du calcul impossible : {m}"));
+    let marge = entree.tissu.marge_lisiere;
+    let mut longueur: f64 = 0.0;
+    let mut items = Vec::with_capacity(reprise.placements.len());
+    for pl in &reprise.placements {
+        let i = entree
+            .pieces
+            .iter()
+            .position(|p| p.id == pl.piece_id)
+            .ok_or_else(|| invalide(format!("pièce « {} » inconnue", pl.piece_id)))?;
+        let (piece, prep) = (&entree.pieces[i], &preparees[i]);
+        let reflechi = pl.miroir ^ piece.miroir;
+        let d = transformer(prep.decalage, pl.rotation, reflechi, 0.0, 0.0);
+        let tx = pl.x + d[0];
+        let ty = pl.y - marge + d[1];
+        for q in &prep.contour_local {
+            let base = [q[0] + prep.decalage[0], q[1] + prep.decalage[1]];
+            longueur = longueur.max(transformer(base, pl.rotation, reflechi, pl.x, pl.y)[0]);
+        }
+        items.push(json!({
+            "item_id": i,
+            "transformation": { "reflected": reflechi, "rotation": pl.rotation, "translation": [tx, ty] },
+        }));
+    }
+    let ext: ExtSPSolution = serde_json::from_value(json!({
+        "strip_width": longueur + 1e-3,
+        "layout": { "container_id": 0, "placed_items": items, "density": 0.0 },
+        "density": 0.0,
+        "run_time_sec": 0,
+    }))
+    .map_err(|e| invalide(e.to_string()))?;
+    jagua_rs::probs::spp::io::import_solution(instance, &ext).map_err(|e| invalide(e.to_string()))
 }
