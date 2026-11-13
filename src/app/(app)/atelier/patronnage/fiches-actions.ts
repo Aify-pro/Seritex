@@ -1,17 +1,17 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { removeTraceFiles, storeTraceFile } from "@/lib/storage/patronnage-files";
+import { removeTraceFiles } from "@/lib/storage/patronnage-files";
 import { requireUser } from "@/lib/auth/current-user";
 import { can } from "@/lib/auth/permissions";
 import { getSizes, getSizesForProductModel, type Size } from "@/lib/sizes";
-import { parseDxfContours } from "@/lib/patronnage/dxf";
 import { normalizeShape, appliquerEchelleFichier, FACTEURS_ECHELLE, type FacteurEchelle } from "@/lib/patronnage/geometry";
 import { chargerTraceSource, facteurEnregistreTrace } from "@/lib/patronnage/trace-source";
 import { loadReferenceLibrary } from "@/lib/patronnage/bibliotheque";
 import { reconnaitreTrace } from "@/lib/patronnage/reconnaissance";
-import { construireAnalyseDetaillee, MM_PAR_UNITE, type TraceAnalysisDetail } from "@/lib/patronnage/detail";
+import { construireAnalyseDetaillee, type TraceAnalysisDetail } from "@/lib/patronnage/detail";
 import { readDxfFile } from "@/lib/patronnage/upload";
+import { deposerFichierTrace, persisterAnalyse, SEUIL_RECONNAISSANCE } from "@/lib/patronnage/depot-trace";
 import { nomenclaturesActives } from "@/lib/patronnage/nomenclatures-actives";
 import type { StatutFiche, RepartitionTailles } from "@/lib/patronnage/types";
 import { repartitionDepuisTraces, repartitionTotal, sameRepartition } from "@/lib/patronnage/dispatching";
@@ -19,8 +19,6 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { redirect } from "next/navigation";
 
-const MOTEUR_VERSION = "patronnage-v2 (rotation+180°, échelle, miroir)";
-const SEUIL_RECONNAISSANCE = 98;
 
 async function requirePermission(action: "view" | "create" | "modify" | "validate" | "unlock" | "archive" | "delete") {
   const current = await requireUser();
@@ -1301,145 +1299,20 @@ export async function uploadTraceDxf(traceId: string, ficheId: string, formData:
   } catch {
     return { error: "Impossible de lire le fichier" };
   }
-  const contours = parseDxfContours(text);
-  if (contours.length === 0) {
-    return { error: "Aucun contour exploitable détecté dans ce tracé." };
-  }
-
   const supabase = await createClient();
-  const library = await loadReferenceLibrary(supabase);
-  if ("error" in library) return { error: library.error };
-
-  // 1 → 3. Moteur : pré-passe d'échelle fichier, comparaison directe contre
-  // toute la bibliothèque, puis passe miroir (cf. lib/patronnage/reconnaissance).
-  const analyse = reconnaitreTrace(contours, library.references, SEUIL_RECONNAISSANCE);
-
-  // 4. Stockage du fichier (remplace l'ancien s'il existe)
-  const { data: existingTrace } = await supabase
-    .from("traces_placement")
-    .select("fichier_path")
-    .eq("id", traceId)
-    .single();
-  if (existingTrace?.fichier_path) {
-    await removeTraceFiles([existingTrace.fichier_path]);
-  }
-  const buffer = Buffer.from(await read.file.arrayBuffer());
-  const stored = await storeTraceFile(
-    `traces/${ficheId}/${traceId}-${Date.now()}-${sanitizeFileName(read.file.name)}`,
-    buffer
+  const depot = await deposerFichierTrace(
+    supabase,
+    authId,
+    traceId,
+    ficheId,
+    { texte: text, nom: read.file.name, octets: Buffer.from(await read.file.arrayBuffer()) },
+    { statutFiche: gate.statut }
   );
-  if ("error" in stored) return { error: `Échec de l'enregistrement du fichier : ${stored.error}` };
-  const remotePath = stored.path;
-
-  // Dimensions du tracé lues dans le fichier (encombrement du placement, à
-  // l'échelle retenue par la reconnaissance) : la plus grande est la longueur
-  // du matelas, l'autre sa largeur. Modifiables ensuite à la main.
-  const dims = dimensionsTraceCm(contours.map((c) => c.points), analyse.facteurEchelle);
-
-  const { data: traceUpdated, error: traceUpdateError } = await supabase
-    .from("traces_placement")
-    .update({
-      ...(dims ? { longueur_matelas_cm: dims.longueur, largeur_matelas_cm: dims.largeur } : {}),
-      fichier_path: remotePath,
-      fichier_nom: read.file.name,
-      fichier_taille: read.file.size,
-      charge_par: authId,
-      charge_le: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", traceId)
-    .select("id");
-  if (traceUpdateError) return { error: traceUpdateError.message };
-  // La RLS filtre sans erreur : 0 ligne modifiée = dépôt non pris en compte.
-  // On retire le fichier tout juste stocké plutôt que de laisser un orphelin,
-  // et surtout on ne prétend pas que le dépôt a réussi.
-  if (!traceUpdated?.length) {
-    await removeTraceFiles([remotePath]);
-    return { error: "La base a refusé la mise à jour du tracé (droits ou verrou de l'ODF) — aucune modification n'a été enregistrée." };
-  }
-
-  const analyseError = await persisterAnalyse(supabase, traceId, analyse);
-  if (analyseError) return { error: analyseError };
-
-  // 5. Fiche : passage automatique en "Tracés déposés" au premier dépôt
-  if (gate.statut === "demande") {
-    await supabase.from("fiches_placement").update({ statut: "traces_deposes" }).eq("id", ficheId);
-  }
-
-  await supabase.from("audit_log").insert({
-    user_id: authId,
-    action: "upload_trace_dxf",
-    entity_type: "trace_placement",
-    entity_id: traceId,
-    metadata: {
-      nb_pieces: analyse.nbPiecesDetectees,
-      facteur_echelle: analyse.facteurEchelle,
-      score_echelle: analyse.scoreEchelle,
-      taux_reconnaissance: analyse.tauxReconnaissance,
-      alerte_miroir: analyse.alerteMiroir,
-      reconnaissance_complete: analyse.reconnaissanceComplete,
-    },
-  });
+  if ("error" in depot) return depot;
 
   revalidatePath("/atelier/patronnage");
   revalidatePath(`/atelier/patronnage/${ficheId}`);
-  return { reconnaissanceComplete: analyse.reconnaissanceComplete };
-}
-
-/** Enregistre (ou remplace) l'analyse d'un tracé. Retourne le message d'erreur éventuel. */
-async function persisterAnalyse(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  traceId: string,
-  analyse: ReturnType<typeof reconnaitreTrace>
-): Promise<string | null> {
-  const { error } = await supabase.from("analyses_trace").upsert(
-    {
-      trace_id: traceId,
-      nb_pieces_detectees: analyse.nbPiecesDetectees,
-      facteur_echelle: analyse.facteurEchelle,
-      patrons_reconnus: analyse.patronsReconnus,
-      pieces_non_reconnues: analyse.piecesNonReconnues,
-      taux_reconnaissance: analyse.tauxReconnaissance,
-      reconnaissance_complete: analyse.reconnaissanceComplete,
-      alerte_miroir: analyse.alerteMiroir,
-      alerte_echelle: analyse.alerteEchelle,
-      moteur_version: MOTEUR_VERSION,
-      analysee_le: new Date().toISOString(),
-    },
-    { onConflict: "trace_id" }
-  );
-  if (error) return error.message;
-  // Tracé d'un ordre regroupé sans pièces : le fichier les pré-remplit (D2) ;
-  // la saisie manuelle reste possible et rien n'est jamais écrasé ici.
-  const { data: t } = await supabase.from("traces_placement").select("fiches_placement(regroupee),trace_semi_finis(id)").eq("id", traceId).maybeSingle();
-  const fiche = Array.isArray(t?.fiches_placement) ? t?.fiches_placement[0] : t?.fiches_placement;
-  if (fiche?.regroupee && (t?.trace_semi_finis ?? []).length === 0) {
-    await supabase.rpc("pre_remplir_pieces_trace", { p_trace_id: traceId });
-  }
-  return null;
-}
-
-/** Encombrement du placement en centimètres (unité de fichier × échelle × 0,1 mm). */
-function dimensionsTraceCm(pieces: [number, number][][], facteur: number): { longueur: number; largeur: number } | null {
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const p of pieces) {
-    for (const [x, y] of p) {
-      if (x < minX) minX = x;
-      if (x > maxX) maxX = x;
-      if (y < minY) minY = y;
-      if (y > maxY) maxY = y;
-    }
-  }
-  if (!Number.isFinite(minX)) return null;
-  const cm = (v: number) => Math.round(((v * facteur * MM_PAR_UNITE) / 10) * 10) / 10;
-  const a = cm(maxX - minX);
-  const b = cm(maxY - minY);
-  if (a <= 0 || b <= 0) return null;
-  return { longueur: Math.max(a, b), largeur: Math.min(a, b) };
-}
-
-function sanitizeFileName(name: string) {
-  return name.replace(/[^a-zA-Z0-9.\-_]/g, "_");
+  return { reconnaissanceComplete: depot.reconnaissanceComplete };
 }
 
 // ------------------------------------------------------------

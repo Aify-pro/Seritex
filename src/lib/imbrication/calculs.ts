@@ -34,6 +34,10 @@ export const parametresCalculSchema = z
   .object({
     libelle: z.string().trim().max(200).optional(),
     ficheId: z.string().uuid().nullable().optional(),
+    /** Tracé pour lequel le calcul est lancé (fenêtre du tracé, module patronnage). */
+    traceId: z.string().uuid().nullable().optional(),
+    /** Calculs lancés ensemble pour être comparés (une laize chacun). */
+    groupe: z.string().uuid().nullable().optional(),
     demandes: z
       .array(z.object({ semiFiniId: z.string().uuid(), taille: z.string().min(1), quantite: z.number().int().min(0).max(10_000) }))
       .min(1),
@@ -52,7 +56,10 @@ export const parametresCalculSchema = z
 
 export type ParametresCalcul = z.input<typeof parametresCalculSchema>;
 
-export async function creerCalculImbrication(parametres: ParametresCalcul): Promise<{ id: string } | { error: string }> {
+export async function creerCalculImbrication(
+  parametres: ParametresCalcul,
+  options: { declencher?: boolean } = {}
+): Promise<{ id: string } | { error: string }> {
   const { authId } = await requirePermission("patronnage_traces", "create");
   const lecture = parametresCalculSchema.safeParse(parametres);
   if (!lecture.success) return { error: `Paramètres invalides : ${lecture.error.issues[0]?.message ?? "valeur refusée"}` };
@@ -75,6 +82,8 @@ export async function creerCalculImbrication(parametres: ParametresCalcul): Prom
     .insert({
       libelle: p.libelle ?? null,
       fiche_id: p.ficheId ?? null,
+      trace_id: p.traceId ?? null,
+      groupe: p.groupe ?? null,
       parametres: { ...p, graine },
       entree: entree.data,
       pieces: prep.pieces,
@@ -85,7 +94,7 @@ export async function creerCalculImbrication(parametres: ParametresCalcul): Prom
     .single();
   if (error) return { error: `Enregistrement du calcul impossible : ${error.message}` };
 
-  await declencherTraitement();
+  if (options.declencher !== false) await declencherTraitement();
   return { id: data.id as string };
 }
 
@@ -152,16 +161,22 @@ export async function lireCalculImbrication(id: string): Promise<CalculImbricati
  * de traitement après la réponse. Sans effet bloquant : la route répond tout
  * de suite et calcule de son côté ; la tâche planifiée rattrape tout échec.
  */
-async function declencherTraitement() {
+export async function declencherTraitement(nombre = 1) {
   const secret = process.env.CRON_SECRET;
   if (!secret) return;
   const base = await getBaseUrl();
   after(async () => {
-    try {
-      await fetch(`${base}/api/imbrication/traiter`, { headers: { Authorization: `Bearer ${secret}` }, signal: AbortSignal.timeout(10_000) });
-    } catch (e) {
-      console.error("[imbrication] déclenchement immédiat impossible (la tâche planifiée prendra le relais)", e);
-    }
+    // Un appel = une fonction serveur qui prend UN calcul à la fois : n appels
+    // pour n calculs lancés ensemble, qui tournent alors en parallèle.
+    await Promise.all(
+      Array.from({ length: Math.max(1, Math.min(nombre, 6)) }, async () => {
+        try {
+          await fetch(`${base}/api/imbrication/traiter`, { headers: { Authorization: `Bearer ${secret}` }, signal: AbortSignal.timeout(10_000) });
+        } catch (e) {
+          console.error("[imbrication] déclenchement immédiat impossible (la tâche planifiée prendra le relais)", e);
+        }
+      })
+    );
   });
 }
 
