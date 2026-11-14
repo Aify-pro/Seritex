@@ -7,6 +7,9 @@ export interface LibraryPiece {
   points: Point[];
   area: number;
   perimeter: number;
+  /** Angles permis au placement (0182), triés, normalisés depuis numeric[]. */
+  rotationsAutorisees: number[];
+  symetrie: "aucune" | "paire";
 }
 
 export interface LibraryPattern {

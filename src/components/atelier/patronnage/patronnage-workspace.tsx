@@ -8,6 +8,7 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { PieceOverlay } from "@/components/atelier/patronnage/piece-overlay";
+import { PieceRotations } from "@/components/atelier/patronnage/piece-rotations";
 import { TaillesChips } from "@/components/atelier/patronnage/tailles-chips";
 import type { LibraryArticle, LibraryPattern } from "@/lib/patronnage/types";
 import type { TailleSemiFini } from "@/lib/patronnage/tailles-semi-finis";
@@ -620,6 +621,13 @@ function BibliothequeTab({
                           <p className="text-foreground-muted">
                             ×{piece.expectedCount} · {Math.round(piece.area)} u²
                           </p>
+                          <PieceRotations
+                            key={`${piece.rotationsAutorisees.join(",")}|${piece.symetrie}`}
+                            pieceId={piece.id}
+                            rotations={piece.rotationsAutorisees}
+                            symetrie={piece.symetrie}
+                            canModify={canModify}
+                          />
                         </div>
                       </div>
                     ))}
