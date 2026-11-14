@@ -10,6 +10,7 @@ import { SEUIL_RECONNAISSANCE_DEFAUT } from "@/lib/patronnage/reconnaissance";
 import { construireAnalyseDetaillee, type TraceAnalysisDetail } from "@/lib/patronnage/detail";
 import { readDxfFile } from "@/lib/patronnage/upload";
 import { getSizes } from "@/lib/sizes";
+import { choixDepuisRotations, normaliserRotations, normaliserSymetrie, reglageRotationsSchema } from "@/lib/patronnage/rotations";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
@@ -283,10 +284,27 @@ export async function replaceReferencePattern(formData: FormData): Promise<{ pat
   const pieceRows = rowsFromContours(patternId, contours, included);
   if (pieceRows.length === 0) return { error: "Aucune pièce exploitable dans ce fichier" };
 
-  const { data: anciennes, error: anciennesError } = await supabase.from("pattern_pieces").select("id").eq("pattern_id", patternId);
+  const { data: anciennes, error: anciennesError } = await supabase
+    .from("pattern_pieces")
+    .select("id,name,rotations_autorisees,symetrie")
+    .eq("pattern_id", patternId);
   if (anciennesError) return { error: `Lecture du patron impossible : ${anciennesError.message}` };
 
-  const { error: insertError } = await supabase.from("pattern_pieces").insert(pieceRows);
+  // Une pièce qui garde son nom garde ses rotations autorisées et sa symétrie ;
+  // une pièce nouvelle prend les valeurs par défaut de la base ({0,180}, aucune).
+  const reglages = new Map((anciennes ?? []).map((a) => [a.name as string, a]));
+  const lignes = pieceRows.map((row) => {
+    const ancienne = reglages.get(row.name);
+    if (!ancienne) return row;
+    const rotations = normaliserRotations(ancienne.rotations_autorisees);
+    return {
+      ...row,
+      ...(choixDepuisRotations(rotations) ? { rotations_autorisees: rotations } : {}),
+      symetrie: normaliserSymetrie(ancienne.symetrie),
+    };
+  });
+
+  const { error: insertError } = await supabase.from("pattern_pieces").insert(lignes);
   if (insertError) return { error: `Enregistrement des pièces impossible : ${insertError.message}` };
 
   const anciennesIds = (anciennes ?? []).map((a) => a.id as string);
@@ -395,6 +413,45 @@ export async function renameReferenceArticle(articleId: string, articleCode: str
     entity_type: "pattern_article",
     entity_id: articleId,
     metadata: { article_code: code },
+  });
+  revalidateBibliotheque();
+  return {};
+}
+
+/**
+ * Règle les rotations autorisées et la symétrie d'une pièce de la bibliothèque
+ * (colonnes de la migration 0182, lues par le moteur d'imbrication). Seules
+ * {0}, {180} et {0,180} sont acceptées. L'écriture passe par le client de
+ * l'utilisateur : la RLS (droit « modifier » du patronnage, 0112) fait foi.
+ */
+export async function reglerRotationsPiece(input: {
+  pieceId: string;
+  rotations: number[];
+  symetrie: "aucune" | "paire";
+}): Promise<{ error?: string }> {
+  const { authId } = await requirePermission("patronnage", "modify");
+
+  const parsed = reglageRotationsSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Réglage invalide" };
+  const { pieceId, rotations, symetrie } = parsed.data;
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("pattern_pieces")
+    .update({ rotations_autorisees: rotations, symetrie })
+    .eq("id", pieceId)
+    .select("id,pattern_id");
+  if (error) {
+    return { error: error.code === "23514" ? "Réglage refusé par la base : valeurs non admises" : `Enregistrement impossible : ${error.message}` };
+  }
+  if (!data || data.length === 0) return { error: "Modification refusée : pièce introuvable ou droit insuffisant sur le patronnage" };
+
+  await supabase.from("audit_log").insert({
+    user_id: authId,
+    action: "update_pattern_piece_rotations",
+    entity_type: "pattern_piece",
+    entity_id: pieceId,
+    metadata: { pattern_id: data[0].pattern_id, rotations_autorisees: rotations, symetrie },
   });
   revalidateBibliotheque();
   return {};

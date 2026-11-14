@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { loadPiecesUtilisees } from "@/lib/patronnage/bibliotheque";
 import { getSizes } from "@/lib/sizes";
+import { normaliserRotations, normaliserSymetrie } from "@/lib/patronnage/rotations";
 import { taillesDesSemiFinis } from "@/lib/patronnage/tailles-semi-finis";
 import { PageHeader } from "@/components/shell/page-header";
 import { PatronBibliothequeManager } from "@/components/atelier/patronnage/patronnage-workspace";
@@ -20,7 +21,7 @@ export default async function PatronnageBibliothequePage({ searchParams }: { sea
   const { data: articles } = await supabase
     .from("pattern_articles")
     .select(
-      "id,article_code,designation,tolerance_pct,product_model_id,patterns(id,size,pattern_pieces(id,name,expected_count,area,perimeter,points))"
+      "id,article_code,designation,tolerance_pct,product_model_id,patterns(id,size,pattern_pieces(id,name,expected_count,area,perimeter,points,rotations_autorisees,symetrie))"
     )
     .is("migre_le", null)
     .order("article_code");
@@ -71,6 +72,8 @@ export default async function PatronnageBibliothequePage({ searchParams }: { sea
         area: piece.area,
         perimeter: piece.perimeter,
         points: piece.points,
+        rotationsAutorisees: normaliserRotations(piece.rotations_autorisees),
+        symetrie: normaliserSymetrie(piece.symetrie),
       })),
     })),
   }));
