@@ -72,6 +72,7 @@ const HUBS: HubDefinition[] = [
       { href: "/parametres/fabrication", label: "Fabrication" },
       { href: "/parametres/dispatching", label: "Dispatching des tailles" },
       { href: "/parametres/impression", label: "Impression" },
+      { href: "/parametres/confection", label: "Confection" },
     ],
   },
   {

@@ -67,6 +67,8 @@ const ROUTE_ACCESS: { prefix: string; roles: string[] }[] = [
   { prefix: "/parametres/familles-articles", roles: ["responsable_production", "administrateur"] },
   // Impression (machines et écrans, ex-Atelier > Machines et écrans) : la production la gère, l'infographie et les chefs de section la consultent ; le droit fin reste celui du module machines_ecrans.
   { prefix: "/parametres/impression", roles: ["responsable_production", "infographiste", "chef_section", "administrateur"] },
+  // Confection (chaînes, postes, agents) : la production règle son atelier ; le droit fin reste celui du module parametres_confection.
+  { prefix: "/parametres/confection", roles: ["responsable_production", "administrateur"] },
   { prefix: "/parametres", roles: ["administrateur"] },
   // Prix de revient et marges (migration 0067) : Direction et administrateur
   // seulement (base_role administrateur) — jamais les commerciaux.
