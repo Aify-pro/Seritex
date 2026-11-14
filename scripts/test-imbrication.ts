@@ -15,6 +15,10 @@
  *  E. Préparation des pièces depuis la bibliothèque (gabarits Modaris).
  *  F. Exécution par tranches.
  *  G. Fichier DXF du tracé calculé : relu et reconnu à 100 % par le module.
+ *  H. Propriétés du moteur sur 60 jeux de pièces tirés au hasard à graine
+ *     fixe (scripts/imbrication-proprietes.ts) : laize, chevauchement,
+ *     rotations, quantités ou code d'erreur prévu, déterminisme ; deux avis
+ *     indépendants (validerTrace + contrôle propre au test).
  *
  * Lancer : npm run test:imbrication
  */
@@ -27,6 +31,7 @@ import { construireEntree, dxfContientDesArcs, nettoyerContour, retrouverContour
 import { executerTranche, traiterCalculs, type CalculReserve, type MiseAJourCalcul, type StoreCalculs } from "../src/lib/imbrication/execution";
 import type { CalculImbrication, ResultatMoteur } from "../src/lib/imbrication/moteur";
 import { corps, dxfModaris, entreeTshirt, manche } from "./imbrication-fixtures";
+import { sectionProprietes } from "./imbrication-proprietes";
 import { CALQUE_LISIERE, genererDxfImbrication } from "../src/lib/imbrication/export-dxf";
 import { reconnaitreTrace } from "../src/lib/patronnage/reconnaissance";
 
@@ -189,6 +194,7 @@ async function main() {
 
   await sectionPreparation();
   await sectionExecution();
+  await sectionProprietes(verifier);
 
   console.log(`\n${total - echecs}/${total} vérifications réussies.`);
   if (echecs > 0) process.exit(1);
