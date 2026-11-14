@@ -508,6 +508,12 @@ function BibliothequeTab({
                     </div>
                   ))}
                 </div>
+                {editing && (
+                  <p className="text-xs text-foreground-muted">
+                    Les pièces qui gardent leur nom gardent leurs rotations et leur symétrie ; une pièce renommée ou
+                    nouvelle repart aux réglages par défaut (0° et 180°, symétrie aucune).
+                  </p>
+                )}
                 <div className="flex justify-end gap-2 pt-1">
                   <Button type="button" variant="ghost" size="sm" onClick={() => setDraft(null)}>
                     Revenir

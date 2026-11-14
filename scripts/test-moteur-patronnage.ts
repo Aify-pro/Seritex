@@ -33,6 +33,13 @@
  *     par SURCHARGE du fichier déposé (jamais une régénération à partir des
  *     contours analysés, cf. dxf-export.ts) ; échoue proprement si la section
  *     ENTITIES est introuvable, plutôt que de rendre un fichier à moitié marqué.
+ * 17. remplacement du DXF d'un patron (lignesAvecReglages) : chaque ligne
+ *     `pattern_pieces` porte TOUJOURS rotations_autorisees et symetrie (pièce
+ *     gardée → réglages conservés s'ils sont un choix admis ; nouvelle,
+ *     renommée ou angle hors choix comme 90° → {0,180} / « aucune ») ; toutes
+ *     les lignes d'un lot ont exactement les mêmes clés — sinon l'insert groupé
+ *     PostgREST met NULL dans les colonnes absentes (NOT NULL, 0182) ; doublons
+ *     de nom ; entrées non modifiées ; un tableau de rotations par ligne.
  *
  * Lancer : npx tsx scripts/test-moteur-patronnage.ts
  */
@@ -43,6 +50,7 @@ import { construireAnalyseDetaillee } from "../src/lib/patronnage/detail";
 import { genererDxfMarque } from "../src/lib/patronnage/dxf-export";
 import { genererTracePdf } from "../src/lib/patronnage/trace-pdf";
 import { reconnaitreTrace, type ReferencePiece } from "../src/lib/patronnage/reconnaissance";
+import { lignesAvecReglages } from "../src/lib/patronnage/rotations";
 
 /* ---------- Génération de contours de pièces plausibles ---------- */
 
@@ -605,7 +613,140 @@ async function testerPdf() {
   check("tracé vide : échoue proprement (pas d'exception)", "error" in vide);
 }
 
+// --- 17. Remplacement du DXF d'un patron : réglages par pièce (retour de revue
+// P-01). Les lignes reprennent les clés de rowsFromContours (actions.ts). En
+// insert groupé, supabase-js envoie columns= avec l'union des clés et PostgREST
+// met NULL dans les colonnes absentes d'une ligne : rotations_autorisees et
+// symetrie étant NOT NULL (0182), chaque ligne doit porter les deux colonnes.
+// Le banc PGlite ne passe pas par PostgREST : ce test est le seul garde-fou.
+function testerReglagesRemplacement() {
+  console.log("\n17. Remplacement du DXF : rotations / symétrie conservées par nom de pièce");
+
+  const patternId = "7d1f3c2a-5b6e-4c8d-9a0b-1c2d3e4f5a6b";
+  const ligne = (name: string, points: Point[], expectedCount = 1) => {
+    const geom = normalizeShape(points);
+    return {
+      pattern_id: patternId,
+      name,
+      expected_count: expectedCount,
+      area: geom.area,
+      perimeter: geom.perimeter,
+      radial_signature: geom.radial,
+      points: geom.points,
+    };
+  };
+  const egal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  const cles = (o: object) => Object.keys(o).sort().join(",");
+
+  // Anciennes pièces telles que les renvoie PostgREST (numeric[] en chaînes
+  // possibles), y compris un doublon de nom et un angle 90° conservé en base.
+  const anciennes = [
+    { name: "Devant", rotations_autorisees: ["180"], symetrie: "paire" },
+    { name: "Dos", rotations_autorisees: [0], symetrie: "aucune" },
+    { name: "Manche", rotations_autorisees: [90], symetrie: "paire" },
+    { name: "Col", rotations_autorisees: ["0", "180.0"], symetrie: "paire" },
+    { name: "Col", rotations_autorisees: [0], symetrie: "aucune" },
+    { name: null, rotations_autorisees: [180], symetrie: "paire" },
+  ];
+  const nouvelles = [
+    ligne("Devant", devantTshirt()),
+    ligne("Poche", translate(manche(), 1500, 0)), // pièce nouvelle
+    ligne("Dos (v2)", devantTshirt()), // « Dos » renommé
+    ligne("Manche", manche(), 2), // 90° en base
+    ligne("Col", manche()), // doublon de nom parmi les anciennes
+    ligne("Col", translate(manche(), 800, 0)), // deux nouvelles du même nom
+  ];
+  const avantNouvelles = JSON.stringify(nouvelles);
+  const avantAnciennes = JSON.stringify(anciennes);
+
+  const res = lignesAvecReglages(nouvelles, anciennes);
+  const [devant, poche, dosRenomme, mancheL, col1, col2] = res;
+
+  check("une ligne par pièce nouvelle, dans le même ordre", res.length === nouvelles.length && res.every((r, i) => r.name === nouvelles[i].name));
+  check(
+    "pièce gardée : ancienne {\"180\"} (chaîne PostgREST), « paire » → [180], « paire »",
+    egal(devant.rotations_autorisees, [180]) && devant.symetrie === "paire",
+    JSON.stringify([devant.rotations_autorisees, devant.symetrie])
+  );
+  check(
+    "pièce gardée : la géométrie et les autres colonnes sont celles du nouveau DXF",
+    devant.area === nouvelles[0].area && egal(devant.points, nouvelles[0].points) && devant.pattern_id === patternId && devant.expected_count === 1
+  );
+  check(
+    "pièce nouvelle → [0,180], « aucune »",
+    egal(poche.rotations_autorisees, [0, 180]) && poche.symetrie === "aucune",
+    JSON.stringify([poche.rotations_autorisees, poche.symetrie])
+  );
+  check(
+    "pièce renommée → défauts [0,180], « aucune » (l'ancien réglage {0} n'est pas repris)",
+    egal(dosRenomme.rotations_autorisees, [0, 180]) && dosRenomme.symetrie === "aucune",
+    JSON.stringify([dosRenomme.rotations_autorisees, dosRenomme.symetrie])
+  );
+  check(
+    "angle 90° conservé en base → [0,180] ; la symétrie « paire » reste conservée",
+    egal(mancheL.rotations_autorisees, [0, 180]) && mancheL.symetrie === "paire",
+    JSON.stringify([mancheL.rotations_autorisees, mancheL.symetrie])
+  );
+  check(
+    "doublon de nom parmi les anciennes : la première fait foi ({\"0\",\"180.0\"}, « paire »)",
+    egal(col1.rotations_autorisees, [0, 180]) && col1.symetrie === "paire",
+    JSON.stringify([col1.rotations_autorisees, col1.symetrie])
+  );
+  check(
+    "deux nouvelles du même nom reçoivent chacune ces réglages",
+    egal(col2.rotations_autorisees, col1.rotations_autorisees) && col2.symetrie === col1.symetrie
+  );
+
+  // CRITIQUE : lot mêlant pièce gardée + pièce nouvelle (cas qui faisait échouer l'insert).
+  const lotMixte = lignesAvecReglages([ligne("Devant", devantTshirt()), ligne("Poche", manche())], anciennes);
+  for (const [nom, lot] of [["lot mixte gardée + nouvelle", lotMixte], ["lot complet", res]] as const) {
+    const ref = cles(lot[0]);
+    check(
+      `${nom} : toutes les lignes ont exactement les mêmes clés`,
+      lot.every((r) => cles(r) === ref),
+      lot.map((r) => cles(r)).filter((k, i, a) => a.indexOf(k) === i).join(" | ")
+    );
+    check(
+      `${nom} : les clés incluent rotations_autorisees et symetrie`,
+      ref.split(",").includes("rotations_autorisees") && ref.split(",").includes("symetrie"),
+      ref
+    );
+    check(
+      `${nom} : aucune valeur null/undefined dans rotations_autorisees / symetrie`,
+      lot.every(
+        (r) =>
+          Array.isArray(r.rotations_autorisees) &&
+          r.rotations_autorisees.length > 0 &&
+          r.rotations_autorisees.every((a) => typeof a === "number" && Number.isFinite(a)) &&
+          (r.symetrie === "aucune" || r.symetrie === "paire")
+      )
+    );
+  }
+  check(
+    "lot mixte : mêmes clés que rowsFromContours + les deux colonnes",
+    cles(lotMixte[1]) === cles({ ...ligne("x", manche()), rotations_autorisees: 0, symetrie: 0 }),
+    cles(lotMixte[1])
+  );
+
+  check("entrées non mutées (nouvelles)", JSON.stringify(nouvelles) === avantNouvelles);
+  check("entrées non mutées (anciennes)", JSON.stringify(anciennes) === avantAnciennes);
+  check("les lignes rendues sont de nouveaux objets", res.every((r, i) => r !== nouvelles[i]));
+  const tableaux = res.map((r) => r.rotations_autorisees);
+  check("chaque ligne a son propre tableau de rotations (aucune référence partagée)", new Set(tableaux).size === tableaux.length);
+  check(
+    "aucun tableau de rotations n'est celui d'une ancienne pièce",
+    tableaux.every((t) => anciennes.every((a) => a.rotations_autorisees !== t))
+  );
+  // Modifier la ligne de défaut ne doit pas modifier les défauts des autres lignes.
+  poche.rotations_autorisees.push(999);
+  const encore = lignesAvecReglages([ligne("Inconnue", manche())], []);
+  check("modifier une ligne rendue ne touche pas les défauts suivants", egal(encore[0].rotations_autorisees, [0, 180]) && !dosRenomme.rotations_autorisees.includes(999));
+
+  check("aucune pièce nouvelle → aucune ligne", lignesAvecReglages([], anciennes).length === 0);
+}
+
 testerPdf().then(() => {
+  testerReglagesRemplacement();
   console.log(
     failures === 0 ? "\n✅ Tous les cas passent.\n" : `\n❌ ${failures} assertion(s) en échec.\n`
   );

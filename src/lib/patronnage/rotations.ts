@@ -71,3 +71,46 @@ export const reglageRotationsSchema = z.object({
 });
 
 export type ReglageRotations = z.input<typeof reglageRotationsSchema>;
+
+/**
+ * Lignes `pattern_pieces` à insérer au remplacement du DXF d'un patron, avec
+ * les réglages de rotation et de symétrie repris des anciennes pièces.
+ *
+ * Chaque ligne renvoyée porte TOUJOURS `rotations_autorisees` et `symetrie`.
+ * Raison : en insert groupé, supabase-js envoie `columns=` avec l'union des
+ * clés de toutes les lignes, et PostgREST met NULL dans les colonnes absentes
+ * d'une ligne (au lieu de la valeur par défaut de la base). Les deux colonnes
+ * étant NOT NULL (migration 0182), un DXF qui mêle une pièce gardée et une
+ * pièce nouvelle ferait échouer tout l'insert.
+ *
+ * Règles :
+ * - une pièce qui garde son nom reprend les rotations de l'ancienne si elles
+ *   forment un choix admis ({0}, {180}, {0,180}), sinon {0,180} ; et sa
+ *   symétrie (normalisée) ;
+ * - une pièce nouvelle ou renommée prend {0,180} et « aucune » ;
+ * - si plusieurs anciennes pièces portent le même nom, la PREMIÈRE de la liste
+ *   fait foi ;
+ * - plusieurs nouvelles pièces du même nom reçoivent chacune les réglages de
+ *   cette ancienne.
+ * Fonction pure : les entrées ne sont pas modifiées, chaque ligne reçoit son
+ * propre tableau de rotations.
+ */
+export function lignesAvecReglages<T extends { name: string }>(
+  nouvelles: readonly T[],
+  anciennes: readonly { name: string | null; rotations_autorisees: unknown; symetrie: unknown }[],
+): (T & { rotations_autorisees: number[]; symetrie: Symetrie })[] {
+  const parNom = new Map<string, (typeof anciennes)[number]>();
+  for (const a of anciennes) {
+    if (a.name !== null && !parNom.has(a.name)) parNom.set(a.name, a);
+  }
+  return nouvelles.map((row) => {
+    const ancienne = parNom.get(row.name);
+    if (!ancienne) return { ...row, rotations_autorisees: [...ROTATIONS_DEFAUT], symetrie: "aucune" as Symetrie };
+    const rotations = normaliserRotations(ancienne.rotations_autorisees);
+    return {
+      ...row,
+      rotations_autorisees: choixDepuisRotations(rotations) !== null ? rotations : [...ROTATIONS_DEFAUT],
+      symetrie: normaliserSymetrie(ancienne.symetrie),
+    };
+  });
+}

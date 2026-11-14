@@ -10,7 +10,7 @@ import { SEUIL_RECONNAISSANCE_DEFAUT } from "@/lib/patronnage/reconnaissance";
 import { construireAnalyseDetaillee, type TraceAnalysisDetail } from "@/lib/patronnage/detail";
 import { readDxfFile } from "@/lib/patronnage/upload";
 import { getSizes } from "@/lib/sizes";
-import { choixDepuisRotations, normaliserRotations, normaliserSymetrie, reglageRotationsSchema } from "@/lib/patronnage/rotations";
+import { lignesAvecReglages, reglageRotationsSchema } from "@/lib/patronnage/rotations";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
@@ -291,18 +291,9 @@ export async function replaceReferencePattern(formData: FormData): Promise<{ pat
   if (anciennesError) return { error: `Lecture du patron impossible : ${anciennesError.message}` };
 
   // Une pièce qui garde son nom garde ses rotations autorisées et sa symétrie ;
-  // une pièce nouvelle prend les valeurs par défaut de la base ({0,180}, aucune).
-  const reglages = new Map((anciennes ?? []).map((a) => [a.name as string, a]));
-  const lignes = pieceRows.map((row) => {
-    const ancienne = reglages.get(row.name);
-    if (!ancienne) return row;
-    const rotations = normaliserRotations(ancienne.rotations_autorisees);
-    return {
-      ...row,
-      ...(choixDepuisRotations(rotations) ? { rotations_autorisees: rotations } : {}),
-      symetrie: normaliserSymetrie(ancienne.symetrie),
-    };
-  });
+  // une pièce nouvelle ou renommée prend {0,180} et « aucune ». Les deux colonnes
+  // sont renseignées sur chaque ligne (voir lignesAvecReglages).
+  const lignes = lignesAvecReglages(pieceRows, anciennes ?? []);
 
   const { error: insertError } = await supabase.from("pattern_pieces").insert(lignes);
   if (insertError) return { error: `Enregistrement des pièces impossible : ${insertError.message}` };
