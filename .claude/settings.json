@@ -1,13 +1,21 @@
 {
   "permissions": {
-    "allow": [
-      "Bash(supabase db push --linked)"
+    "ask": [
+      "Bash(supabase db push:*)",
+      "Bash(supabase migration up:*)",
+      "Bash(gh pr merge:*)"
+    ],
+    "deny": [
+      "Bash(vercel deploy:*)",
+      "Bash(vercel --prod:*)",
+      "Bash(git push origin main:*)",
+      "Bash(git push -f:*)",
+      "Bash(git push --force:*)"
     ]
   },
   "autoMode": {
     "allow": [
-      "$defaults",
-      "Bash(supabase db push --linked)"
+      "$defaults"
     ]
   }
 }
