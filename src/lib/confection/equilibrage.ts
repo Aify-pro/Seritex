@@ -8,7 +8,8 @@
  * Fonctions pures et déterministes : aucun accès à la base, aucune date,
  * aucun hasard. Les nombres sont rendus bruts ; l'arrondi est l'affaire de
  * l'écran. La répartition des opérations sur les postes (poids positionnel
- * classé) viendra en C-03.
+ * classé, C-03) est dans `repartition.ts`, son contrôle indépendant dans
+ * `controle-repartition.ts` ; ce fichier-ci n'importe rien.
  *
  * Unités : temps en minutes, capacités en pièces par heure, rendement en
  * fraction (0,85 = 85 %).
@@ -49,6 +50,20 @@ export type Poste = {
   operations: string[];
 };
 
+/**
+ * Règle pour mettre deux opérations sur un même poste (§4.3, étape 3).
+ * - `machine_et_suite` (règle de l'atelier, par défaut) : même type de
+ *   machine (deux opérations manuelles, `typeMachine` nul, comptent comme un
+ *   même type) ET elles se suivent : chaque opération du poste est reliée à
+ *   une autre opération du poste par une précédence directe (l'une est à
+ *   faire juste avant l'autre). Une opération commune (C7) placée entre deux
+ *   opérations de chaîne est transparente : A → commune → B se suivent.
+ * - `libre` : aucune condition de machine ni de suite ; seules la cadence et
+ *   les précédences comptent. Sert aux cas d'école publiés, qui n'ont pas de
+ *   machines, et aux simulations « et si la machine ne comptait pas ».
+ */
+export type RegleRegroupement = "machine_et_suite" | "libre";
+
 export class EquilibrageErreur extends Error {
   constructor(message: string) {
     super(message);
@@ -57,13 +72,27 @@ export class EquilibrageErreur extends Error {
 }
 
 /** Marge contre les erreurs d'arrondi flottant (1,2 ÷ 0,6 = 2,0000000000000004). */
-const EPS = 1e-9;
+export const EPS = 1e-9;
+
+/**
+ * Ordre fixe des codes : caractère par caractère, sans règle de langue.
+ * Sert au départage du classement et à l'ordre des sommes flottantes, pour
+ * qu'aucun résultat ne dépende de l'ordre de la liste reçue.
+ */
+export const parCodeCroissant = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 const fmt = (op: Operation) => `${op.code} (${op.libelle})`;
 
 function positif(valeur: number, nom: string): void {
   if (!Number.isFinite(valeur) || valeur <= 0) {
     throw new EquilibrageErreur(`${nom} doit être un nombre strictement positif (reçu : ${valeur}).`);
+  }
+}
+
+/** Un effectif se compte en personnes entières : 4,5 personnes est refusé. */
+export function verifierEffectif(effectif: number): void {
+  if (!Number.isInteger(effectif) || effectif < 1) {
+    throw new EquilibrageErreur(`L'effectif doit être un nombre entier de personnes, au moins 1 (reçu : ${effectif}).`);
   }
 }
 
@@ -168,16 +197,28 @@ export function cadenceVisee(minutesParJour: number, rendementAttendu: number, p
   return (minutesParJour * rendementAttendu) / piecesVisees;
 }
 
-/** Somme des temps des opérations de chaîne (les opérations communes sont exclues, C7). */
+/**
+ * Somme des temps des opérations de chaîne (les opérations communes sont
+ * exclues, C7). Additionnée dans l'ordre des codes : une somme flottante
+ * dépend de l'ordre des termes, et le résultat (donc le taux d'équilibre)
+ * doit être le même au bit près quel que soit l'ordre de la liste reçue.
+ */
 export function sommeDesTemps(operations: Operation[]): number {
-  return operations.filter((o) => !o.commune).reduce((s, o) => s + o.tempsMin, 0);
+  return operations
+    .filter((o) => !o.commune)
+    .sort((a, b) => parCodeCroissant(a.code, b.code))
+    .reduce((s, o) => s + o.tempsMin, 0);
 }
 
-/** Personnes nécessaires sur une opération = temps ÷ cadence, arrondi au-dessus. */
+/**
+ * Personnes nécessaires sur une opération = temps ÷ cadence, arrondi
+ * au-dessus. Toujours au moins 1 : une opération, même très courte devant la
+ * cadence, occupe quelqu'un (jamais 0 ni −0).
+ */
 export function personnesNecessaires(tempsMin: number, cadence: number): number {
   positif(tempsMin, "Le temps de l'opération");
   positif(cadence, "La cadence");
-  return Math.ceil(tempsMin / cadence - EPS);
+  return Math.max(1, Math.ceil(tempsMin / cadence - EPS));
 }
 
 /** Effectif théorique minimum = somme des temps ÷ cadence (non arrondi). */
@@ -295,7 +336,7 @@ export function productionJournaliereTheorique(
   rendementAttendu: number,
 ): number {
   validerOperations(operations);
-  positif(effectif, "L'effectif");
+  verifierEffectif(effectif);
   positif(minutesParJour, "Le nombre de minutes de travail par jour");
   verifierRendement(rendementAttendu);
   const somme = sommeDesTemps(operations);
@@ -313,7 +354,8 @@ export function chargeOperationCommune(tempsMin: number, piecesParChaine: number
   if (piecesParChaine.some((p) => !Number.isFinite(p) || p < 0)) {
     throw new EquilibrageErreur("Les pièces par chaîne doivent être des nombres positifs ou nuls.");
   }
-  const pieces = piecesParChaine.reduce((s, p) => s + p, 0);
+  // Somme dans l'ordre croissant : même résultat quel que soit l'ordre des chaînes.
+  const pieces = [...piecesParChaine].sort((a, b) => a - b).reduce((s, p) => s + p, 0);
   return (pieces * tempsMin) / minutesPresence;
 }
 
@@ -337,21 +379,65 @@ export type CalculChaine = {
   sommeDesTempsMin: number;
   /** Somme des temps ÷ cadence, non arrondi. */
   effectifTheoriqueMinimum: number;
-  /** Une opération = un poste, personnes arrondies au-dessus. */
+  /** Une opération = un poste, personnes arrondies au-dessus pour tenir la cadence visée. */
   operations: BesoinOperation[];
+  /**
+   * Personnes qu'il faut, à une opération par poste, pour tenir la cadence
+   * visée (somme des `operations[].personnes`). Ce n'est PAS l'effectif donné.
+   */
   effectifNecessaire: number;
+  /** Chaîne « une opération par poste » tenue par `effectifNecessaire` personnes. */
   sortie: SortieChaine;
+  /** Production de la chaîne décrite par `sortie`, donc avec `effectifNecessaire` personnes. */
   productionJournaliere: number;
+  /** Effectif donné par l'utilisateur (mode « j'ai N personnes ») ; `null` en mode objectif de pièces. */
+  effectifDonne: number | null;
+  /**
+   * Faux quand, à une opération par poste, la cadence visée demande plus de
+   * personnes que l'effectif donné (D-9). Toujours vrai en mode objectif de pièces.
+   */
+  effectifSuffisant: boolean;
+  /** `effectifNecessaire` − `effectifDonne` si l'effectif ne suffit pas, sinon 0. */
+  personnesManquantes: number;
+  /**
+   * Avertissement à afficher quand l'effectif donné ne suffit pas (D-9) :
+   * « Effectif insuffisant : X personnes nécessaires… ». `null` sinon.
+   */
+  avertissement: string | null;
+  /**
+   * Mode effectif seulement : la chaîne « une opération par poste » tenue par
+   * les personnes données, placées au mieux (une par opération, puis chaque
+   * personne restante va au poste le plus chargé). `null` en mode objectif de
+   * pièces, et quand il y a moins de personnes que d'opérations : il faut
+   * alors regrouper des opérations (voir `repartirOperations`).
+   */
+  sortieEffectifDonne: SortieChaine | null;
+  /**
+   * Production maximale possible avec l'effectif donné, à une opération par
+   * poste (D-9) = production de `sortieEffectifDonne`. `null` dans les mêmes
+   * cas que `sortieEffectifDonne` : avec moins de personnes que d'opérations,
+   * il faut regrouper des opérations, et le chiffre s'obtient alors avec
+   * `meilleureRepartitionPourEffectif` (`repartition.ts`), ce que dit aussi
+   * `avertissement`. Le plafond théorique (équilibre parfait) reste dans
+   * `piecesVisees`.
+   */
+  productionMaximaleEffectifDonne: number | null;
   /** Vrai si au moins un temps n'est que « estimé » : le résultat est indicatif. */
   indicatif: boolean;
 };
 
 /**
  * Chiffres de base d'une chaîne, une opération par poste (la répartition
- * fine viendra en C-03).
+ * fine, qui regroupe des opérations, est dans `repartition.ts`).
  * - Objectif en pièces : cadence = minutes × rendement ÷ pièces.
  * - Objectif en effectif : cadence idéale = somme des temps ÷ effectif,
- *   pièces visées = minutes × rendement ÷ cadence.
+ *   pièces visées = minutes × rendement ÷ cadence (plafond théorique).
+ *
+ * On ne mélange pas deux effectifs : `operations`, `effectifNecessaire`,
+ * `sortie` et `productionJournaliere` décrivent la chaîne qu'il FAUDRAIT pour
+ * tenir la cadence visée ; `effectifDonne`, `effectifSuffisant`,
+ * `avertissement`, `sortieEffectifDonne` et `productionMaximaleEffectifDonne`
+ * disent ce que l'on PEUT faire avec les personnes données.
  */
 export function calculerChaine(operations: Operation[], params: ParametresChaine): CalculChaine {
   validerOperations(operations);
@@ -367,7 +453,7 @@ export function calculerChaine(operations: Operation[], params: ParametresChaine
     pieces = params.objectif.piecesVisees;
     cadence = cadenceVisee(params.minutesParJour, params.rendementAttendu, pieces);
   } else {
-    positif(params.objectif.effectif, "L'effectif");
+    verifierEffectif(params.objectif.effectif);
     cadence = somme / params.objectif.effectif;
     pieces = (params.minutesParJour * params.rendementAttendu) / cadence;
   }
@@ -389,7 +475,31 @@ export function calculerChaine(operations: Operation[], params: ParametresChaine
     besoins.map((b) => ({ code: b.code, personnes: b.personnes, operations: [b.code] })),
   );
 
+  const effectifDonne = "effectif" in params.objectif ? params.objectif.effectif : null;
+  const effectifSuffisant = effectifDonne === null || effectifDonne >= sortie.effectif;
+  const sortieEffectifDonne =
+    effectifDonne !== null && effectifDonne >= chaine.length
+      ? sortieChaine(operations, placerEffectif(chaine, effectifDonne))
+      : null;
+  let avertissement: string | null = null;
+  if (effectifDonne !== null && !effectifSuffisant) {
+    avertissement =
+      `Effectif insuffisant : ${sortie.effectif} personnes nécessaires pour tenir la cadence visée ` +
+      `à une opération par poste (${effectifDonne} ${effectifDonne > 1 ? "données" : "donnée"}).` +
+      (sortieEffectifDonne === null
+        ? ` Il y a plus d'opérations (${chaine.length}) que de personnes : des opérations doivent être regroupées sur un même poste, et la production maximale possible se calcule avec la répartition des opérations sur les postes.`
+        : "");
+  }
+
   return {
+    effectifDonne,
+    effectifSuffisant,
+    personnesManquantes: effectifDonne !== null && !effectifSuffisant ? sortie.effectif - effectifDonne : 0,
+    avertissement,
+    sortieEffectifDonne,
+    productionMaximaleEffectifDonne: sortieEffectifDonne
+      ? productionJournaliere(sortieEffectifDonne.cadenceMin, params.minutesParJour, params.rendementAttendu)
+      : null,
     cadenceMin: cadence,
     piecesVisees: pieces,
     sommeDesTempsMin: somme,
@@ -400,4 +510,24 @@ export function calculerChaine(operations: Operation[], params: ParametresChaine
     productionJournaliere: productionJournaliere(sortie.cadenceMin, params.minutesParJour, params.rendementAttendu),
     indicatif: chaine.some((o) => o.source === "estime"),
   };
+}
+
+/**
+ * Place `effectif` personnes sur une chaîne « une opération par poste » pour
+ * la plus grande sortie possible : une personne par opération, puis chaque
+ * personne restante rejoint le poste dont le temps par personne est le plus
+ * long (le premier dans l'ordre de la liste en cas d'égalité). Suppose
+ * `effectif` ≥ nombre d'opérations.
+ */
+function placerEffectif(chaine: Operation[], effectif: number): Poste[] {
+  const postes: Poste[] = chaine.map((o) => ({ code: o.code, personnes: 1, operations: [o.code] }));
+  for (let reste = effectif - chaine.length; reste > 0; reste -= 1) {
+    let plusCharge = 0;
+    for (let i = 1; i < chaine.length; i += 1) {
+      const charge = chaine[i].tempsMin / postes[i].personnes;
+      if (charge > chaine[plusCharge].tempsMin / postes[plusCharge].personnes + EPS) plusCharge = i;
+    }
+    postes[plusCharge].personnes += 1;
+  }
+  return postes;
 }
